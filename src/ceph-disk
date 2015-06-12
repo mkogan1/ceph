@@ -923,6 +923,12 @@ def mount(
                 path,
                 ],
             )
+        command(
+           [
+                'restorecon',
+                path,
+                ],
+           )
     except subprocess.CalledProcessError as e:
         try:
             os.rmdir(path)
