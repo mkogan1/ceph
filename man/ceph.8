@@ -1998,6 +1998,7 @@ Usage:
 .nf
 .ft C
 ceph osd reweight\-by\-pg {<int[100\-]>} {<poolname> [<poolname...]}
+{\-\-no\-increasing}
 .ft P
 .fi
 .UNINDENT
@@ -2012,7 +2013,7 @@ Usage:
 .sp
 .nf
 .ft C
-ceph osd reweight\-by\-utilization {<int[100\-]>}
+ceph osd reweight\-by\-utilization {<int[100\-]>} {\-\-no\-increasing}
 .ft P
 .fi
 .UNINDENT
