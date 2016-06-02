@@ -484,7 +484,6 @@ noinst_HEADERS += \
 	test/kv_store_bench.h \
 	test/librados/test.h \
 	test/librados/TestCase.h \
-	test/libradosstriper/TestCase.h \
 	test/ObjectMap/KeyValueDBMemory.h \
 	test/omap_bench.h \
 	test/osdc/FakeWriteback.h \
