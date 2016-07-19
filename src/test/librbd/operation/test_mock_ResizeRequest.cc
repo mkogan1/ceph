@@ -180,8 +180,8 @@ TEST_F(TestMockOperationResizeRequest, GrowSuccess) {
   expect_grow_object_map(mock_image_ctx);
   expect_block_writes(mock_image_ctx, 0);
   expect_update_header(mock_image_ctx, 0);
-  expect_commit_op_event(mock_image_ctx, 0);
   expect_unblock_writes(mock_image_ctx);
+  expect_commit_op_event(mock_image_ctx, 0);
   ASSERT_EQ(0, when_resize(mock_image_ctx, ictx->size * 2, 0, false));
 }
 
@@ -206,9 +206,9 @@ TEST_F(TestMockOperationResizeRequest, ShrinkSuccess) {
   expect_invalidate_cache(mock_image_ctx, 0);
   expect_block_writes(mock_image_ctx, 0);
   expect_update_header(mock_image_ctx, 0);
-  expect_commit_op_event(mock_image_ctx, 0);
   expect_shrink_object_map(mock_image_ctx);
   expect_unblock_writes(mock_image_ctx);
+  expect_commit_op_event(mock_image_ctx, 0);
   ASSERT_EQ(0, when_resize(mock_image_ctx, ictx->size / 2, 0, false));
 }
 
