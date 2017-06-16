@@ -538,33 +538,32 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
   if (ret < 0)
     return ret;
 
-
   RGWRados::Bucket target(store, info);
   RGWRados::Bucket::List list_op(&target);
+  int max = 1000;
 
   list_op.params.list_versions = true;
   list_op.params.allow_unordered = true;
 
-  if (delete_children) {
-    int max = 1000;
+  do {
+    objs.clear();
 
-    do {
-      objs.clear();
+    ret = list_op.list_objects(max, &objs, &common_prefixes, NULL);
+    if (ret < 0)
+      return ret;
 
-      ret = list_op.list_objects(max, &objs, &common_prefixes, NULL);
+    if (!objs.empty() && !delete_children) {
+      lderr(store->ctx()) << "ERROR: could not remove non-empty bucket " << bucket.name << dendl;
+      return -ENOTEMPTY;
+    }
+
+    for (auto& obj : objs) {
+      ret = rgw_remove_object(store, info, bucket, obj.key);
       if (ret < 0)
         return ret;
+    }
 
-      std::vector<RGWObjEnt>::iterator it = objs.begin();
-      for (; it != objs.end(); ++it) {
-        ret = rgw_remove_object(store, info, bucket, (*it).key);
-        if (ret < 0)
-          return ret;
-      }
-
-    } while (!objs.empty());
-
-  }
+  } while (!objs.empty());
 
   ret = rgw_bucket_sync_user_stats(store, bucket.tenant, bucket.name);
   if ( ret < 0) {
@@ -629,7 +628,6 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
   ret = store->get_bucket_info(obj_ctx, bucket.tenant, bucket.name, info, NULL);
   if (ret < 0)
     return ret;
-
 
   RGWRados::Bucket target(store, info);
   RGWRados::Bucket::List list_op(&target);
