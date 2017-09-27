@@ -4868,11 +4868,16 @@ void RGWDeleteLC::execute()
 
 int RGWGetCORS::verify_permission()
 {
-  if (false == s->auth.identity->is_owner_of(s->bucket_owner.get_id())) {
-    return -EACCES;
+  if (s->iam_policy) {
+    if (s->iam_policy->eval(s->env, *s->auth.identity,
+			    rgw::IAM::s3PutBucketCORS,
+			    ARN(s->bucket)) == Effect::Allow) {
+      return 0;
+    }
+  } else if (s->auth.identity->is_owner_of(s->bucket_owner.get_id())) {
+    return 0;
   }
-
-  return 0;
+  return -EACCES;
 }
 
 void RGWGetCORS::execute()
@@ -4890,11 +4895,16 @@ void RGWGetCORS::execute()
 
 int RGWPutCORS::verify_permission()
 {
-  if (false == s->auth.identity->is_owner_of(s->bucket_owner.get_id())) {
-    return -EACCES;
+  if (s->iam_policy) {
+    if (s->iam_policy->eval(s->env, *s->auth.identity,
+			    rgw::IAM::s3PutBucketCORS,
+			    ARN(s->bucket)) == Effect::Allow) {
+      return 0;
+    }
+  } else if (s->auth.identity->is_owner_of(s->bucket_owner.get_id())) {
+    return 0;
   }
-
-  return 0;
+  return -EACCES;
 }
 
 void RGWPutCORS::execute()
