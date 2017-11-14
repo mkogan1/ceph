@@ -565,7 +565,7 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
 
   } while (!objs.empty());
 
-  ret = rgw_bucket_sync_user_stats(store, bucket.tenant, bucket.name);
+  ret = rgw_bucket_sync_user_stats(store, info.owner, bucket);
   if ( ret < 0) {
      dout(1) << "WARNING: failed sync user stats before bucket delete. ret=" <<  ret << dendl;
   }
@@ -720,27 +720,17 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
     return ret;
   }
 
-  ret = rgw_bucket_sync_user_stats(store, bucket.tenant, bucket.name);
+  ret = rgw_bucket_sync_user_stats(store, info.owner, bucket);
   if (ret < 0) {
      dout(1) << "WARNING: failed sync user stats before bucket delete. ret=" <<  ret << dendl;
   }
 
   RGWObjVersionTracker objv_tracker;
 
-  ret = rgw_bucket_delete_bucket_obj(store, bucket.tenant, bucket.name, objv_tracker);
+  ret = store->delete_bucket(bucket, objv_tracker);
   if (ret < 0) {
-    lderr(store->ctx()) << "ERROR: could not remove bucket " << bucket.name << "with ret as " << ret << dendl;
+    lderr(store->ctx()) << "ERROR: could not remove bucket " << bucket.name << dendl;
     return ret;
-  }
-
-  if (!store->is_syncing_bucket_meta(bucket)) {
-    RGWObjVersionTracker objv_tracker;
-    string entry = bucket.get_key();
-    ret = rgw_bucket_instance_remove_entry(store, entry, &objv_tracker);
-    if (ret < 0) {
-      lderr(store->ctx()) << "ERROR: could not remove bucket instance entry" << bucket.name << "with ret as " << ret << dendl;
-      return ret;
-    }
   }
 
   ret = rgw_unlink_bucket(store, info.owner, bucket.tenant, bucket.name, false);
