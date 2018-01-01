@@ -11,7 +11,6 @@
  * Foundation.  See file COPYING.
  *
  */
-
 #include "common/Thread.h"
 #include "common/code_environment.h"
 #include "common/debug.h"
@@ -30,6 +29,10 @@
 #ifdef HAVE_SCHED
 #include <sched.h>
 #endif
+#include <sys/resource.h>
+#include <iostream>
+#include <fstream>
+#include <string>
 
 static int _set_affinity(int id)
 {
@@ -115,11 +118,17 @@ int Thread::try_create(size_t stacksize)
   pthread_attr_t *thread_attr = NULL;
   pthread_attr_t thread_attr_loc;
   
+  char buf[256]; 
+  snprintf(buf, sizeof(buf), "####DEBUG## Thread::try_create(%s) ~stacksize=%ld\n", thread_name, stacksize); dout_emergency(buf);
   stacksize &= CEPH_PAGE_MASK;  // must be multiple of page
+  //snprintf(buf, sizeof(buf), "  ##DEBUG## Thread::try_create() @CEPH_PAGE_MASK ~stacksize=%ld\n", stacksize); dout_emergency(buf);
   if (stacksize) {
     thread_attr = &thread_attr_loc;
     pthread_attr_init(thread_attr);
     pthread_attr_setstacksize(thread_attr, stacksize);
+    snprintf(buf, sizeof(buf), "  ##DEBUG## Thread::try_create() @if(stacksize) ~stacksize=%ld\n", stacksize); dout_emergency(buf);
+    //while(true) { cerr << "."; sleep(1); }
+    //assert(false);
   }
 
   int r;
@@ -151,12 +160,28 @@ void Thread::create(const char *name, size_t stacksize)
   assert(strlen(name) < 16);
   thread_name = name;
 
-  int ret = try_create(stacksize);
+  int ret = try_create(stacksize); 
   if (ret != 0) {
+    struct rlimit limits={0};
+    getrlimit(RLIMIT_NPROC, &limits);
+
     char buf[256];
     snprintf(buf, sizeof(buf), "Thread::try_create(): pthread_create "
-	     "failed with error %d", ret);
+	     "failed with error %d=%s ; slim=%llu, hlim=%llu\n", ret, strerror(ret), limits.rlim_cur, limits.rlim_max);
     dout_emergency(buf);
+
+    std::ifstream filest("/proc/self/status");
+    std::string line; int numberOfLinesToRead = 35; int linesRead = 0;
+    while (std::getline(filest, line)) {
+      cerr << "  ##DEBUG## /proc/self/status: " << line << std::endl;
+      if (numberOfLinesToRead == ++linesRead) { break; }
+    }
+    std::ifstream filelim("/proc/self/limits");
+    numberOfLinesToRead = 35; linesRead = 0;
+    while (std::getline(filelim, line)) {
+      cerr << "  ##DEBUG## /proc/self/status: " << line << std::endl;
+      if (numberOfLinesToRead == ++linesRead) { break; }
+    }
     assert(ret == 0);
   }
 }

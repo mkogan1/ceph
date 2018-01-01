@@ -140,6 +140,7 @@ void Pipe::start_reader()
     reader_needs_join = false;
   }
   reader_running = true;
+  cerr << "####DEBUG## Pipe::start_reader() - ms_rwthread_stack_bytes=" << msgr->cct->_conf->ms_rwthread_stack_bytes << std::endl;
   reader_thread.create("ms_pipe_read", msgr->cct->_conf->ms_rwthread_stack_bytes);
 }
 
@@ -158,6 +159,7 @@ void Pipe::start_writer()
   assert(pipe_lock.is_locked());
   assert(!writer_running);
   writer_running = true;
+  cerr << "####DEBUG## Pipe::start_writer() - ms_rwthread_stack_bytes=" << msgr->cct->_conf->ms_rwthread_stack_bytes << std::endl;
   writer_thread.create("ms_pipe_write", msgr->cct->_conf->ms_rwthread_stack_bytes);
 }
 
