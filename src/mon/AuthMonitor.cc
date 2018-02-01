@@ -523,8 +523,10 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
 
       proto = s->auth_handler->start_session(entity_name, indata, response_bl, caps_info);
       ret = 0;
-      if (caps_info.allow_all)
+      if (caps_info.allow_all) {
 	s->caps.set_allow_all();
+	s->authenticated = true;
+      }
     } else {
       // request
       ret = s->auth_handler->handle_request(indata, response_bl, s->global_id, caps_info, &auid);
@@ -544,6 +546,7 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
       }
       s->caps.parse(str, NULL);
       s->auid = auid;
+      s->authenticated = true;
     }
   } catch (const buffer::error &err) {
     ret = -EINVAL;
