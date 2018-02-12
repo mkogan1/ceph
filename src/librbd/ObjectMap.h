@@ -11,6 +11,7 @@
 #include "common/AsyncOpTracker.h"
 #include "common/bit_vector.hpp"
 #include "common/RWLock.h"
+#include "common/RefCountedObj.h"
 #include "librbd/Utils.h"
 #include <boost/optional.hpp>
 
@@ -24,7 +25,7 @@ struct BlockGuardCell;
 class ImageCtx;
 
 template <typename ImageCtxT = ImageCtx>
-class ObjectMap {
+class ObjectMap : public RefCountedObject {
 public:
   static ObjectMap *create(ImageCtxT &image_ctx, uint64_t snap_id) {
     return new ObjectMap(image_ctx, snap_id);
