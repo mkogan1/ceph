@@ -11,6 +11,8 @@
 #include <boost/optional.hpp>
 #include <boost/utility/in_place_factory.hpp>
 
+#include "xxHash/xxhash.h"
+
 #include "common/ceph_json.h"
 #include "common/utf8.h"
 
@@ -2873,11 +2875,37 @@ public:
 		     uint64_t cookie,
 		     uint64_t notifier_id,
 		     bufferlist& bl) override {
+    static thread_local unsigned short seed[4];
+    static thread_local bool seeded = false;
+
+    if (unlikely(!seeded)) {
+      auto t = ceph::coarse_mono_clock::now();
+      auto h = XXH64(&t, sizeof(t), 0);
+      static_assert(sizeof(h) == sizeof(seed),
+		    "Please add cases for your machine's widths.");
+      *reinterpret_cast<uint64_t*>(&seed[0]) = h;
+      seeded = true;
+    }
+
     ldout(rados->ctx(), 10) << "RGWWatcher::handle_notify() "
 			    << " notify_id " << notify_id
 			    << " cookie " << cookie
 			    << " notifier " << notifier_id
 			    << " bl.length()=" << bl.length() << dendl;
+
+    if (unlikely(rados->inject_notify_timeout_probability == 1) ||
+	(rados->inject_notify_timeout_probability > 0 &&
+	 (rados->inject_notify_timeout_probability >
+	  erand48(seed)))) {
+      ldout(rados->ctx(), 0)
+	<< "RGWWatcher::handle_notify() dropping notification! "
+	<< "If this isn't what you want, set "
+	<< "rgw_inject_notify_timeout_probability to zero!" << dendl;
+      return;
+    }
+
+
+
     rados->watch_cb(notify_id, cookie, notifier_id, bl);
 
     bufferlist reply_bl; // empty reply payload
@@ -4664,6 +4692,9 @@ int RGWRados::init_complete()
 int RGWRados::initialize()
 {
   int ret;
+
+  inject_notify_timeout_probability =
+    cct->_conf->get_val<double>("rgw_inject_notify_timeout_probability");
 
   ret = init_rados();
   if (ret < 0)
