@@ -3218,14 +3218,11 @@ void PGMap::get_health_checks(
     }
 
     if (!warn_detail.empty()) {
-      ostringstream ss;
-      ss << warn << " slow requests are blocked > "
-	 << cct->_conf->mon_osd_warn_op_age << " sec";
-      auto& d = checks->add("REQUEST_SLOW", HEALTH_WARN, ss.str());
-      d.detail.swap(warn_detail);
       int left = max;
+      set<int> implicated_osds;
       for (auto& p : warn_osd_by_max) {
 	ostringstream ss;
+        implicated_osds.insert(p.second.begin(), p.second.end());
 	if (p.second.size() > 1) {
 	  ss << "osds " << p.second
              << " have blocked requests > " << p.first << " sec";
@@ -3233,21 +3230,24 @@ void PGMap::get_health_checks(
 	  ss << "osd." << *p.second.begin()
              << " has blocked requests > " << p.first << " sec";
 	}
-	d.detail.push_back(ss.str());
+	warn_detail.push_back(ss.str());
 	if (--left == 0) {
 	  break;
 	}
       }
+      ostringstream ss;
+      ss << warn << " slow requests are blocked > "
+	 << cct->_conf->mon_osd_warn_op_age << " sec. Implicated osds "
+         << implicated_osds;
+      auto& d = checks->add("REQUEST_SLOW", HEALTH_WARN, ss.str());
+      d.detail.swap(warn_detail);
     }
     if (!error_detail.empty()) {
-      ostringstream ss;
-      ss << error << " stuck requests are blocked > "
-	 << err_age << " sec";
-      auto& d = checks->add("REQUEST_STUCK", HEALTH_ERR, ss.str());
-      d.detail.swap(error_detail);
       int left = max;
+      set<int> implicated_osds;
       for (auto& p : error_osd_by_max) {
 	ostringstream ss;
+        implicated_osds.insert(p.second.begin(), p.second.end());
 	if (p.second.size() > 1) {
 	  ss << "osds " << p.second
              << " have stuck requests > " << p.first << " sec";
@@ -3255,11 +3255,16 @@ void PGMap::get_health_checks(
 	  ss << "osd." << *p.second.begin()
              << " has stuck requests > " << p.first << " sec";
 	}
-	d.detail.push_back(ss.str());
+	error_detail.push_back(ss.str());
 	if (--left == 0) {
 	  break;
 	}
       }
+      ostringstream ss;
+      ss << error << " stuck requests are blocked > "
+	 << err_age << " sec. Implicated osds " << implicated_osds;
+      auto& d = checks->add("REQUEST_STUCK", HEALTH_ERR, ss.str());
+      d.detail.swap(error_detail);
     }
   }
 
