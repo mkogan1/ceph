@@ -114,6 +114,9 @@ def mount_tmpfs(path):
         path
     ])
 
+    # Restore SELinux context
+    system.set_context(path)
+
 
 def create_osd_path(osd_id, tmpfs=False):
     path = '/var/lib/ceph/osd/%s-%s' % (conf.cluster, osd_id)
@@ -185,6 +188,9 @@ def mount_osd(device, osd_id):
     command.append(device)
     command.append(destination)
     process.run(command)
+
+    # Restore SELinux context
+    system.set_context(destination)
 
 
 def _link_device(device, device_type, osd_id):
