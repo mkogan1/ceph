@@ -319,7 +319,7 @@ int HashIndex::split_dirs(const vector<string> &path) {
 
   if (must_split(info)) {
     dout(1) << __func__ << " " << path << " has " << info.objs
-            << " objects, starting split." << dendl;
+            << " objects, starting split in pg " << coll() << "." << dendl;
     r = initiate_split(path, info);
     if (r < 0) {
       dout(10) << "error initiating split on " << path << ": "
@@ -328,7 +328,7 @@ int HashIndex::split_dirs(const vector<string> &path) {
     }
 
     r = complete_split(path, info);
-    dout(1) << __func__ << " " << path << " split completed."
+    dout(1) << __func__ << " " << path << " split completed in pg " << coll() << "."
             << dendl;
     if (r < 0) {
       dout(10) << "error completing split on " << path << ": "
@@ -422,12 +422,12 @@ int HashIndex::_created(const vector<string> &path,
 
   if (must_split(info)) {
     dout(1) << __func__ << " " << path << " has " << info.objs
-            << " objects, starting split." << dendl;
+            << " objects, starting split in pg " << coll() << "." << dendl;
     int r = initiate_split(path, info);
     if (r < 0)
       return r;
     r = complete_split(path, info);
-    dout(1) << __func__ << " " << path << " split completed."
+    dout(1) << __func__ << " " << path << " split completed in pg " << coll() << "."
             << dendl;
     return r;
   } else {
