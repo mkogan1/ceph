@@ -2046,7 +2046,7 @@ class Prepare(object):
             If the --bluestore argument is given, a bluestore objectstore
             will be created.  If --filestore is provided, a legacy FileStore
             objectstore will be created.  If neither is specified, we default
-            to BlueStore.
+            to FileStore.
 
             When an entire device is prepared for bluestore, two
             partitions are created. The first partition is for metadata,
