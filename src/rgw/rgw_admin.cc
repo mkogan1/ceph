@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include <boost/optional.hpp>
 
@@ -2317,6 +2318,29 @@ int create_new_bucket_instance(RGWRados *store,
   return 0;
 }
 
+static int trim_sync_error_log(int shard_id, const ceph::real_time& start_time,
+                               const ceph::real_time& end_time,
+                               const string& start_marker, const string& end_marker,
+                               int delay_ms)
+{
+  auto oid = RGWSyncErrorLogger::get_shard_oid(RGW_SYNC_ERROR_LOG_SHARD_PREFIX,
+                                               shard_id);
+  // call cls_log_trim() until it returns -ENODATA
+  for (;;) {
+    int ret = store->time_log_trim(oid, start_time, end_time,
+                                   start_marker, end_marker);
+    if (ret == -ENODATA) {
+      return 0;
+    }
+    if (ret < 0) {
+      return ret;
+    }
+    if (delay_ms) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    }
+  }
+  // unreachable
+}
 
 #ifdef BUILDING_FOR_EMBEDDED
 extern "C" int cephd_rgw_admin(int argc, const char **argv)
@@ -2477,6 +2501,7 @@ int main(int argc, const char **argv)
   bool index_type_specified = false;
 
   boost::optional<std::string> compression_type;
+  int trim_delay_ms = 0;
 
   for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ) {
     if (ceph_argparse_double_dash(args, i)) {
@@ -2805,6 +2830,8 @@ int main(int argc, const char **argv)
       perm_policy_doc = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--path-prefix", (char*)NULL)) {
       path_prefix = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--trim-delay-ms", (char*)NULL)) {
+      trim_delay_ms = atoi(val.c_str());
     } else if (strncmp(*i, "-", 1) == 0) {
       cerr << "ERROR: invalid flag " << *i << std::endl;
       return EINVAL;
@@ -6730,9 +6757,10 @@ next:
     }
 
     for (; shard_id < ERROR_LOGGER_SHARDS; ++shard_id) {
-      string oid = RGWSyncErrorLogger::get_shard_oid(RGW_SYNC_ERROR_LOG_SHARD_PREFIX, shard_id);
-      ret = store->time_log_trim(oid, start_time.to_real_time(), end_time.to_real_time(), start_marker, end_marker);
-      if (ret < 0 && ret != -ENODATA) {
+      ret = trim_sync_error_log(shard_id, start_time.to_real_time(),
+                                end_time.to_real_time(), start_marker,
+                                end_marker, trim_delay_ms);
+      if (ret < 0) {
         cerr << "ERROR: sync error trim: " << cpp_strerror(-ret) << std::endl;
         return -ret;
       }
