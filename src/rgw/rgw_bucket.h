@@ -200,6 +200,7 @@ struct RGWBucketAdminOpState {
   std::string bucket_name;
   std::string bucket_id;
   std::string object_name;
+  std::string new_bucket_name;
 
   bool list_buckets;
   bool stat_buckets;
@@ -234,6 +235,10 @@ struct RGWBucketAdminOpState {
     quota = value;
   }
 
+
+  void set_new_bucket_name(std::string& new_bucket_str) {
+    new_bucket_name = new_bucket_str;
+  }
 
   rgw_user& get_user_id() { return uid; }
   std::string& get_user_display_name() { return display_name; }
