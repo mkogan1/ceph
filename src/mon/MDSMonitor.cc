@@ -2040,7 +2040,7 @@ void MDSMonitor::maybe_replace_gid(FSMap &fsmap, mds_gid_t gid,
   // We will only take decisive action (replacing/removing a daemon)
   // if we have some indicating that some other daemon(s) are successfully
   // getting beacons through recently.
-  mono_time latest_beacon = mono_clock::zero();
+  mono_time latest_beacon = mono_time::min();
   for (const auto &p : last_beacon) {
     latest_beacon = std::max(p.second.stamp, latest_beacon);
   }
