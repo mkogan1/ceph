@@ -26,7 +26,7 @@ AuthClientHandler *get_auth_client_handler(CephContext *cct, int proto,
   case CEPH_AUTH_CEPHX:
     return new CephxClientHandler(cct, rkeys);
   case CEPH_AUTH_NONE:
-    return new AuthNoneClientHandler(cct, rkeys);
+    return new AuthNoneClientHandler{cct};
   default:
     return NULL;
   }

@@ -5828,7 +5828,7 @@ bool Monitor::ms_get_authorizer(int service_id, AuthAuthorizer **authorizer,
   if (!auth_cluster_required.is_supported_auth(CEPH_AUTH_CEPHX)) {
     // auth_none
     dout(20) << __func__ << " building auth_none authorizer" << dendl;
-    AuthNoneClientHandler handler(g_ceph_context, nullptr);
+    AuthNoneClientHandler handler{g_ceph_context};
     handler.set_global_id(0);
     *authorizer = handler.build_authorizer(service_id);
     return true;
