@@ -165,4 +165,38 @@
     0; })
 #endif
 
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+inline int pipe_cloexec(int pipefd[2])
+{
+#if defined(HAVE_PIPE2)
+  return pipe2(pipefd, O_CLOEXEC);
+#else
+  if (pipe(pipefd) == -1)
+    return -1;
+
+  /*
+   * The old-fashioned, race-condition prone way that we have to fall
+   * back on if pipe2 does not exist.
+   */
+  if (fcntl(pipefd[0], F_SETFD, FD_CLOEXEC) < 0) {
+    goto fail;
+  }
+
+  if (fcntl(pipefd[1], F_SETFD, FD_CLOEXEC) < 0) {
+    goto fail;
+  }
+
+  return 0;
+fail:
+  int save_errno = errno;
+  VOID_TEMP_FAILURE_RETRY(close(pipefd[0]));
+  VOID_TEMP_FAILURE_RETRY(close(pipefd[1]));
+  return (errno = save_errno, -1);
+#endif
+}
+
+
 #endif /* !CEPH_COMPAT_H */
