@@ -1507,7 +1507,7 @@ private:
   map<int, int> debug_heartbeat_drops_remaining;
   Cond heartbeat_cond;
   bool heartbeat_stop;
-  std::atomic_bool heartbeat_need_update;   
+  std::atomic_bool heartbeat_need_update;
   map<int,HeartbeatInfo> heartbeat_peers;  ///< map of osd id to HeartbeatInfo
   utime_t last_mon_heartbeat;
   Messenger *hb_front_client_messenger;
@@ -1691,9 +1691,9 @@ private:
 	string lock_name, string ordering_lock,
 	uint64_t max_tok_per_prio, uint64_t min_cost, CephContext *cct,
 	io_queue opqueue)
-	: sdata_lock(lock_name.c_str(), false, true, false, cct),
+	: sdata_lock(lock_name.c_str(), false, true, false),
 	  sdata_op_ordering_lock(ordering_lock.c_str(), false, true,
-				 false, cct) {
+				 false) {
 	if (opqueue == io_queue::weightedpriority) {
 	  pqueue = std::unique_ptr
 	    <WeightedPriorityQueue<pair<spg_t,PGQueueable>,entity_inst_t>>(
@@ -1735,7 +1735,7 @@ private:
 		 "OSD:ShardedOpWQ:order:", i);
 	ShardData* one_shard = new ShardData(
 	  lock_name, order_lock,
-	  osd->cct->_conf->osd_op_pq_max_tokens_per_priority, 
+	  osd->cct->_conf->osd_op_pq_max_tokens_per_priority,
 	  osd->cct->_conf->osd_op_pq_min_cost, osd->cct, osd->op_queue);
 	shard_list.push_back(one_shard);
       }
@@ -1821,7 +1821,7 @@ private:
     };
 
     bool is_shard_empty(uint32_t thread_index) override {
-      uint32_t shard_index = thread_index % num_shards; 
+      uint32_t shard_index = thread_index % num_shards;
       ShardData* sdata = shard_list[shard_index];
       assert(NULL != sdata);
       Mutex::Locker l(sdata->sdata_op_ordering_lock);
