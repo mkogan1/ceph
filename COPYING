@@ -154,6 +154,7 @@ Files: src/ceph-volume/plugin/zfs/*
 Copyright: 2018, Willem Jan Withagen
 License: BSD 3-clause
 
+
 Files: src/include/uses_allocator.h
 Copyright: 2016, Pablo Halpern <phalpern@halpernwightsoftware.com>
 License: Boost Software License, Version 1.0
@@ -166,3 +167,7 @@ License: Boost Software License, Version 1.0
 Files: src/include/expected.hpp
 Copyright: 2017, Simon Brand
 License: CC0
+
+Files: src/include/function2.hpp
+Copyright: 2015-2018, Denis Blank
+License: Boost Software License, Version 1.0
