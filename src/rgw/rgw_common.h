@@ -30,6 +30,7 @@
 #include "rgw_string.h"
 #include "common/async/yield_context.h"
 #include "rgw_website.h"
+#include "rgw_tag.h"
 #include "cls/version/cls_version_types.h"
 #include "cls/user/cls_user_types.h"
 #include "cls/rgw/cls_rgw_types.h"
@@ -2064,6 +2065,8 @@ struct req_state : DoutPrefixProvider {
   string req_id;
   string trans_id;
   uint64_t id;
+
+  RGWObjTags tagset;
 
   bool mfa_verified{false};
 
