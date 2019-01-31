@@ -545,10 +545,11 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
   list_op.params.list_versions = true;
   list_op.params.allow_unordered = true;
 
+  bool is_truncated = false;
   do {
     objs.clear();
 
-    ret = list_op.list_objects(max, &objs, &common_prefixes, NULL);
+    ret = list_op.list_objects(max, &objs, &common_prefixes, &is_truncated);
     if (ret < 0)
       return ret;
 
@@ -559,11 +560,11 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
 
     for (auto& obj : objs) {
       ret = rgw_remove_object(store, info, bucket, obj.key);
-      if (ret < 0)
+      if (ret < 0 && ret != -ENOENT) {
         return ret;
+      }
     }
-
-  } while (!objs.empty());
+  } while(is_truncated);
 
   ret = rgw_bucket_sync_user_stats(store, info.owner, bucket);
   if ( ret < 0) {
@@ -572,9 +573,12 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
 
   RGWObjVersionTracker objv_tracker;
 
-  ret = store->delete_bucket(bucket, objv_tracker);
+  // if we deleted children above we will force delete, as any that
+  // remain is detrius from a prior bug
+  ret = store->delete_bucket(bucket, objv_tracker, !delete_children);
   if (ret < 0) {
-    lderr(store->ctx()) << "ERROR: could not remove bucket " << bucket.name << dendl;
+    lderr(store->ctx()) << "ERROR: could not remove bucket " <<
+      bucket.name << dendl;
     return ret;
   }
 
@@ -633,16 +637,20 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
   RGWRados::Bucket::List list_op(&target);
 
   list_op.params.list_versions = true;
+  list_op.params.allow_unordered = true;
 
   std::list<librados::AioCompletion*> handles;
 
   int max = 1000;
   int max_aio = concurrent_max;
-  ret = list_op.list_objects(max, &objs, &common_prefixes, NULL);
-  if (ret < 0)
-    return ret;
+  bool is_truncated = true;
 
-  while (!objs.empty()) {
+  while (is_truncated) {
+    objs.clear();
+    ret = list_op.list_objects(max, &objs, &common_prefixes, &is_truncated);
+    if (ret < 0)
+      return ret;
+
     std::vector<RGWObjEnt>::iterator it = objs.begin();
     for (; it != objs.end(); ++it) {
       RGWObjState *astate = NULL;
@@ -707,11 +715,6 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
         max_aio = concurrent_max;
       }
     } // for all RGW objects
-    objs.clear();
-
-    ret = list_op.list_objects(max, &objs, &common_prefixes, NULL);
-    if (ret < 0)
-      return ret;
   }
 
   ret = drain_handles(handles);
@@ -727,7 +730,10 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
 
   RGWObjVersionTracker objv_tracker;
 
-  ret = store->delete_bucket(bucket, objv_tracker);
+  // this function can only be run if caller wanted children to be
+  // deleted, so we can ignore the check for children as any that
+  // remain are detritus from a prior bug
+  ret = store->delete_bucket(bucket, objv_tracker, false);
   if (ret < 0) {
     lderr(store->ctx()) << "ERROR: could not remove bucket " << bucket.name << dendl;
     return ret;
