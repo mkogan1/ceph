@@ -1369,6 +1369,8 @@ enum RGWBucketFlags {
 
 class RGWSI_Zone;
 
+struct RGWBucketSyncPolicy;
+
 struct RGWBucketInfo {
   enum BIShardsHashType {
     MOD = 0
@@ -1376,11 +1378,11 @@ struct RGWBucketInfo {
 
   rgw_bucket bucket;
   rgw_user owner;
-  uint32_t flags;
+  uint32_t flags{0};
   string zonegroup;
   ceph::real_time creation_time;
   rgw_placement_rule placement_rule;
-  bool has_instance_obj;
+  bool has_instance_obj{false};
   RGWObjVersionTracker objv_tracker; /* we don't need to serialize this, for runtime tracking */
   obj_version ep_objv; /* entry point object version, for runtime tracking only */
   RGWQuotaInfo quota;
@@ -1391,9 +1393,9 @@ struct RGWBucketInfo {
   // Represents the shard number for blind bucket.
   const static uint32_t NUM_SHARDS_BLIND_BUCKET;
 
-  bool requester_pays;
+  bool requester_pays{false};
 
-  bool has_website;
+  bool has_website{false};
   RGWBucketWebsiteConf website_conf;
 
   bool swift_versioning;
@@ -1401,119 +1403,18 @@ struct RGWBucketInfo {
 
   map<string, uint32_t> mdsearch_config;
 
-
-
   /* resharding */
   uint8_t reshard_status{0};
   string new_bucket_instance_id;
 
   RGWObjectLock obj_lock;
 
-  void encode(bufferlist& bl) const {
-     ENCODE_START(21, 4, bl);
-     encode(bucket, bl);
-     encode(owner.id, bl);
-     encode(flags, bl);
-     encode(zonegroup, bl);
-     uint64_t ct = real_clock::to_time_t(creation_time);
-     encode(ct, bl);
-     encode(placement_rule, bl);
-     encode(has_instance_obj, bl);
-     encode(quota, bl);
-     encode(requester_pays, bl);
-     encode(owner.tenant, bl);
-     encode(has_website, bl);
-     if (has_website) {
-       encode(website_conf, bl);
-     }
-     encode(swift_versioning, bl);
-     if (swift_versioning) {
-       encode(swift_ver_location, bl);
-     }
-     encode(creation_time, bl);
-     encode(mdsearch_config, bl);
-     encode(reshard_status, bl);
-     encode(new_bucket_instance_id, bl);
-     if (obj_lock_enabled()) {
-       encode(obj_lock, bl);
-     }
-     encode(layout, bl);
-     ENCODE_FINISH(bl);
-  }
-  void decode(bufferlist::const_iterator& bl) {
-    DECODE_START_LEGACY_COMPAT_LEN_32(21, 4, 4, bl);
-     decode(bucket, bl);
-     if (struct_v >= 2) {
-       string s;
-       decode(s, bl);
-       owner.from_str(s);
-     }
-     if (struct_v >= 3)
-       decode(flags, bl);
-     if (struct_v >= 5)
-       decode(zonegroup, bl);
-     if (struct_v >= 6) {
-       uint64_t ct;
-       decode(ct, bl);
-       if (struct_v < 17)
-	 creation_time = ceph::real_clock::from_time_t((time_t)ct);
-     }
-     if (struct_v >= 7)
-       decode(placement_rule, bl);
-     if (struct_v >= 8)
-       decode(has_instance_obj, bl);
-     if (struct_v >= 9)
-       decode(quota, bl);
-     static constexpr uint8_t new_layout_v = 21;
-     if (struct_v >= 10 && struct_v < new_layout_v)
-       decode(layout.current_index.layout.normal.num_shards, bl);
-     if (struct_v >= 11 && struct_v < new_layout_v)
-       decode(layout.current_index.layout.normal.hash_type, bl);
-     if (struct_v >= 12)
-       decode(requester_pays, bl);
-     if (struct_v >= 13)
-       decode(owner.tenant, bl);
-     if (struct_v >= 14) {
-       decode(has_website, bl);
-       if (has_website) {
-         decode(website_conf, bl);
-       } else {
-         website_conf = RGWBucketWebsiteConf();
-       }
-     }
-     if (struct_v >= 15 && struct_v < new_layout_v) {
-       uint32_t it;
-       decode(it, bl);
-       layout.current_index.layout.type = (rgw::BucketIndexType)it;
-     } else {
-       layout.current_index.layout.type = rgw::BucketIndexType::Normal;
-     }
-     swift_versioning = false;
-     swift_ver_location.clear();
-     if (struct_v >= 16) {
-       decode(swift_versioning, bl);
-       if (swift_versioning) {
-         decode(swift_ver_location, bl);
-       }
-     }
-     if (struct_v >= 17) {
-       decode(creation_time, bl);
-     }
-     if (struct_v >= 18) {
-       decode(mdsearch_config, bl);
-     }
-     if (struct_v >= 19) {
-       decode(reshard_status, bl);
-       decode(new_bucket_instance_id, bl);
-     }
-     if (struct_v >= 20 && obj_lock_enabled()) {
-       decode(obj_lock, bl);
-     }
-     if (struct_v >= 21) {
-       decode(layout, bl);
-     }
-     DECODE_FINISH(bl);
-  }
+  std::shared_ptr<const RGWBucketSyncPolicy> sync_policy;
+
+
+  void encode(bufferlist& bl) const;
+  void decode(bufferlist::const_iterator& bl);
+
   void dump(Formatter *f) const;
   static void generate_test_instances(list<RGWBucketInfo*>& o);
 
@@ -1531,8 +1432,12 @@ struct RGWBucketInfo {
     return swift_versioning && !versioned();
   }
 
-  RGWBucketInfo() : flags(0), has_instance_obj(false), requester_pays(false),
-                    has_website(false), swift_versioning(false), reshard_status(0) {}
+  void set_sync_policy(RGWBucketSyncPolicy&& policy);
+
+  bool empty_sync_policy() const;
+
+  RGWBucketInfo();
+  ~RGWBucketInfo();
 };
 WRITE_CLASS_ENCODER(RGWBucketInfo)
 
