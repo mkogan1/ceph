@@ -15,6 +15,7 @@
 #include "rgw/rgw_log_backing.h"
 #include "rgw/rgw_tools.h"
 #include "rgw/rgw_zone.h"
+#include "rgw/rgw_bucket_sync.h"
 #include "rgw/cls_fifo_legacy.h"
 #include "cls/fifo/cls_fifo_types.h"
 #include "cls/log/cls_log_client.h"
@@ -574,9 +575,12 @@ std::string RGWDataChangesLog::get_oid(uint64_t gen_id, int i) const {
 	  fmt::format("{}.{}", prefix, i));
 }
 
-int RGWDataChangesLog::add_entry(const rgw_bucket& bucket, int shard_id) {
-  if (!store->svc.zone->need_to_log_data())
+int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id) {
+  if (!store->svc.zone->need_to_log_data() &&
+      (!bucket_info.sync_policy || !bucket_info.sync_policy->zone_is_source(store->svc.zone->zone_id()))) {
     return 0;
+  }
+  auto& bucket = bucket_info.bucket;
 
   if (observer) {
     observer->on_bucket_changed(bucket.get_key());

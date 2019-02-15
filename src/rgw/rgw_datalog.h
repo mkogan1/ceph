@@ -183,6 +183,7 @@ class RGWDataChangesLog {
   std::atomic<bool> down_flag = { false };
 
   struct ChangeStatus {
+    std::shared_ptr<const RGWBucketSyncPolicy> sync_policy;
     ceph::real_time cur_expiration;
     ceph::real_time cur_sent;
     bool pending = false;
@@ -216,7 +217,7 @@ public:
   ~RGWDataChangesLog();
 
   int init();
-  int add_entry(const rgw_bucket& bucket_info, int shard_id);
+  int add_entry(const RGWBucketInfo& bucket_info, int shard_id);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int list_entries(int shard, int max_entries,
 		   std::vector<rgw_data_change_log_entry>& entries,

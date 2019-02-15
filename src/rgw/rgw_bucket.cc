@@ -2851,7 +2851,7 @@ public:
       }
 
       for (int i = 0; i < shards_num; ++i, ++shard_id) {
-        ret = store->data_log->add_entry(bci.info.bucket, shard_id);
+        ret = store->data_log->add_entry(bci.info, shard_id);
         if (ret < 0) {
 	   lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
 	   return ret;
