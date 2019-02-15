@@ -9,6 +9,7 @@
 #include "auth/Crypto.h"
 
 #include <list>
+#include <sstream>
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -159,13 +160,15 @@ public:
                                                   remove_tags(cct->_conf->rgw_gc_max_objs) {
     max_aio = cct->_conf->rgw_gc_max_concurrent_io;
   }
+
   ~RGWGCIOManager() {
     for (auto io : ios) {
       io.c->release();
     }
   }
 
-  int schedule_io(IoCtx *ioctx, const string& oid, ObjectWriteOperation *op, int index, const string& tag) {
+  int schedule_io(IoCtx *ioctx, const string& oid, ObjectWriteOperation *op,
+		  int index, const string& tag) {
     while (ios.size() > max_aio) {
       if (gc->going_down()) {
         return 0;
@@ -198,8 +201,6 @@ public:
     int ret = io.c->get_return_value();
     io.c->release();
 
-    auto& rt = remove_tags[io.index];
-
     if (ret == -ENOENT) {
       ret = 0;
     }
@@ -216,12 +217,24 @@ public:
       goto done;
     }
 
-    rt.push_back(io.tag);
-    if (rt.size() > (size_t)cct->_conf->rgw_gc_max_trim_chunk) {
-      flush_remove_tags(io.index, rt);
-    }
-done:
+    schedule_tag_removal(io.index, io.tag);
+
+  done:
     ios.pop_front();
+  }
+
+  void schedule_tag_removal(int index, string tag) {
+    auto& rt = remove_tags[index];
+
+    // since every element of a chain tries to add the same tag, and
+    // since chains are handled sequentially, check to make sure it's
+    // not already on the list
+    if (rt.empty() || rt.back() != tag) {
+      rt.push_back(tag);
+      if (rt.size() >= (size_t)cct->_conf->rgw_gc_max_trim_chunk) {
+	flush_remove_tags(index, rt);
+      }
+    }
   }
 
   void drain_ios() {
@@ -245,15 +258,38 @@ done:
     index_io.type = IO::IndexIO;
     index_io.index = index;
 
+    // use lambda to assemble list, so it will only get executed if
+    // we're at the appropirate logging level
+    auto lister = [&rt]() -> std::string {
+      std::stringstream out;
+      bool first = true;
+
+      for (const auto& s : rt) {
+	if (first) {
+	  first = false;
+	} else {
+	  out << ", ";
+	}
+	out << s;
+      }
+
+      return out.str();
+    };
+
+    dout(20) << __func__ <<
+      " removing entries from gc log shard index=" << index << ", size=" <<
+      rt.size() << ", entries=[" << lister() << "]" << dendl;
+
     int ret = gc->remove(index, rt, &index_io.c);
     rt.clear();
     if (ret < 0) {
-      /* we already cleared list of tags, this prevents us from ballooning in case of
-       * a persistent problem
+      /* we already cleared list of tags, this prevents us from
+       * ballooning in case of a persistent problem
        */
       ldout(cct, 0) << "WARNING: failed to remove tags on gc shard index=" << index << " ret=" << ret << dendl;
       return;
     }
+
     ios.push_back(index_io);
   }
 
@@ -332,49 +368,59 @@ int RGWGC::process(int index, int max_secs, bool expired_only,
       cls_rgw_obj_chain& chain = info.chain;
 
       utime_t now = ceph_clock_now(g_ceph_context);
-      if (now >= end)
+      if (now >= end) {
         goto done;
-
-      for (liter = chain.objs.begin(); liter != chain.objs.end(); ++liter) {
-        cls_rgw_obj& obj = *liter;
-
-        if (obj.pool != last_pool) {
-          delete ctx;
-          ctx = new IoCtx;
-	  ret = store->get_rados_handle()->ioctx_create(obj.pool.c_str(), *ctx);
-	  if (ret < 0) {
-	    dout(0) << "ERROR: failed to create ioctx pool=" << obj.pool << dendl;
-	    continue;
-	  }
-          last_pool = obj.pool;
-        }
-
-        ctx->locator_set_key(obj.loc);
-        rgw_obj key_obj;
-        key_obj.set_obj(obj.key.name);
-        key_obj.set_instance(obj.key.instance);
-
-	dout(0) << "gc::process: removing " << obj.pool << ":" << key_obj.get_object() << dendl;
-	ObjectWriteOperation op;
-	cls_refcount_put(op, info.tag, true);
-
-        ret = io_manager.schedule_io(ctx, key_obj.get_object(), &op, index, info.tag);
-        if (ret < 0) {
-          ldout(store->ctx(), 0) << "WARNING: failed to schedule deletion for oid=" << key_obj.get_object() << dendl;
-        }
-
-        if (going_down()) // leave early, even if tag isn't removed, it's ok
-          goto done;
       }
-    }
+
+      if (chain.objs.empty()) {
+        io_manager.schedule_tag_removal(index, info.tag);
+      } else {
+	for (liter = chain.objs.begin(); liter != chain.objs.end(); ++liter) {
+	  cls_rgw_obj& obj = *liter;
+
+	  if (obj.pool != last_pool) {
+	    delete ctx;
+	    ctx = new IoCtx;
+	    ret = store->get_rados_handle()->ioctx_create(obj.pool.c_str(), *ctx);
+	    if (ret < 0) {
+	      last_pool = "";
+	      dout(0) << "ERROR: failed to create ioctx pool=" <<
+		obj.pool << dendl;
+	      continue;
+	    }
+	    last_pool = obj.pool;
+	  }
+
+	  ctx->locator_set_key(obj.loc);
+	  rgw_obj key_obj;
+	  key_obj.set_obj(obj.key.name);
+	  key_obj.set_instance(obj.key.instance);
+
+	  dout(0) << "gc::process: removing " << obj.pool << ":" << key_obj.get_object() << dendl;
+	  ObjectWriteOperation op;
+	  cls_refcount_put(op, info.tag, true); // ERIC CHERRY-PICK KEEP?
+
+	  ret = io_manager.schedule_io(ctx, key_obj.get_object(), &op, index, info.tag);
+	  if (ret < 0) {
+	    ldout(store->ctx(), 0) << "WARNING: failed to schedule deletion for oid=" << key_obj.get_object() << dendl;
+	  }
+	  if (going_down()) {
+	    // leave early, even if tag isn't removed, it's ok since it
+	    // will be picked up next time around
+	    goto done;
+	  }
+	} // chains loop
+      } // else -- chains not empty
+    } // entries loop
   } while (truncated);
 
 done:
-  /* we don't drain here, because if we're going down we don't want to hold the system
-   * if backend is unresponsive
+  /* we don't drain here, because if we're going down we don't want to
+   * hold the system if backend is unresponsive
    */
   l.unlock(&store->gc_pool_ctx, obj_names[index]);
   delete ctx;
+
   return 0;
 }
 
@@ -459,4 +505,3 @@ void RGWGC::GCWorker::stop()
   Mutex::Locker l(lock);
   cond.Signal();
 }
-
