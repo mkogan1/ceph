@@ -1317,6 +1317,13 @@ struct rgw_bucket_shard {
   }
 };
 
+inline ostream& operator<<(ostream& out, const rgw_bucket_shard& bs) {
+  if (bs.shard_id <= 0) {
+    return out << bs.bucket;
+  }
+
+  return out << bs.bucket << ":" << bs.shard_id;
+}
 
 struct RGWObjVersionTracker {
   obj_version read_version;
@@ -1392,6 +1399,7 @@ inline ostream& operator<<(ostream& out, const RGWBucketIndexType &index_type)
 }
 
 struct RGWBucketSyncPolicy;
+class RGWSI_Zone;
 
 struct RGWBucketInfo {
   enum BIShardsHashType {
@@ -1467,6 +1475,8 @@ struct RGWBucketInfo {
   void set_sync_policy(RGWBucketSyncPolicy&& policy);
 
   bool empty_sync_policy() const;
+  bool bucket_is_sync_source(const string& zone_id) const;
+  bool bucket_datasync_enabled(const RGWSI_Zone *zone_svc) const;
 
   RGWBucketInfo();
   ~RGWBucketInfo();

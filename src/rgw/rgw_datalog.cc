@@ -576,8 +576,7 @@ std::string RGWDataChangesLog::get_oid(uint64_t gen_id, int i) const {
 }
 
 int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id) {
-  if (!store->svc.zone->need_to_log_data() &&
-      (!bucket_info.sync_policy || !bucket_info.sync_policy->zone_is_source(store->svc.zone->zone_id()))) {
+  if (!bucket_info.bucket_datasync_enabled(store->svc.zone)) {
     return 0;
   }
   auto& bucket = bucket_info.bucket;
