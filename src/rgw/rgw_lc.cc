@@ -1480,7 +1480,7 @@ std::string s3_expiration_header(
   const std::map<std::string, buffer::list>& bucket_attrs)
 {
   CephContext* cct = dpp->get_cct();
-  RGWLifecycleConfiguration config(cct); // TODO: save in bucket info
+  RGWLifecycleConfiguration config(cct);
   std::string hdr{""};
 
   const auto& aiter = bucket_attrs.find(RGW_ATTR_LC);
@@ -1574,8 +1574,7 @@ std::string s3_expiration_header(
     // update earliest expiration
     if (rule_expiration_date) {
       if ((! expiration_date) ||
-	  ((expiration_date &&
-	    (*expiration_date < *rule_expiration_date)))) {
+	  (*expiration_date < *rule_expiration_date)) {
       expiration_date =
 	boost::optional<ceph::real_time>(rule_expiration_date);
       }
