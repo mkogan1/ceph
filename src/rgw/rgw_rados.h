@@ -1906,7 +1906,7 @@ public:
                req_info *info,
                const string& source_zone,
                rgw_obj& src_obj,
-               RGWBucketInfo& src_bucket_info,
+               const RGWBucketInfo *src_bucket_info,
                real_time *src_mtime,
                uint64_t *psize,
                const real_time *mod_ptr,
@@ -1926,8 +1926,8 @@ public:
                        const string& source_zone,
                        const rgw_obj& dest_obj,
                        const rgw_obj& src_obj,
-                       RGWBucketInfo& dest_bucket_info,
-                       RGWBucketInfo& src_bucket_info,
+                       const RGWBucketInfo& dest_bucket_info,
+                       const RGWBucketInfo *src_bucket_info,
 		       std::optional<rgw_placement_rule> dest_placement,
                        ceph::real_time *src_mtime,
                        ceph::real_time *mtime,
@@ -2118,7 +2118,7 @@ public:
                     bufferlist& obj_tag, map<uint64_t, vector<rgw_bucket_olh_log_entry> >& log,
                     uint64_t *plast_ver, rgw_zone_set *zones_trace = nullptr);
   int update_olh(RGWObjectCtx& obj_ctx, RGWObjState *state, const RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_zone_set *zones_trace = nullptr);
-  int set_olh(RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& target_obj, bool delete_marker, rgw_bucket_dir_entry_meta *meta,
+  int set_olh(RGWObjectCtx& obj_ctx, const RGWBucketInfo& bucket_info, const rgw_obj& target_obj, bool delete_marker, rgw_bucket_dir_entry_meta *meta,
               uint64_t olh_epoch, ceph::real_time unmod_since, bool high_precision_time,
               rgw_zone_set *zones_trace = nullptr, bool log_data_change = false);
   int repair_olh(RGWObjState* state, const RGWBucketInfo& bucket_info,
