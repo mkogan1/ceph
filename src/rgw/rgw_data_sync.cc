@@ -3384,7 +3384,7 @@ int RGWBucketSyncStatusManager::init()
   auto async_rados = store->get_async_rados();
 
   for (int i = 0; i < effective_num_shards; i++) {
-    RGWRemoteBucketLog *l = new RGWRemoteBucketLog(this, store, this, async_rados, &http_manager);
+    RGWRemoteBucketLog *l = new RGWRemoteBucketLog(this, store, async_rados, &http_manager);
     ret = l->init(source_zone, conn, bucket, (num_shards ? i : -1), error_logger, store->get_sync_tracer(), sync_module);
     if (ret < 0) {
       ldpp_dout(this, 0) << "ERROR: failed to initialize RGWRemoteBucketLog object" << dendl;

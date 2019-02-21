@@ -534,7 +534,6 @@ class RGWRemoteBucketLog : public RGWCoroutinesManager {
   string source_zone;
   rgw_bucket_shard bs;
 
-  RGWBucketSyncStatusManager *status_manager;
   RGWAsyncRadosProcessor *async_rados;
   RGWHTTPManager *http_manager;
 
@@ -545,11 +544,10 @@ class RGWRemoteBucketLog : public RGWCoroutinesManager {
 
 public:
   RGWRemoteBucketLog(const DoutPrefixProvider *_dpp, RGWRados *_store,
-                     RGWBucketSyncStatusManager *_sm,
                      RGWAsyncRadosProcessor *_async_rados,
                      RGWHTTPManager *_http_manager)
     : RGWCoroutinesManager(_store->ctx(), _store->get_cr_registry()),
-      dpp(_dpp), store(_store), status_manager(_sm),
+      dpp(_dpp), store(_store),
       async_rados(_async_rados), http_manager(_http_manager)
   {}
 
