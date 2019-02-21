@@ -264,11 +264,15 @@ done:
       ++index;
     }
   }
-};
+}; // class RGWGCIOManger
 
 int RGWGC::process(int index, int max_secs, bool expired_only,
                    RGWGCIOManager& io_manager)
 {
+  dout(20) << "RGWGC::process entered with GC index_shard=" <<
+    index << ", max_secs=" << max_secs << ", expired_only=" <<
+    expired_only << dendl;
+
   rados::cls::lock::Lock l(gc_index_lock_name);
   utime_t end = ceph_clock_now(g_ceph_context);
 
@@ -298,7 +302,14 @@ int RGWGC::process(int index, int max_secs, bool expired_only,
   do {
     int max = 100;
     std::list<cls_rgw_gc_obj_info> entries;
-    ret = cls_rgw_gc_list(store->gc_pool_ctx, obj_names[index], marker, max, expired_only, entries, &truncated, next_marker);
+
+    ret = cls_rgw_gc_list(store->gc_pool_ctx, obj_names[index], marker, max,
+			  expired_only, entries, &truncated, next_marker);
+    dout(20) <<
+      "RGWGC::process cls_rgw_gc_list returned with returned:" << ret <<
+      ", entries.size=" << entries.size() << ", truncated=" << truncated <<
+      ", next_marker='" << next_marker << "'" << dendl;
+
     if (ret == -ENOENT) {
       ret = 0;
       goto done;
@@ -306,10 +317,17 @@ int RGWGC::process(int index, int max_secs, bool expired_only,
     if (ret < 0)
       goto done;
 
+    marker = next_marker;
+
     string last_pool;
     std::list<cls_rgw_gc_obj_info>::iterator iter;
     for (iter = entries.begin(); iter != entries.end(); ++iter) {
       cls_rgw_gc_obj_info& info = *iter;
+
+      dout(20) << "RGWGC::process iterating over entry tag='" <<
+	info.tag << "', time=" << info.time << ", chain.objs.size()=" <<
+	info.chain.objs.size() << dendl;
+
       std::list<cls_rgw_obj>::iterator liter;
       cls_rgw_obj_chain& chain = info.chain;
 
