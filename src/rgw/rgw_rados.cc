@@ -6713,7 +6713,7 @@ int RGWRados::Object::Write::write_meta(uint64_t size,
   target->invalidate_state();
   state = NULL;
 
-  if (versioned_op) {
+  if (versioned_op && meta.olh_epoch) {
     r = store->set_olh(target->get_ctx(), target->get_bucket_info(), obj, false, NULL, *meta.olh_epoch, real_time(), false, meta.zones_trace);
     if (r < 0) {
       return r;
