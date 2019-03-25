@@ -53,6 +53,7 @@
 #include "include/ceph_assert.h"
 #include "rgw_role.h"
 #include "rgw_rest_sts.h"
+#include "rgw_rest_iam.h"
 #include "rgw_sts.h"
 
 #define dout_context g_ceph_context
@@ -3508,6 +3509,15 @@ RGWOp *RGWHandler_REST_Service_S3::op_post()
       return op;
     }
   }
+
+  if (isIAMenabled) {
+    RGWHandler_REST_IAM iam_handler(auth_registry, post_body);
+    iam_handler.init(store, s, s->cio);
+    auto op = iam_handler.get_op(store);
+    if (op) {
+      return op;
+    }
+  }
   if (isPSenabled) {
     RGWHandler_REST_PSTopic_AWS topic_handler(auth_registry, post_body);
     topic_handler.init(store, s, s->cio);
@@ -4052,7 +4062,7 @@ RGWHandler_REST* RGWRESTMgr_S3::get_handler(struct req_state* const s,
     }
   } else {
     if (s->init_state.url_bucket.empty()) {
-      handler = new RGWHandler_REST_Service_S3(auth_registry, enable_sts, enable_pubsub);
+	handler = new RGWHandler_REST_Service_S3(auth_registry, enable_sts, enable_iam, enable_pubsub);
     } else if (s->object.empty()) {
       handler = new RGWHandler_REST_Bucket_S3(auth_registry, enable_pubsub);
     } else {
@@ -4401,7 +4411,20 @@ AWSGeneralAbstractor::get_auth_data_v4(const req_state* const s,
   bool is_non_s3_op = false;
   if (s->op_type == RGW_STS_GET_SESSION_TOKEN ||
       s->op_type == RGW_STS_ASSUME_ROLE ||
-      s->op_type == RGW_STS_ASSUME_ROLE_WEB_IDENTITY) {
+      s->op_type == RGW_STS_ASSUME_ROLE_WEB_IDENTITY ||
+      s->op_type == RGW_OP_CREATE_ROLE ||
+      s->op_type == RGW_OP_DELETE_ROLE ||
+      s->op_type == RGW_OP_GET_ROLE ||
+      s->op_type == RGW_OP_MODIFY_ROLE ||
+      s->op_type == RGW_OP_LIST_ROLES ||
+      s->op_type == RGW_OP_PUT_ROLE_POLICY ||
+      s->op_type == RGW_OP_GET_ROLE_POLICY ||
+      s->op_type == RGW_OP_LIST_ROLE_POLICIES ||
+      s->op_type == RGW_OP_DELETE_ROLE_POLICY ||
+      s->op_type == RGW_OP_PUT_USER_POLICY ||
+      s->op_type == RGW_OP_GET_USER_POLICY ||
+      s->op_type == RGW_OP_LIST_USER_POLICIES ||
+      s->op_type == RGW_OP_DELETE_USER_POLICY) {
     is_non_s3_op = true;
   }
 
