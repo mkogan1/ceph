@@ -195,17 +195,17 @@ void DeepCopyRequest<I>::handle_copy_image(int r) {
 template <typename I>
 void DeepCopyRequest<I>::send_copy_object_map() {
   m_dst_image_ctx->owner_lock.get_read();
-  m_dst_image_ctx->snap_lock.get_read();
+  m_dst_image_ctx->image_lock.get_read();
 
   if (!m_dst_image_ctx->test_features(RBD_FEATURE_OBJECT_MAP,
-                                      m_dst_image_ctx->snap_lock)) {
-    m_dst_image_ctx->snap_lock.put_read();
+                                      m_dst_image_ctx->image_lock)) {
+    m_dst_image_ctx->image_lock.put_read();
     m_dst_image_ctx->owner_lock.put_read();
     send_copy_metadata();
     return;
   }
   if (m_src_snap_id_end == CEPH_NOSNAP) {
-    m_dst_image_ctx->snap_lock.put_read();
+    m_dst_image_ctx->image_lock.put_read();
     m_dst_image_ctx->owner_lock.put_read();
     send_refresh_object_map();
     return;
@@ -222,7 +222,7 @@ void DeepCopyRequest<I>::send_copy_object_map() {
   }
   if (finish_op_ctx == nullptr) {
     lderr(m_cct) << "lost exclusive lock" << dendl;
-    m_dst_image_ctx->snap_lock.put_read();
+    m_dst_image_ctx->image_lock.put_read();
     m_dst_image_ctx->owner_lock.put_read();
     finish(r);
     return;
@@ -237,7 +237,7 @@ void DeepCopyRequest<I>::send_copy_object_map() {
   ceph_assert(m_snap_seqs->count(m_src_snap_id_end) > 0);
   librados::snap_t copy_snap_id = (*m_snap_seqs)[m_src_snap_id_end];
   m_dst_image_ctx->object_map->rollback(copy_snap_id, ctx);
-  m_dst_image_ctx->snap_lock.put_read();
+  m_dst_image_ctx->image_lock.put_read();
   m_dst_image_ctx->owner_lock.put_read();
 }
 
@@ -295,7 +295,7 @@ void DeepCopyRequest<I>::handle_refresh_object_map(int r) {
   }
 
   {
-    RWLock::WLocker snap_locker(m_dst_image_ctx->snap_lock);
+    RWLock::WLocker image_locker(m_dst_image_ctx->image_lock);
     RWLock::WLocker object_map_locker(m_dst_image_ctx->object_map_lock);
     std::swap(m_dst_image_ctx->object_map, m_object_map);
   }
@@ -330,7 +330,7 @@ void DeepCopyRequest<I>::handle_copy_metadata(int r) {
 
 template <typename I>
 int DeepCopyRequest<I>::validate_copy_points() {
-  RWLock::RLocker snap_locker(m_src_image_ctx->snap_lock);
+  RWLock::RLocker image_locker(m_src_image_ctx->image_lock);
 
   if (m_src_snap_id_start != 0 &&
       m_src_image_ctx->snap_info.find(m_src_snap_id_start) ==
