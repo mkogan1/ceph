@@ -107,7 +107,6 @@ public:
       image_watcher(NULL),
       journal(NULL),
       owner_lock(util::unique_lock_name("librbd::ImageCtx::owner_lock", this)),
-      md_lock(util::unique_lock_name("librbd::ImageCtx::md_lock", this)),
       image_lock(util::unique_lock_name("librbd::ImageCtx::image_lock", this)),
       parent_lock(util::unique_lock_name("librbd::ImageCtx::parent_lock", this)),
       object_map_lock(util::unique_lock_name("librbd::ImageCtx::object_map_lock", this)),
@@ -736,7 +735,7 @@ public:
                                 bool thread_safe) {
     ldout(cct, 20) << __func__ << dendl;
 
-    RWLock::WLocker md_locker(md_lock);
+    RWLock::WLocker md_locker(image_lock);
 
     // reset settings back to global defaults
     for (auto& key : config_overrides) {

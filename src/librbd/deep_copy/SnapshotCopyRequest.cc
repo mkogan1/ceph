@@ -61,15 +61,15 @@ SnapshotCopyRequest<I>::SnapshotCopyRequest(I *src_image_ctx,
               (m_src_snap_id_start > 0 && m_dst_snap_id_start > 0));
 
   // snap ids ordered from oldest to newest
-  m_src_image_ctx->snap_lock.get_read();
+  m_src_image_ctx->image_lock.get_read();
   m_src_snap_ids.insert(src_image_ctx->snaps.begin(),
                         src_image_ctx->snaps.end());
-  m_src_image_ctx->snap_lock.put_read();
+  m_src_image_ctx->image_lock.put_read();
 
-  m_dst_image_ctx->snap_lock.get_read();
+  m_dst_image_ctx->image_lock.get_read();
   m_dst_snap_ids.insert(dst_image_ctx->snaps.begin(),
                         dst_image_ctx->snaps.end());
-  m_dst_image_ctx->snap_lock.put_read();
+  m_dst_image_ctx->image_lock.put_read();
 
   if (m_src_snap_id_end != CEPH_NOSNAP) {
     m_src_snap_ids.erase(m_src_snap_ids.upper_bound(m_src_snap_id_end),
