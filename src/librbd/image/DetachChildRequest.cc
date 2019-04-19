@@ -34,7 +34,7 @@ DetachChildRequest<I>::~DetachChildRequest() {
 template <typename I>
 void DetachChildRequest<I>::send() {
   {
-    RWLock::RLocker snap_locker(m_image_ctx.snap_lock);
+    RWLock::RLocker image_locker(m_image_ctx.image_lock);
     RWLock::RLocker parent_locker(m_image_ctx.parent_lock);
 
     // use oldest snapshot or HEAD for parent spec
@@ -188,7 +188,7 @@ void DetachChildRequest<I>::handle_clone_v2_open_parent(int r) {
   // do not attempt to open the parent journal when removing the trash
   // snapshot, because the parent may be not promoted
   if (m_parent_image_ctx->test_features(RBD_FEATURE_JOURNALING)) {
-    RWLock::WLocker snap_locker(m_parent_image_ctx->snap_lock);
+    RWLock::WLocker image_locker(m_parent_image_ctx->image_lock);
     m_parent_image_ctx->set_journal_policy(new journal::DisabledPolicy());
   }
 
