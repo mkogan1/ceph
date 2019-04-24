@@ -185,38 +185,44 @@ int process_request(RGWRados* const store,
 
   s->op_type = op->get_type();
 
-  req->log(s, "verifying requester");
-  ret = op->verify_requester(auth_registry);
-  if (ret < 0) {
-    dout(10) << "failed to authorize request" << dendl;
-    abort_early(s, NULL, ret, handler);
-    goto done;
-  }
+  try {
 
-  /* FIXME: remove this after switching all handlers to the new authentication
-   * infrastructure. */
-  if (nullptr == s->auth.identity) {
-    s->auth.identity = rgw::auth::transform_old_authinfo(s);
-  }
+    req->log(s, "verifying requester");
+    ret = op->verify_requester(auth_registry);
+    if (ret < 0) {
+      dout(10) << "failed to authorize request" << dendl;
+      abort_early(s, NULL, ret, handler);
+      goto done;
+    }
 
-  req->log(s, "normalizing buckets and tenants");
-  ret = handler->postauth_init();
-  if (ret < 0) {
-    dout(10) << "failed to run post-auth init" << dendl;
-    abort_early(s, op, ret, handler);
-    goto done;
-  }
+    /* FIXME: remove this after switching all handlers to the new authentication
+     * infrastructure. */
+    if (nullptr == s->auth.identity) {
+      s->auth.identity = rgw::auth::transform_old_authinfo(s);
+    }
 
-  if (s->user->suspended) {
-    dout(10) << "user is suspended, uid=" << s->user->user_id << dendl;
-    abort_early(s, op, -ERR_USER_SUSPENDED, handler);
-    goto done;
-  }
+    req->log(s, "normalizing buckets and tenants");
+    ret = handler->postauth_init();
+    if (ret < 0) {
+      dout(10) << "failed to run post-auth init" << dendl;
+      abort_early(s, op, ret, handler);
+      goto done;
+    }
 
-  ret = rgw_process_authenticated(handler, op, req, s);
-  if (ret < 0) {
-    abort_early(s, op, ret, handler);
-    goto done;
+    if (s->user->suspended) {
+      dout(10) << "user is suspended, uid=" << s->user->user_id << dendl;
+      abort_early(s, op, -ERR_USER_SUSPENDED, handler);
+      goto done;
+    }
+
+    ret = rgw_process_authenticated(handler, op, req, s);
+    if (ret < 0) {
+      abort_early(s, op, ret, handler);
+      goto done;
+    }
+  } catch (const ceph::crypto::DigestException& e) {
+    dout(0) << "authentication failed" << e.what() << dendl;
+    abort_early(s, op, -ERR_INVALID_SECRET_KEY, handler);
   }
 done:
   try {

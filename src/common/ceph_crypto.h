@@ -15,12 +15,21 @@
 #include <cryptopp/md5.h>
 #include <cryptopp/sha.h>
 #include <cryptopp/hmac.h>
+#include <stdexcept>
 
 // reinclude our assert to clobber the system one
 # include "include/assert.h"
 
 namespace ceph {
   namespace crypto {
+
+    class DigestException : public std::runtime_error
+	{
+	public:
+		DigestException(const char* what_arg) : runtime_error(what_arg)
+			{}
+	};
+  
     void assert_init();
     void init(CephContext *cct);
     // @param shared true if the the underlying crypto library could be shared
@@ -35,7 +44,7 @@ namespace ceph {
 
     class HMACSHA1: public CryptoPP::HMAC<CryptoPP::SHA1> {
     public:
-      HMACSHA1 (const byte *key, size_t length)
+	 HMACSHA1 (const byte *key, size_t length)
 	: CryptoPP::HMAC<CryptoPP::SHA1>(key, length)
 	{
 	}
@@ -56,6 +65,7 @@ namespace ceph {
 // you *must* use CRYPTO_CXXFLAGS in CMakeLists.txt for including this include
 # include <nss.h>
 # include <pk11pub.h>
+#include <stdexcept>
 
 // NSS thinks a lot of fairly fundamental operations might potentially
 // fail, because it has been written to support e.g. smartcards doing all
@@ -80,46 +90,70 @@ namespace ceph {
   } // namespace crypto
 } // namespace
 
-
 namespace ceph {
   namespace crypto {
-    void assert_init();
+
+    class DigestException : public std::runtime_error
+	{
+	public:
+		using runtime_error = std::runtime_error;
+
+		DigestException(const char* what_arg) : runtime_error(what_arg)
+			{}
+	};
+
+	void assert_init();
     void init(CephContext *cct);
     void shutdown(bool shared=true);
-    class Digest {
+
+	class Digest {
     private:
       PK11Context *ctx;
       size_t digest_size;
     public:
-      Digest (SECOidTag _type, size_t _digest_size) : digest_size(_digest_size) {
-	ctx = PK11_CreateDigestContext(_type);
-	assert(ctx);
-	Restart();
+      Digest (SECOidTag _type, size_t _digest_size)
+		  : digest_size(_digest_size) {
+		  ctx = PK11_CreateDigestContext(_type);
+		  if (! ctx) {
+			  throw DigestException("PK11_CreateDigestContext() failed");
+		  }
+		  Restart();
       }
+
       ~Digest () {
-	PK11_DestroyContext(ctx, PR_TRUE);
+		  PK11_DestroyContext(ctx, PR_TRUE);
       }
+
       void Restart() {
-	SECStatus s;
-	s = PK11_DigestBegin(ctx);
-	assert(s == SECSuccess);
+		  SECStatus s;
+		  s = PK11_DigestBegin(ctx);
+		  if (s != SECSuccess) {
+			  throw DigestException("PK11_DigestBegin() failed");
+		  }
       }
+
       void Update (const byte *input, size_t length) {
-        if (length) {
-	  SECStatus s;
-	  s = PK11_DigestOp(ctx, input, length);
-	  assert(s == SECSuccess);
-        }
+		  if (length) {
+			  SECStatus s;
+			  s = PK11_DigestOp(ctx, input, length);
+			  if (s != SECSuccess) {
+				  throw DigestException("PK11_DigestOp() failed");
+			  }
+		  }
       }
-      void Final (byte *digest) {
-	SECStatus s;
-	unsigned int dummy;
-	s = PK11_DigestFinal(ctx, digest, &dummy, digest_size);
-	assert(s == SECSuccess);
-	assert(dummy == digest_size);
-	Restart();
-      }
+
+	  void Final (byte *digest) {
+		  SECStatus s;
+		  unsigned int dummy;
+		  s = PK11_DigestFinal(ctx, digest, &dummy, digest_size);
+		  if (! (s == SECSuccess) &&
+			  (dummy == digest_size)) {
+			  throw DigestException("PK11_DigestFinal() failed");
+		  }
+		  Restart();
+	  }
     };
+
     class MD5 : public Digest {
     public:
       MD5 () : Digest(SEC_OID_MD5, CEPH_CRYPTO_MD5_DIGESTSIZE) { }
@@ -142,57 +176,80 @@ namespace ceph {
       PK11Context *ctx;
       unsigned int digest_size;
     public:
-      HMAC (CK_MECHANISM_TYPE cktype, unsigned int digestsize, const byte *key, size_t length) {
+      HMAC (CK_MECHANISM_TYPE cktype, unsigned int digestsize,
+			const byte *key, size_t length) {
         digest_size = digestsize;
 	slot = PK11_GetBestSlot(cktype, NULL);
-	assert(slot);
+	if (! slot) {
+		throw DigestException("PK11_GetBestSlot() failed");
+	}
+
 	SECItem keyItem;
 	keyItem.type = siBuffer;
 	keyItem.data = (unsigned char*)key;
 	keyItem.len = length;
 	symkey = PK11_ImportSymKey_FIPS(slot, cktype, PK11_OriginUnwrap,
 					CKA_SIGN,  &keyItem, NULL);
-	assert(symkey);
+	if (! symkey) {
+		throw DigestException("PK11_ImportSymKey_FIPS() failed");
+	}
+
 	SECItem param;
 	param.type = siBuffer;
 	param.data = NULL;
 	param.len = 0;
 	ctx = PK11_CreateContextBySymKey(cktype, CKA_SIGN, symkey, &param);
-	assert(ctx);
+	if (! ctx) {
+		throw DigestException("PK11_CreateContextBySymKey() failed");
+	}
 	Restart();
-      }
-      ~HMAC ();
-      void Restart() {
-	SECStatus s;
-	s = PK11_DigestBegin(ctx);
-	assert(s == SECSuccess);
-      }
-      void Update (const byte *input, size_t length) {
-	SECStatus s;
-	s = PK11_DigestOp(ctx, input, length);
-	assert(s == SECSuccess);
-      }
-      void Final (byte *digest) {
-	SECStatus s;
-	unsigned int dummy;
-	s = PK11_DigestFinal(ctx, digest, &dummy, digest_size);
-	assert(s == SECSuccess);
-	assert(dummy == digest_size);
-	Restart();
-      }
+   }
+
+   ~HMAC ();
+
+   void Restart() {
+	   SECStatus s;
+	   s = PK11_DigestBegin(ctx);
+	   if (s != SECSuccess) {
+		   throw DigestException("PK11_DigestBegin() failed");
+	   }
+   }
+
+   void Update (const byte *input, size_t length) {
+	   SECStatus s;
+	   s = PK11_DigestOp(ctx, input, length);
+	   if (s != SECSuccess) {
+		   throw DigestException("PK11_DigestOp() failed");
+	   }
+   }
+
+   void Final (byte *digest) {
+	   SECStatus s;
+	   unsigned int dummy;
+	   s = PK11_DigestFinal(ctx, digest, &dummy, digest_size);
+	   if (! (s == SECSuccess) &&
+		   (dummy == digest_size)) {
+		   throw DigestException("PK11_DigestFinal() failed");
+	   }
+	   Restart();
+     }
     };
 
     class HMACSHA1 : public HMAC {
     public:
-      HMACSHA1 (const byte *key, size_t length) : HMAC(CKM_SHA_1_HMAC, CEPH_CRYPTO_HMACSHA1_DIGESTSIZE, key, length) { }
+      HMACSHA1 (const byte *key, size_t length)
+		  : HMAC(CKM_SHA_1_HMAC, CEPH_CRYPTO_HMACSHA1_DIGESTSIZE, key, length)
+			{}
     };
 
     class HMACSHA256 : public HMAC {
     public:
-      HMACSHA256 (const byte *key, size_t length) : HMAC(CKM_SHA256_HMAC, CEPH_CRYPTO_HMACSHA256_DIGESTSIZE, key, length) { }
+      HMACSHA256 (const byte *key, size_t length)
+		  : HMAC(CKM_SHA256_HMAC, CEPH_CRYPTO_HMACSHA256_DIGESTSIZE, key, length)
+			{}
     };
-  }
-}
+  } /* namespace crypto */
+} /* namespace ceph */
 
 #else
 // cppcheck-suppress preprocessorErrorDirective
