@@ -3346,6 +3346,7 @@ void take_min_markers(IterIn first, IterIn last, IterOut dest)
 } // anonymous namespace
 
 class DataLogTrimCR : public RGWCoroutine {
+  using TrimCR = RGWSyncLogTrimCR;
   RGWRados *store;
   RGWHTTPManager *http;
   const int num_shards;
@@ -3362,7 +3363,7 @@ class DataLogTrimCR : public RGWCoroutine {
       num_shards(num_shards),
       zone_id(store->get_zone().id),
       peer_status(store->zone_data_notify_to_map.size()),
-      min_shard_markers(num_shards, "99999999"),
+      min_shard_markers(num_shards, TrimCR::max_marker),
       last_trim(last_trim)
   {}
 
