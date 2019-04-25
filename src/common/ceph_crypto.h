@@ -23,8 +23,13 @@
 namespace ceph {
   namespace crypto {
 
-    class DigestException : public std::runtime_error;
-
+    class DigestException : public std::runtime_error
+	{
+	public:
+		DigestException(const char* what_arg) : runtime_error(what_arg)
+			{}
+	};
+  
     void assert_init();
     void init(CephContext *cct);
     // @param shared true if the the underlying crypto library could be shared
