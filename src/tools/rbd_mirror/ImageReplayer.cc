@@ -667,6 +667,11 @@ void ImageReplayer<I>::handle_start_replay(int r) {
   update_mirror_image_status(true, boost::none);
   reschedule_update_status_task(30);
 
+  if (on_replay_interrupted()) {
+    on_finish->complete(r);
+    return;
+  }
+
   {
     CephContext *cct = static_cast<CephContext *>(m_local->cct());
     double poll_seconds = cct->_conf.get_val<double>(
