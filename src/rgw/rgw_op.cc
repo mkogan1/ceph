@@ -1172,7 +1172,10 @@ void RGWDeleteObjTags::execute()
 int RGWGetBucketTags::verify_permission()
 {
 
-  //TODO(LC)
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketTagging)) {
+    return -EACCES;
+  }
+
   return 0;
 }
 
@@ -1194,7 +1197,11 @@ void RGWGetBucketTags::execute()
 }
 
 int RGWPutBucketTags::verify_permission() {
-  // TODO(LC)
+
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketTagging)) {
+    return -EACCES;
+  }
+
   return 0;
 }
 
@@ -1214,7 +1221,10 @@ void RGWDeleteBucketTags::pre_exec()
 
 int RGWDeleteBucketTags::verify_permission()
 {
-  //TODO(LC)
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketTagging)) {
+    return -EACCES;
+  }
+
   return 0;
 }
 
