@@ -15,9 +15,16 @@ public:
 
 protected:
   tag_map_t tag_map;
+
+  uint32_t max_obj_tags{10};
+  uint32_t max_tag_key_size{128};
+  uint32_t max_tag_val_size{256};
+
  public:
   RGWObjTags() = default;
-  ~RGWObjTags() = default;
+  RGWObjTags(uint32_t max_obj_tags):max_obj_tags(max_obj_tags) {}
+
+  virtual ~RGWObjTags() = default;
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1,1,bl);
