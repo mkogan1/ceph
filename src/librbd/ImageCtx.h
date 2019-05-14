@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "common/allocator.h"
 #include "common/config_proxy.h"
 #include "common/event_socket.h"
 #include "common/Mutex.h"
