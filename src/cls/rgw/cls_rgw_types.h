@@ -647,13 +647,13 @@ static inline std::string to_string(const enum cls_rgw_reshard_status status)
 {
   switch (status) {
   case CLS_RGW_RESHARD_NONE:
-    return "CLS_RGW_RESHARD_NONE";
+    return "none";
     break;
   case CLS_RGW_RESHARD_IN_PROGRESS:
-    return "CLS_RGW_RESHARD_IN_PROGRESS";
+    return "in-progress";
     break;
   case CLS_RGW_RESHARD_DONE:
-    return "CLS_RGW_RESHARD_DONE";
+    return "done";
     break;
   default:
     break;
