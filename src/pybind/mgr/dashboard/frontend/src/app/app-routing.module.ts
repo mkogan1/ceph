@@ -91,7 +91,7 @@ const routes: Routes = [
       {
         path: 'edit/:name',
         component: ConfigurationFormComponent,
-        data: { breadcrumbs: 'Edit' }
+        data: { breadcrumbs: ActionLabels.EDIT }
       }
     ]
   },
@@ -235,11 +235,15 @@ const routes: Routes = [
     },
     children: [
       { path: '', component: NfsListComponent },
-      { path: 'add', component: NfsFormComponent, data: { breadcrumbs: 'Add' } },
       {
-        path: 'edit/:cluster_id/:export_id',
+        path: URLVerbs.CREATE,
         component: NfsFormComponent,
-        data: { breadcrumbs: 'Edit' }
+        data: { breadcrumbs: ActionLabels.CREATE }
+      },
+      {
+        path: `${URLVerbs.EDIT}/:cluster_id/:export_id`,
+        component: NfsFormComponent,
+        data: { breadcrumbs: ActionLabels.EDIT }
       }
     ]
   },
