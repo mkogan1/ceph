@@ -93,6 +93,7 @@ OutputDataSocket::OutputDataSocket(CephContext *cct, uint64_t _backlog)
     going_down(false),
     data_size(0),
     m_lock("OutputDataSocket::m_lock")
+    skipped(0)
 {
 }
 
@@ -290,12 +291,12 @@ void OutputDataSocket::handle_connection(int fd)
 int OutputDataSocket::dump_data(int fd)
 {
   m_lock.Lock(); 
-  list<bufferlist> l = std::move(data);
+  vector<buffer::list> l = std::move(data);
   data.clear();
   data_size = 0;
   m_lock.Unlock();
 
-  for (list<bufferlist>::iterator iter = l.begin(); iter != l.end(); ++iter) {
+  for (auto iter = l.begin(); iter != l.end(); ++iter) {
     bufferlist& bl = *iter;
     int ret = safe_write(fd, bl.c_str(), bl.length());
     if (ret >= 0) {
@@ -384,10 +385,17 @@ void OutputDataSocket::append_output(bufferlist& bl)
   Mutex::Locker l(m_lock);
 
   if (data_size + bl.length() > data_max_backlog) {
-    ldout(m_cct, 20) << "dropping data output, max backlog reached" << dendl;
+    if (skipped % 100 == 0) {
+      ldout(m_cct, 0) << "dropping data output, max backlog reached (skipped=="
+		      << skipped << ")"
+		      << dendl;
+      skipped = 1;
+    } else
+      ++skipped;
+    return;
   }
-  data.push_back(bl);
 
+  data.push_back(bl);
   data_size += bl.length();
 
   cond.Signal();
