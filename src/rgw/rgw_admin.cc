@@ -6315,7 +6315,7 @@ next:
     constexpr uint32_t NUM_ENTRIES = 1000;
     uint16_t expansion_factor = 1;
     while (is_truncated) {
-      map<string, rgw_bucket_dir_entry> result;
+      RGWRados::ent_map_t result;
       int r =
 	store->cls_bucket_list_ordered(bucket_info, RGW_NO_SHARD, marker,
 				       prefix, NUM_ENTRIES, true, expansion_factor,
@@ -6334,8 +6334,7 @@ next:
 	--expansion_factor;
       }
 
-      map<string, rgw_bucket_dir_entry>::iterator iter;
-      for (iter = result.begin(); iter != result.end(); ++iter) {
+      for (auto iter = result.begin(); iter != result.end(); ++iter) {
         rgw_obj_key key = iter->second.key;
         rgw_bucket_dir_entry& entry = iter->second;
 
