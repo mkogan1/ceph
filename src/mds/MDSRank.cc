@@ -21,6 +21,8 @@
 #include "messages/MMDSLoadTargets.h"
 #include "messages/MMDSTableRequest.h"
 
+#include "mgr/MgrClient.h"
+
 #include "MDSDaemon.h"
 #include "MDSMap.h"
 #include "SnapClient.h"
@@ -480,6 +482,7 @@ MDSRank::MDSRank(
     std::unique_ptr<MDSMap>& mdsmap_,
     Messenger *msgr,
     MonClient *monc_,
+    MgrClient *mgrc,
     Context *respawn_hook_,
     Context *suicide_hook_)
   :
@@ -516,7 +519,7 @@ MDSRank::MDSRank(
     hb(NULL), last_tid(0), osd_epoch_barrier(0), beacon(beacon_),
     mds_slow_req_count(0),
     last_client_mdsmap_bcast(0),
-    messenger(msgr), monc(monc_),
+    messenger(msgr), monc(monc_), mgrc(mgrc),
     respawn_hook(respawn_hook_),
     suicide_hook(suicide_hook_),
     standby_replaying(false),
@@ -547,6 +550,15 @@ MDSRank::MDSRank(
                                          cct->_conf->mds_op_log_threshold);
   op_tracker.set_history_size_and_duration(cct->_conf->mds_op_history_size,
                                            cct->_conf->mds_op_history_duration);
+
+  std::string rank_str = stringify(get_nodeid());
+  std::map<std::string, std::string> service_metadata = {{"rank", rank_str}};
+  int r = mgrc->service_daemon_register("mds", rank_str, service_metadata);
+  if (r < 0) {
+    derr << ": failed to register with manager for service status update" << dendl;
+  }
+
+  schedule_update_timer_task();
 }
 
 MDSRank::~MDSRank()
@@ -3471,10 +3483,11 @@ MDSRankDispatcher::MDSRankDispatcher(
     std::unique_ptr<MDSMap> &mdsmap_,
     Messenger *msgr,
     MonClient *monc_,
+    MgrClient *mgrc,
     Context *respawn_hook_,
     Context *suicide_hook_)
   : MDSRank(whoami_, mds_lock_, clog_, timer_, beacon_, mdsmap_,
-      msgr, monc_, respawn_hook_, suicide_hook_)
+            msgr, monc_, mgrc, respawn_hook_, suicide_hook_)
 {}
 
 bool MDSRankDispatcher::handle_command(
@@ -3599,3 +3612,35 @@ epoch_t MDSRank::get_osd_epoch() const
   return objecter->with_osdmap(std::mem_fn(&OSDMap::get_epoch));  
 }
 
+void MDSRank::get_task_status(std::map<std::string, std::string> *status) {
+  dout(20) << __func__ << dendl;
+
+  // scrub summary for now..
+  std::string_view scrub_summary = scrubstack->scrub_summary();
+  status->emplace(SCRUB_STATUS_KEY, std::move(scrub_summary));
+}
+
+void MDSRank::schedule_update_timer_task() {
+  dout(20) << __func__ << dendl;
+
+  timer.add_event_after(g_conf().get_val<double>("mds_task_status_update_interval"),
+                        new FunctionContext([this](int _) {
+                            send_task_status();
+                          }));
+}
+
+void MDSRank::send_task_status() {
+  std::map<std::string, std::string> status;
+  get_task_status(&status);
+
+  if (!status.empty()) {
+    dout(20) << __func__ << ": updating " << status.size() << " status keys" << dendl;
+
+    int r = mgrc->service_daemon_update_task_status(std::move(status));
+    if (r < 0) {
+      derr << ": failed to update service daemon status: " << cpp_strerror(r) << dendl;
+    }
+  }
+
+  schedule_update_timer_task();
+}
