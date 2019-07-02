@@ -305,6 +305,7 @@ public:
     buckets_objcount = 0;
     buckets_size = 0;
     buckets_size_rounded = 0;
+    doing_swift_cross_tenant = 0;
   }
 
   virtual int verify_permission();
