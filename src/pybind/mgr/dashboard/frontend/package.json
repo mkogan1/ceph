@@ -87,6 +87,7 @@
     "@angular/platform-browser-dynamic": "7.2.6",
     "@angular/router": "7.2.6",
     "@ngx-translate/i18n-polyfill": "1.0.0",
+    "@patternfly/patternfly": "^2.6.16",
     "@swimlane/ngx-datatable": "14.0.0",
     "awesome-bootstrap-checkbox": "0.3.7",
     "bootstrap": "3.4.1",
