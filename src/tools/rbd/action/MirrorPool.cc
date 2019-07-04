@@ -872,7 +872,6 @@ int execute_peer_add(const po::variables_map &vm,
     return r;
   }
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
   r = utils::init(pool_name, "", &rados, &io_ctx);
@@ -939,7 +938,6 @@ int execute_peer_remove(const po::variables_map &vm,
     return r;
   }
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
   r = utils::init(pool_name, "", &rados, &io_ctx);
@@ -1014,7 +1012,6 @@ int execute_peer_set(const po::variables_map &vm,
     key = "mon_host";
   }
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
   r = utils::init(pool_name, "", &rados, &io_ctx);
@@ -1048,12 +1045,12 @@ int execute_peer_set(const po::variables_map &vm,
 
 void get_disable_arguments(po::options_description *positional,
                            po::options_description *options) {
-  at::add_pool_options(positional, options, false);
+  at::add_pool_options(positional, options, true);
 }
 
 void get_enable_arguments(po::options_description *positional,
                           po::options_description *options) {
-  at::add_pool_options(positional, options, false);
+  at::add_pool_options(positional, options, true);
   positional->add_options()
     ("mode", "mirror mode [image or pool]");
   add_site_name_optional(options);
@@ -1101,9 +1098,10 @@ int execute_enable_disable(librados::IoCtx& io_ctx,
 int execute_disable(const po::variables_map &vm,
                     const std::vector<std::string> &ceph_global_init_args) {
   std::string pool_name;
+  std::string namespace_name;
   size_t arg_index = 0;
   int r = utils::get_pool_and_namespace_names(vm, true, true, &pool_name,
-                                              nullptr, &arg_index);
+                                              &namespace_name, &arg_index);
   if (r < 0) {
     return r;
   }
@@ -1111,8 +1109,7 @@ int execute_disable(const po::variables_map &vm,
   librados::Rados rados;
   librados::IoCtx io_ctx;
 
-  // TODO support namespaces
-  r = utils::init(pool_name, "", &rados, &io_ctx);
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
   if (r < 0) {
     return r;
   }
@@ -1124,9 +1121,10 @@ int execute_disable(const po::variables_map &vm,
 int execute_enable(const po::variables_map &vm,
                    const std::vector<std::string> &ceph_global_init_args) {
   std::string pool_name;
+  std::string namespace_name;
   size_t arg_index = 0;
   int r = utils::get_pool_and_namespace_names(vm, true, true, &pool_name,
-                                              nullptr, &arg_index);
+                                              &namespace_name, &arg_index);
   if (r < 0) {
     return r;
   }
@@ -1145,8 +1143,7 @@ int execute_enable(const po::variables_map &vm,
   librados::Rados rados;
   librados::IoCtx io_ctx;
 
-  // TODO support namespaces
-  r = utils::init(pool_name, "", &rados, &io_ctx);
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
   if (r < 0) {
     return r;
   }
@@ -1171,7 +1168,7 @@ int execute_enable(const po::variables_map &vm,
 
 void get_info_arguments(po::options_description *positional,
                         po::options_description *options) {
-  at::add_pool_options(positional, options, false);
+  at::add_pool_options(positional, options, true);
   at::add_format_options(options);
   options->add_options()
     (ALL_NAME.c_str(), po::bool_switch(), "list all attributes");
@@ -1180,9 +1177,10 @@ void get_info_arguments(po::options_description *positional,
 int execute_info(const po::variables_map &vm,
                  const std::vector<std::string> &ceph_global_init_args) {
   std::string pool_name;
+  std::string namespace_name;
   size_t arg_index = 0;
   int r = utils::get_pool_and_namespace_names(vm, true, false, &pool_name,
-                                              nullptr, &arg_index);
+                                              &namespace_name, &arg_index);
   if (r < 0) {
     return r;
   }
@@ -1193,10 +1191,9 @@ int execute_info(const po::variables_map &vm,
     return r;
   }
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
-  r = utils::init(pool_name, "", &rados, &io_ctx);
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
   if (r < 0) {
     return r;
   }
@@ -1215,9 +1212,11 @@ int execute_info(const po::variables_map &vm,
   }
 
   std::vector<librbd::mirror_peer_t> mirror_peers;
-  r = rbd.mirror_peer_list(io_ctx, &mirror_peers);
-  if (r < 0) {
-    return r;
+  if (namespace_name.empty()) {
+    r = rbd.mirror_peer_list(io_ctx, &mirror_peers);
+    if (r < 0) {
+      return r;
+    }
   }
 
   std::string mirror_mode_desc;
@@ -1243,7 +1242,7 @@ int execute_info(const po::variables_map &vm,
     std::cout << "Mode: " << mirror_mode_desc << std::endl;
   }
 
-  if (mirror_mode != RBD_MIRROR_MODE_DISABLED) {
+  if (mirror_mode != RBD_MIRROR_MODE_DISABLED && namespace_name.empty()) {
     if (formatter != nullptr) {
       formatter->dump_string("site_name", site_name);
     } else {
@@ -1265,7 +1264,7 @@ int execute_info(const po::variables_map &vm,
 
 void get_status_arguments(po::options_description *positional,
 			  po::options_description *options) {
-  at::add_pool_options(positional, options, false);
+  at::add_pool_options(positional, options, true);
   at::add_format_options(options);
   at::add_verbose_option(options);
 }
@@ -1273,9 +1272,10 @@ void get_status_arguments(po::options_description *positional,
 int execute_status(const po::variables_map &vm,
                    const std::vector<std::string> &ceph_global_init_args) {
   std::string pool_name;
+  std::string namespace_name;
   size_t arg_index = 0;
   int r = utils::get_pool_and_namespace_names(vm, true, false, &pool_name,
-                                              nullptr, &arg_index);
+                                              &namespace_name, &arg_index);
   if (r < 0) {
     return r;
   }
@@ -1288,10 +1288,9 @@ int execute_status(const po::variables_map &vm,
 
   bool verbose = vm[at::VERBOSE].as<bool>();
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
-  r = utils::init(pool_name, "", &rados, &io_ctx);
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
   if (r < 0) {
     return r;
   }
@@ -1410,23 +1409,23 @@ void get_promote_arguments(po::options_description *positional,
   options->add_options()
     ("force", po::bool_switch(),
      "promote even if not cleanly demoted by remote cluster");
-  at::add_pool_options(positional, options, false);
+  at::add_pool_options(positional, options, true);
 }
 
 int execute_promote(const po::variables_map &vm,
                     const std::vector<std::string> &ceph_global_init_args) {
   std::string pool_name;
+  std::string namespace_name;
   size_t arg_index = 0;
   int r = utils::get_pool_and_namespace_names(vm, true, true, &pool_name,
-                                              nullptr, &arg_index);
+                                              &namespace_name, &arg_index);
   if (r < 0) {
     return r;
   }
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
-  r = utils::init(pool_name, "", &rados, &io_ctx);
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
   if (r < 0) {
     return r;
   }
@@ -1449,23 +1448,23 @@ int execute_promote(const po::variables_map &vm,
 
 void get_demote_arguments(po::options_description *positional,
 			   po::options_description *options) {
-  at::add_pool_options(positional, options, false);
+  at::add_pool_options(positional, options, true);
 }
 
 int execute_demote(const po::variables_map &vm,
                    const std::vector<std::string> &ceph_global_init_args) {
   std::string pool_name;
+  std::string namespace_name;
   size_t arg_index = 0;
   int r = utils::get_pool_and_namespace_names(vm, true, true, &pool_name,
-                                              nullptr, &arg_index);
+                                              &namespace_name, &arg_index);
   if (r < 0) {
     return r;
   }
 
-  // TODO support namespaces
   librados::Rados rados;
   librados::IoCtx io_ctx;
-  r = utils::init(pool_name, "", &rados, &io_ctx);
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
   if (r < 0) {
     return r;
   }
