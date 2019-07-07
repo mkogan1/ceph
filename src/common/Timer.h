@@ -15,6 +15,9 @@
 #ifndef CEPH_TIMER_H
 #define CEPH_TIMER_H
 
+#include <map>
+#include "ceph_time.h"
+#include "ceph_mutex.h"
 #include "Cond.h"
 #include "Mutex.h"
 
@@ -24,9 +27,32 @@ class SafeTimerThread;
 
 class SafeTimer
 {
+  // hide the API differences between Mutex/Cond and
+  // ceph::mutex/condition_variable to facilitate backporting of commits
+  // introduced after PR #29113
+  struct LockAdapter {
+    LockAdapter(Mutex* legacy_lock) : legacy_lock(legacy_lock) {
+    }
+    LockAdapter(ceph::mutex* new_lock) : new_lock(new_lock) {
+    }
+
+    bool is_locked() const;
+    void lock();
+    void unlock();
+
+    void wait();
+    void wait_until(utime_t when);
+    void notify_all();
+
+    Mutex* legacy_lock = nullptr;
+    Cond legacy_cond;
+
+    ceph::mutex* new_lock = nullptr;
+    ceph::condition_variable new_cond;
+  };
+
   CephContext *cct;
-  Mutex& lock;
-  Cond cond;
+  LockAdapter lock;
   bool safe_callbacks;
 
   friend class SafeTimerThread;
@@ -35,6 +61,7 @@ class SafeTimer
   void timer_thread();
   void _shutdown();
 
+  using clock_t = ceph::real_clock;
   std::multimap<utime_t, Context*> schedule;
   std::map<Context*, std::multimap<utime_t, Context*>::iterator> events;
   bool stopping;
@@ -57,6 +84,7 @@ public:
    * setting safe_callbacks = false eliminates the lock cycle issue.
    * */
   SafeTimer(CephContext *cct, Mutex &l, bool safe_callbacks=true);
+  SafeTimer(CephContext *cct, ceph::mutex &l, bool safe_callbacks=true);
   virtual ~SafeTimer();
 
   /* Call with the event_lock UNLOCKED.
@@ -72,6 +100,7 @@ public:
    * Call with the event_lock LOCKED */
   Context* add_event_after(double seconds, Context *callback);
   Context* add_event_at(utime_t when, Context *callback);
+  Context* add_event_at(clock_t::time_point when, Context *callback);
 
   /* Cancel an event.
    * Call with the event_lock LOCKED

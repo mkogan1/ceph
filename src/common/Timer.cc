@@ -38,7 +38,15 @@ typedef std::multimap < utime_t, Context *> scheduled_map_t;
 typedef std::map < Context*, scheduled_map_t::iterator > event_lookup_map_t;
 
 SafeTimer::SafeTimer(CephContext *cct_, Mutex &l, bool safe_callbacks)
-  : cct(cct_), lock(l),
+  : cct(cct_), lock(&l),
+    safe_callbacks(safe_callbacks),
+    thread(NULL),
+    stopping(false)
+{
+}
+
+SafeTimer::SafeTimer(CephContext *cct_, ceph::mutex &l, bool safe_callbacks)
+  : cct(cct_), lock(&l),
     safe_callbacks(safe_callbacks),
     thread(NULL),
     stopping(false)
@@ -64,7 +72,7 @@ void SafeTimer::shutdown()
     ceph_assert(lock.is_locked());
     cancel_all_events();
     stopping = true;
-    cond.Signal();
+    lock.notify_all();
     lock.unlock();
     thread->join();
     lock.lock();
@@ -105,9 +113,9 @@ void SafeTimer::timer_thread()
 
     ldout(cct,20) << "timer_thread going to sleep" << dendl;
     if (schedule.empty())
-      cond.Wait(lock);
+      lock.wait();
     else
-      cond.WaitUntil(lock, schedule.begin()->first);
+      lock.wait_until(schedule.begin()->first);
     ldout(cct,20) << "timer_thread awake" << dendl;
   }
   ldout(cct,10) << "timer_thread exiting" << dendl;
@@ -144,8 +152,13 @@ Context* SafeTimer::add_event_at(utime_t when, Context *callback)
   /* If the event we have just inserted comes before everything else, we need to
    * adjust our timeout. */
   if (i == schedule.begin())
-    cond.Signal();
+    lock.notify_all();
   return callback;
+}
+
+Context* SafeTimer::add_event_at(clock_t::time_point when, Context *callback)
+{
+  return add_event_at(utime_t(when), callback);
 }
 
 bool SafeTimer::cancel_event(Context *callback)
@@ -190,4 +203,56 @@ void SafeTimer::dump(const char *caller) const
        s != schedule.end();
        ++s)
     ldout(cct,10) << " " << s->first << "->" << s->second << dendl;
+}
+
+bool SafeTimer::LockAdapter::is_locked() const {
+  if (legacy_lock != nullptr) {
+    return legacy_lock->is_locked();
+  } else {
+    return ceph_mutex_is_locked(*new_lock);
+  }
+}
+
+void SafeTimer::LockAdapter::lock() {
+  if (legacy_lock != nullptr) {
+    legacy_lock->lock();
+  } else {
+    new_lock->lock();
+  }
+}
+
+void SafeTimer::LockAdapter::unlock() {
+  if (legacy_lock != nullptr) {
+    legacy_lock->unlock();
+  } else {
+    new_lock->unlock();
+  }
+}
+
+void SafeTimer::LockAdapter::wait() {
+  if (legacy_lock != nullptr) {
+    legacy_cond.Wait(*legacy_lock);
+  } else {
+    std::unique_lock l(*new_lock, std::adopt_lock);
+    new_cond.wait(l);
+    l.release();
+  }
+}
+
+void SafeTimer::LockAdapter::wait_until(utime_t when) {
+  if (legacy_lock != nullptr) {
+    legacy_cond.WaitUntil(*legacy_lock, when);
+  } else {
+    std::unique_lock l(*new_lock, std::adopt_lock);
+    new_cond.wait_until(l, when.to_real_time());
+    l.release();
+  }
+}
+
+void SafeTimer::LockAdapter::notify_all() {
+  if (legacy_lock != nullptr) {
+    legacy_cond.Signal();
+  } else {
+    new_cond.notify_all();
+  }
 }
