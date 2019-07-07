@@ -15,14 +15,14 @@ namespace journal {
 ObjectPlayer::ObjectPlayer(librados::IoCtx &ioctx,
                            const std::string &object_oid_prefix,
                            uint64_t object_num, SafeTimer &timer,
-                           Mutex &timer_lock, uint8_t order,
+                           ceph::mutex &timer_lock, uint8_t order,
                            uint64_t max_fetch_bytes)
   : RefCountedObject(NULL, 0), m_object_num(object_num),
     m_oid(utils::get_object_name(object_oid_prefix, m_object_num)),
     m_cct(NULL), m_timer(timer), m_timer_lock(timer_lock), m_order(order),
     m_max_fetch_bytes(max_fetch_bytes > 0 ? max_fetch_bytes : 2 << order),
     m_watch_interval(0), m_watch_task(NULL),
-    m_lock(utils::unique_lock_name("ObjectPlayer::m_lock", this)),
+    m_lock(ceph::make_mutex(utils::unique_lock_name("ObjectPlayer::m_lock", this))),
     m_fetch_in_progress(false) {
   m_ioctx.dup(ioctx);
   m_cct = reinterpret_cast<CephContext*>(m_ioctx.cct());
@@ -30,8 +30,8 @@ ObjectPlayer::ObjectPlayer(librados::IoCtx &ioctx,
 
 ObjectPlayer::~ObjectPlayer() {
   {
-    Mutex::Locker timer_locker(m_timer_lock);
-    Mutex::Locker locker(m_lock);
+    std::lock_guard timer_locker{m_timer_lock};
+    std::lock_guard locker{m_lock};
     ceph_assert(!m_fetch_in_progress);
     ceph_assert(m_watch_ctx == nullptr);
   }
@@ -40,7 +40,7 @@ ObjectPlayer::~ObjectPlayer() {
 void ObjectPlayer::fetch(Context *on_finish) {
   ldout(m_cct, 10) << __func__ << ": " << m_oid << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_fetch_in_progress);
   m_fetch_in_progress = true;
 
@@ -60,7 +60,7 @@ void ObjectPlayer::fetch(Context *on_finish) {
 void ObjectPlayer::watch(Context *on_fetch, double interval) {
   ldout(m_cct, 20) << __func__ << ": " << m_oid << " watch" << dendl;
 
-  Mutex::Locker timer_locker(m_timer_lock);
+  std::lock_guard timer_locker{m_timer_lock};
   m_watch_interval = interval;
 
   ceph_assert(m_watch_ctx == nullptr);
@@ -73,7 +73,7 @@ void ObjectPlayer::unwatch() {
   ldout(m_cct, 20) << __func__ << ": " << m_oid << " unwatch" << dendl;
   Context *watch_ctx = nullptr;
   {
-    Mutex::Locker timer_locker(m_timer_lock);
+    std::lock_guard timer_locker{m_timer_lock};
     ceph_assert(!m_unwatched);
     m_unwatched = true;
 
@@ -90,13 +90,13 @@ void ObjectPlayer::unwatch() {
 }
 
 void ObjectPlayer::front(Entry *entry) const {
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_entries.empty());
   *entry = m_entries.front();
 }
 
 void ObjectPlayer::pop_front() {
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_entries.empty());
 
   auto &entry = m_entries.front();
@@ -118,7 +118,7 @@ int ObjectPlayer::handle_fetch_complete(int r, const bufferlist &bl,
     return 0;
   }
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(m_fetch_in_progress);
   m_read_off += bl.length();
   m_read_bl.append(bl);
@@ -230,7 +230,7 @@ void ObjectPlayer::clear_invalid_range(uint32_t off, uint32_t len) {
 }
 
 void ObjectPlayer::schedule_watch() {
-  ceph_assert(m_timer_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_timer_lock));
   if (m_watch_ctx == NULL) {
     return;
   }
@@ -245,7 +245,7 @@ void ObjectPlayer::schedule_watch() {
 }
 
 bool ObjectPlayer::cancel_watch() {
-  ceph_assert(m_timer_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_timer_lock));
   ldout(m_cct, 20) << __func__ << ": " << m_oid << " cancelling watch" << dendl;
   if (m_watch_task != nullptr) {
     bool canceled = m_timer.cancel_event(m_watch_task);
@@ -258,7 +258,7 @@ bool ObjectPlayer::cancel_watch() {
 }
 
 void ObjectPlayer::handle_watch_task() {
-  ceph_assert(m_timer_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_timer_lock));
 
   ldout(m_cct, 10) << __func__ << ": " << m_oid << " polling" << dendl;
   ceph_assert(m_watch_ctx != nullptr);
@@ -274,7 +274,7 @@ void ObjectPlayer::handle_watch_fetched(int r) {
 
   Context *watch_ctx = nullptr;
   {
-    Mutex::Locker timer_locker(m_timer_lock);
+    std::lock_guard timer_locker{m_timer_lock};
     std::swap(watch_ctx, m_watch_ctx);
 
     if (m_unwatched) {
@@ -293,7 +293,7 @@ void ObjectPlayer::C_Fetch::finish(int r) {
   r = object_player->handle_fetch_complete(r, read_bl, &refetch);
 
   {
-    Mutex::Locker locker(object_player->m_lock);
+    std::lock_guard locker{object_player->m_lock};
     object_player->m_fetch_in_progress = false;
   }
 
