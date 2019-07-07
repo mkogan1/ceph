@@ -77,6 +77,14 @@ public:
   explicit utime_t(const std::chrono::time_point<Clock>& t)
     : utime_t(Clock::to_timespec(t)) {} // forward to timespec ctor
 
+  template<class Rep, class Period>
+  explicit utime_t(const std::chrono::duration<Rep, Period>& dur) {
+    using common_t = std::common_type_t<Rep, int>;
+    tv.tv_sec = std::max<common_t>(std::chrono::duration_cast<std::chrono::seconds>(dur).count(), 0);
+    tv.tv_nsec = std::max<common_t>((std::chrono::duration_cast<std::chrono::nanoseconds>(dur) %
+				     std::chrono::seconds(1)).count(), 0);
+  }
+
   utime_t(const struct timeval &v) {
     set_from_timeval(&v);
   }
