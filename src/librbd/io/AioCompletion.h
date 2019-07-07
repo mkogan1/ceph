@@ -6,6 +6,7 @@
 
 #include "common/Cond.h"
 #include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 #include "common/ceph_time.h"
 #include "include/Context.h"
 #include "include/utime.h"
@@ -166,9 +167,9 @@ struct AioCompletion {
     lock.Unlock();
     if (!n) {
       if (ictx != nullptr && event_notify) {
-        ictx->completed_reqs_lock.Lock();
+        ictx->completed_reqs_lock.lock();
         m_xlist_item.remove_myself();
-        ictx->completed_reqs_lock.Unlock();
+        ictx->completed_reqs_lock.unlock();
       }
       delete this;
     }
