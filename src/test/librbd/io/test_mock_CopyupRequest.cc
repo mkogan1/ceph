@@ -371,7 +371,7 @@ TEST_F(TestMockIoCopyupRequest, StandardWithSnaps) {
 
   librbd::ImageCtx *ictx;
   ASSERT_EQ(0, open_image(m_image_name, &ictx));
-  ictx->image_lock.get_write();
+  ictx->image_lock.lock();
   ictx->add_snap(cls::rbd::UserSnapshotNamespace(), "2", 2, ictx->size,
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
@@ -379,7 +379,7 @@ TEST_F(TestMockIoCopyupRequest, StandardWithSnaps) {
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
   ictx->snapc = {2, {2, 1}};
-  ictx->image_lock.put_write();
+  ictx->image_lock.unlock();
 
   MockTestImageCtx mock_parent_image_ctx(*ictx->parent);
   MockTestImageCtx mock_image_ctx(*ictx, &mock_parent_image_ctx);
@@ -466,12 +466,12 @@ TEST_F(TestMockIoCopyupRequest, CopyOnReadWithSnaps) {
 
   librbd::ImageCtx *ictx;
   ASSERT_EQ(0, open_image(m_image_name, &ictx));
-  ictx->image_lock.get_write();
+  ictx->image_lock.lock();
   ictx->add_snap(cls::rbd::UserSnapshotNamespace(), "1", 1, ictx->size,
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
   ictx->snapc = {1, {1}};
-  ictx->image_lock.put_write();
+  ictx->image_lock.unlock();
 
   MockTestImageCtx mock_parent_image_ctx(*ictx->parent);
   MockTestImageCtx mock_image_ctx(*ictx, &mock_parent_image_ctx);
@@ -596,7 +596,7 @@ TEST_F(TestMockIoCopyupRequest, DeepCopyWithPostSnaps) {
 
   librbd::ImageCtx *ictx;
   ASSERT_EQ(0, open_image(m_image_name, &ictx));
-  ictx->image_lock.get_write();
+  ictx->image_lock.lock();
   ictx->add_snap(cls::rbd::UserSnapshotNamespace(), "3", 3, ictx->size,
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
@@ -607,7 +607,7 @@ TEST_F(TestMockIoCopyupRequest, DeepCopyWithPostSnaps) {
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
   ictx->snapc = {3, {3, 2, 1}};
-  ictx->image_lock.put_write();
+  ictx->image_lock.unlock();
 
   MockTestImageCtx mock_parent_image_ctx(*ictx->parent);
   MockTestImageCtx mock_image_ctx(*ictx, &mock_parent_image_ctx);
@@ -664,7 +664,7 @@ TEST_F(TestMockIoCopyupRequest, DeepCopyWithPreAndPostSnaps) {
 
   librbd::ImageCtx *ictx;
   ASSERT_EQ(0, open_image(m_image_name, &ictx));
-  ictx->image_lock.get_write();
+  ictx->image_lock.lock();
   ictx->add_snap(cls::rbd::UserSnapshotNamespace(), "4", 4, ictx->size,
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
@@ -678,7 +678,7 @@ TEST_F(TestMockIoCopyupRequest, DeepCopyWithPreAndPostSnaps) {
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
   ictx->snapc = {4, {4, 3, 2, 1}};
-  ictx->image_lock.put_write();
+  ictx->image_lock.unlock();
 
   MockTestImageCtx mock_parent_image_ctx(*ictx->parent);
   MockTestImageCtx mock_image_ctx(*ictx, &mock_parent_image_ctx);
@@ -1016,12 +1016,12 @@ TEST_F(TestMockIoCopyupRequest, CopyupError) {
 
   librbd::ImageCtx *ictx;
   ASSERT_EQ(0, open_image(m_image_name, &ictx));
-  ictx->image_lock.get_write();
+  ictx->image_lock.lock();
   ictx->add_snap(cls::rbd::UserSnapshotNamespace(), "1", 1, ictx->size,
                  ictx->parent_md, RBD_PROTECTION_STATUS_UNPROTECTED,
                  0, {});
   ictx->snapc = {1, {1}};
-  ictx->image_lock.put_write();
+  ictx->image_lock.unlock();
 
   MockTestImageCtx mock_parent_image_ctx(*ictx->parent);
   MockTestImageCtx mock_image_ctx(*ictx, &mock_parent_image_ctx);

@@ -235,7 +235,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, Success) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(0, cond_ctx.wait());
@@ -280,7 +280,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, SuccessCloneParent) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(0, cond_ctx.wait());
@@ -329,7 +329,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, SuccessTrash) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(0, cond_ctx.wait());
@@ -394,7 +394,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, FlattenedCloneRemovesChild) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(0, cond_ctx.wait());
@@ -438,7 +438,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, TrashCloneParent) {
     mock_image_ctx, &cond_ctx, cls::rbd::TrashSnapshotNamespace{}, "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EBUSY, cond_ctx.wait());
@@ -481,7 +481,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, SnapshotTrashAddNotSupported) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(0, cond_ctx.wait());
@@ -507,7 +507,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, SnapshotTrashAddError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EINVAL, cond_ctx.wait());
@@ -537,7 +537,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, SnapshotGetError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EOPNOTSUPP, cond_ctx.wait());
@@ -574,7 +574,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, ObjectMapSnapRemoveError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EINVAL, cond_ctx.wait());
@@ -612,7 +612,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, RemoveChildParentError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-ENOENT, cond_ctx.wait());
@@ -663,7 +663,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, RemoveChildError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EINVAL, cond_ctx.wait());
@@ -707,7 +707,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, RemoveSnapError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-ENOENT, cond_ctx.wait());
@@ -739,7 +739,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, MissingSnap) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-ENOENT, cond_ctx.wait());
@@ -782,7 +782,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, ListChildrenError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EINVAL, cond_ctx.wait());
@@ -823,7 +823,7 @@ TEST_F(TestMockOperationSnapshotRemoveRequest, DetachStaleChildError) {
     mock_image_ctx, &cond_ctx, cls::rbd::UserSnapshotNamespace(), "snap1",
     snap_id);
   {
-    RWLock::RLocker owner_locker(mock_image_ctx.owner_lock);
+    std::shared_lock owner_locker{mock_image_ctx.owner_lock};
     req->send();
   }
   ASSERT_EQ(-EINVAL, cond_ctx.wait());
