@@ -1421,7 +1421,7 @@ namespace librbd {
     tracepoint(librbd, get_access_timestamp_enter, ictx, ictx->name.c_str(),
                ictx->read_only);
     {
-      RWLock::RLocker timestamp_locker(ictx->timestamp_lock);
+      std::shared_lock timestamp_locker{ictx->timestamp_lock};
       utime_t time = ictx->get_access_timestamp();
       time.to_timespec(timestamp);
     }
@@ -1435,7 +1435,7 @@ namespace librbd {
     tracepoint(librbd, get_modify_timestamp_enter, ictx, ictx->name.c_str(),
                ictx->read_only);
     {
-      RWLock::RLocker timestamp_locker(ictx->timestamp_lock);
+      std::shared_lock timestamp_locker{ictx->timestamp_lock};
       utime_t time = ictx->get_modify_timestamp();
       time.to_timespec(timestamp);
     }

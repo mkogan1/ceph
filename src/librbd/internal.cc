@@ -172,9 +172,10 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
   void image_info(ImageCtx *ictx, image_info_t& info, size_t infosize)
   {
     int obj_order = ictx->order;
-    ictx->image_lock.get_read();
-    info.size = ictx->get_image_size(ictx->snap_id);
-    ictx->image_lock.put_read();
+    {
+      std::shared_lock locker{ictx->image_lock};
+      info.size = ictx->get_image_size(ictx->snap_id);
+    }
     info.obj_size = 1ULL << obj_order;
     info.num_objs = Striper::get_num_objects(ictx->layout, info.size);
     info.order = obj_order;
@@ -199,15 +200,15 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
   void trim_image(ImageCtx *ictx, uint64_t newsize, ProgressContext& prog_ctx)
   {
-    ceph_assert(ictx->owner_lock.is_locked());
+    ceph_assert(ceph_mutex_is_locked(ictx->owner_lock));
     ceph_assert(ictx->exclusive_lock == nullptr ||
                 ictx->exclusive_lock->is_lock_owner());
 
     C_SaferCond ctx;
-    ictx->image_lock.get_read();
+    ictx->image_lock.lock_shared();
     operation::TrimRequest<> *req = operation::TrimRequest<>::create(
       *ictx, &ctx, ictx->size, newsize, prog_ctx);
-    ictx->image_lock.put_read();
+    ictx->image_lock.unlock_shared();
     req->send();
 
     int r = ctx.wait();
@@ -524,7 +525,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       return r;
     }
 
-    RWLock::RLocker l(ictx->image_lock);
+    std::shared_lock l{ictx->image_lock};
     snap_t snap_id = ictx->get_snap_id(cls::rbd::UserSnapshotNamespace(),
                                        snap_name);
 
@@ -609,7 +610,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     int r = ictx->state->refresh_if_required();
     if (r < 0)
       return r;
-    RWLock::RLocker l(ictx->image_lock);
+    std::shared_lock l{ictx->image_lock};
     snap_t snap_id = ictx->get_snap_id(*snap_namespace, snap_name);
     if (snap_id == CEPH_NOSNAP)
       return -ENOENT;
@@ -626,7 +627,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     if (r < 0)
       return r;
 
-    RWLock::RLocker l(ictx->image_lock);
+    std::shared_lock l{ictx->image_lock};
     snap_t snap_id = ictx->get_snap_id(cls::rbd::UserSnapshotNamespace(), snap_name);
     if (snap_id == CEPH_NOSNAP)
       return -ENOENT;
@@ -962,7 +963,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     int r = ictx->state->refresh_if_required();
     if (r < 0)
       return r;
-    RWLock::RLocker l2(ictx->image_lock);
+    std::shared_lock l2{ictx->image_lock};
     *size = ictx->get_image_size(ictx->snap_id);
     return 0;
   }
@@ -972,7 +973,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     int r = ictx->state->refresh_if_required();
     if (r < 0)
       return r;
-    RWLock::RLocker l(ictx->image_lock);
+    std::shared_lock l{ictx->image_lock};
     *features = ictx->features;
     return 0;
   }
@@ -982,7 +983,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     int r = ictx->state->refresh_if_required();
     if (r < 0)
       return r;
-    RWLock::RLocker image_locker(ictx->image_lock);
+    std::shared_lock image_locker{ictx->image_lock};
     return ictx->get_parent_overlap(ictx->snap_id, overlap);
   }
 
@@ -993,7 +994,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       return r;
     }
 
-    RWLock::RLocker l2(ictx->image_lock);
+    std::shared_lock l2{ictx->image_lock};
     return ictx->get_flags(ictx->snap_id, flags);
   }
 
@@ -1018,7 +1019,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     ldout(cct, 20) << __func__ << ": ictx=" << ictx << dendl;
     *is_owner = false;
 
-    RWLock::RLocker owner_locker(ictx->owner_lock);
+    std::shared_lock owner_locker{ictx->owner_lock};
     if (ictx->exclusive_lock == nullptr) {
       return 0;
     }
@@ -1048,7 +1049,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     C_SaferCond lock_ctx;
     {
-      RWLock::WLocker l(ictx->owner_lock);
+      std::unique_lock l{ictx->owner_lock};
 
       if (ictx->exclusive_lock == nullptr) {
 	lderr(cct) << "exclusive-lock feature is not enabled" << dendl;
@@ -1074,7 +1075,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       return r;
     }
 
-    RWLock::RLocker l(ictx->owner_lock);
+    std::shared_lock l{ictx->owner_lock};
     if (ictx->exclusive_lock == nullptr) {
       return -EINVAL;
     } else if (!ictx->exclusive_lock->is_lock_owner()) {
@@ -1092,7 +1093,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     C_SaferCond lock_ctx;
     {
-      RWLock::WLocker l(ictx->owner_lock);
+      std::unique_lock l{ictx->owner_lock};
 
       if (ictx->exclusive_lock == nullptr ||
 	  !ictx->exclusive_lock->is_lock_owner()) {
@@ -1159,7 +1160,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     managed_lock::Locker locker;
     C_SaferCond get_owner_ctx;
     {
-      RWLock::RLocker l(ictx->owner_lock);
+      std::shared_lock l{ictx->owner_lock};
 
       if (ictx->exclusive_lock == nullptr) {
         lderr(cct) << "exclusive-lock feature is not enabled" << dendl;
@@ -1183,7 +1184,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     C_SaferCond break_ctx;
     {
-      RWLock::RLocker l(ictx->owner_lock);
+      std::shared_lock l{ictx->owner_lock};
 
       if (ictx->exclusive_lock == nullptr) {
         lderr(cct) << "exclusive-lock feature is not enabled" << dendl;
@@ -1210,7 +1211,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     if (r < 0)
       return r;
 
-    RWLock::RLocker l(ictx->image_lock);
+    std::shared_lock l{ictx->image_lock};
     for (map<snap_t, SnapInfo>::iterator it = ictx->snap_info.begin();
 	 it != ictx->snap_info.end(); ++it) {
       snap_info_t info;
@@ -1232,7 +1233,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     if (r < 0)
       return r;
 
-    RWLock::RLocker l(ictx->image_lock);
+    std::shared_lock l{ictx->image_lock};
     *exists = ictx->get_snap_id(snap_namespace, snap_name) != CEPH_NOSNAP;
     return 0;
   }
@@ -1339,10 +1340,10 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 		   << (src->snap_name.length() ? "@" + src->snap_name : "")
 		   << " -> " << destname << " opts = " << opts << dendl;
 
-    src->image_lock.get_read();
+    src->image_lock.lock_shared();
     uint64_t features = src->features;
     uint64_t src_size = src->get_image_size(src->snap_id);
-    src->image_lock.put_read();
+    src->image_lock.unlock_shared();
     uint64_t format = 2;
     if (opts.get(RBD_IMAGE_OPTION_FORMAT, &format) != 0) {
       opts.set(RBD_IMAGE_OPTION_FORMAT, format);
@@ -1484,13 +1485,13 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
   int copy(ImageCtx *src, ImageCtx *dest, ProgressContext &prog_ctx, size_t sparse_size)
   {
-    src->image_lock.get_read();
+    src->image_lock.lock_shared();
     uint64_t src_size = src->get_image_size(src->snap_id);
-    src->image_lock.put_read();
+    src->image_lock.unlock_shared();
 
-    dest->image_lock.get_read();
+    dest->image_lock.lock_shared();
     uint64_t dest_size = dest->get_image_size(dest->snap_id);
-    dest->image_lock.put_read();
+    dest->image_lock.unlock_shared();
 
     CephContext *cct = src->cct;
     if (dest_size < src_size) {
@@ -1528,7 +1529,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       trace.init("copy", &src->trace_endpoint);
     }
 
-    RWLock::RLocker owner_lock(src->owner_lock);
+    std::shared_lock owner_lock{src->owner_lock};
     SimpleThrottle throttle(src->config.get_val<uint64_t>("rbd_concurrent_management_ops"), false);
     uint64_t period = src->get_stripe_period();
     unsigned fadvise_flags = LIBRADOS_OP_FLAG_FADVISE_SEQUENTIAL |
@@ -1540,7 +1541,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       }
 
       {
-        RWLock::RLocker image_locker(src->image_lock);
+	std::shared_lock image_locker{src->image_lock};
         if (src->object_map != nullptr) {
           bool skip = true;
           // each period is related to src->stripe_count objects, check them all
@@ -1590,7 +1591,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     if (r < 0)
       return r;
 
-    RWLock::RLocker locker(ictx->image_lock);
+    std::shared_lock locker{ictx->image_lock};
     if (exclusive)
       *exclusive = ictx->exclusive_locked;
     if (tag)
@@ -1628,7 +1629,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
      * duplicate that code.
      */
     {
-      RWLock::RLocker locker(ictx->image_lock);
+      std::shared_lock locker{ictx->image_lock};
       r = rados::cls::lock::lock(&ictx->md_ctx, ictx->header_oid, RBD_LOCK_NAME,
 			         exclusive ? LOCK_EXCLUSIVE : LOCK_SHARED,
 			         cookie, tag, "", utime_t(), 0);
@@ -1651,7 +1652,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       return r;
 
     {
-      RWLock::RLocker locker(ictx->image_lock);
+      std::shared_lock locker{ictx->image_lock};
       r = rados::cls::lock::unlock(&ictx->md_ctx, ictx->header_oid,
 				   RBD_LOCK_NAME, cookie);
       if (r < 0) {
@@ -1749,9 +1750,9 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       return r;
 
     uint64_t mylen = len;
-    ictx->image_lock.get_read();
+    ictx->image_lock.lock_shared();
     r = clip_io(ictx, off, &mylen);
-    ictx->image_lock.put_read();
+    ictx->image_lock.unlock_shared();
     if (r < 0)
       return r;
 
@@ -1764,7 +1765,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       trace.init("read_iterate", &ictx->trace_endpoint);
     }
 
-    RWLock::RLocker owner_locker(ictx->owner_lock);
+    std::shared_lock owner_locker{ictx->owner_lock};
     start_time = coarse_mono_clock::now();
     while (left > 0) {
       uint64_t period_off = off - (off % period);
@@ -1803,7 +1804,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
   // validate extent against image size; clip to image size if necessary
   int clip_io(ImageCtx *ictx, uint64_t off, uint64_t *len)
   {
-    ceph_assert(ictx->image_lock.is_locked());
+    ceph_assert(ceph_mutex_is_locked(ictx->image_lock));
     uint64_t image_size = ictx->get_image_size(ictx->snap_id);
     bool snap_exists = ictx->snap_exists;
 
@@ -1837,7 +1838,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     C_SaferCond ctx;
     {
-      RWLock::RLocker owner_locker(ictx->owner_lock);
+      std::shared_lock owner_locker{ictx->owner_lock};
       ictx->io_object_dispatcher->invalidate_cache(&ctx);
     }
     r = ctx.wait();
@@ -1853,7 +1854,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     ldout(cct, 20) << __func__ << " " << ictx << " numcomp = " << numcomp
                    << dendl;
     int i = 0;
-    Mutex::Locker l(ictx->completed_reqs_lock);
+    std::unique_lock l{ictx->completed_reqs_lock};
     numcomp = std::min(numcomp, (int)ictx->completed_reqs.size());
     while (i < numcomp) {
       comps[i++] = ictx->completed_reqs.front();
