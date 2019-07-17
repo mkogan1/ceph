@@ -6,8 +6,8 @@
 #include "tools/rbd/Utils.h"
 #include "common/errno.h"
 #include "common/strtol.h"
-#include "common/Cond.h"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
+#include "include/types.h"
 #include "global/signal_handler.h"
 #include <atomic>
 #include <chrono>
@@ -73,7 +73,7 @@ void validate(boost::any& v, const std::vector<std::string>& values,
   }
 }
 
-io_type_t get_io_type(string io_type_string) {
+io_type_t get_io_type(std::string io_type_string) {
   if (io_type_string == "read")
     return IO_TYPE_READ;
   else if (io_type_string == "write")
@@ -118,8 +118,8 @@ public:
 
 struct rbd_bencher {
   librbd::Image *image;
-  Mutex lock;
-  Cond cond;
+  ceph::mutex lock = ceph::make_mutex("rbd_bencher::lock");
+  ceph::condition_variable cond;
   int in_flight;
   io_type_t io_type;
   uint64_t io_size;
@@ -127,7 +127,6 @@ struct rbd_bencher {
 
   explicit rbd_bencher(librbd::Image *i, io_type_t io_type, uint64_t io_size)
     : image(i),
-      lock("rbd_bencher::lock"),
       in_flight(0),
       io_type(io_type),
       io_size(io_size)
@@ -142,7 +141,7 @@ struct rbd_bencher {
   void start_io(int max, uint64_t off, uint64_t len, int op_flags, bool read_flag)
   {
     {
-      Mutex::Locker l(lock);
+      std::lock_guard l{lock};
       in_flight++;
     }
 
@@ -160,11 +159,9 @@ struct rbd_bencher {
   }
 
   int wait_for(int max, bool interrupt_on_terminating) {
-    Mutex::Locker l(lock);
+    std::unique_lock l{lock};
     while (in_flight > max && !(terminating && interrupt_on_terminating)) {
-      utime_t dur;
-      dur.set_from_double(.2);
-      cond.WaitInterval(lock, dur);
+      cond.wait_for(l, 200ms);
     }
 
     return terminating ? -EINTR : 0;
@@ -180,16 +177,16 @@ void rbd_bencher_completion(void *vc, void *pc)
   //cout << "complete " << c << std::endl;
   int ret = c->get_return_value();
   if (b->io_type == IO_TYPE_WRITE && ret != 0) {
-    cout << "write error: " << cpp_strerror(ret) << std::endl;
+    std::cout << "write error: " << cpp_strerror(ret) << std::endl;
     exit(ret < 0 ? -ret : ret);
   } else if (b->io_type == IO_TYPE_READ && (unsigned int)ret != b->io_size) {
     cout << "read error: " << cpp_strerror(ret) << std::endl;
     exit(ret < 0 ? -ret : ret);
   }
-  b->lock.Lock();
+  b->lock.lock();
   b->in_flight--;
-  b->cond.Signal();
-  b->lock.Unlock();
+  b->cond.notify_all();
+  b->lock.unlock();
   c->release();
   delete bc;
 }
