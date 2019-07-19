@@ -954,12 +954,21 @@ std::string rgwlc_s3_expiration_header(
     }
 
     if (filter.has_tags()) {
-      bool tag_match = true;
+      bool tag_match = false;
       const RGWObjTags& rule_tagset = filter.get_tags();
       for (auto& tag : rule_tagset.get_tags()) {
-	if (obj_tag_map.find(tag.first) == obj_tag_map.end()) {
-	  tag_match = false;
-	  break;
+	/* remember, S3 tags are {key,value} tuples */
+	auto ma1 = obj_tag_map.find(tag.first);
+	if ( ma1 != obj_tag_map.end()) {
+	  if (tag.second == ma1->second) {
+	    ldpp_dout(dpp, 10) << "tag match obj_key=" << obj_key
+			       << " rule_id=" << id
+			       << " tag=" << tag
+			       << " (ma=" << *ma1 << ")"
+			       << dendl;
+	    tag_match = true;
+	    break;
+	  }
 	}
       }
       if (! tag_match)
@@ -1181,4 +1190,3 @@ int fix_lc_shard_entry(RGWRados* store, const RGWBucketInfo& bucket_info,
 }
 
 }} // namespace rgw::lc
-
