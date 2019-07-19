@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include "LeaderWatcher.h"
+#include "common/Cond.h"
 #include "common/Timer.h"
 #include "common/debug.h"
 #include "common/errno.h"
@@ -30,7 +31,8 @@ LeaderWatcher<I>::LeaderWatcher(Threads<I> *threads, librados::IoCtx &io_ctx,
                                 leader_watcher::Listener *listener)
   : Watcher(io_ctx, threads->work_queue, RBD_MIRROR_LEADER),
     m_threads(threads), m_listener(listener), m_instances_listener(this),
-    m_lock("rbd::mirror::LeaderWatcher " + io_ctx.get_pool_name()),
+    m_lock(ceph::make_mutex("rbd::mirror::LeaderWatcher " +
+			    io_ctx.get_pool_name())),
     m_notifier_id(librados::Rados(io_ctx).get_instance_id()),
     m_instance_id(stringify(m_notifier_id)),
     m_leader_lock(new LeaderLock(m_ioctx, m_work_queue, m_oid, this, true,
@@ -63,7 +65,7 @@ template <typename I>
 void LeaderWatcher<I>::init(Context *on_finish) {
   dout(10) << "notifier_id=" << m_notifier_id << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
 
   ceph_assert(m_on_finish == nullptr);
   m_on_finish = on_finish;
@@ -75,7 +77,7 @@ template <typename I>
 void LeaderWatcher<I>::create_leader_object() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   librados::ObjectWriteOperation op;
   op.create(false);
@@ -93,7 +95,7 @@ void LeaderWatcher<I>::handle_create_leader_object(int r) {
 
   Context *on_finish = nullptr;
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
 
     if (r == 0) {
       register_watch();
@@ -112,7 +114,7 @@ template <typename I>
 void LeaderWatcher<I>::register_watch() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_async_context_callback(
     m_work_queue, create_context_callback<
@@ -127,13 +129,13 @@ void LeaderWatcher<I>::handle_register_watch(int r) {
 
   Context *on_finish = nullptr;
   if (r < 0) {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     derr << "error registering leader watcher for " << m_oid << " object: "
          << cpp_strerror(r) << dendl;
     ceph_assert(m_on_finish != nullptr);
     std::swap(on_finish, m_on_finish);
   } else {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     init_status_watcher();
     return;
   }
@@ -153,8 +155,7 @@ template <typename I>
 void LeaderWatcher<I>::shut_down(Context *on_finish) {
   dout(10) << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
+  std::scoped_lock locker{m_threads->timer_lock, m_lock};
 
   ceph_assert(m_on_shut_down_finish == nullptr);
   m_on_shut_down_finish = on_finish;
@@ -166,7 +167,7 @@ template <typename I>
 void LeaderWatcher<I>::shut_down_leader_lock() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_async_context_callback(
     m_work_queue, create_context_callback<
@@ -179,7 +180,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_shut_down_leader_lock(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
 
   if (r < 0) {
     derr << "error shutting down leader lock: " << cpp_strerror(r) << dendl;
@@ -192,7 +193,7 @@ template <typename I>
 void LeaderWatcher<I>::unregister_watch() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_async_context_callback(
     m_work_queue, create_context_callback<
@@ -216,8 +217,7 @@ template <typename I>
 void LeaderWatcher<I>::wait_for_tasks() {
   dout(10) << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
+  std::scoped_lock locker{m_threads->timer_lock, m_lock};
   schedule_timer_task("wait for tasks", 0, false,
                       &LeaderWatcher<I>::handle_wait_for_tasks, true);
 }
@@ -226,8 +226,8 @@ template <typename I>
 void LeaderWatcher<I>::handle_wait_for_tasks() {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(m_on_shut_down_finish != nullptr);
 
   ceph_assert(!m_timer_op_tracker.empty());
@@ -237,7 +237,7 @@ void LeaderWatcher<I>::handle_wait_for_tasks() {
       Context *on_finish;
       {
         // ensure lock isn't held when completing shut down
-        Mutex::Locker locker(m_lock);
+	std::lock_guard locker{m_lock};
         ceph_assert(m_on_shut_down_finish != nullptr);
         on_finish = m_on_shut_down_finish;
       }
@@ -254,14 +254,13 @@ bool LeaderWatcher<I>::is_blacklisted() const {
 
 template <typename I>
 bool LeaderWatcher<I>::is_leader() const {
-  Mutex::Locker locker(m_lock);
-
+  std::lock_guard locker{m_lock};
   return is_leader(m_lock);
 }
 
 template <typename I>
-bool LeaderWatcher<I>::is_leader(Mutex &lock) const {
-  ceph_assert(m_lock.is_locked());
+bool LeaderWatcher<I>::is_leader(ceph::mutex &lock) const {
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   bool leader = m_leader_lock->is_leader();
   dout(10) << leader << dendl;
@@ -270,14 +269,13 @@ bool LeaderWatcher<I>::is_leader(Mutex &lock) const {
 
 template <typename I>
 bool LeaderWatcher<I>::is_releasing_leader() const {
-  Mutex::Locker locker(m_lock);
-
+  std::lock_guard locker{m_lock};
   return is_releasing_leader(m_lock);
 }
 
 template <typename I>
-bool LeaderWatcher<I>::is_releasing_leader(Mutex &lock) const {
-  ceph_assert(m_lock.is_locked());
+bool LeaderWatcher<I>::is_releasing_leader(ceph::mutex &lock) const {
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   bool releasing = m_leader_lock->is_releasing_leader();
   dout(10) << releasing << dendl;
@@ -288,7 +286,7 @@ template <typename I>
 bool LeaderWatcher<I>::get_leader_instance_id(std::string *instance_id) const {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
 
   if (is_leader(m_lock) || is_releasing_leader(m_lock)) {
     *instance_id = m_instance_id;
@@ -307,7 +305,7 @@ template <typename I>
 void LeaderWatcher<I>::release_leader() {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   if (!is_leader(m_lock)) {
     return;
   }
@@ -319,7 +317,7 @@ template <typename I>
 void LeaderWatcher<I>::list_instances(std::vector<std::string> *instance_ids) {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
 
   instance_ids->clear();
   if (m_instances != nullptr) {
@@ -329,8 +327,8 @@ void LeaderWatcher<I>::list_instances(std::vector<std::string> *instance_ids) {
 
 template <typename I>
 void LeaderWatcher<I>::cancel_timer_task() {
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   if (m_timer_task == nullptr) {
     return;
@@ -347,8 +345,8 @@ void LeaderWatcher<I>::schedule_timer_task(const std::string &name,
                                            int delay_factor, bool leader,
                                            TimerCallback timer_callback,
                                            bool shutting_down) {
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   if (!shutting_down && m_on_shut_down_finish != nullptr) {
     return;
@@ -358,11 +356,11 @@ void LeaderWatcher<I>::schedule_timer_task(const std::string &name,
 
   m_timer_task = new FunctionContext(
     [this, leader, timer_callback](int r) {
-      ceph_assert(m_threads->timer_lock.is_locked());
+      ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
       m_timer_task = nullptr;
 
       if (m_timer_op_tracker.empty()) {
-        Mutex::Locker locker(m_lock);
+	std::lock_guard locker{m_lock};
         execute_timer_task(leader, timer_callback);
         return;
       }
@@ -390,8 +388,8 @@ void LeaderWatcher<I>::execute_timer_task(bool leader,
                                           TimerCallback timer_callback) {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(m_timer_op_tracker.empty());
 
   if (is_leader(m_lock) != leader) {
@@ -417,7 +415,7 @@ void LeaderWatcher<I>::handle_post_acquire_leader_lock(int r,
     return;
   }
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(m_on_finish == nullptr);
   m_on_finish = on_finish;
   m_ret_val = 0;
@@ -429,7 +427,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_pre_release_leader_lock(Context *on_finish) {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(m_on_finish == nullptr);
   m_on_finish = on_finish;
   m_ret_val = 0;
@@ -447,7 +445,7 @@ void LeaderWatcher<I>::handle_post_release_leader_lock(int r,
     return;
   }
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(m_on_finish == nullptr);
   m_on_finish = on_finish;
 
@@ -458,8 +456,8 @@ template <typename I>
 void LeaderWatcher<I>::break_leader_lock() {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(!m_timer_op_tracker.empty());
 
   if (m_locker.cookie.empty()) {
@@ -478,8 +476,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_break_leader_lock(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
+  std::scoped_lock locker{m_threads->timer_lock, m_lock};
   ceph_assert(!m_timer_op_tracker.empty());
 
   if (m_leader_lock->is_shutdown()) {
@@ -505,8 +502,8 @@ void LeaderWatcher<I>::schedule_get_locker(bool reset_leader,
                                            uint32_t delay_factor) {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   if (reset_leader) {
     m_locker = {};
@@ -521,8 +518,8 @@ template <typename I>
 void LeaderWatcher<I>::get_locker() {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(!m_timer_op_tracker.empty());
 
   C_GetLocker *get_locker_ctx = new C_GetLocker(this);
@@ -536,8 +533,7 @@ void LeaderWatcher<I>::handle_get_locker(int r,
                                          librbd::managed_lock::Locker& locker) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker mutex_locker(m_lock);
+  std::scoped_lock l{m_threads->timer_lock, m_lock};
   ceph_assert(!m_timer_op_tracker.empty());
 
   if (m_leader_lock->is_shutdown()) {
@@ -596,8 +592,7 @@ void LeaderWatcher<I>::handle_get_locker(int r,
       if (get_leader_instance_id(&instance_id)) {
         m_listener->update_leader_handler(instance_id);
       }
-      Mutex::Locker timer_locker(m_threads->timer_lock);
-      Mutex::Locker locker(m_lock);
+      std::scoped_lock locker{m_threads->timer_lock, m_lock};
       m_timer_op_tracker.finish_op();
     });
   m_work_queue->queue(ctx, 0);
@@ -607,8 +602,8 @@ template <typename I>
 void LeaderWatcher<I>::schedule_acquire_leader_lock(uint32_t delay_factor) {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   schedule_timer_task("acquire leader lock",
                       delay_factor *
@@ -618,8 +613,8 @@ void LeaderWatcher<I>::schedule_acquire_leader_lock(uint32_t delay_factor) {
 
 template <typename I>
 void LeaderWatcher<I>::acquire_leader_lock() {
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(!m_timer_op_tracker.empty());
 
   ++m_acquire_attempts;
@@ -635,8 +630,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_acquire_leader_lock(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
+  std::scoped_lock locker{m_threads->timer_lock, m_lock};
   ceph_assert(!m_timer_op_tracker.empty());
 
   if (m_leader_lock->is_shutdown()) {
@@ -673,7 +667,7 @@ template <typename I>
 void LeaderWatcher<I>::release_leader_lock() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_async_context_callback(
     m_work_queue, create_context_callback<
@@ -686,8 +680,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_release_leader_lock(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
+  std::scoped_lock locker{m_threads->timer_lock, m_lock};
 
   if (r < 0) {
     derr << "error releasing lock: " << cpp_strerror(r) << dendl;
@@ -701,7 +694,7 @@ template <typename I>
 void LeaderWatcher<I>::init_status_watcher() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(m_status_watcher == nullptr);
 
   m_status_watcher = MirrorStatusWatcher<I>::create(m_ioctx, m_work_queue);
@@ -718,8 +711,7 @@ void LeaderWatcher<I>::handle_init_status_watcher(int r) {
 
   Context *on_finish = nullptr;
   {
-    Mutex::Locker timer_locker(m_threads->timer_lock);
-    Mutex::Locker locker(m_lock);
+    std::scoped_lock locker{m_threads->timer_lock, m_lock};
 
     if (r < 0) {
       derr << "error initializing mirror status watcher: " << cpp_strerror(r)
@@ -739,7 +731,7 @@ template <typename I>
 void LeaderWatcher<I>::shut_down_status_watcher() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(m_status_watcher != nullptr);
 
   Context *ctx = create_async_context_callback(
@@ -753,7 +745,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_shut_down_status_watcher(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   m_status_watcher->destroy();
   m_status_watcher = nullptr;
 
@@ -769,7 +761,7 @@ template <typename I>
 void LeaderWatcher<I>::init_instances() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(m_instances == nullptr);
 
   m_instances = Instances<I>::create(m_threads, m_ioctx, m_instance_id,
@@ -787,7 +779,7 @@ void LeaderWatcher<I>::handle_init_instances(int r) {
 
   Context *on_finish = nullptr;
   if (r < 0) {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     derr << "error initializing instances: " << cpp_strerror(r) << dendl;
     m_instances->destroy();
     m_instances = nullptr;
@@ -795,7 +787,7 @@ void LeaderWatcher<I>::handle_init_instances(int r) {
     ceph_assert(m_on_finish != nullptr);
     std::swap(m_on_finish, on_finish);
   } else {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     notify_listener();
     return;
   }
@@ -807,7 +799,7 @@ template <typename I>
 void LeaderWatcher<I>::shut_down_instances() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(m_instances != nullptr);
 
   Context *ctx = create_async_context_callback(
@@ -824,7 +816,7 @@ void LeaderWatcher<I>::handle_shut_down_instances(int r) {
 
   Context *on_finish = nullptr;
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
 
     m_instances->destroy();
     m_instances = nullptr;
@@ -839,7 +831,7 @@ template <typename I>
 void LeaderWatcher<I>::notify_listener() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_async_context_callback(
     m_work_queue, create_context_callback<
@@ -863,7 +855,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_notify_listener(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
 
   if (r < 0) {
     derr << "error notifying listener: " << cpp_strerror(r) << dendl;
@@ -881,7 +873,7 @@ template <typename I>
 void LeaderWatcher<I>::notify_lock_acquired() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_context_callback<
     LeaderWatcher<I>, &LeaderWatcher<I>::handle_notify_lock_acquired>(this);
@@ -898,7 +890,7 @@ void LeaderWatcher<I>::handle_notify_lock_acquired(int r) {
 
   Context *on_finish = nullptr;
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     if (r < 0 && r != -ETIMEDOUT) {
       derr << "error notifying leader lock acquired: " << cpp_strerror(r)
            << dendl;
@@ -920,7 +912,7 @@ template <typename I>
 void LeaderWatcher<I>::notify_lock_released() {
   dout(10) << dendl;
 
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   Context *ctx = create_context_callback<
     LeaderWatcher<I>, &LeaderWatcher<I>::handle_notify_lock_released>(this);
@@ -937,7 +929,7 @@ void LeaderWatcher<I>::handle_notify_lock_released(int r) {
 
   Context *on_finish = nullptr;
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     if (r < 0 && r != -ETIMEDOUT) {
       derr << "error notifying leader lock released: " << cpp_strerror(r)
            << dendl;
@@ -953,8 +945,8 @@ template <typename I>
 void LeaderWatcher<I>::notify_heartbeat() {
   dout(10) << dendl;
 
-  ceph_assert(m_threads->timer_lock.is_locked());
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_threads->timer_lock));
+  ceph_assert(ceph_mutex_is_locked(m_lock));
   ceph_assert(!m_timer_op_tracker.empty());
 
   if (!is_leader(m_lock)) {
@@ -977,8 +969,7 @@ template <typename I>
 void LeaderWatcher<I>::handle_notify_heartbeat(int r) {
   dout(10) << "r=" << r << dendl;
 
-  Mutex::Locker timer_locker(m_threads->timer_lock);
-  Mutex::Locker locker(m_lock);
+  std::scoped_lock locker{m_threads->timer_lock, m_lock};
   ceph_assert(!m_timer_op_tracker.empty());
 
   m_timer_op_tracker.finish_op();
@@ -1017,8 +1008,7 @@ void LeaderWatcher<I>::handle_heartbeat(Context *on_notify_ack) {
   dout(10) << dendl;
 
   {
-    Mutex::Locker timer_locker(m_threads->timer_lock);
-    Mutex::Locker locker(m_lock);
+    std::scoped_lock locker{m_threads->timer_lock, m_lock};
     if (is_leader(m_lock)) {
       dout(5) << "got another leader heartbeat, ignoring" << dendl;
     } else {
@@ -1036,8 +1026,7 @@ void LeaderWatcher<I>::handle_lock_acquired(Context *on_notify_ack) {
   dout(10) << dendl;
 
   {
-    Mutex::Locker timer_locker(m_threads->timer_lock);
-    Mutex::Locker locker(m_lock);
+    std::scoped_lock locker{m_threads->timer_lock, m_lock};
     if (is_leader(m_lock)) {
       dout(5) << "got another leader lock_acquired, ignoring" << dendl;
     } else {
@@ -1054,8 +1043,7 @@ void LeaderWatcher<I>::handle_lock_released(Context *on_notify_ack) {
   dout(10) << dendl;
 
   {
-    Mutex::Locker timer_locker(m_threads->timer_lock);
-    Mutex::Locker locker(m_lock);
+    std::scoped_lock locker{m_threads->timer_lock, m_lock};
     if (is_leader(m_lock)) {
       dout(5) << "got another leader lock_released, ignoring" << dendl;
     } else {
