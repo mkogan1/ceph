@@ -157,7 +157,7 @@ public:
                                   false);
     EXPECT_EQ(0, ictx->state->open(0));
     {
-      RWLock::WLocker image_locker(ictx->image_lock);
+      std::unique_lock image_locker{ictx->image_lock};
       ictx->set_journal_policy(new librbd::journal::DisabledPolicy());
     }
 
@@ -177,7 +177,7 @@ public:
                                   false);
     EXPECT_EQ(0, ictx->state->open(0));
     {
-      RWLock::WLocker image_locker(ictx->image_lock);
+      std::unique_lock image_locker{ictx->image_lock};
       ictx->set_journal_policy(new librbd::journal::DisabledPolicy());
     }
 

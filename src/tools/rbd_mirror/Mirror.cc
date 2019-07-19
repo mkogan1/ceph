@@ -345,7 +345,7 @@ private:
 class CacheManagerHandler : public journal::CacheManagerHandler {
 public:
   CacheManagerHandler(CephContext *cct)
-    : m_cct(cct), m_lock("rbd::mirror::CacheManagerHandler") {
+    : m_cct(cct) {
 
     if (!m_cct->_conf.get_val<bool>("rbd_mirror_memory_autotune")) {
       return;
@@ -377,7 +377,7 @@ public:
   }
 
   ~CacheManagerHandler() {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
 
     ceph_assert(m_caches.empty());
   }
@@ -393,7 +393,7 @@ public:
     dout(20) << cache_name << " min_size=" << min_size << " max_size="
              << max_size << " handler=" << handler << dendl;
 
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
 
     auto p = m_caches.insert(
         {cache_name, {cache_name, min_size, max_size, handler}});
@@ -410,7 +410,7 @@ public:
 
     dout(20) << cache_name << dendl;
 
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
 
     auto it = m_caches.find(cache_name);
     ceph_assert(it != m_caches.end());
@@ -425,7 +425,7 @@ public:
       return;
     }
 
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
 
     // Before we trim, check and see if it's time to rebalance/resize.
     auto autotune_interval = m_cct->_conf.get_val<double>(
@@ -474,7 +474,8 @@ private:
 
   CephContext *m_cct;
 
-  mutable Mutex m_lock;
+  mutable ceph::mutex m_lock =
+    ceph::make_mutex("rbd::mirror::CacheManagerHandler");
   std::unique_ptr<PriorityCache::Manager> m_cache_manager;
   std::map<std::string, Cache> m_caches;
 
@@ -485,7 +486,6 @@ private:
 Mirror::Mirror(CephContext *cct, const std::vector<const char*> &args) :
   m_cct(cct),
   m_args(args),
-  m_lock("rbd::mirror::Mirror"),
   m_local(new librados::Rados()),
   m_cache_manager_handler(new CacheManagerHandler(cct)),
   m_asok_hook(new MirrorAdminSocketHook(cct, this))
@@ -505,7 +505,7 @@ void Mirror::handle_signal(int signum)
 {
   dout(20) << signum << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   switch (signum) {
   case SIGHUP:
@@ -518,7 +518,7 @@ void Mirror::handle_signal(int signum)
   case SIGINT:
   case SIGTERM:
     m_stopping = true;
-    m_cond.Signal();
+    m_cond.notify_all();
     break;
 
   default:
@@ -566,18 +566,18 @@ void Mirror::run()
       next_refresh_pools += m_cct->_conf.get_val<uint64_t>(
           "rbd_mirror_pool_replayers_refresh_interval");
     }
-    Mutex::Locker l(m_lock);
+    std::unique_lock l{m_lock};
     if (!m_manual_stop) {
       if (refresh_pools) {
         update_pool_replayers(m_local_cluster_watcher->get_pool_peers());
       }
       m_cache_manager_handler->run_cache_manager();
     }
-    m_cond.WaitInterval(m_lock, {1, 0});
+    m_cond.wait_for(l, 1s);
   }
 
   // stop all pool replayers in parallel
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   for (auto &pool_replayer : m_pool_replayers) {
     pool_replayer.second->stop(false);
   }
@@ -588,7 +588,7 @@ void Mirror::print_status(Formatter *f, stringstream *ss)
 {
   dout(20) << "enter" << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -613,7 +613,7 @@ void Mirror::print_status(Formatter *f, stringstream *ss)
 void Mirror::start()
 {
   dout(20) << "enter" << dendl;
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -629,7 +629,7 @@ void Mirror::start()
 void Mirror::stop()
 {
   dout(20) << "enter" << dendl;
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -645,7 +645,7 @@ void Mirror::stop()
 void Mirror::restart()
 {
   dout(20) << "enter" << dendl;
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -661,7 +661,7 @@ void Mirror::restart()
 void Mirror::flush()
 {
   dout(20) << "enter" << dendl;
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping || m_manual_stop) {
     return;
@@ -675,7 +675,7 @@ void Mirror::flush()
 void Mirror::release_leader()
 {
   dout(20) << "enter" << dendl;
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -689,7 +689,7 @@ void Mirror::release_leader()
 void Mirror::update_pool_replayers(const PoolPeers &pool_peers)
 {
   dout(20) << "enter" << dendl;
-  ceph_assert(m_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(m_lock));
 
   // remove stale pool replayers before creating new pool replayers
   for (auto it = m_pool_replayers.begin(); it != m_pool_replayers.end();) {
