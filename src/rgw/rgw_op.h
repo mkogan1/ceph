@@ -2357,5 +2357,8 @@ static inline int parse_value_and_bound(
   return 0;
 }
 
+int get_obj_attrs(RGWRados *store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, map<string, bufferlist>& attrs, rgw_obj *target_obj = nullptr);
+int modify_obj_attr(RGWRados *store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, const char* attr_name, bufferlist& attr_val);
+int forward_request_to_master(struct req_state *s, obj_version *objv, RGWRados *store, bufferlist& in_data,                               JSONParser *jp, req_info *forward_info = nullptr);
 
 #endif /* CEPH_RGW_OP_H */
