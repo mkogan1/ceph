@@ -195,6 +195,14 @@ void RGWOp_User_Create::execute()
   if (gen_key)
     op_state.set_generate_key();
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_User::create(store, op_state, flusher);
 }
 
@@ -296,7 +304,15 @@ void RGWOp_User_Modify::execute()
     }
     op_state.set_op_mask(op_mask);
   }
-
+  
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_User::modify(store, op_state, flusher);
 }
 
@@ -332,6 +348,14 @@ void RGWOp_User_Remove::execute()
 
   op_state.set_purge_data(purge_data);
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_User::remove(store, op_state, flusher);
 }
 
@@ -402,6 +426,14 @@ void RGWOp_Subuser_Create::execute()
   }
   op_state.set_key_type(key_type);
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_Subuser::create(store, op_state, flusher);
 }
 
@@ -463,6 +495,14 @@ void RGWOp_Subuser_Modify::execute()
   }
   op_state.set_key_type(key_type);
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_Subuser::modify(store, op_state, flusher);
 }
 
@@ -500,6 +540,14 @@ void RGWOp_Subuser_Remove::execute()
   if (purge_keys)
     op_state.set_purge_keys();
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_Subuser::remove(store, op_state, flusher);
 }
 
@@ -635,6 +683,14 @@ void RGWOp_Caps_Add::execute()
   op_state.set_user_id(uid);
   op_state.set_caps(caps);
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_Caps::add(store, op_state, flusher);
 }
 
@@ -667,6 +723,14 @@ void RGWOp_Caps_Remove::execute()
   op_state.set_user_id(uid);
   op_state.set_caps(caps);
 
+  if (!store->svc.zone->is_meta_master()) {
+  bufferlist data;
+  op_ret = forward_request_to_master(s, nullptr, store, data, nullptr);
+  if (op_ret < 0) {
+    ldpp_dout(this, 0) << "forward_request_to_master returned ret=" << op_ret << dendl;
+    return;
+    }
+  }
   http_ret = RGWUserAdminOp_Caps::remove(store, op_state, flusher);
 }
 
