@@ -885,10 +885,10 @@ std::string rgwlc_s3_expiration_header(
   const ceph::real_time& mtime,
   /* const */ std::map<std::string, buffer::list>& bucket_attrs)
 {
-  RGWLifecycleConfiguration config(cct); // TODO: save in bucket info
+  RGWLifecycleConfiguration config(cct);
   std::string hdr{""};
 
-  map<string, bufferlist>::iterator aiter = bucket_attrs.find(RGW_ATTR_LC);
+  const auto& aiter = bucket_attrs.find(RGW_ATTR_LC);
   if (aiter == bucket_attrs.end())
     return hdr;
 
@@ -896,9 +896,9 @@ std::string rgwlc_s3_expiration_header(
   try {
       config.decode(iter);
   } catch (const buffer::error& e) {
-    ldout(cct, 0) << __func__
-		  <<  "() decode life cycle config failed"
-		  << dendl;
+      ldout(cct, 0) << __func__
+			<<  "() decode life cycle config failed"
+			<< dendl;
       return hdr;
   } /* catch */
 
@@ -914,6 +914,8 @@ std::string rgwlc_s3_expiration_header(
 
   boost::optional<ceph::real_time> expiration_date;
   boost::optional<std::string> rule_id;
+  /* return the first rule to be deleted */
+  boost::optional<std::string> earliest_rule_id;
 
   const auto& rule_map = config.get_rule_map();
   for (const auto& ri : rule_map) {
@@ -925,14 +927,14 @@ std::string rgwlc_s3_expiration_header(
     auto& noncur_expiration = rule.get_noncur_expiration();
 
     ldout(cct, 10) << "rule: " << ri.first
-		   << " prefix: " << prefix
-		   << " expiration: "
-		   << " date: " << expiration.get_date()
-		   << " days: " << expiration.get_days()
-		   << " noncur_expiration: "
-		   << " date: " << noncur_expiration.get_date()
-		   << " days: " << noncur_expiration.get_days()
-		   << dendl;
+		       << " prefix: " << prefix
+		       << " expiration: "
+		       << " date: " << expiration.get_date()
+		       << " days: " << expiration.get_days()
+		       << " noncur_expiration: "
+		       << " date: " << noncur_expiration.get_date()
+		       << " days: " << noncur_expiration.get_days()
+		       << dendl;
 
     /* skip if rule !enabled
      * if rule has prefix, skip iff object !match prefix
@@ -962,10 +964,10 @@ std::string rgwlc_s3_expiration_header(
 	if ( ma1 != obj_tag_map.end()) {
 	  if (tag.second == ma1->second) {
 	    ldout(cct, 10) << "tag match obj_key=" << obj_key
-			   << " rule_id=" << id
-			   << " tag=" << tag
-			   << " (ma=" << *ma1 << ")"
-			   << dendl;
+			       << " rule_id=" << id
+			       << " tag=" << tag
+			       << " (ma=" << *ma1 << ")"
+			       << dendl;
 	    tag_match = true;
 	    break;
 	  }
@@ -997,27 +999,27 @@ std::string rgwlc_s3_expiration_header(
     // update earliest expiration
     if (rule_expiration_date) {
       if ((! expiration_date) ||
-	  ((expiration_date &&
-	    (*expiration_date < *rule_expiration_date)))) {
+	  (*expiration_date > *rule_expiration_date)) {
       expiration_date =
 	boost::optional<ceph::real_time>(rule_expiration_date);
+      earliest_rule_id = rule_id;
       }
     }
   }
 
   // cond format header
-  if (expiration_date && rule_id) {
+  if (expiration_date && earliest_rule_id) {
     // Fri, 23 Dec 2012 00:00:00 GMT
     char exp_buf[100];
     time_t exp = ceph::real_clock::to_time_t(*expiration_date);
     if (std::strftime(exp_buf, sizeof(exp_buf),
 		      "%a, %d %b %Y %T %Z", std::gmtime(&exp))) {
       hdr = fmt::format("expiry-date=\"{0}\", rule-id=\"{1}\"", exp_buf,
-			*rule_id);
+			*earliest_rule_id);
     } else {
       ldout(cct, 0) << __func__ <<
 	"() strftime of life cycle expiration header failed"
-		    << dendl;
+			<< dendl;
     }
   }
 
