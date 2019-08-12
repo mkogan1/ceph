@@ -2833,29 +2833,35 @@ public:
     }
 
     if (exists && old_bci.info.datasync_flag_enabled() != bci.info.datasync_flag_enabled()) {
-      int shards_num = bci.info.num_shards? bci.info.num_shards : 1;
-      int shard_id = bci.info.num_shards? 0 : -1;
+      #warning needs to be done differently
+      bool new_sync_enabled = bci.info.datasync_flag_enabled();
+      bool old_sync_enabled = old_bci.info.datasync_flag_enabled();
 
-      if (!bci.info.datasync_flag_enabled()) {
-      ret = store->stop_bi_log_entries(bci.info, -1);
-        if (ret < 0) {
-	   lderr(store->ctx()) << "ERROR: failed writing bilog" << dendl;
-	   return ret;
-        }
-      } else {
-        ret = store->resync_bi_log_entries(bci.info, -1);
-        if (ret < 0) {
-	   lderr(store->ctx()) << "ERROR: failed writing bilog" << dendl;
-	   return ret;
-        }
-      }
+      if (old_sync_enabled != new_sync_enabled) {
+	int shards_num = bci.info.num_shards? bci.info.num_shards : 1;
+	int shard_id = bci.info.num_shards? 0 : -1;
 
-      for (int i = 0; i < shards_num; ++i, ++shard_id) {
-        ret = store->data_log->add_entry(bci.info, shard_id);
-        if (ret < 0) {
-	   lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
-	   return ret;
-        }
+	if (!new_sync_enabled) {
+	  ret = store->stop_bi_log_entries(bci.info, -1);
+	  if (ret < 0) {
+	    lderr(store->ctx()) << "ERROR: failed writing bilog" << dendl;
+	    return ret;
+	  }
+	} else {
+	  ret = store->resync_bi_log_entries(bci.info, -1);
+	  if (ret < 0) {
+	    lderr(store->ctx()) << "ERROR: failed writing bilog" << dendl;
+	    return ret;
+	  }
+	}
+
+	for (int i = 0; i < shards_num; ++i, ++shard_id) {
+	  ret = store->data_log->add_entry(bci.info, shard_id);
+	  if (ret < 0) {
+	    lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
+	    return ret;
+	  }
+	}
       }
     }
 

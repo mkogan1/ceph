@@ -51,6 +51,8 @@ class RGWReshard;
 class RGWReshardWait;
 
 class RGWSysObjectCtx;
+class RGWBucketSyncPolicyHandler;
+using RGWBucketSyncPolicyHandlerRef = std::shared_ptr<RGWBucketSyncPolicyHandler>;
 
 /* flags for put_obj_meta() */
 #define PUT_OBJ_CREATE      0x01
@@ -1284,6 +1286,12 @@ protected:
   using RGWChainedCacheImpl_bucket_info_entry = RGWChainedCacheImpl<bucket_info_entry>;
   RGWChainedCacheImpl_bucket_info_entry *binfo_cache;
 
+  struct bucket_sync_policy_cache_entry {
+    std::shared_ptr<RGWBucketSyncPolicyHandler> handler;
+  };
+  using RGWChainedCacheImpl_bucket_sync_policy_cache_entry = RGWChainedCacheImpl<bucket_sync_policy_cache_entry>;
+  RGWChainedCacheImpl_bucket_sync_policy_cache_entry* sync_policy_cache = nullptr;
+
   using tombstone_cache_t = lru_map<rgw_obj, tombstone_entry>;
   tombstone_cache_t *obj_tombstone_cache;
 
@@ -2508,6 +2516,11 @@ public:
    */
   static uint32_t calc_ordered_bucket_list_per_shard(uint32_t num_entries,
 						     uint32_t num_shards);
+public:
+  int get_sync_policy_handler(const rgw_bucket& bucket,
+			      RGWBucketSyncPolicyHandlerRef *phandler);
+  int bucket_exports_data(const rgw_bucket& bucket);
+  int bucket_imports_data(const rgw_bucket& bucket);
 };
 
 class RGWStoreManager {

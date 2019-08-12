@@ -642,6 +642,7 @@ struct es_obj_metadata {
 };
 
 class RGWElasticInitConfigCBCR : public RGWCoroutine {
+  RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
   ElasticConfigRef conf;
   ESInfo es_info;
@@ -667,13 +668,14 @@ class RGWElasticInitConfigCBCR : public RGWCoroutine {
   } err_response;
 
 public:
-  RGWElasticInitConfigCBCR(RGWDataSyncEnv *_sync_env,
-                          ElasticConfigRef _conf) : RGWCoroutine(_sync_env->cct),
-                                                    sync_env(_sync_env),
-                                                    conf(_conf) {}
+  RGWElasticInitConfigCBCR(RGWDataSyncCtx *sc,
+			   ElasticConfigRef _conf) : RGWCoroutine(sc->cct),
+						     sc(sc),
+						     sync_env(sc->env),
+						     conf(_conf) {}
   int operate() override {
     reenter(this) {
-      ldout(sync_env->cct, 0) << ": init elasticsearch config zone=" << sync_env->source_zone << dendl;
+      ldout(sync_env->cct, 0) << ": init elasticsearch config zone=" << sc->source_zone << dendl;
       yield call(new RGWReadRESTResourceCR<ESInfo> (sync_env->cct,
                                                     conf->conn.get(),
                                                     sync_env->http_manager,
@@ -728,15 +730,15 @@ class RGWElasticHandleRemoteObjCBCR : public RGWStatRemoteObjCBCR {
   ElasticConfigRef conf;
   uint64_t versioned_epoch;
 public:
-  RGWElasticHandleRemoteObjCBCR(RGWDataSyncEnv *_sync_env,
+  RGWElasticHandleRemoteObjCBCR(RGWDataSyncCtx *_sc,
                           rgw_bucket_sync_pipe& _sync_pipe, rgw_obj_key& _key,
-                          ElasticConfigRef _conf, uint64_t _versioned_epoch) : RGWStatRemoteObjCBCR(_sync_env, _sync_pipe.source_bs.bucket, _key),
+                          ElasticConfigRef _conf, uint64_t _versioned_epoch) : RGWStatRemoteObjCBCR(_sc, _sync_pipe.info.source_bs.bucket, _key),
                                                                                sync_pipe(_sync_pipe), conf(_conf),
                                                                                versioned_epoch(_versioned_epoch) {}
   int operate() override {
     reenter(this) {
-      ldout(sync_env->cct, 10) << ": stat of remote obj: z=" << sync_env->source_zone
-                               << " b=" << sync_pipe.source_bs.bucket << " k=" << key
+      ldout(sync_env->cct, 10) << ": stat of remote obj: z=" << sc->source_zone
+                               << " b=" << sync_pipe.info.source_bs.bucket << " k=" << key
                                << " size=" << size << " mtime=" << mtime << dendl;
 
       yield {
@@ -764,9 +766,9 @@ class RGWElasticHandleRemoteObjCR : public RGWCallStatRemoteObjCR {
   ElasticConfigRef conf;
   uint64_t versioned_epoch;
 public:
-  RGWElasticHandleRemoteObjCR(RGWDataSyncEnv *_sync_env,
+  RGWElasticHandleRemoteObjCR(RGWDataSyncCtx *sc,
                         rgw_bucket_sync_pipe& _sync_pipe, rgw_obj_key& _key,
-                        ElasticConfigRef _conf, uint64_t _versioned_epoch) : RGWCallStatRemoteObjCR(_sync_env, _sync_pipe.source_bs.bucket, _key),
+                        ElasticConfigRef _conf, uint64_t _versioned_epoch) : RGWCallStatRemoteObjCR(sc, _sync_pipe.info.source_bs.bucket, _key),
                                                            sync_pipe(_sync_pipe),
                                                            conf(_conf), versioned_epoch(_versioned_epoch) {
   }
@@ -774,28 +776,29 @@ public:
   ~RGWElasticHandleRemoteObjCR() override {}
 
   RGWStatRemoteObjCBCR *allocate_callback() override {
-    return new RGWElasticHandleRemoteObjCBCR(sync_env, sync_pipe, key, conf, versioned_epoch);
+    return new RGWElasticHandleRemoteObjCBCR(sc, sync_pipe, key, conf, versioned_epoch);
   }
 };
 
 class RGWElasticRemoveRemoteObjCBCR : public RGWCoroutine {
+  RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
   rgw_bucket_sync_pipe sync_pipe;
   rgw_obj_key key;
   ceph::real_time mtime;
   ElasticConfigRef conf;
 public:
-  RGWElasticRemoveRemoteObjCBCR(RGWDataSyncEnv *_sync_env,
+  RGWElasticRemoveRemoteObjCBCR(RGWDataSyncCtx *sc,
                           rgw_bucket_sync_pipe& _sync_pipe, rgw_obj_key& _key, const ceph::real_time& _mtime,
-                          ElasticConfigRef _conf) : RGWCoroutine(_sync_env->cct), sync_env(_sync_env),
+                          ElasticConfigRef _conf) : RGWCoroutine(sc->cct), sync_env(sc->env),
                                                         sync_pipe(_sync_pipe), key(_key),
                                                         mtime(_mtime), conf(_conf) {}
   int operate() override {
     reenter(this) {
-      ldout(sync_env->cct, 10) << ": remove remote obj: z=" << sync_env->source_zone
-                               << " b=" << sync_pipe.source_bs.bucket << " k=" << key << " mtime=" << mtime << dendl;
+      ldout(sc->cct, 10) << ": remove remote obj: z=" << sc->source_zone
+			 << " b=" << sync_pipe.info.source_bs.bucket << " k=" << key << " mtime=" << mtime << dendl;
       yield {
-        string path = conf->get_obj_path(sync_pipe.dest_bucket_info, key);
+	string path = conf->get_obj_path(sync_pipe.dest_bucket_info, key);
 
         call(new RGWDeleteRESTResourceCR(sync_env->cct, conf->conn.get(),
                                          sync_env->http_manager,
@@ -819,16 +822,16 @@ public:
   }
   ~RGWElasticDataSyncModule() override {}
 
-  void init(RGWDataSyncEnv *sync_env, uint64_t instance_id) override {
-    conf->init_instance(sync_env->store->svc.zone->get_realm(), instance_id);
+  void init(RGWDataSyncCtx *sc, uint64_t instance_id) override {
+    conf->init_instance(sc->env->store->svc.zone->get_realm(), instance_id);
     // try to get elastic search version
-    RGWCoroutinesManager crs(sync_env->store->ctx(), sync_env->store->get_cr_registry());
-    RGWHTTPManager http_manager(sync_env->store->ctx(), crs.get_completion_mgr());
+    RGWCoroutinesManager crs(sc->cct, sc->env->store->get_cr_registry());
+    RGWHTTPManager http_manager(sc->cct, crs.get_completion_mgr());
     int ret = http_manager.start();
     if (ret < 0) {
       return;
     }
-    ret = crs.run(new RGWReadRESTResourceCR<ESInfo>(sync_env->cct,
+    ret = crs.run(new RGWReadRESTResourceCR<ESInfo>(sc->cct,
 					      conf->conn.get(),
 					      &http_manager,
 					      "/", nullptr,
@@ -836,38 +839,38 @@ public:
 					      &(conf->es_info)));
     http_manager.stop();
     if (ret < 0) {
-      ldout(sync_env->cct, 1) << conf->id << ": fetch elastic info failed: " << ret << dendl;
+      ldout(sc->cct, 1) << conf->id << ": fetch elastic info failed: " << ret << dendl;
     } else {
-      ldout(sync_env->cct, 5) << conf->id << ": got elastic version=" << conf->es_info.get_version_str() << dendl;
+      ldout(sc->cct, 5) << conf->id << ": got elastic version=" << conf->es_info.get_version_str() << dendl;
     }
   }
 
-  RGWCoroutine *init_sync(RGWDataSyncEnv *sync_env) override {
-    ldout(sync_env->cct, 5) << conf->id << ": init" << dendl;
-    return new RGWElasticInitConfigCBCR(sync_env, conf);
+  RGWCoroutine *init_sync(RGWDataSyncCtx *sc) override {
+    ldout(sc->cct, 5) << conf->id << ": init" << dendl;
+    return new RGWElasticInitConfigCBCR(sc, conf);
   }
-  RGWCoroutine *sync_object(RGWDataSyncEnv *sync_env, rgw_bucket_sync_pipe& sync_pipe, rgw_obj_key& key, std::optional<uint64_t> versioned_epoch, rgw_zone_set *zones_trace) override {
-    ldout(sync_env->cct, 10) << conf->id << ": sync_object: b=" << sync_pipe.source_bs.bucket << " k=" << key << " versioned_epoch=" << versioned_epoch.value_or(0) << dendl;
+  RGWCoroutine *sync_object(RGWDataSyncCtx *sc, rgw_bucket_sync_pipe& sync_pipe, rgw_obj_key& key, std::optional<uint64_t> versioned_epoch, rgw_zone_set *zones_trace) override {
+    ldout(sc->cct, 10) << conf->id << ": sync_object: b=" << sync_pipe.info.source_bs.bucket << " k=" << key << " versioned_epoch=" << versioned_epoch.value_or(0) << dendl;
     if (!conf->should_handle_operation(sync_pipe.dest_bucket_info)) {
-      ldout(sync_env->cct, 10) << conf->id << ": skipping operation (bucket not approved)" << dendl;
+      ldout(sc->cct, 10) << conf->id << ": skipping operation (bucket not approved)" << dendl;
       return nullptr;
     }
-    return new RGWElasticHandleRemoteObjCR(sync_env, sync_pipe, key, conf, versioned_epoch.value_or(0));
+    return new RGWElasticHandleRemoteObjCR(sc, sync_pipe, key, conf, versioned_epoch.value_or(0));
   }
-  RGWCoroutine *remove_object(RGWDataSyncEnv *sync_env, rgw_bucket_sync_pipe& sync_pipe, rgw_obj_key& key, real_time& mtime, bool versioned, uint64_t versioned_epoch, rgw_zone_set *zones_trace) override {
+  RGWCoroutine *remove_object(RGWDataSyncCtx *sc, rgw_bucket_sync_pipe& sync_pipe, rgw_obj_key& key, real_time& mtime, bool versioned, uint64_t versioned_epoch, rgw_zone_set *zones_trace) override {
     /* versioned and versioned epoch params are useless in the elasticsearch backend case */
-    ldout(sync_env->cct, 10) << conf->id << ": rm_object: b=" << sync_pipe.source_bs.bucket << " k=" << key << " mtime=" << mtime << " versioned=" << versioned << " versioned_epoch=" << versioned_epoch << dendl;
+    ldout(sc->cct, 10) << conf->id << ": rm_object: b=" << sync_pipe.info.source_bs.bucket << " k=" << key << " mtime=" << mtime << " versioned=" << versioned << " versioned_epoch=" << versioned_epoch << dendl;
     if (!conf->should_handle_operation(sync_pipe.dest_bucket_info)) {
-      ldout(sync_env->cct, 10) << conf->id << ": skipping operation (bucket not approved)" << dendl;
+      ldout(sc->cct, 10) << conf->id << ": skipping operation (bucket not approved)" << dendl;
       return nullptr;
     }
-    return new RGWElasticRemoveRemoteObjCBCR(sync_env, sync_pipe, key, mtime, conf);
+    return new RGWElasticRemoveRemoteObjCBCR(sc, sync_pipe, key, mtime, conf);
   }
-  RGWCoroutine *create_delete_marker(RGWDataSyncEnv *sync_env, rgw_bucket_sync_pipe& sync_pipe, rgw_obj_key& key, real_time& mtime,
+  RGWCoroutine *create_delete_marker(RGWDataSyncCtx *sc, rgw_bucket_sync_pipe& sync_pipe, rgw_obj_key& key, real_time& mtime,
                                      rgw_bucket_entry_owner& owner, bool versioned, uint64_t versioned_epoch, rgw_zone_set *zones_trace) override {
-    ldout(sync_env->cct, 10) << conf->id << ": create_delete_marker: b=" << sync_pipe.source_bs.bucket << " k=" << key << " mtime=" << mtime
+    ldout(sc->cct, 10) << conf->id << ": create_delete_marker: b=" << sync_pipe.info.source_bs.bucket << " k=" << key << " mtime=" << mtime
                             << " versioned=" << versioned << " versioned_epoch=" << versioned_epoch << dendl;
-    ldout(sync_env->cct, 10) << conf->id << ": skipping operation (not handled)" << dendl;
+    ldout(sc->cct, 10) << conf->id << ": skipping operation (not handled)" << dendl;
     return NULL;
   }
   RGWRESTConn *get_rest_conn() {

@@ -22,6 +22,14 @@ int rgw_init_ioctx(librados::Rados *rados, const rgw_pool& pool,
 		   bool create = false,
 		   bool mostly_omap = false);
 
+struct rgw_name_to_flag {
+  const char *type_name;
+  uint32_t flag;
+};
+
+int rgw_parse_list_of_flags(struct rgw_name_to_flag *mapping,
+			    const string& str, uint32_t *perm);
+
 int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& oid, bufferlist& data, bool exclusive,
                        RGWObjVersionTracker *objv_tracker, real_time set_mtime, map<string, bufferlist> *pattrs = NULL);
 int rgw_get_system_obj(RGWRados *rgwstore, RGWSysObjectCtx& obj_ctx, const rgw_pool& pool, const string& key, bufferlist& bl,

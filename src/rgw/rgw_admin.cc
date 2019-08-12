@@ -2526,11 +2526,12 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
   out << indented{width, "zone"} << zone.id << " (" << zone.name << ")\n";
   out << indented{width, "bucket"} << info.bucket << "\n\n";
 
-  if (!info.bucket_datasync_enabled(store->svc.zone)) {
+  if (!store->bucket_imports_data(info.bucket)) {
     out << "Sync is disabled for bucket " << info.bucket.name << '\n';
     return 0;
   }
 
+#warning need to use bucket sources
   auto& zone_conn_map = store->svc.zone->get_zone_conn_map();
   if (!source_zone_id.empty()) {
     auto z = zonegroup.zones.find(source_zone_id);
@@ -7531,7 +7532,7 @@ next:
     if (ret < 0) {
       return -ret;
     }
-    RGWBucketSyncStatusManager sync(store, source_zone, bucket);
+    RGWBucketPipeSyncStatusManager sync(store, source_zone, bucket);
 
     ret = sync.init();
     if (ret < 0) {
@@ -7602,7 +7603,7 @@ next:
     if (ret < 0) {
       return -ret;
     }
-    RGWBucketSyncStatusManager sync(store, source_zone, bucket);
+    RGWBucketPipeSyncStatusManager sync(store, source_zone, bucket);
 
     ret = sync.init();
     if (ret < 0) {
@@ -7635,7 +7636,7 @@ next:
     if (ret < 0) {
       return -ret;
     }
-    RGWBucketSyncStatusManager sync(store, source_zone, bucket);
+    RGWBucketPipeSyncStatusManager sync(store, source_zone, bucket);
 
     ret = sync.init();
     if (ret < 0) {

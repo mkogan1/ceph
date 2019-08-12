@@ -32,6 +32,7 @@
 #include "rgw_cr_rados.h"
 #include "rgw_cr_rest.h"
 #include "rgw_putobj_processor.h"
+#include "rgw_bucket_sync.h"
 
 #include "cls/rgw/cls_rgw_ops.h"
 #include "cls/rgw/cls_rgw_client.h"
@@ -1360,6 +1361,7 @@ void RGWRados::finalize()
 
   delete meta_mgr;
   delete binfo_cache;
+  delete sync_policy_cache;
   delete obj_tombstone_cache;
 
   if (reshard_wait.get()) {
@@ -1621,6 +1623,10 @@ int RGWRados::init_complete()
 
   binfo_cache = new RGWChainedCacheImpl<bucket_info_entry>;
   binfo_cache->init(svc.cache);
+
+  sync_policy_cache = new RGWChainedCacheImpl<bucket_sync_policy_cache_entry>;
+  sync_policy_cache->init(svc.cache);
+
 
   lc = new RGWLC();
   lc->initialize(cct, this);
@@ -10856,4 +10862,83 @@ int RGWRados::list_mfa(const string& oid, list<rados::cls::otp::otp_info_t> *res
   }
 
   return 0;
+}
+
+int RGWRados::get_sync_policy_handler(const rgw_bucket& bucket,
+				      RGWBucketSyncPolicyHandlerRef *handler)
+{
+  string key = bucket.get_key();
+  string cache_key("bi/");
+  cache_key.append(key);
+
+  if (auto e = sync_policy_cache->find(cache_key)) {
+    *handler = e->handler;
+    return 0;
+  }
+
+
+  rgw_cache_entry_info cache_info;
+
+  RGWBucketInfo bucket_info;
+  auto ctx = svc.sysobj->init_obj_ctx();
+  string oid;
+  if (bucket.oid.empty()) {
+    get_bucket_meta_oid(bucket, oid);
+  } else {
+    oid = bucket.oid;
+  }
+
+  int r = get_bucket_instance_from_oid(ctx,
+				       oid,
+				       bucket_info,
+				       nullptr,
+				       nullptr,
+				       &cache_info);
+  if (r < 0) {
+    if (r != -ENOENT) {
+      ldout(cct, 0) << "ERROR: svc.bucket->read_bucket_instance_info(key=" << key << ") returned r=" << r << dendl;
+    }
+    return r;
+  }
+
+  bucket_sync_policy_cache_entry e;
+  e.handler = std::make_shared<RGWBucketSyncPolicyHandler>(svc.zone, bucket_info);
+
+  r = e.handler->init();
+  if (r < 0) {
+    ldout(cct, 0) << "ERROR: RGWBucketSyncPolicyHandler::init() returned r=" << r << dendl;
+    return r;
+  }
+
+  if (!sync_policy_cache->put(svc.cache, cache_key, &e, {&cache_info})) {
+    ldout(cct, 20) << "couldn't put bucket_sync_policy cache entry, might have raced with data changes" << dendl;
+  }
+
+  return 0;
+}
+
+int RGWRados::bucket_exports_data(const rgw_bucket& bucket)
+{
+
+  RGWBucketSyncPolicyHandlerRef handler;
+
+  int r = get_sync_policy_handler(bucket, &handler);
+  if (r < 0) {
+    return r;
+  }
+
+  return handler->bucket_exports_data();
+}
+
+int RGWRados::bucket_imports_data(const rgw_bucket& bucket)
+{
+
+  RGWBucketSyncPolicyHandlerRef handler;
+
+  int r = get_sync_policy_handler(bucket, &handler);
+  if (r < 0) {
+    return r;
+  }
+
+  return handler->bucket_imports_data();
 }

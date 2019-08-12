@@ -576,9 +576,12 @@ std::string RGWDataChangesLog::get_oid(uint64_t gen_id, int i) const {
 }
 
 int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id) {
-  if (!bucket_info.bucket_datasync_enabled(store->svc.zone)) {
-    return 0;
-  }
+#warning FIXME
+#if 0
+  if (!bucket_info->bucket_exports_data(bucket_info.bucket, null_yield)) {
+     return 0;
+   }
+#endif
   auto& bucket = bucket_info.bucket;
 
   if (observer) {

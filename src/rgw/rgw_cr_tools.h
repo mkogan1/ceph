@@ -1,10 +1,12 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// vim: ts=8 sw=2 smarttab
 #ifndef CEPH_RGW_CR_TOOLS_H
 #define CEPH_RGW_CR_TOOLS_H
 
 #include "rgw_cr_rados.h"
 #include "rgw_tools.h"
 #include "rgw_lc.h"
-
+#include "rgw_bucket_sync.h"
 
 struct rgw_user_create_params {
   rgw_user user;
@@ -71,5 +73,14 @@ struct rgw_bucket_lifecycle_config_params {
 
 using RGWBucketLifecycleConfigCR = RGWSimpleWriteOnlyAsyncCR<rgw_bucket_lifecycle_config_params>;
 
+struct rgw_bucket_get_sync_policy_params {
+  rgw_bucket bucket;
+};
+
+struct rgw_bucket_get_sync_policy_result {
+  RGWBucketSyncPolicyHandlerRef policy_handler;
+};
+
+using RGWBucketGetSyncPolicyHandlerCR = RGWSimpleAsyncCR<rgw_bucket_get_sync_policy_params, rgw_bucket_get_sync_policy_result>;
 
 #endif

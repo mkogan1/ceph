@@ -17,6 +17,7 @@
 #include "rgw_rados.h"
 #include "rgw_http_errors.h"
 #include "rgw_arn.h"
+#include "rgw_data_sync.h"
 
 #include "common/ceph_crypto.h"
 #include "common/armor.h"
@@ -28,6 +29,7 @@
 #include "include/str_list.h"
 #include "rgw_crypt_sanitize.h"
 #include "rgw_bucket_sync.h"
+#include "rgw_sync_policy.h"
 
 #include "services/svc_zone.h"
 
@@ -1682,30 +1684,6 @@ string rgw_trim_quotes(const string& val)
   return s;
 }
 
-struct rgw_name_to_flag {
-  const char *type_name;
-  uint32_t flag;
-};
-
-static int parse_list_of_flags(struct rgw_name_to_flag *mapping,
-                               const string& str, uint32_t *perm)
-{
-  list<string> strs;
-  get_str_list(str, strs);
-  list<string>::iterator iter;
-  uint32_t v = 0;
-  for (iter = strs.begin(); iter != strs.end(); ++iter) {
-    string& s = *iter;
-    for (int i = 0; mapping[i].type_name; i++) {
-      if (s.compare(mapping[i].type_name) == 0)
-        v |= mapping[i].flag;
-    }
-  }
-
-  *perm = v;
-  return 0;
-}
-
 static struct rgw_name_to_flag cap_names[] = { {"*",     RGW_CAP_ALL},
                   {"read",  RGW_CAP_READ},
 		  {"write", RGW_CAP_WRITE},
@@ -1713,7 +1691,7 @@ static struct rgw_name_to_flag cap_names[] = { {"*",     RGW_CAP_ALL},
 
 int RGWUserCaps::parse_cap_perm(const string& str, uint32_t *perm)
 {
-  return parse_list_of_flags(cap_names, str, perm);
+  return rgw_parse_list_of_flags(cap_names, str, perm);
 }
 
 int RGWUserCaps::get_cap(const string& cap, string& type, uint32_t *pperm)
@@ -1980,7 +1958,7 @@ static struct rgw_name_to_flag op_type_mapping[] = { {"*",  RGW_OP_TYPE_ALL},
 
 int rgw_parse_op_type_list(const string& str, uint32_t *perm)
 {
-  return parse_list_of_flags(op_type_mapping, str, perm);
+  return rgw_parse_list_of_flags(op_type_mapping, str, perm);
 }
 
 bool match_policy(boost::string_view pattern, boost::string_view input,
@@ -2186,9 +2164,9 @@ void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
     bool has_sync_policy;
     decode(has_sync_policy, bl);
     if (has_sync_policy) {
-      auto policy = make_shared<RGWBucketSyncPolicy>();
+      auto policy = make_shared<rgw_sync_policy_info>();
       decode(*policy, bl);
-      sync_policy = std::const_pointer_cast<const RGWBucketSyncPolicy>(policy);
+      sync_policy = std::const_pointer_cast<const rgw_sync_policy_info>(policy);
     } else {
       sync_policy.reset();
     }
@@ -2197,10 +2175,10 @@ void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
   DECODE_FINISH(bl);
 }
 
-void RGWBucketInfo::set_sync_policy(RGWBucketSyncPolicy&& policy)
+void RGWBucketInfo::set_sync_policy(rgw_sync_policy_info&& policy)
 {
-  auto shared_policy = make_shared<RGWBucketSyncPolicy>(policy);
-  sync_policy = std::const_pointer_cast<const RGWBucketSyncPolicy>(shared_policy);
+  auto shared_policy = make_shared<rgw_sync_policy_info>(policy);
+  sync_policy = std::const_pointer_cast<const rgw_sync_policy_info>(shared_policy);
 }
 
 bool RGWBucketInfo::empty_sync_policy() const
@@ -2212,18 +2190,3 @@ bool RGWBucketInfo::empty_sync_policy() const
   return sync_policy->empty();
 }
 
-bool RGWBucketInfo::bucket_is_sync_source(const string& zone_id) const
-{
-  return (sync_policy &&
-          sync_policy->zone_is_source(zone_id));
-}
-
-bool RGWBucketInfo::bucket_datasync_enabled(const RGWSI_Zone *zone_svc) const
-{
-  if (bucket_is_sync_source(zone_svc->zone_id())) {
-    return true;
-  }
-
-  return (zone_svc->need_to_log_data() &&
-          datasync_flag_enabled());
-}

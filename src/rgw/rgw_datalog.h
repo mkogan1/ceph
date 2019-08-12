@@ -183,7 +183,7 @@ class RGWDataChangesLog {
   std::atomic<bool> down_flag = { false };
 
   struct ChangeStatus {
-    std::shared_ptr<const RGWBucketSyncPolicy> sync_policy;
+    std::shared_ptr<const rgw_sync_policy_info> sync_policy;
     ceph::real_time cur_expiration;
     ceph::real_time cur_sent;
     bool pending = false;
