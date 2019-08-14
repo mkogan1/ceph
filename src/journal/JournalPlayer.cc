@@ -712,7 +712,7 @@ void JournalPlayer::schedule_watch(bool immediate) {
                      << *m_active_tag_tid << dendl;
 
     m_async_op_tracker.start_op();
-    FunctionContext *ctx = new FunctionContext([this](int r) {
+    auto ctx = new LambdaContext([this](int r) {
         handle_watch_assert_active(r);
       });
     m_journal_metadata->assert_active_tag(*m_active_tag_tid, ctx);

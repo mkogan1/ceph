@@ -195,7 +195,7 @@ void PoolWatcher<I>::unregister_watcher() {
   dout(5) << dendl;
 
   m_async_op_tracker.start_op();
-  Context *ctx = new FunctionContext([this](int r) {
+  Context *ctx = new LambdaContext([this](int r) {
       dout(5) << "unregister_watcher: r=" << r << dendl;
       if (r < 0) {
         derr << "error unregistering watcher for "
@@ -367,7 +367,7 @@ void PoolWatcher<I>::schedule_refresh_images(double interval) {
   m_image_ids_invalid = true;
   m_timer_ctx = m_threads->timer->add_event_after(
     interval,
-    new FunctionContext([this](int r) {
+    new LambdaContext([this](int r) {
 	process_refresh_images();
       }));
 }
@@ -429,7 +429,7 @@ void PoolWatcher<I>::process_refresh_images() {
 
   // execute outside of the timer's lock
   m_async_op_tracker.start_op();
-  Context *ctx = new FunctionContext([this](int r) {
+  Context *ctx = new LambdaContext([this](int r) {
       register_watcher();
       m_async_op_tracker.finish_op();
     });
@@ -447,7 +447,7 @@ void PoolWatcher<I>::schedule_listener() {
   dout(20) << dendl;
 
   m_async_op_tracker.start_op();
-  Context *ctx = new FunctionContext([this](int r) {
+  Context *ctx = new LambdaContext([this](int r) {
       notify_listener();
       m_async_op_tracker.finish_op();
     });

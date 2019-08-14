@@ -1434,7 +1434,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       }
 
       auto *throttle = m_throttle;
-      auto *end_op_ctx = new FunctionContext([throttle](int r) {
+      auto *end_op_ctx = new LambdaContext([throttle](int r) {
 	throttle->end_op(r);
       });
       auto gather_ctx = new C_Gather(m_dest->cct, end_op_ctx);

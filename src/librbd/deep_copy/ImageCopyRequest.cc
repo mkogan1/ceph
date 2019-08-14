@@ -127,7 +127,7 @@ void ImageCopyRequest<I>::send_next_object_copy() {
     flags |= OBJECT_COPY_REQUEST_FLAG_FLATTEN;
   }
 
-  Context *ctx = new FunctionContext(
+  Context *ctx = new LambdaContext(
     [this, ono](int r) {
       handle_object_copy(ono, r);
     });

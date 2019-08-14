@@ -122,13 +122,16 @@ struct RunOnDelete {
 typedef std::shared_ptr<RunOnDelete> RunOnDeleteRef;
 
 template <typename T>
-struct LambdaContext : public Context {
-  T t;
+class LambdaContext : public Context {
+public:
   LambdaContext(T &&t) : t(std::forward<T>(t)) {}
-  void finish(int) override {
-    t();
+  void finish(int r) override {
+    t(r);
   }
+private:
+  T t;
 };
+
 template <typename T>
 LambdaContext<T> *make_lambda_context(T &&t) {
   return new LambdaContext<T>(std::move(t));
