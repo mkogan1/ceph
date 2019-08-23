@@ -9715,7 +9715,8 @@ int RGWRados::cls_user_get_header_async(const string& user_id, RGWGetUserHeader_
 }
 
 int RGWRados::cls_user_sync_bucket_stats(rgw_raw_obj& user_obj,
-					 const RGWBucketInfo& bucket_info)
+					 const RGWBucketInfo& bucket_info,
+					 RGWBucketEnt* result)
 {
   vector<rgw_bucket_dir_header> headers;
   int r = cls_bucket_head(bucket_info, RGW_NO_SHARD, headers);
@@ -9724,21 +9725,22 @@ int RGWRados::cls_user_sync_bucket_stats(rgw_raw_obj& user_obj,
     return r;
   }
 
-  cls_user_bucket_entry entry;
-
-  bucket_info.bucket.convert(&entry.bucket);
+  result->bucket = bucket_info.bucket;
 
   for (const auto& hiter : headers) {
     for (const auto& iter : hiter.stats) {
       if (RGWObjCategory::Main == iter.first ||
 	  RGWObjCategory::MultiMeta == iter.first) {
 	const struct rgw_bucket_category_stats& header_stats = iter.second;
-	entry.size += header_stats.total_size;
-	entry.size_rounded += header_stats.total_size_rounded;
-	entry.count += header_stats.num_entries;
+	result->size += header_stats.total_size;
+	result->size_rounded += header_stats.total_size_rounded;
+	result->count += header_stats.num_entries;
       }
     }
   }
+
+  cls_user_bucket_entry entry;
+  result->convert(&entry);
 
   list<cls_user_bucket_entry> entries;
   entries.push_back(entry);
@@ -9879,7 +9881,7 @@ int RGWRados::cls_user_remove_bucket(rgw_raw_obj& obj, const cls_user_bucket& bu
 
 int RGWRados::check_bucket_shards(const RGWBucketInfo& bucket_info,
 				  const rgw_bucket& bucket,
-				  RGWQuotaInfo& bucket_quota)
+				  uint64_t num_objs)
 {
   if (! cct->_conf.get_val<bool>("rgw_dynamic_resharding")) {
       return 0;
@@ -9899,14 +9901,9 @@ int RGWRados::check_bucket_shards(const RGWBucketInfo& bucket_info,
   const uint64_t max_objs_per_shard =
     cct->_conf.get_val<uint64_t>("rgw_max_objs_per_shard");
 
-  int ret =
-    quota_handler->check_bucket_shards(max_objs_per_shard, num_source_shards,
-                                      bucket_info.owner, bucket, bucket_quota,
-                                      1, need_resharding, &suggested_num_shards);
-  if (ret < 0) {
-    return ret;
-  }
-
+  quota_handler->check_bucket_shards(max_objs_per_shard, num_source_shards,
+                                     bucket, num_objs, need_resharding,
+                                     &suggested_num_shards);
   if (! need_resharding) {
     return 0;
   }

@@ -636,13 +636,14 @@ int RGWUserStatsCache::sync_bucket(const rgw_user& user, rgw_bucket& bucket)
     return r;
   }
 
-  r = rgw_bucket_sync_user_stats(store, user, bucket_info);
+  RGWBucketEnt ent;
+  r = rgw_bucket_sync_user_stats(store, user, bucket_info, &ent);
   if (r < 0) {
     ldout(store->ctx(), 0) << "ERROR: rgw_bucket_sync_user_stats() for user=" << user << ", bucket=" << bucket << " returned " << r << dendl;
     return r;
   }
 
-  return 0;
+  return store->check_bucket_shards(bucket_info, bucket, ent.count);
 }
 
 int RGWUserStatsCache::sync_user(const rgw_user& user)
@@ -970,31 +971,21 @@ public:
     user_stats_cache.adjust_stats(user, bucket, obj_delta, added_bytes, removed_bytes);
   }
 
-  int check_bucket_shards(uint64_t max_objs_per_shard, uint64_t num_shards,
-			  const rgw_user& user, const rgw_bucket& bucket, RGWQuotaInfo& bucket_quota,
-			  uint64_t num_objs, bool& need_resharding, uint32_t *suggested_num_shards) override
+  void check_bucket_shards(uint64_t max_objs_per_shard, uint64_t num_shards,
+			   const rgw_bucket& bucket, uint64_t num_objs,
+			   bool& need_resharding, uint32_t *suggested_num_shards) override
   {
-    RGWStorageStats bucket_stats;
-    int ret = bucket_stats_cache.get_stats(user, bucket, bucket_stats,
-                                           bucket_quota);
-    if (ret < 0) {
-      return ret;
-    }
-
-    if (bucket_stats.num_objects  + num_objs > num_shards * max_objs_per_shard) {
-      ldout(store->ctx(), 0) << __func__ << ": resharding needed: stats.num_objects=" << bucket_stats.num_objects
+    if (num_objs > num_shards * max_objs_per_shard) {
+      ldout(store->ctx(), 0) << __func__ << ": resharding needed: stats.num_objects=" << num_objs
              << " shard max_objects=" <<  max_objs_per_shard * num_shards << dendl;
       need_resharding = true;
       if (suggested_num_shards) {
-        *suggested_num_shards = (bucket_stats.num_objects  + num_objs) * 2 / max_objs_per_shard;
+        *suggested_num_shards = num_objs * 2 / max_objs_per_shard;
       }
     } else {
       need_resharding = false;
     }
-
-    return 0;
   }
-
 };
 
 

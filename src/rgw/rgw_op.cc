@@ -3280,7 +3280,8 @@ void RGWDeleteBucket::execute()
     }
   }
 
-  op_ret = rgw_bucket_sync_user_stats(store, s->user->user_id, s->bucket_info);
+  RGWBucketEnt ent;
+  op_ret = rgw_bucket_sync_user_stats(store, s->user->user_id, s->bucket_info, &ent);
   if ( op_ret < 0) {
      ldpp_dout(this, 1) << "WARNING: failed to sync user stats before bucket delete: op_ret= " << op_ret << dendl;
   }

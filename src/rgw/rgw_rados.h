@@ -2323,7 +2323,8 @@ public:
   int cls_user_get_header(const string& user_id, cls_user_header *header);
   int cls_user_reset_stats(const string& user_id);
   int cls_user_get_header_async(const string& user_id, RGWGetUserHeader_CB *ctx);
-  int cls_user_sync_bucket_stats(rgw_raw_obj& user_obj, const RGWBucketInfo& bucket_info);
+  int cls_user_sync_bucket_stats(rgw_raw_obj& user_obj, const RGWBucketInfo& bucket_info,
+                                 RGWBucketEnt *pent);
   int cls_user_list_buckets(rgw_raw_obj& obj,
                             const string& in_marker,
                             const string& end_marker,
@@ -2342,7 +2343,7 @@ public:
                   RGWQuotaInfo& user_quota, RGWQuotaInfo& bucket_quota, uint64_t obj_size, bool check_size_only = false);
 
   int check_bucket_shards(const RGWBucketInfo& bucket_info, const rgw_bucket& bucket,
-			  RGWQuotaInfo& bucket_quota);
+			  uint64_t num_objs);
 
   int add_bucket_to_reshard(const RGWBucketInfo& bucket_info, uint32_t new_num_shards);
 
