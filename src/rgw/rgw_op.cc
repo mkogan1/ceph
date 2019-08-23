@@ -3645,11 +3645,6 @@ void RGWPutObj::execute()
       ldpp_dout(this, 20) << "check_quota() returned ret=" << op_ret << dendl;
       return;
     }
-    op_ret = store->check_bucket_shards(s->bucket_info, s->bucket, bucket_quota);
-    if (op_ret < 0) {
-      ldpp_dout(this, 20) << "check_bucket_shards() returned ret=" << op_ret << dendl;
-      return;
-    }
   }
 
   if (supplied_etag) {
@@ -3849,12 +3844,6 @@ void RGWPutObj::execute()
     return;
   }
 
-  op_ret = store->check_bucket_shards(s->bucket_info, s->bucket, bucket_quota);
-  if (op_ret < 0) {
-    ldpp_dout(this, 20) << "check_bucket_shards() returned ret=" << op_ret << dendl;
-    return;
-  }
-
   hash.Final(m);
 
   if (compressor && compressor->is_compressed()) {
@@ -4033,11 +4022,6 @@ void RGWPostObj::execute()
       return;
     }
 
-    op_ret = store->check_bucket_shards(s->bucket_info, s->bucket, bucket_quota);
-    if (op_ret < 0) {
-      return;
-    }
-
     if (supplied_md5_b64) {
       char supplied_md5_bin[CEPH_CRYPTO_MD5_DIGESTSIZE + 1];
       ldpp_dout(this, 15) << "supplied_md5_b64=" << supplied_md5_b64 << dendl;
@@ -4137,11 +4121,6 @@ void RGWPostObj::execute()
 
     op_ret = store->check_quota(s->bucket_owner.get_id(), s->bucket,
                                 user_quota, bucket_quota, s->obj_size);
-    if (op_ret < 0) {
-      return;
-    }
-
-    op_ret = store->check_bucket_shards(s->bucket_info, s->bucket, bucket_quota);
     if (op_ret < 0) {
       return;
     }
@@ -6928,11 +6907,6 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
     return op_ret;
   }
 
-  op_ret = store->check_bucket_shards(s->bucket_info, s->bucket, bucket_quota);
-  if (op_ret < 0) {
-    return op_ret;
-  }
-
   rgw_obj obj(binfo.bucket, object);
   if (s->bucket_info.versioning_enabled()) {
     store->gen_rand_obj_instance_name(&obj);
@@ -7013,11 +6987,6 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
 			      user_quota, bucket_quota, size);
   if (op_ret < 0) {
     ldpp_dout(this, 20) << "quota exceeded for path=" << path << dendl;
-    return op_ret;
-  }
-
-  op_ret = store->check_bucket_shards(s->bucket_info, s->bucket, bucket_quota);
-  if (op_ret < 0) {
     return op_ret;
   }
 
