@@ -156,13 +156,15 @@ int rgw_read_user_buckets(RGWRados * store,
   return 0;
 }
 
-int rgw_bucket_sync_user_stats(RGWRados *store, const rgw_user& user_id, const RGWBucketInfo& bucket_info)
+int rgw_bucket_sync_user_stats(RGWRados *store, const rgw_user& user_id,
+                               const RGWBucketInfo& bucket_info,
+                               RGWBucketEnt* pent)
 {
   string buckets_obj_id;
   rgw_get_buckets_obj(user_id, buckets_obj_id);
   rgw_raw_obj obj(store->svc.zone->get_zone_params().user_uid_pool, buckets_obj_id);
 
-  return store->cls_user_sync_bucket_stats(obj, bucket_info);
+  return store->cls_user_sync_bucket_stats(obj, bucket_info, pent);
 }
 
 int rgw_bucket_sync_user_stats(RGWRados *store, const string& tenant_name, const string& bucket_name)
@@ -175,7 +177,8 @@ int rgw_bucket_sync_user_stats(RGWRados *store, const string& tenant_name, const
     return ret;
   }
 
-  ret = rgw_bucket_sync_user_stats(store, bucket_info.owner, bucket_info);
+  RGWBucketEnt ent;
+  ret = rgw_bucket_sync_user_stats(store, bucket_info.owner, bucket_info, &ent);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: could not sync user stats for bucket " << bucket_name << ": ret=" << ret << dendl;
     return ret;
@@ -574,7 +577,8 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
     return ret;
   }
 
-  ret = rgw_bucket_sync_user_stats(store, info.owner, info);
+  RGWBucketEnt ent;
+  ret = rgw_bucket_sync_user_stats(store, info.owner, info, &ent);
   if ( ret < 0) {
      dout(1) << "WARNING: failed sync user stats before bucket delete. ret=" <<  ret << dendl;
   }
@@ -739,7 +743,8 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
     return ret;
   }
 
-  ret = rgw_bucket_sync_user_stats(store, info.owner, info);
+  RGWBucketEnt ent;
+  ret = rgw_bucket_sync_user_stats(store, info.owner, info, &ent);
   if (ret < 0) {
      dout(1) << "WARNING: failed sync user stats before bucket delete. ret=" <<  ret << dendl;
   }
