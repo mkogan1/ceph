@@ -45,7 +45,9 @@ extern int rgw_bucket_delete_bucket_obj(RGWRados *store,
                                         const string& bucket_name,
                                         RGWObjVersionTracker& objv_tracker);
 
-extern int rgw_bucket_sync_user_stats(RGWRados *store, const rgw_user& user_id, const RGWBucketInfo& bucket_info);
+extern int rgw_bucket_sync_user_stats(RGWRados *store, const rgw_user& user_id,
+                                      const RGWBucketInfo& bucket_info,
+                                      RGWBucketEnt* pent);
 extern int rgw_bucket_sync_user_stats(RGWRados *store, const string& tenant_name, const string& bucket_name);
 
 extern std::string rgw_make_bucket_entry_name(const std::string& tenant_name,
