@@ -46,7 +46,7 @@ private:
    * GET_MIRROR_IMAGE
    *    |
    *    v
-   * GET_TAG_OWNER
+   * GET_JOURNAL_TAG_OWNER (if journal)
    *    |
    *    v
    * <finish>
@@ -65,8 +65,10 @@ private:
   void get_mirror_image();
   void handle_get_mirror_image(int r);
 
-  void get_tag_owner();
-  void handle_get_tag_owner(int r);
+  void get_journal_tag_owner();
+  void handle_get_journal_tag_owner(int r);
+
+  void get_snapshot_promotion_state();
 
   void finish(int r);
 
