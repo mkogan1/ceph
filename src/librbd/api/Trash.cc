@@ -42,10 +42,6 @@ namespace {
 
 template <typename I>
 int disable_mirroring(I *ictx) {
-  if (!ictx->test_features(RBD_FEATURE_JOURNALING)) {
-    return 0;
-  }
-
   cls::rbd::MirrorImage mirror_image;
   int r = cls_client::mirror_image_get(&ictx->md_ctx, ictx->id, &mirror_image);
   if (r == -ENOENT) {
@@ -85,10 +81,6 @@ int enable_mirroring(IoCtx &io_ctx, const std::string &image_id) {
   if (r < 0) {
     lderr(cct) << "failed to retrieve features: " << cpp_strerror(r) << dendl;
     return r;
-  }
-
-  if ((features & RBD_FEATURE_JOURNALING) == 0) {
-    return 0;
   }
 
   cls::rbd::MirrorMode mirror_mode;
