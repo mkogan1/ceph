@@ -740,6 +740,7 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
         }
         max_aio = concurrent_max;
       }
+      obj_ctx.invalidate(obj);
     } // for all RGW objects
   }
 
