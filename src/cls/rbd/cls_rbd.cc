@@ -4590,13 +4590,6 @@ int uuid_get(cls_method_context_t hctx, std::string *mirror_uuid) {
   return 0;
 }
 
-void sanitize_entity_inst(entity_inst_t* entity_inst) {
-  // make all addrs of type ANY because the type isn't what uniquely
-  // identifies them and clients and on-disk formats can be encoded
-  // with different backwards compatibility settings.
-  entity_inst->addr.set_type(entity_addr_t::TYPE_ANY);
-}
-
 int list_watchers(cls_method_context_t hctx,
                   std::set<entity_inst_t> *entities) {
   obj_list_watch_response_t watchers;
@@ -4609,7 +4602,7 @@ int list_watchers(cls_method_context_t hctx,
   entities->clear();
   for (auto &w : watchers.entries) {
     entity_inst_t entity_inst{w.name, w.addr};
-    sanitize_entity_inst(&entity_inst);
+    cls::rbd::sanitize_entity_inst(&entity_inst);
 
     entities->insert(entity_inst);
   }
@@ -4975,45 +4968,9 @@ int image_remove(cls_method_context_t hctx, const string &image_id) {
   return 0;
 }
 
-struct MirrorImageStatusOnDisk : cls::rbd::MirrorImageStatus {
-  entity_inst_t origin;
-
-  MirrorImageStatusOnDisk() {
-  }
-  MirrorImageStatusOnDisk(const cls::rbd::MirrorImageStatus &status) :
-    cls::rbd::MirrorImageStatus(status) {
-  }
-
-  void encode_meta(bufferlist &bl, uint64_t features) const {
-    ENCODE_START(1, 1, bl);
-    auto sanitized_origin = origin;
-    sanitize_entity_inst(&sanitized_origin);
-    encode(sanitized_origin, bl, features);
-    ENCODE_FINISH(bl);
-  }
-
-  void encode(bufferlist &bl, uint64_t features) const {
-    encode_meta(bl, features);
-    cls::rbd::MirrorImageStatus::encode(bl);
-  }
-
-  void decode_meta(bufferlist::const_iterator &it) {
-    DECODE_START(1, it);
-    decode(origin, it);
-    sanitize_entity_inst(&origin);
-    DECODE_FINISH(it);
-  }
-
-  void decode(bufferlist::const_iterator &it) {
-    decode_meta(it);
-    cls::rbd::MirrorImageStatus::decode(it);
-  }
-};
-WRITE_CLASS_ENCODER_FEATURES(MirrorImageStatusOnDisk)
-
 int image_status_set(cls_method_context_t hctx, const string &global_image_id,
 		     const cls::rbd::MirrorImageStatus &status) {
-  MirrorImageStatusOnDisk ondisk_status(status);
+  cls::rbd::MirrorImageStatusOnDisk ondisk_status(status);
   ondisk_status.up = false;
   ondisk_status.last_update = ceph_clock_now();
 
@@ -5058,7 +5015,7 @@ int image_status_get(cls_method_context_t hctx, const string &global_image_id,
     return r;
   }
 
-  MirrorImageStatusOnDisk ondisk_status;
+  cls::rbd::MirrorImageStatusOnDisk ondisk_status;
   try {
     auto it = bl.cbegin();
     decode(ondisk_status, it);
@@ -5220,7 +5177,7 @@ int image_status_remove_down(cls_method_context_t hctx) {
 	break;
       }
 
-      MirrorImageStatusOnDisk status;
+      cls::rbd::MirrorImageStatusOnDisk status;
       try {
 	auto it = list_it.second.cbegin();
 	status.decode_meta(it);
@@ -5264,7 +5221,7 @@ int image_instance_get(cls_method_context_t hctx,
     return r;
   }
 
-  MirrorImageStatusOnDisk ondisk_status;
+  cls::rbd::MirrorImageStatusOnDisk ondisk_status;
   try {
     auto it = bl.cbegin();
     decode(ondisk_status, it);
