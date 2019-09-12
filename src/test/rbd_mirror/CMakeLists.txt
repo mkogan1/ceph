@@ -21,12 +21,13 @@ add_executable(unittest_rbd_mirror
   test_mock_ImageMap.cc
   test_mock_ImageReplayer.cc
   test_mock_ImageSync.cc
-  test_mock_ImageSyncThrottler.cc
   test_mock_InstanceReplayer.cc
   test_mock_InstanceWatcher.cc
   test_mock_LeaderWatcher.cc
+  test_mock_NamespaceReplayer.cc
   test_mock_PoolReplayer.cc
   test_mock_PoolWatcher.cc
+  test_mock_Throttler.cc
   image_deleter/test_mock_RemoveRequest.cc
   image_deleter/test_mock_SnapshotPurgeRequest.cc
   image_deleter/test_mock_TrashMoveRequest.cc
@@ -64,7 +65,7 @@ target_link_libraries(unittest_rbd_mirror
   librados
   osdc
   global
-  radostest
+  radostest-cxx
   )
 
 add_executable(ceph_test_rbd_mirror
@@ -82,7 +83,7 @@ target_link_libraries(ceph_test_rbd_mirror
   cls_journal_client
   rbd_types
   librados
-  radostest
+  radostest-cxx
   ${UNITTEST_LIBS}
   )
 

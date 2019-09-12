@@ -1,13 +1,11 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <errno.h>
 #include <vector>
 #include <algorithm>
 #include <string>
 #include <boost/tokenizer.hpp>
-#include <boost/algorithm/string.hpp>
-#include <boost/utility/string_view.hpp>
 
 #include "json_spirit/json_spirit.h"
 #include "common/ceph_json.h"
@@ -18,13 +16,13 @@
 #include "rgw_string.h"
 #include "rgw_rados.h"
 #include "rgw_http_errors.h"
+#include "rgw_arn.h"
 
 #include "common/ceph_crypto.h"
 #include "common/armor.h"
 #include "common/errno.h"
 #include "common/Clock.h"
 #include "common/Formatter.h"
-#include "common/perf_counters.h"
 #include "common/convenience.h"
 #include "common/strtol.h"
 #include "include/str_list.h"
@@ -36,12 +34,10 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
-using rgw::IAM::ARN;
+using rgw::ARN;
 using rgw::IAM::Effect;
 using rgw::IAM::op_to_perm;
 using rgw::IAM::Policy;
-
-PerfCounters *perfcounter = NULL;
 
 const uint32_t RGWBucketInfo::NUM_SHARDS_BLIND_BUCKET(UINT32_MAX);
 
@@ -78,6 +74,8 @@ rgw_http_errors rgw_http_s3_errors({
     { ERR_INVALID_CORS_RULES_ERROR, {400, "InvalidRequest" }},
     { ERR_INVALID_WEBSITE_ROUTING_RULES_ERROR, {400, "InvalidRequest" }},
     { ERR_INVALID_ENCRYPTION_ALGORITHM, {400, "InvalidEncryptionAlgorithmError" }},
+    { ERR_INVALID_RETENTION_PERIOD,{400, "InvalidRetentionPeriod"}},
+    { ERR_LIMIT_EXCEEDED, {400, "LimitExceeded" }},
     { ERR_LENGTH_REQUIRED, {411, "MissingContentLength" }},
     { EACCES, {403, "AccessDenied" }},
     { EPERM, {403, "AccessDenied" }},
@@ -99,6 +97,8 @@ rgw_http_errors rgw_http_s3_errors({
     { ERR_NO_CORS_FOUND, {404, "NoSuchCORSConfiguration"}},
     { ERR_NO_SUCH_SUBUSER, {404, "NoSuchSubUser"}},
     { ERR_NO_SUCH_ENTITY, {404, "NoSuchEntity"}},
+    { ERR_NO_SUCH_CORS_CONFIGURATION, {404, "NoSuchCORSConfiguration"}},
+    { ERR_NO_SUCH_OBJECT_LOCK_CONFIGURATION, {404, "ObjectLockConfigurationNotFoundError"}},
     { ERR_METHOD_NOT_ALLOWED, {405, "MethodNotAllowed" }},
     { ETIMEDOUT, {408, "RequestTimeout" }},
     { EEXIST, {409, "BucketAlreadyExists" }},
@@ -106,8 +106,9 @@ rgw_http_errors rgw_http_s3_errors({
     { ERR_EMAIL_EXIST, {409, "EmailExists" }},
     { ERR_KEY_EXIST, {409, "KeyExists"}},
     { ERR_TAG_CONFLICT, {409, "OperationAborted"}},
-    { ERR_ROLE_EXISTS, {409, "EntityAlreadyExists"}},
-    { ERR_DELETE_CONFLICT, {409, "DeleteConflict"}},
+    { ERR_POSITION_NOT_EQUAL_TO_LENGTH, {409, "PositionNotEqualToLength"}},
+    { ERR_OBJECT_NOT_APPENDABLE, {409, "ObjectNotAppendable"}},
+    { ERR_INVALID_BUCKET_STATE, {409, "InvalidBucketState"}},
     { ERR_INVALID_SECRET_KEY, {400, "InvalidSecretKey"}},
     { ERR_INVALID_KEY_TYPE, {400, "InvalidKeyType"}},
     { ERR_INVALID_CAP, {400, "InvalidCapability"}},
@@ -120,7 +121,9 @@ rgw_http_errors rgw_http_s3_errors({
     { ERR_INTERNAL_ERROR, {500, "InternalError" }},
     { ERR_NOT_IMPLEMENTED, {501, "NotImplemented" }},
     { ERR_SERVICE_UNAVAILABLE, {503, "ServiceUnavailable"}},
+    { ERR_RATE_LIMITED, {503, "SlowDown"}},
     { ERR_ZERO_IN_URL, {400, "InvalidRequest" }},
+    { ERR_NO_SUCH_TAG_SET, {404, "NoSuchTagSetError"}},
 });
 
 rgw_http_errors rgw_http_swift_errors({
@@ -138,50 +141,18 @@ rgw_http_errors rgw_http_swift_errors({
      * procedures also for ERR_ZERO_IN_URL. This make a problem as the validation
      * is performed very early, even before setting the req_state::proto_flags. */
     { ERR_ZERO_IN_URL, {412, "Invalid UTF8 or contains NULL"}},
+    { ERR_RATE_LIMITED, {498, "Rate Limited"}},
 });
 
 rgw_http_errors rgw_http_sts_errors({
     { ERR_PACKED_POLICY_TOO_LARGE, {400, "PackedPolicyTooLarge" }},
+    { ERR_INVALID_IDENTITY_TOKEN, {400, "InvalidIdentityToken" }},
 });
 
-int rgw_perf_start(CephContext *cct)
-{
-  PerfCountersBuilder plb(cct, "rgw", l_rgw_first, l_rgw_last);
-
-  // RGW emits comparatively few metrics, so let's be generous
-  // and mark them all USEFUL to get transmission to ceph-mgr by default.
-  plb.set_prio_default(PerfCountersBuilder::PRIO_USEFUL);
-
-  plb.add_u64_counter(l_rgw_req, "req", "Requests");
-  plb.add_u64_counter(l_rgw_failed_req, "failed_req", "Aborted requests");
-
-  plb.add_u64_counter(l_rgw_get, "get", "Gets");
-  plb.add_u64_counter(l_rgw_get_b, "get_b", "Size of gets");
-  plb.add_time_avg(l_rgw_get_lat, "get_initial_lat", "Get latency");
-  plb.add_u64_counter(l_rgw_put, "put", "Puts");
-  plb.add_u64_counter(l_rgw_put_b, "put_b", "Size of puts");
-  plb.add_time_avg(l_rgw_put_lat, "put_initial_lat", "Put latency");
-
-  plb.add_u64(l_rgw_qlen, "qlen", "Queue length");
-  plb.add_u64(l_rgw_qactive, "qactive", "Active requests queue");
-
-  plb.add_u64_counter(l_rgw_cache_hit, "cache_hit", "Cache hits");
-  plb.add_u64_counter(l_rgw_cache_miss, "cache_miss", "Cache miss");
-
-  plb.add_u64_counter(l_rgw_keystone_token_cache_hit, "keystone_token_cache_hit", "Keystone token cache hits");
-  plb.add_u64_counter(l_rgw_keystone_token_cache_miss, "keystone_token_cache_miss", "Keystone token cache miss");
-
-  perfcounter = plb.create_perf_counters();
-  cct->get_perfcounters_collection()->add(perfcounter);
-  return 0;
-}
-
-void rgw_perf_stop(CephContext *cct)
-{
-  ceph_assert(perfcounter);
-  cct->get_perfcounters_collection()->remove(perfcounter);
-  delete perfcounter;
-}
+rgw_http_errors rgw_http_iam_errors({
+    { ERR_ROLE_EXISTS, {409, "EntityAlreadyExists"}},
+    { ERR_DELETE_CONFLICT, {409, "DeleteConflict"}},
+});
 
 using namespace ceph::crypto;
 
@@ -347,6 +318,11 @@ void set_req_state_err(struct rgw_err& err,	/* out */
       return;
   }
 
+  if (prot_flags & RGW_REST_IAM) {
+    if (search_err(rgw_http_iam_errors, err_no, err.http_ret, err.err_code))
+      return;
+  }
+
   //Default to searching in s3 errors
   if (search_err(rgw_http_s3_errors, err_no, err.http_ret, err.err_code))
       return;
@@ -415,7 +391,6 @@ struct str_len meta_prefixes[] = { STR_LEN_ENTRY("HTTP_X_AMZ"),
                                    STR_LEN_ENTRY("HTTP_X_ACCOUNT"),
                                    {NULL, 0} };
 
-
 void req_info::init_meta_info(bool *found_bad_meta)
 {
   x_meta_map.clear();
@@ -468,6 +443,23 @@ std::ostream& operator<<(std::ostream& oss, const rgw_err &err)
 {
   oss << "rgw_err(http_ret=" << err.http_ret << ", err_code='" << err.err_code << "') ";
   return oss;
+}
+
+void rgw_add_amz_meta_header(
+  std::map<std::string, std::string>& x_meta_map,
+  const std::string& k,
+  const std::string& v)
+{
+  auto it = x_meta_map.find(k);
+  if (it != x_meta_map.end()) {
+    std::string old = it->second;
+    boost::algorithm::trim_right(old);
+    old.append(",");
+    old.append(v);
+    x_meta_map[k] = old;
+  } else {
+    x_meta_map[k] = v;
+  }
 }
 
 string rgw_string_unquote(const string& s)
@@ -732,11 +724,11 @@ using ceph::crypto::SHA256;
  */
 sha256_digest_t calc_hash_sha256(const boost::string_view& msg)
 {
-  std::array<unsigned char, CEPH_CRYPTO_HMACSHA256_DIGESTSIZE> hash;
+  sha256_digest_t hash;
 
   SHA256 hasher;
   hasher.Update(reinterpret_cast<const unsigned char*>(msg.data()), msg.size());
-  hasher.Final(hash.data());
+  hasher.Final(hash.v);
 
   return hash;
 }
@@ -954,7 +946,9 @@ void RGWHTTPArgs::append(const string& name, const string& val)
       (name.compare("website") == 0) ||
       (name.compare("requestPayment") == 0) ||
       (name.compare("torrent") == 0) ||
-      (name.compare("tagging") == 0)) {
+      (name.compare("tagging") == 0) ||
+      (name.compare("append") == 0) ||
+      (name.compare("position") == 0)) {
     sub_resources[name] = val;
   } else if (name[0] == 'r') { // root of all evil
     if ((name.compare("response-content-type") == 0) ||
@@ -972,6 +966,7 @@ void RGWHTTPArgs::append(const string& name, const string& val)
               (name.compare("index") == 0) ||
               (name.compare("policy") == 0) ||
               (name.compare("quota") == 0) ||
+              (name.compare("list") == 0) ||
               (name.compare("object") == 0)) {
 
     if (!admin_subresource_added) {
@@ -1042,6 +1037,26 @@ void RGWHTTPArgs::get_bool(const char *name, bool *val, bool def_val)
   }
 }
 
+int RGWHTTPArgs::get_int(const char *name, int *val, int def_val)
+{
+  bool exists = false;
+  string val_str;
+  val_str = get(name, &exists);
+  if (!exists) {
+    *val = def_val;
+    return 0;
+  }
+
+  string err;
+
+  *val = (int)strict_strtol(val_str.c_str(), 10, &err);
+  if (!err.empty()) {
+    *val = def_val;
+    return -EINVAL;
+  }
+  return 0;
+}
+
 string RGWHTTPArgs::sys_get(const string& name, bool * const exists) const
 {
   const auto iter = sys_val_map.find(name);
@@ -1052,6 +1067,31 @@ string RGWHTTPArgs::sys_get(const string& name, bool * const exists) const
   }
 
   return e ? iter->second : string();
+}
+
+bool rgw_transport_is_secure(CephContext *cct, const RGWEnv& env)
+{
+  const auto& m = env.get_map();
+  // frontend connected with ssl
+  if (m.count("SERVER_PORT_SECURE")) {
+    return true;
+  }
+  // ignore proxy headers unless explicitly enabled
+  if (!cct->_conf->rgw_trust_forwarded_https) {
+    return false;
+  }
+  // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Forwarded
+  // Forwarded: by=<identifier>; for=<identifier>; host=<host>; proto=<http|https>
+  auto i = m.find("HTTP_FORWARDED");
+  if (i != m.end() && i->second.find("proto=https") != std::string::npos) {
+    return true;
+  }
+  // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-Proto
+  i = m.find("HTTP_X_FORWARDED_PROTO");
+  if (i != m.end() && i->second == "https") {
+    return true;
+  }
+  return false;
 }
 
 namespace {
@@ -1089,12 +1129,16 @@ bool verify_user_permission(const DoutPrefixProvider* dpp,
                             struct req_state * const s,
                             RGWAccessControlPolicy * const user_acl,
                             const vector<rgw::IAM::Policy>& user_policies,
-                            const rgw::IAM::ARN& res,
+                            const rgw::ARN& res,
                             const uint64_t op)
 {
   auto usr_policy_res = eval_user_policies(user_policies, s->env, boost::none, op, res);
   if (usr_policy_res == Effect::Deny) {
     return false;
+  }
+
+  if (usr_policy_res == Effect::Allow) {
+    return true;
   }
 
   if (op == rgw::IAM::s3CreateBucket || op == rgw::IAM::s3ListAllMyBuckets) {
@@ -1103,12 +1147,6 @@ bool verify_user_permission(const DoutPrefixProvider* dpp,
     return verify_user_permission_no_policy(dpp, s, user_acl, perm);
   }
 
-  if (usr_policy_res == Effect::Pass) {
-    return false;
-  }
-  else if (usr_policy_res == Effect::Allow) {
-    return true;
-  }
   return false;
 }
 
@@ -1116,6 +1154,9 @@ bool verify_user_permission_no_policy(const DoutPrefixProvider* dpp, struct req_
                             RGWAccessControlPolicy * const user_acl,
                             const int perm)
 {
+  if (s->auth.identity->get_identity_type() == TYPE_ROLE)
+    return false;
+
   /* S3 doesn't support account ACLs. */
   if (!user_acl)
     return true;
@@ -1128,7 +1169,7 @@ bool verify_user_permission_no_policy(const DoutPrefixProvider* dpp, struct req_
 
 bool verify_user_permission(const DoutPrefixProvider* dpp,
                             struct req_state * const s,
-                            const rgw::IAM::ARN& res,
+                            const rgw::ARN& res,
                             const uint64_t op)
 {
   return verify_user_permission(dpp, s, s->user_acl.get(), s->iam_user_policies, res, op);
@@ -1923,12 +1964,15 @@ bool match_policy(boost::string_view pattern, boost::string_view input,
 {
   const uint32_t flag2 = flag & (MATCH_POLICY_ACTION|MATCH_POLICY_ARN) ?
       MATCH_CASE_INSENSITIVE : 0;
+  const bool colonblocks = !(flag & (MATCH_POLICY_RESOURCE |
+				     MATCH_POLICY_STRING));
 
   const auto npos = boost::string_view::npos;
   boost::string_view::size_type last_pos_input = 0, last_pos_pattern = 0;
   while (true) {
-    auto cur_pos_input = input.find(":", last_pos_input);
-    auto cur_pos_pattern = pattern.find(":", last_pos_pattern);
+    auto cur_pos_input = colonblocks ? input.find(":", last_pos_input) : npos;
+    auto cur_pos_pattern =
+      colonblocks ? pattern.find(":", last_pos_pattern) : npos;
 
     auto substr_input = input.substr(last_pos_input, cur_pos_input);
     auto substr_pattern = pattern.substr(last_pos_pattern, cur_pos_pattern);

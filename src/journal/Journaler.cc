@@ -43,8 +43,7 @@ std::string Journaler::object_oid_prefix(int pool_id,
   return JOURNAL_OBJECT_PREFIX + stringify(pool_id) + "." + journal_id + ".";
 }
 
-Journaler::Threads::Threads(CephContext *cct)
-    : timer_lock("Journaler::timer_lock") {
+Journaler::Threads::Threads(CephContext *cct) {
   thread_pool = new ThreadPool(cct, "Journaler::thread_pool", "tp_journal", 1);
   thread_pool->start();
 
@@ -56,7 +55,7 @@ Journaler::Threads::Threads(CephContext *cct)
 
 Journaler::Threads::~Threads() {
   {
-    Mutex::Locker timer_locker(timer_lock);
+    std::lock_guard timer_locker{timer_lock};
     timer->shutdown();
   }
   delete timer;
@@ -73,24 +72,26 @@ Journaler::Threads::~Threads() {
 
 Journaler::Journaler(librados::IoCtx &header_ioctx,
                      const std::string &journal_id,
-                     const std::string &client_id, const Settings &settings)
+                     const std::string &client_id, const Settings &settings,
+                     CacheManagerHandler *cache_manager_handler)
     : m_threads(new Threads(reinterpret_cast<CephContext*>(header_ioctx.cct()))),
-      m_client_id(client_id) {
+      m_client_id(client_id), m_cache_manager_handler(cache_manager_handler) {
   set_up(m_threads->work_queue, m_threads->timer, &m_threads->timer_lock,
          header_ioctx, journal_id, settings);
 }
 
 Journaler::Journaler(ContextWQ *work_queue, SafeTimer *timer,
-                     Mutex *timer_lock, librados::IoCtx &header_ioctx,
+                     ceph::mutex *timer_lock, librados::IoCtx &header_ioctx,
 		     const std::string &journal_id,
-		     const std::string &client_id, const Settings &settings)
-    : m_client_id(client_id) {
+		     const std::string &client_id, const Settings &settings,
+                     CacheManagerHandler *cache_manager_handler)
+    : m_client_id(client_id), m_cache_manager_handler(cache_manager_handler) {
   set_up(work_queue, timer, timer_lock, header_ioctx, journal_id,
          settings);
 }
 
 void Journaler::set_up(ContextWQ *work_queue, SafeTimer *timer,
-                       Mutex *timer_lock, librados::IoCtx &header_ioctx,
+                       ceph::mutex *timer_lock, librados::IoCtx &header_ioctx,
                        const std::string &journal_id,
                        const Settings &settings) {
   m_header_ioctx.dup(header_ioctx);
@@ -216,8 +217,8 @@ void Journaler::get_mutable_metadata(uint64_t *minimum_set,
 
 void Journaler::create(uint8_t order, uint8_t splay_width,
                       int64_t pool_id, Context *on_finish) {
-  if (order > 64 || order < 12) {
-    lderr(m_cct) << "order must be in the range [12, 64]" << dendl;
+  if (order > 26 || order < 12) {
+    lderr(m_cct) << "order must be in the range [12, 26]" << dendl;
     on_finish->complete(-EDOM);
     return;
   }
@@ -391,15 +392,20 @@ void Journaler::committed(const Future &future) {
   m_trimmer->committed(future_impl->get_commit_tid());
 }
 
-void Journaler::start_append(int flush_interval, uint64_t flush_bytes,
-			     double flush_age, uint64_t max_in_flight_appends) {
+void Journaler::start_append(uint64_t max_in_flight_appends) {
   ceph_assert(m_recorder == nullptr);
 
   // TODO verify active object set >= current replay object set
 
   m_recorder = new JournalRecorder(m_data_ioctx, m_object_oid_prefix,
-				   m_metadata, flush_interval, flush_bytes,
-				   flush_age, max_in_flight_appends);
+				   m_metadata, max_in_flight_appends);
+}
+
+void Journaler::set_append_batch_options(int flush_interval,
+                                         uint64_t flush_bytes,
+                                         double flush_age) {
+  ceph_assert(m_recorder != nullptr);
+  m_recorder->set_append_batch_options(flush_interval, flush_bytes, flush_age);
 }
 
 void Journaler::stop_append(Context *on_safe) {
@@ -412,7 +418,7 @@ void Journaler::stop_append(Context *on_safe) {
       delete recorder;
       on_safe->complete(r);
     });
-  recorder->flush(on_safe);
+  recorder->shut_down(on_safe);
 }
 
 uint64_t Journaler::get_max_append_size() const {
@@ -436,7 +442,7 @@ void Journaler::flush_append(Context *on_safe) {
 void Journaler::create_player(ReplayHandler *replay_handler) {
   ceph_assert(m_player == nullptr);
   m_player = new JournalPlayer(m_data_ioctx, m_object_oid_prefix, m_metadata,
-                               replay_handler);
+                               replay_handler, m_cache_manager_handler);
 }
 
 void Journaler::get_metadata(uint8_t *order, uint8_t *splay_width,

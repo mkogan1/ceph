@@ -34,11 +34,17 @@ struct SnapInfo {
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator &bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<SnapInfo*>& ls);
+  static void generate_test_instances(std::list<SnapInfo*>& ls);
 
   std::string_view get_long_name() const;
 };
 WRITE_CLASS_ENCODER(SnapInfo)
+
+inline bool operator==(const SnapInfo &l, const SnapInfo &r)
+{
+  return l.snapid == r.snapid && l.ino == r.ino &&
+	 l.stamp == r.stamp && l.name == r.name;
+}
 
 ostream& operator<<(ostream& out, const SnapInfo &sn);
 
@@ -61,7 +67,7 @@ struct snaplink_t {
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator &bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<snaplink_t*>& ls);
+  static void generate_test_instances(std::list<snaplink_t*>& ls);
 };
 WRITE_CLASS_ENCODER(snaplink_t)
 
@@ -97,7 +103,7 @@ struct sr_t {
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator &bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<sr_t*>& ls);
+  static void generate_test_instances(std::list<sr_t*>& ls);
 };
 WRITE_CLASS_ENCODER(sr_t)
 

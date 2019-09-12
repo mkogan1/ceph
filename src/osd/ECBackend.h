@@ -104,7 +104,7 @@ public:
     const eversion_t &trim_to,
     const eversion_t &roll_forward_to,
     const vector<pg_log_entry_t> &log_entries,
-    boost::optional<pg_hit_set_history_t> &hset_history,
+    std::optional<pg_hit_set_history_t> &hset_history,
     Context *on_all_commit,
     ceph_tid_t tid,
     osd_reqid_t reqid,
@@ -302,11 +302,12 @@ private:
   void handle_recovery_read_complete(
     const hobject_t &hoid,
     boost::tuple<uint64_t, uint64_t, map<pg_shard_t, bufferlist> > &to_read,
-    boost::optional<map<string, bufferlist> > attrs,
+    std::optional<map<string, bufferlist> > attrs,
     RecoveryMessages *m);
   void handle_recovery_push(
     const PushOp &op,
-    RecoveryMessages *m);
+    RecoveryMessages *m,
+    bool is_repair);
   void handle_recovery_push_reply(
     const PushReplyOp &op,
     pg_shard_t from,
@@ -343,7 +344,7 @@ public:
   struct read_result_t {
     int r;
     map<pg_shard_t, int> errors;
-    boost::optional<map<string, bufferlist> > attrs;
+    std::optional<map<string, bufferlist> > attrs;
     list<
       boost::tuple<
 	uint64_t, uint64_t, map<pg_shard_t, bufferlist> > > returned;
@@ -455,7 +456,7 @@ public:
     object_stat_sum_t delta_stats;
     eversion_t version;
     eversion_t trim_to;
-    boost::optional<pg_hit_set_history_t> updated_hit_set_history;
+    std::optional<pg_hit_set_history_t> updated_hit_set_history;
     vector<pg_log_entry_t> log_entries;
     ceph_tid_t tid;
     osd_reqid_t reqid;
@@ -478,7 +479,7 @@ public:
     bool invalidates_cache() const { return plan.invalidates_cache; }
 
     // must be true if requires_rmw(), must be false if invalidates_cache()
-    bool using_cache = false;
+    bool using_cache = true;
 
     /// In progress read state;
     map<hobject_t,extent_set> pending_read; // subset already being read
@@ -599,6 +600,13 @@ public:
   };
   IsPGRecoverablePredicate *get_is_recoverable_predicate() const override {
     return new ECRecPred(ec_impl);
+  }
+
+  int get_ec_data_chunk_count() const override {
+    return ec_impl->get_data_chunk_count();
+  }
+  int get_ec_stripe_chunk_size() const override {
+    return sinfo.get_chunk_size();
   }
 
   /**

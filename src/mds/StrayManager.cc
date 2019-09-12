@@ -55,7 +55,7 @@ public:
   explicit StrayManagerLogContext(StrayManager *sm_) : sm(sm_) {}
 };
 
-class StrayManagerContext : public virtual MDSInternalContextBase {
+class StrayManagerContext : public virtual MDSContext {
 protected:
   StrayManager *sm;
   MDSRank *get_mds() override
@@ -230,8 +230,6 @@ void StrayManager::_purge_stray_purged(
 
     mds->mdlog->submit_entry(le, new C_PurgeStrayLogged(this, dn, pdv,
           mds->mdlog->get_current_segment()));
-
-    logger->set(l_mdc_num_strays, num_strays);
   }
 }
 
@@ -340,15 +338,28 @@ void StrayManager::_enqueue(CDentry *dn, bool trunc)
   }
 }
 
+void StrayManager::queue_delayed(CDentry *dn)
+{
+  if (!started)
+    return;
+
+  if (dn->state_test(CDentry::STATE_EVALUATINGSTRAY))
+    return;
+
+  if (!dn->item_stray.is_on_list()) {
+    delayed_eval_stray.push_back(&dn->item_stray);
+    num_strays_delayed++;
+    logger->set(l_mdc_num_strays_delayed, num_strays_delayed);
+  }
+}
 
 void StrayManager::advance_delayed()
 {
   if (!started)
     return;
 
-  for (elist<CDentry*>::iterator p = delayed_eval_stray.begin(); !p.end(); ) {
-    CDentry *dn = *p;
-    ++p;
+  while (!delayed_eval_stray.empty()) {
+    CDentry *dn = delayed_eval_stray.front();
     dn->item_stray.remove_myself();
     num_strays_delayed--;
 
@@ -359,17 +370,7 @@ void StrayManager::advance_delayed()
       continue;
     }
 
-    const bool purging = eval_stray(dn);
-    if (!purging) {
-      derr << "Dentry " << *dn << " was purgeable but no longer is!" << dendl;
-      /*
-       * This can happen if a stray is purgeable, but has gained an extra
-       * reference by virtue of having its backtrace updated.
-       * FIXME perhaps we could simplify this further by
-       * avoiding writing the backtrace of purge-ready strays, so
-       * that this code could be more rigid?
-       */
-    }
+    eval_stray(dn);
   }
   logger->set(l_mdc_num_strays_delayed, num_strays_delayed);
 }
@@ -410,7 +411,7 @@ struct C_MDC_EvalStray : public StrayManagerContext {
   }
 };
 
-bool StrayManager::_eval_stray(CDentry *dn, bool delay)
+bool StrayManager::_eval_stray(CDentry *dn)
 {
   dout(10) << "eval_stray " << *dn << dendl;
   CDentry::linkage_t *dnl = dn->get_projected_linkage();
@@ -429,17 +430,13 @@ bool StrayManager::_eval_stray(CDentry *dn, bool delay)
   // call eval_stray() after purge()
   ceph_assert(!dn->state_test(CDentry::STATE_PURGING));
 
-  if (!dn->is_auth()) {
+  if (!dn->is_auth())
     return false;
-  }
 
   if (!started)
-    delay = true;
+    return false;
 
   if (dn->item_stray.is_on_list()) {
-    if (delay)
-      return false;
-
     dn->item_stray.remove_myself();
     num_strays_delayed--;
     logger->set(l_mdc_num_strays_delayed, num_strays_delayed);
@@ -503,14 +500,8 @@ bool StrayManager::_eval_stray(CDentry *dn, bool delay)
       dout(20) << " too many dn refs" << dendl;
       return false;
     }
-    if (delay) {
-      if (!dn->item_stray.is_on_list()) {
-	delayed_eval_stray.push_back(&dn->item_stray);
-	num_strays_delayed++;
-	logger->set(l_mdc_num_strays_delayed, num_strays_delayed);
-      }
     // don't purge multiversion inode with snap data
-    } else if (in->snaprealm && in->snaprealm->has_past_parents() &&
+    if (in->snaprealm && in->snaprealm->has_past_parents() &&
               !in->old_inodes.empty()) {
       // A file with snapshots: we will truncate the HEAD revision
       // but leave the metadata intact.
@@ -548,14 +539,14 @@ void StrayManager::activate()
   purge_queue.activate();
 }
 
-bool StrayManager::eval_stray(CDentry *dn, bool delay)
+bool StrayManager::eval_stray(CDentry *dn)
 {
   // avoid nested eval_stray
   if (dn->state_test(CDentry::STATE_EVALUATINGSTRAY))
       return false;
 
   dn->state_set(CDentry::STATE_EVALUATINGSTRAY);
-  bool ret = _eval_stray(dn, delay);
+  bool ret = _eval_stray(dn);
   dn->state_clear(CDentry::STATE_EVALUATINGSTRAY);
   return ret;
 }
@@ -668,7 +659,7 @@ void StrayManager::reintegrate_stray(CDentry *straydn, CDentry *rdn)
   filepath dst;
   rdn->make_path(dst);
 
-  auto req = MClientRequest::create(CEPH_MDS_OP_RENAME);
+  auto req = make_message<MClientRequest>(CEPH_MDS_OP_RENAME);
   req->set_filepath(dst);
   req->set_filepath2(src);
   req->set_tid(mds->issue_tid());
@@ -697,7 +688,7 @@ void StrayManager::migrate_stray(CDentry *dn, mds_rank_t to)
   dst.push_dentry(src[0]);
   dst.push_dentry(src[1]);
 
-  auto req = MClientRequest::create(CEPH_MDS_OP_RENAME);
+  auto req = make_message<MClientRequest>(CEPH_MDS_OP_RENAME);
   req->set_filepath(dst);
   req->set_filepath2(src);
   req->set_tid(mds->issue_tid());

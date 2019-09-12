@@ -6,7 +6,7 @@ import sys
 import logging
 
 from ceph_volume.decorators import catches
-from ceph_volume import log, devices, configuration, conf, exceptions, terminal
+from ceph_volume import log, devices, configuration, conf, exceptions, terminal, inventory
 
 
 class Volume(object):
@@ -27,6 +27,7 @@ Ceph Conf: {ceph_path}
         self.mapper = {
             'lvm': devices.lvm.LVM,
             'simple': devices.simple.Simple,
+            'inventory': inventory.Inventory,
         }
         self.plugin_help = "No plugins found/loaded"
         if argv is None:
@@ -104,7 +105,7 @@ Ceph Conf: {ceph_path}
         # argparse which will end up complaning that there are no args
         if len(argv) <= 1:
             print(self.help(warning=True))
-            return
+            raise SystemExit(0)
         parser = argparse.ArgumentParser(
             prog='ceph-volume',
             formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -130,6 +131,7 @@ Ceph Conf: {ceph_path}
         if os.path.isdir(conf.log_path):
             conf.log_path = os.path.join(args.log_path, 'ceph-volume.log')
         log.setup()
+        log.setup_console()
         logger = logging.getLogger(__name__)
         logger.info("Running command: ceph-volume %s %s", " ".join(main_args), " ".join(subcommand_args))
         # set all variables from args and load everything needed according to

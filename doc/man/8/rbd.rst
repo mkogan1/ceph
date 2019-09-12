@@ -116,7 +116,7 @@ Parameters
    string. This is useful for situations where an image must
    be open from more than one client at once, like during
    live migration of a virtual machine, or for use underneath
-   a clustered filesystem.
+   a clustered file system.
 
 .. option:: --format format
 
@@ -537,13 +537,13 @@ Commands
 :command:`mv` *src-image-spec* *dest-image-spec*
   Rename an image.  Note: rename across pools is not supported.
 
-:command:`namespace create` *pool-name* *namespace-name*
+:command:`namespace create` *pool-name*/*namespace-name*
   Create a new image namespace within the pool.
 
 :command:`namespace list` *pool-name*
   List image namespaces defined within the pool.
 
-:command:`namespace remove` *pool-name* *namespace-name*
+:command:`namespace remove` *pool-name*/*namespace-name*
   Remove an empty image namespace from the pool.
 
 :command:`object-map check` *image-spec* | *snap-spec*
@@ -606,6 +606,12 @@ Commands
   in different pools than the parent snapshot.)
 
   This requires image format 2.
+
+:command:`sparsify` [--sparse-size *sparse-size*] *image-spec*
+  Reclaim space for zeroed image extents. The default sparse size is
+  4096 bytes and can be changed via --sparse-size option with the
+  following restrictions: it should be power of two, not less than
+  4096, and not larger image object size.
 
 :command:`status` *image-spec*
   Show the status of the image, including which clients have it open.
@@ -746,6 +752,17 @@ Per mapping (block device) `rbd device map` options:
   deprovisioning a fully provisioned image (since 4.17). When enabled, discard
   requests will fail with -EOPNOTSUPP, write zeroes requests will fall back to
   manually zeroing.
+
+* abort_on_full - Fail write requests with -ENOSPC when the cluster is full or
+  the data pool reaches its quota (since 5.0).  The default behaviour is to
+  block until the full condition is cleared.
+
+* alloc_size - Minimum allocation unit of the underlying OSD object store
+  backend (since 5.1, default is 64K bytes).  This is used to round off and
+  drop discards that are too small.  For bluestore, the recommended setting is
+  bluestore_min_alloc_size (typically 64K for hard disk drives and 16K for
+  solid-state drives).  For filestore with filestore_punch_hole = false, the
+  recommended setting is image object size (typically 4M).
 
 `rbd device unmap` options:
 

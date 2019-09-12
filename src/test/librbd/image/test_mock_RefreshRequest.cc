@@ -264,8 +264,6 @@ public:
       expect.WillOnce(Return(r));
     } else {
       expect.WillOnce(DoDefault());
-      EXPECT_CALL(get_mock_io_ctx(mock_image_ctx.md_ctx),
-                  exec(RBD_INFO, _, StrEq("rbd"), StrEq("metadata_list"), _, _, _));
       EXPECT_CALL(*mock_image_ctx.image_watcher, is_unregistered())
         .WillOnce(Return(false));
     }
@@ -377,7 +375,7 @@ public:
   }
 
   void expect_init_layout(MockRefreshImageCtx &mock_image_ctx) {
-    EXPECT_CALL(mock_image_ctx, init_layout());
+    EXPECT_CALL(mock_image_ctx, init_layout(_));
   }
 
   void expect_test_features(MockRefreshImageCtx &mock_image_ctx) {
@@ -682,7 +680,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessChild) {
     }
 
     librbd::NoOpProgressContext no_op;
-    ASSERT_EQ(0, librbd::api::Image<>::remove(m_ioctx, clone_name, "", no_op));
+    ASSERT_EQ(0, librbd::api::Image<>::remove(m_ioctx, clone_name, no_op));
     ASSERT_EQ(0, ictx->operations->snap_unprotect(cls::rbd::UserSnapshotNamespace(), "snap"));
   };
 
@@ -736,7 +734,7 @@ TEST_F(TestMockImageRefreshRequest, SuccessChildDontOpenParent) {
     }
 
     librbd::NoOpProgressContext no_op;
-    ASSERT_EQ(0, librbd::api::Image<>::remove(m_ioctx, clone_name, "", no_op));
+    ASSERT_EQ(0, librbd::api::Image<>::remove(m_ioctx, clone_name, no_op));
     ASSERT_EQ(0, ictx->operations->snap_unprotect(cls::rbd::UserSnapshotNamespace(), "snap"));
   };
 
@@ -831,11 +829,6 @@ TEST_F(TestMockImageRefreshRequest, DisableExclusiveLock) {
                                                    false));
   }
 
-  if (ictx->test_features(RBD_FEATURE_FAST_DIFF)) {
-    ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_FAST_DIFF,
-                                                   false));
-  }
-
   if (ictx->test_features(RBD_FEATURE_OBJECT_MAP)) {
     ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_OBJECT_MAP,
                                                    false));
@@ -886,11 +879,6 @@ TEST_F(TestMockImageRefreshRequest, DisableExclusiveLockWhileAcquiringLock) {
                                                    false));
   }
 
-  if (ictx->test_features(RBD_FEATURE_FAST_DIFF)) {
-    ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_FAST_DIFF,
-                                                   false));
-  }
-
   if (ictx->test_features(RBD_FEATURE_OBJECT_MAP)) {
     ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_OBJECT_MAP,
                                                    false));
@@ -931,11 +919,6 @@ TEST_F(TestMockImageRefreshRequest, JournalDisabledByPolicy) {
 
   if (ictx->test_features(RBD_FEATURE_FAST_DIFF)) {
     ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_FAST_DIFF,
-                                                   false));
-  }
-
-  if (ictx->test_features(RBD_FEATURE_OBJECT_MAP)) {
-    ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_OBJECT_MAP,
                                                    false));
   }
 
@@ -983,11 +966,6 @@ TEST_F(TestMockImageRefreshRequest, EnableJournalWithExclusiveLock) {
                                                    false));
   }
 
-  if (ictx->test_features(RBD_FEATURE_OBJECT_MAP)) {
-    ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_OBJECT_MAP,
-                                                   false));
-  }
-
   ASSERT_EQ(0, ictx->state->refresh());
 
   MockRefreshImageCtx mock_image_ctx(*ictx);
@@ -1028,11 +1006,6 @@ TEST_F(TestMockImageRefreshRequest, EnableJournalWithoutExclusiveLock) {
 
   librbd::ImageCtx *ictx;
   ASSERT_EQ(0, open_image(m_image_name, &ictx));
-
-  if (ictx->test_features(RBD_FEATURE_FAST_DIFF)) {
-    ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_FAST_DIFF,
-                                                   false));
-  }
 
   if (ictx->test_features(RBD_FEATURE_OBJECT_MAP)) {
     ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_OBJECT_MAP,
@@ -1223,11 +1196,6 @@ TEST_F(TestMockImageRefreshRequest, DisableObjectMap) {
 
   if (ictx->test_features(RBD_FEATURE_FAST_DIFF)) {
     ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_FAST_DIFF,
-                                                   false));
-  }
-
-  if (ictx->test_features(RBD_FEATURE_OBJECT_MAP)) {
-    ASSERT_EQ(0, ictx->operations->update_features(RBD_FEATURE_OBJECT_MAP,
                                                    false));
   }
 

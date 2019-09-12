@@ -12,11 +12,15 @@ devices in an efficient way?
 
 The process is similar to :ref:`ceph-volume-lvm-create`, and will do the
 preparation and activation at once, following the same workflow for each OSD.
+However, If the ``--prepare`` flag is passed then only the prepare step is taken
+and the OSDs are not activated.
 
 All the features that ``ceph-volume lvm create`` supports, like ``dmcrypt``,
 avoiding ``systemd`` units from starting, defining bluestore or filestore,
 are supported. Any fine-grained option that may affect a single OSD is not
 supported, for example: specifying where journals should be placed.
+
+
 
 
 .. _ceph-volume-lvm-batch_bluestore:
@@ -28,8 +32,8 @@ with the ``batch`` sub-command. It allows a few different scenarios depending
 on the input of devices:
 
 #. Devices are all spinning HDDs: 1 OSD is created per device
-#. Devices are all spinning SSDs: 2 OSDs are created per device
-#. Devices are a mix of HDDS and SSDs: data is placed on the spinning device,
+#. Devices are all SSDs: 2 OSDs are created per device
+#. Devices are a mix of HDDs and SSDs: data is placed on the spinning device,
    the ``block.db`` is created on the SSD, as large as possible.
 
 
@@ -47,7 +51,7 @@ on the input of devices:
 
 #. Devices are all the same type (for example all spinning HDD or all SSDs):
    1 OSD is created per device, collocating the journal in the same HDD.
-#. Devices are a mix of HDDS and SSDs: data is placed on the spinning device,
+#. Devices are a mix of HDDs and SSDs: data is placed on the spinning device,
    while the journal is created on the SSD using the sizing options from
    ceph.conf and falling back to the default journal size of 5GB.
 

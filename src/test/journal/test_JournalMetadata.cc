@@ -4,7 +4,6 @@
 #include "journal/JournalMetadata.h"
 #include "test/journal/RadosTestFixture.h"
 #include "common/Cond.h"
-#include "common/Mutex.h"
 #include <map>
 
 class TestJournalMetadata : public RadosTestFixture {
@@ -22,11 +21,9 @@ public:
   journal::JournalMetadataPtr create_metadata(const std::string &oid,
                                               const std::string &client_id,
                                               double commit_interval = 0.1,
-					      uint64_t max_fetch_bytes = 0,
                                               int max_concurrent_object_sets = 0) {
     journal::JournalMetadataPtr metadata = RadosTestFixture::create_metadata(
-      oid, client_id, commit_interval, max_fetch_bytes,
-      max_concurrent_object_sets);
+      oid, client_id, commit_interval, max_concurrent_object_sets);
     m_metadata_list.push_back(metadata);
     metadata->add_listener(&m_listener);
     return metadata;
@@ -128,7 +125,7 @@ TEST_F(TestJournalMetadata, DisconnectLaggyClient) {
 
   int max_concurrent_object_sets = 100;
   journal::JournalMetadataPtr metadata =
-    create_metadata(oid, "client1", 0.1, 0, max_concurrent_object_sets);
+    create_metadata(oid, "client1", 0.1, max_concurrent_object_sets);
   ASSERT_EQ(0, init_metadata(metadata));
   ASSERT_TRUE(wait_for_update(metadata));
 

@@ -19,6 +19,11 @@
 #define PROCPREFIX
 #endif
 
+#include <sys/stat.h>
+#ifndef ACCESSPERMS
+#define ACCESSPERMS (S_IRWXU|S_IRWXG|S_IRWXO)
+#endif
+
 #if defined(__FreeBSD__)
 
 // FreeBSD supports Linux procfs with its compatibility module
@@ -35,6 +40,12 @@
 
 /* And include the extra required include file */
 #include <pthread_np.h>
+
+#include <sys/param.h>
+#include <sys/cpuset.h>
+#define cpu_set_t cpuset_t
+int sched_setaffinity(pid_t pid, size_t cpusetsize,
+                      cpu_set_t *mask);
 
 #endif /* __FreeBSD__ */
 
@@ -79,8 +90,14 @@
 /* get PATH_MAX */
 #include <limits.h>
 
+#ifndef EUCLEAN
+#define EUCLEAN 117
+#endif
 #ifndef EREMOTEIO
 #define EREMOTEIO 121
+#endif
+#ifndef EKEYREJECTED
+#define EKEYREJECTED 129
 #endif
 
 #ifndef HOST_NAME_MAX

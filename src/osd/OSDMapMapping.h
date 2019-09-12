@@ -10,6 +10,7 @@
 
 #include "osd/osd_types.h"
 #include "common/WorkQueue.h"
+#include "common/Cond.h"
 
 class OSDMap;
 
@@ -23,28 +24,29 @@ public:
     bool aborted = false;
     Context *onfinish = nullptr;
 
-    Mutex lock = {"ParallelPGMapper::Job::lock"};
-    Cond cond;
+    ceph::mutex lock = ceph::make_mutex("ParallelPGMapper::Job::lock");
+    ceph::condition_variable cond;
 
     Job(const OSDMap *om) : start(ceph_clock_now()), osdmap(om) {}
     virtual ~Job() {
       ceph_assert(shards == 0);
     }
 
-    // child must implement this
+    // child must implement either form of process
+    virtual void process(const vector<pg_t>& pgs) = 0;
     virtual void process(int64_t poolid, unsigned ps_begin, unsigned ps_end) = 0;
     virtual void complete() = 0;
 
     void set_finish_event(Context *fin) {
-      lock.Lock();
+      lock.lock();
       if (shards == 0) {
 	// already done.
-	lock.Unlock();
+	lock.unlock();
 	fin->complete(0);
       } else {
 	// set finisher
 	onfinish = fin;
-	lock.Unlock();
+	lock.unlock();
       }
     }
     bool is_done() {
@@ -55,33 +57,29 @@ public:
       return finish - start;
     }
     void wait() {
-      std::lock_guard l(lock);
-      while (shards > 0) {
-	cond.Wait(lock);
-      }
+      std::unique_lock l(lock);
+      cond.wait(l, [this] { return shards == 0; });
     }
     bool wait_for(double duration) {
       utime_t until = start;
       until += duration;
-      std::lock_guard l(lock);
+      std::unique_lock l(lock);
       while (shards > 0) {
 	if (ceph_clock_now() >= until) {
 	  return false;
 	}
-	cond.Wait(lock);
+	cond.wait(l);
       }
       return true;
     }
     void abort() {
       Context *fin = nullptr;
       {
-	std::lock_guard l(lock);
+	std::unique_lock l(lock);
 	aborted = true;
 	fin = onfinish;
 	onfinish = nullptr;
-	while (shards > 0) {
-	  cond.Wait(lock);
-	}
+	cond.wait(l, [this] { return shards == 0; });
       }
       if (fin) {
 	fin->complete(-ECANCELED);
@@ -102,7 +100,9 @@ protected:
     Job *job;
     int64_t pool;
     unsigned begin, end;
+    vector<pg_t> pgs;
 
+    Item(Job *j, vector<pg_t> pgs) : job(j), pgs(pgs) {}
     Item(Job *j, int64_t p, unsigned b, unsigned e)
       : job(j),
 	pool(p),
@@ -157,7 +157,8 @@ public:
 
   void queue(
     Job *job,
-    unsigned pgs_per_item);
+    unsigned pgs_per_item,
+    const vector<pg_t>& input_pgs);
 
   void drain() {
     wq.drain();
@@ -274,6 +275,7 @@ private:
       : Job(osdmap), mapping(m) {
       mapping->_start(*osdmap);
     }
+    void process(const vector<pg_t>& pgs) override {}
     void process(int64_t pool, unsigned ps_begin, unsigned ps_end) override {
       mapping->_update_range(*osdmap, pool, ps_begin, ps_end);
     }
@@ -300,7 +302,7 @@ public:
     auto p = pools.find(pgid.pool());
     ceph_assert(p != pools.end());
     ceph_assert(pgid.ps() < p->second.pg_num);
-    vector<int> acting;
+    std::vector<int> acting;
     p->second.get(pgid.ps(), nullptr, nullptr, &acting, acting_primary);
     if (p->second.erasure) {
       for (uint8_t i = 0; i < acting.size(); ++i) {
@@ -329,7 +331,7 @@ public:
     ParallelPGMapper& mapper,
     unsigned pgs_per_item) {
     std::unique_ptr<MappingJob> job(new MappingJob(&map, this));
-    mapper.queue(job.get(), pgs_per_item);
+    mapper.queue(job.get(), pgs_per_item, {});
     return job;
   }
 

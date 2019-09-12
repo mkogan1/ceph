@@ -11,6 +11,6 @@ target_link_libraries(ceph_test_cls_version
   ${CMAKE_DL_LIBS}
   ${CRYPTO_LIBS}
   ${EXTRALIBS}
-  radostest
+  radostest-cxx
   )
 

@@ -8,21 +8,22 @@ from functools import partial
 from datetime import datetime
 
 import cherrypy
-import six
 
 import rbd
 
-from . import ApiController, RESTController, Task, UpdatePermission, DeletePermission
+from . import ApiController, RESTController, Task, UpdatePermission, \
+              DeletePermission, CreatePermission, ReadPermission
 from .. import mgr
 from ..security import Scope
 from ..services.ceph_service import CephService
+from ..services.rbd import RbdConfiguration, format_bitmask, format_features
 from ..tools import ViewCache, str_to_bool
 from ..services.exception import handle_rados_error, handle_rbd_error, \
-    serialize_dashboard_exception
+                                 serialize_dashboard_exception
 
 
 # pylint: disable=not-callable
-def RbdTask(name, metadata, wait_for):
+def RbdTask(name, metadata, wait_for):  # noqa: N802
     def composed_decorator(func):
         func = handle_rados_error('pool')(func)
         func = handle_rbd_error()(func)
@@ -44,57 +45,6 @@ def _rbd_image_call(pool_name, image_name, func, *args, **kwargs):
     return _rbd_call(pool_name, _ioctx_func, image_name, func, *args, **kwargs)
 
 
-RBD_FEATURES_NAME_MAPPING = {
-    rbd.RBD_FEATURE_LAYERING: "layering",
-    rbd.RBD_FEATURE_STRIPINGV2: "striping",
-    rbd.RBD_FEATURE_EXCLUSIVE_LOCK: "exclusive-lock",
-    rbd.RBD_FEATURE_OBJECT_MAP: "object-map",
-    rbd.RBD_FEATURE_FAST_DIFF: "fast-diff",
-    rbd.RBD_FEATURE_DEEP_FLATTEN: "deep-flatten",
-    rbd.RBD_FEATURE_JOURNALING: "journaling",
-    rbd.RBD_FEATURE_DATA_POOL: "data-pool",
-    rbd.RBD_FEATURE_OPERATIONS: "operations",
-}
-
-
-def _format_bitmask(features):
-    """
-    Formats the bitmask:
-
-    >>> _format_bitmask(45)
-    ['deep-flatten', 'exclusive-lock', 'layering', 'object-map']
-    """
-    names = [val for key, val in RBD_FEATURES_NAME_MAPPING.items()
-             if key & features == key]
-    return sorted(names)
-
-
-def _format_features(features):
-    """
-    Converts the features list to bitmask:
-
-    >>> _format_features(['deep-flatten', 'exclusive-lock', 'layering', 'object-map'])
-    45
-
-    >>> _format_features(None) is None
-    True
-
-    >>> _format_features('deep-flatten, exclusive-lock')
-    32
-    """
-    if isinstance(features, six.string_types):
-        features = features.split(',')
-
-    if not isinstance(features, list):
-        return None
-
-    res = 0
-    for key, value in RBD_FEATURES_NAME_MAPPING.items():
-        if value in features:
-            res = key | res
-    return res
-
-
 def _sort_features(features, enable=True):
     """
     Sorts image features according to feature dependencies:
@@ -103,7 +53,7 @@ def _sort_features(features, enable=True):
     journaling depends on exclusive-lock
     fast-diff depends on object-map
     """
-    ORDER = ['exclusive-lock', 'journaling', 'object-map', 'fast-diff']
+    ORDER = ['exclusive-lock', 'journaling', 'object-map', 'fast-diff']  # noqa: N806
 
     def key_func(feat):
         try:
@@ -120,12 +70,11 @@ class Rbd(RESTController):
     RESOURCE_ID = "pool_name/image_name"
 
     # set of image features that can be enable on existing images
-    ALLOW_ENABLE_FEATURES = set(["exclusive-lock", "object-map", "fast-diff",
-                                 "journaling"])
+    ALLOW_ENABLE_FEATURES = {"exclusive-lock", "object-map", "fast-diff", "journaling"}
 
     # set of image features that can be disabled on existing images
-    ALLOW_DISABLE_FEATURES = set(["exclusive-lock", "object-map", "fast-diff",
-                                  "deep-flatten", "journaling"])
+    ALLOW_DISABLE_FEATURES = {"exclusive-lock", "object-map", "fast-diff", "deep-flatten",
+                              "journaling"}
 
     @classmethod
     def _rbd_disk_usage(cls, image, snaps, whole_object=True):
@@ -151,7 +100,8 @@ class Rbd(RESTController):
 
         return total_used_size, snap_map
 
-    def _rbd_image(self, ioctx, pool_name, image_name):
+    @classmethod
+    def _rbd_image(cls, ioctx, pool_name, image_name):
         with rbd.Image(ioctx, image_name) as img:
             stat = img.stat()
             stat['name'] = image_name
@@ -159,7 +109,7 @@ class Rbd(RESTController):
             stat['pool_name'] = pool_name
             features = img.features()
             stat['features'] = features
-            stat['features_name'] = _format_bitmask(features)
+            stat['features_name'] = format_bitmask(features)
 
             # the following keys are deprecated
             del stat['parent_pool']
@@ -212,7 +162,7 @@ class Rbd(RESTController):
                          for s in stat['snapshots']]
                 snaps.sort(key=lambda s: s[0])
                 snaps += [(snaps[-1][0]+1 if snaps else 0, stat['size'], None)]
-                total_prov_bytes, snaps_prov_bytes = self._rbd_disk_usage(
+                total_prov_bytes, snaps_prov_bytes = cls._rbd_disk_usage(
                     img, snaps, True)
                 stat['total_disk_usage'] = total_prov_bytes
                 for snap, prov_bytes in snaps_prov_bytes.items():
@@ -227,17 +177,20 @@ class Rbd(RESTController):
                 stat['total_disk_usage'] = None
                 stat['disk_usage'] = None
 
+            stat['configuration'] = RbdConfiguration(pool_ioctx=ioctx, image_name=image_name).list()
+
             return stat
 
+    @classmethod
     @ViewCache()
-    def _rbd_pool_list(self, pool_name):
+    def _rbd_pool_list(cls, pool_name):
         rbd_inst = rbd.RBD()
         with mgr.rados.open_ioctx(pool_name) as ioctx:
             names = rbd_inst.list(ioctx)
             result = []
             for name in names:
                 try:
-                    stat = self._rbd_image(ioctx, pool_name, name)
+                    stat = cls._rbd_image(ioctx, pool_name, name)
                 except rbd.ImageNotFound:
                     # may have been removed in the meanwhile
                     continue
@@ -254,6 +207,8 @@ class Rbd(RESTController):
         for pool in pools:
             # pylint: disable=unbalanced-tuple-unpacking
             status, value = self._rbd_pool_list(pool)
+            for i, image in enumerate(value):
+                value[i]['configuration'] = RbdConfiguration(pool, image['name']).list()
             result.append({'status': status, 'value': value, 'pool_name': pool})
         return result
 
@@ -274,7 +229,7 @@ class Rbd(RESTController):
     @RbdTask('create',
              {'pool_name': '{pool_name}', 'image_name': '{name}'}, 2.0)
     def create(self, name, pool_name, size, obj_size=None, features=None,
-               stripe_unit=None, stripe_count=None, data_pool=None):
+               stripe_unit=None, stripe_count=None, data_pool=None, configuration=None):
 
         size = int(size)
 
@@ -287,13 +242,14 @@ class Rbd(RESTController):
                 l_order = int(round(math.log(float(obj_size), 2)))
 
             # Set features
-            feature_bitmask = _format_features(features)
+            feature_bitmask = format_features(features)
 
             rbd_inst.create(ioctx, name, size, order=l_order, old_format=False,
                             features=feature_bitmask, stripe_unit=stripe_unit,
                             stripe_count=stripe_count, data_pool=data_pool)
+            RbdConfiguration(pool_ioctx=ioctx, image_name=name).set_configuration(configuration)
 
-        return _rbd_call(pool_name, _create)
+        _rbd_call(pool_name, _create)
 
     @RbdTask('delete', ['{pool_name}', '{image_name}'], 2.0)
     def delete(self, pool_name, image_name):
@@ -301,7 +257,7 @@ class Rbd(RESTController):
         return _rbd_call(pool_name, rbd_inst.remove, image_name)
 
     @RbdTask('edit', ['{pool_name}', '{image_name}', '{name}'], 4.0)
-    def set(self, pool_name, image_name, name=None, size=None, features=None):
+    def set(self, pool_name, image_name, name=None, size=None, features=None, configuration=None):
         def _edit(ioctx, image):
             rbd_inst = rbd.RBD()
             # check rename image
@@ -314,19 +270,26 @@ class Rbd(RESTController):
 
             # check enable/disable features
             if features is not None:
-                curr_features = _format_bitmask(image.features())
+                curr_features = format_bitmask(image.features())
                 # check disabled features
                 _sort_features(curr_features, enable=False)
                 for feature in curr_features:
                     if feature not in features and feature in self.ALLOW_DISABLE_FEATURES:
-                        f_bitmask = _format_features([feature])
+                        if feature not in format_bitmask(image.features()):
+                            continue
+                        f_bitmask = format_features([feature])
                         image.update_features(f_bitmask, False)
                 # check enabled features
                 _sort_features(features)
                 for feature in features:
                     if feature not in curr_features and feature in self.ALLOW_ENABLE_FEATURES:
-                        f_bitmask = _format_features([feature])
+                        if feature in format_bitmask(image.features()):
+                            continue
+                        f_bitmask = format_features([feature])
                         image.update_features(f_bitmask, True)
+
+            RbdConfiguration(pool_ioctx=ioctx, image_name=image_name).set_configuration(
+                configuration)
 
         return _rbd_image_call(pool_name, image_name, _edit)
 
@@ -338,7 +301,7 @@ class Rbd(RESTController):
     @RESTController.Resource('POST')
     def copy(self, pool_name, image_name, dest_pool_name, dest_image_name,
              snapshot_name=None, obj_size=None, features=None, stripe_unit=None,
-             stripe_count=None, data_pool=None):
+             stripe_count=None, data_pool=None, configuration=None):
 
         def _src_copy(s_ioctx, s_img):
             def _copy(d_ioctx):
@@ -348,13 +311,15 @@ class Rbd(RESTController):
                     l_order = int(round(math.log(float(obj_size), 2)))
 
                 # Set features
-                feature_bitmask = _format_features(features)
+                feature_bitmask = format_features(features)
 
                 if snapshot_name:
                     s_img.set_snap(snapshot_name)
 
                 s_img.copy(d_ioctx, dest_image_name, feature_bitmask, l_order,
                            stripe_unit, stripe_count, data_pool)
+                RbdConfiguration(pool_ioctx=d_ioctx, image_name=dest_image_name).set_configuration(
+                    configuration)
 
             return _rbd_call(dest_pool_name, _copy)
 
@@ -373,7 +338,7 @@ class Rbd(RESTController):
     @RESTController.Collection('GET')
     def default_features(self):
         rbd_default_features = mgr.get('config')['rbd_default_features']
-        return _format_bitmask(int(rbd_default_features))
+        return format_bitmask(int(rbd_default_features))
 
     @RbdTask('trash/move', ['{pool_name}', '{image_name}'], 2.0)
     @RESTController.Resource('POST')
@@ -384,6 +349,11 @@ class Rbd(RESTController):
         """
         rbd_inst = rbd.RBD()
         return _rbd_call(pool_name, rbd_inst.trash_move, image_name, delay)
+
+    @RESTController.Resource()
+    @ReadPermission
+    def configuration(self, pool_name, image_name):
+        return RbdConfiguration(pool_name, image_name).list()
 
 
 @ApiController('/block/image/{pool_name}/{image_name}/snap', Scope.RBD_IMAGE)
@@ -443,8 +413,11 @@ class RbdSnapshot(RESTController):
               'child_image_name': '{child_image_name}'}, 2.0)
     @RESTController.Resource('POST')
     def clone(self, pool_name, image_name, snapshot_name, child_pool_name,
-              child_image_name, obj_size=None, features=None,
-              stripe_unit=None, stripe_count=None, data_pool=None):
+              child_image_name, obj_size=None, features=None, stripe_unit=None, stripe_count=None,
+              data_pool=None, configuration=None):
+        """
+        Clones a snapshot to an image
+        """
 
         def _parent_clone(p_ioctx):
             def _clone(ioctx):
@@ -454,16 +427,19 @@ class RbdSnapshot(RESTController):
                     l_order = int(round(math.log(float(obj_size), 2)))
 
                 # Set features
-                feature_bitmask = _format_features(features)
+                feature_bitmask = format_features(features)
 
                 rbd_inst = rbd.RBD()
                 rbd_inst.clone(p_ioctx, image_name, snapshot_name, ioctx,
                                child_image_name, feature_bitmask, l_order,
                                stripe_unit, stripe_count, data_pool)
 
+                RbdConfiguration(pool_ioctx=ioctx, image_name=child_image_name).set_configuration(
+                    configuration)
+
             return _rbd_call(child_pool_name, _clone)
 
-        return _rbd_call(pool_name, _parent_clone)
+        _rbd_call(pool_name, _parent_clone)
 
 
 @ApiController('/block/image/trash', Scope.RBD_IMAGE)
@@ -519,7 +495,7 @@ class RbdTrash(RESTController):
 
     @RbdTask('trash/restore', ['{pool_name}', '{image_id}', '{new_image_name}'], 2.0)
     @RESTController.Resource('POST')
-    @UpdatePermission
+    @CreatePermission
     def restore(self, pool_name, image_id, new_image_name):
         """Restore an image from trash."""
         return _rbd_call(pool_name, self.rbd_inst.trash_restore, image_id, new_image_name)

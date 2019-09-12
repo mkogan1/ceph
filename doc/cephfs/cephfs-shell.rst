@@ -3,7 +3,7 @@
 CephFS Shell
 =============
 
-The File System (FS) shell includes various shell-like commands that directly interact with the :term:`Ceph Filesystem`.
+The File System (FS) shell includes various shell-like commands that directly interact with the :term:`Ceph File System`.
 
 Usage :
 
@@ -13,6 +13,18 @@ Options :
     -c, --config FILE     Set Configuration file.
     -b, --batch FILE      Process a batch file.
     -t, --test FILE       Test against transcript(s) in FILE
+
+
+.. note::
+
+    Latest version of the cmd2 module is required for running cephfs-shell.
+    If CephFS is installed through source, execute cephfs-shell in the build
+    directory. It can also be executed as following using virtualenv:
+
+.. code:: bash
+
+    [build]$ virtualenv -p python3 venv && source venv/bin/activate && pip3 install cmd2
+    [build]$ source vstart_environment.sh && source venv/bin/activate && python3 ../src/tools/cephfs/cephfs-shell
 
 Commands
 ========
@@ -35,7 +47,7 @@ Options :
 put
 ---
 
-Copy a file/directory to Ceph Filesystem from Local Filesystem.
+Copy a file/directory to Ceph File System from Local File System.
 
 Usage : 
     
@@ -55,13 +67,13 @@ Options :
 get
 ---
  
-Copy a file from Ceph Filesystem to Local Filesystem.
+Copy a file from Ceph File System to Local File System.
 
 Usage : 
 
     get [options] <source_path> [target_path]
 
-* source_path - remote file/directory path which is to be copied to local filesystem.
+* source_path - remote file/directory path which is to be copied to local file system.
     * if `.` copies all the file/directories in the remote working directory.
                     
 * target_path - local directory path where the files/directories are to be copied to.
@@ -254,6 +266,10 @@ shortcuts
 
 Lists shortcuts (aliases) available
 
+Usage :
+
+    shortcuts
+
 history
 -------
 
@@ -296,10 +312,10 @@ Usage :
 
 * Call without arguments for a list of settable parameters with their values.
 
- Options :
- -h     show this help message and exit
- -a     display read-only settings as well
- -l     describe function of parameter
+Options :
+  -h     show this help message and exit
+  -a     display read-only settings as well
+  -l     describe function of parameter
 
 edit
 ----
@@ -337,12 +353,24 @@ Usage:
 locate
 ------
 
-Find an item in Filesystem
+Find an item in File System
 
 Usage:
+
      locate [options] <name>
 
 Options :
   -c       Count number of items found
   -i       Ignore case 
 
+stat
+------
+
+Display file status.
+
+Usage :
+
+     stat [-h] <file_name> [file_name ...]
+
+Options :
+  -h     Shows the help message

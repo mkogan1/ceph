@@ -30,6 +30,8 @@
 #include "messages/MMonMgrReport.h"
 #include "messages/MCommand.h"
 #include "messages/MCommandReply.h"
+#include "messages/MMgrCommand.h"
+#include "messages/MMgrCommandReply.h"
 #include "messages/MPGStats.h"
 #include "messages/MOSDScrub.h"
 #include "messages/MOSDScrub2.h"
@@ -42,7 +44,14 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "mgr.server " << __func__ << " "
 
-
+namespace {
+  template <typename Map>
+  bool map_compare(Map const &lhs, Map const &rhs) {
+    return lhs.size() == rhs.size()
+      && std::equal(lhs.begin(), lhs.end(), rhs.begin(),
+                    [] (auto a, auto b) { return a.first == b.first && a.second == b.second; });
+  }
+}
 
 DaemonServer::DaemonServer(MonClient *monc_,
                            Finisher &finisher_,
@@ -76,15 +85,6 @@ DaemonServer::DaemonServer(MonClient *monc_,
       py_modules(py_modules_),
       clog(clog_),
       audit_clog(audit_clog_),
-      auth_cluster_registry(g_ceph_context,
-                    g_conf()->auth_supported.empty() ?
-                      g_conf()->auth_cluster_required :
-                      g_conf()->auth_supported),
-      auth_service_registry(g_ceph_context,
-                   g_conf()->auth_supported.empty() ?
-                      g_conf()->auth_service_required :
-                      g_conf()->auth_supported),
-      lock("DaemonServer"),
       pgmap_ready(false),
       timer(g_ceph_context, lock),
       shutting_down(false),
@@ -110,6 +110,8 @@ int DaemonServer::init(uint64_t gid, entity_addrvec_t client_addrs)
 			   "mgr",
 			   getpid(), 0);
   msgr->set_default_policy(Messenger::Policy::stateless_server(0));
+
+  msgr->set_auth_client(monc);
 
   // throttle clients
   msgr->set_policy_throttlers(entity_name_t::TYPE_CLIENT,
@@ -145,6 +147,9 @@ int DaemonServer::init(uint64_t gid, entity_addrvec_t client_addrs)
   msgr->start();
   msgr->add_dispatcher_tail(this);
 
+  msgr->set_auth_server(monc);
+  monc->set_handle_authentication_dispatcher(this);
+
   started_at = ceph_clock_now();
 
   std::lock_guard l(lock);
@@ -161,16 +166,10 @@ entity_addrvec_t DaemonServer::get_myaddrs() const
   return msgr->get_myaddrs();
 }
 
-KeyStore *DaemonServer::ms_get_auth1_authorizer_keystore()
-{
-  return monc->rotating_secrets.get();
-}
-
 int DaemonServer::ms_handle_authentication(Connection *con)
 {
-  int ret = 0;
   MgrSession *s = new MgrSession(cct);
-  con->set_priv(s->get());
+  con->set_priv(s);
   s->inst.addr = con->get_peer_addr();
   s->entity_name = con->peer_name;
   dout(10) << __func__ << " new session " << s << " con " << con
@@ -183,27 +182,24 @@ int DaemonServer::ms_handle_authentication(Connection *con)
     dout(10) << " session " << s << " " << s->entity_name
 	     << " allow_all" << dendl;
     s->caps.set_allow_all();
-  }
-
-  if (caps_info.caps.length() > 0) {
+  } else if (caps_info.caps.length() > 0) {
     auto p = caps_info.caps.cbegin();
     string str;
     try {
       decode(str, p);
     }
     catch (buffer::error& e) {
-      ret = -EPERM;
-    }
-    bool success = s->caps.parse(str);
-    if (success) {
       dout(10) << " session " << s << " " << s->entity_name
-	       << " has caps " << s->caps << " '" << str << "'" << dendl;
-      ret = 1;
-    } else {
+               << " failed to decode caps" << dendl;
+      return -EPERM;
+    }
+    if (!s->caps.parse(str)) {
       dout(10) << " session " << s << " " << s->entity_name
 	       << " failed to parse caps '" << str << "'" << dendl;
-      ret = -EPERM;
+      return -EPERM;
     }
+    dout(10) << " session " << s << " " << s->entity_name
+             << " has caps " << s->caps << " '" << str << "'" << dendl;
   }
 
   if (con->get_peer_type() == CEPH_ENTITY_TYPE_OSD) {
@@ -214,26 +210,7 @@ int DaemonServer::ms_handle_authentication(Connection *con)
     osd_cons[s->osd_id].insert(con);
   }
 
-  return ret;
-}
-
-bool DaemonServer::ms_get_authorizer(int dest_type,
-    AuthAuthorizer **authorizer, bool force_new)
-{
-  dout(10) << "type=" << ceph_entity_type_name(dest_type) << dendl;
-
-  if (dest_type == CEPH_ENTITY_TYPE_MON) {
-    return true;
-  }
-
-  if (force_new) {
-    if (monc->wait_auth_rotating(10) < 0)
-      return false;
-  }
-
-  *authorizer = monc->build_authorizer(dest_type);
-  dout(20) << "got authorizer " << *authorizer << dendl;
-  return *authorizer != NULL;
+  return 1;
 }
 
 bool DaemonServer::ms_handle_reset(Connection *con)
@@ -263,25 +240,26 @@ bool DaemonServer::ms_handle_refused(Connection *con)
   return false;
 }
 
-bool DaemonServer::ms_dispatch(Message *m)
+bool DaemonServer::ms_dispatch2(const ref_t<Message>& m)
 {
   // Note that we do *not* take ::lock here, in order to avoid
   // serializing all message handling.  It's up to each handler
   // to take whatever locks it needs.
   switch (m->get_type()) {
     case MSG_PGSTATS:
-      cluster_state.ingest_pgstats(static_cast<MPGStats*>(m));
+      cluster_state.ingest_pgstats(ref_cast<MPGStats>(m));
       maybe_ready(m->get_source().num());
-      m->put();
       return true;
     case MSG_MGR_REPORT:
-      return handle_report(static_cast<MMgrReport*>(m));
+      return handle_report(ref_cast<MMgrReport>(m));
     case MSG_MGR_OPEN:
-      return handle_open(static_cast<MMgrOpen*>(m));
+      return handle_open(ref_cast<MMgrOpen>(m));
     case MSG_MGR_CLOSE:
-      return handle_close(static_cast<MMgrClose*>(m));
+      return handle_close(ref_cast<MMgrClose>(m));
     case MSG_COMMAND:
-      return handle_command(static_cast<MCommand*>(m));
+      return handle_command(ref_cast<MCommand>(m));
+    case MSG_MGR_COMMAND:
+      return handle_command(ref_cast<MMgrCommand>(m));
     default:
       dout(1) << "Unhandled message type " << m->get_type() << dendl;
       return false;
@@ -340,7 +318,7 @@ void DaemonServer::tick()
 // fire after all modules have had a chance to set their health checks.
 void DaemonServer::schedule_tick_locked(double delay_sec)
 {
-  ceph_assert(lock.is_locked_by_me());
+  ceph_assert(ceph_mutex_is_locked_by_me(lock));
 
   if (tick_event) {
     timer.cancel_event(tick_event);
@@ -385,6 +363,7 @@ void DaemonServer::shutdown()
   dout(10) << "begin" << dendl;
   msgr->shutdown();
   msgr->wait();
+  cluster_state.shutdown();
   dout(10) << "done" << dendl;
 
   std::lock_guard l(lock);
@@ -417,7 +396,7 @@ static bool key_from_string(
   return true;
 }
 
-bool DaemonServer::handle_open(MMgrOpen *m)
+bool DaemonServer::handle_open(const ref_t<MMgrOpen>& m)
 {
   std::lock_guard l(lock);
 
@@ -425,7 +404,7 @@ bool DaemonServer::handle_open(MMgrOpen *m)
 				   m->get_connection()->get_peer_type(),
 				   m->daemon_name);
 
-  dout(4) << "from " << m->get_connection() << "  " << key << dendl;
+  dout(10) << "from " << m->get_connection() << "  " << key << dendl;
 
   _send_configure(m->get_connection());
 
@@ -448,14 +427,15 @@ bool DaemonServer::handle_open(MMgrOpen *m)
     std::lock_guard l(daemon->lock);
     daemon->perf_counters.clear();
 
+    daemon->service_daemon = m->service_daemon;
     if (m->service_daemon) {
       daemon->set_metadata(m->daemon_metadata);
       daemon->service_status = m->daemon_status;
 
       utime_t now = ceph_clock_now();
-      auto d = pending_service_map.get_daemon(m->service_name,
-					      m->daemon_name);
-      if (d->gid != (uint64_t)m->get_source().num()) {
+      auto [d, added] = pending_service_map.get_daemon(m->service_name,
+						       m->daemon_name);
+      if (added || d->gid != (uint64_t)m->get_source().num()) {
 	dout(10) << "registering " << key << " in pending_service_map" << dendl;
 	d->gid = m->get_source().num();
 	d->addr = m->get_source_addr();
@@ -488,11 +468,10 @@ bool DaemonServer::handle_open(MMgrOpen *m)
     daemon_connections.insert(m->get_connection());
   }
 
-  m->put();
   return true;
 }
 
-bool DaemonServer::handle_close(MMgrClose *m)
+bool DaemonServer::handle_close(const ref_t<MMgrClose>& m)
 {
   std::lock_guard l(lock);
 
@@ -514,11 +493,11 @@ bool DaemonServer::handle_close(MMgrClose *m)
   }
 
   // send same message back as a reply
-  m->get_connection()->send_message(m);
+  m->get_connection()->send_message2(m);
   return true;
 }
 
-bool DaemonServer::handle_report(MMgrReport *m)
+bool DaemonServer::handle_report(const ref_t<MMgrReport>& m)
 {
   DaemonKey key;
   if (!m->service_name.empty()) {
@@ -528,108 +507,127 @@ bool DaemonServer::handle_report(MMgrReport *m)
   }
   key.second = m->daemon_name;
 
-  dout(4) << "from " << m->get_connection() << " " << key << dendl;
+  dout(10) << "from " << m->get_connection() << " " << key << dendl;
 
   if (m->get_connection()->get_peer_type() == entity_name_t::TYPE_CLIENT &&
       m->service_name.empty()) {
     // Clients should not be sending us stats unless they are declaring
     // themselves to be a daemon for some service.
-    dout(4) << "rejecting report from non-daemon client " << m->daemon_name
+    dout(10) << "rejecting report from non-daemon client " << m->daemon_name
 	    << dendl;
     m->get_connection()->mark_down();
-    m->put();
     return true;
   }
 
-  // Look up the DaemonState
-  DaemonStatePtr daemon;
-  if (daemon_state.exists(key)) {
-    dout(20) << "updating existing DaemonState for " << key << dendl;
-    daemon = daemon_state.get(key);
-  } else {
-    // we don't know the hostname at this stage, reject MMgrReport here.
-    dout(5) << "rejecting report from " << key << ", since we do not have its metadata now."
-	    << dendl;
 
-    // issue metadata request in background
-    if (!daemon_state.is_updating(key) && 
-	(key.first == "osd" || key.first == "mds")) {
+  {
+    lock.lock();
 
-      std::ostringstream oss;
-      auto c = new MetadataUpdate(daemon_state, key);
-      if (key.first == "osd") {
-        oss << "{\"prefix\": \"osd metadata\", \"id\": "
-            << key.second<< "}";
+    DaemonStatePtr daemon;
+    // Look up the DaemonState
+    if (daemon_state.exists(key)) {
+      dout(20) << "updating existing DaemonState for " << key << dendl;
+      daemon = daemon_state.get(key);
+    } else {
+      lock.unlock();
 
-      } else if (key.first == "mds") {
-        c->set_default("addr", stringify(m->get_source_addr()));
-        oss << "{\"prefix\": \"mds metadata\", \"who\": \""
-            << key.second << "\"}";
+      // we don't know the hostname at this stage, reject MMgrReport here.
+      dout(5) << "rejecting report from " << key << ", since we do not have its metadata now."
+              << dendl;
+      // issue metadata request in background
+      if (!daemon_state.is_updating(key) && 
+          (key.first == "osd" || key.first == "mds" || key.first == "mon")) {
+
+        std::ostringstream oss;
+        auto c = new MetadataUpdate(daemon_state, key);
+        if (key.first == "osd") {
+          oss << "{\"prefix\": \"osd metadata\", \"id\": "
+              << key.second<< "}";
+
+        } else if (key.first == "mds") {
+          c->set_default("addr", stringify(m->get_source_addr()));
+          oss << "{\"prefix\": \"mds metadata\", \"who\": \""
+              << key.second << "\"}";
  
-      } else {
-	ceph_abort();
+        } else if (key.first == "mon") {
+          oss << "{\"prefix\": \"mon metadata\", \"id\": \""
+              << key.second << "\"}";
+        } else {
+          ceph_abort();
+        }
+
+        monc->start_mon_command({oss.str()}, {}, &c->outbl, &c->outs, c);
       }
 
-      monc->start_mon_command({oss.str()}, {}, &c->outbl, &c->outs, c);
-    }
-    
-    {
-      std::lock_guard l(lock);
+      lock.lock();
+
       // kill session
       auto priv = m->get_connection()->get_priv();
       auto session = static_cast<MgrSession*>(priv.get());
       if (!session) {
-	return false;
+        return false;
       }
       m->get_connection()->mark_down();
 
       dout(10) << "unregistering osd." << session->osd_id
-	       << "  session " << session << " con " << m->get_connection() << dendl;
+               << "  session " << session << " con " << m->get_connection() << dendl;
       
       if (osd_cons.find(session->osd_id) != osd_cons.end()) {
-	   osd_cons[session->osd_id].erase(m->get_connection());
-      } 
+        osd_cons[session->osd_id].erase(m->get_connection());
+      }
 
       auto iter = daemon_connections.find(m->get_connection());
       if (iter != daemon_connections.end()) {
-	daemon_connections.erase(iter);
+        daemon_connections.erase(iter);
+      }
+
+      lock.unlock();
+      return false;
+    }
+
+    // Update the DaemonState
+    ceph_assert(daemon != nullptr);
+    {
+      std::lock_guard l(daemon->lock);
+      auto &daemon_counters = daemon->perf_counters;
+      daemon_counters.update(*m.get());
+
+      auto p = m->config_bl.cbegin();
+      if (p != m->config_bl.end()) {
+        decode(daemon->config, p);
+        decode(daemon->ignored_mon_config, p);
+        dout(20) << " got config " << daemon->config
+                 << " ignored " << daemon->ignored_mon_config << dendl;
+      }
+
+      if (daemon->service_daemon) {
+        utime_t now = ceph_clock_now();
+        if (m->daemon_status) {
+          daemon->service_status_stamp = now;
+          daemon->service_status = *m->daemon_status;
+        }
+        if (m->task_status && !map_compare(daemon->task_status, *m->task_status)) {
+          auto [d, added] = pending_service_map.get_daemon(m->service_name,
+							   m->daemon_name);
+	  if (!added) {
+            daemon->task_status = *m->task_status;
+            d->task_status = *m->task_status;
+            pending_service_map_dirty = pending_service_map.epoch;
+	  }
+        }
+        daemon->last_service_beacon = now;
+      } else if (m->daemon_status) {
+        derr << "got status from non-daemon " << key << dendl;
+      }
+      if (m->get_connection()->peer_is_osd() || m->get_connection()->peer_is_mon()) {
+        // only OSD and MON send health_checks to me now
+        daemon->daemon_health_metrics = std::move(m->daemon_health_metrics);
+        dout(10) << "daemon_health_metrics " << daemon->daemon_health_metrics
+                 << dendl;
       }
     }
 
-    return false;
-  }
-
-  // Update the DaemonState
-  ceph_assert(daemon != nullptr);
-  {
-    std::lock_guard l(daemon->lock);
-    auto &daemon_counters = daemon->perf_counters;
-    daemon_counters.update(m);
-
-    auto p = m->config_bl.cbegin();
-    if (p != m->config_bl.end()) {
-      decode(daemon->config, p);
-      decode(daemon->ignored_mon_config, p);
-      dout(20) << " got config " << daemon->config
-	       << " ignored " << daemon->ignored_mon_config << dendl;
-    }
-
-    if (daemon->service_daemon) {
-      utime_t now = ceph_clock_now();
-      if (m->daemon_status) {
-        daemon->service_status = *m->daemon_status;
-        daemon->service_status_stamp = now;
-      }
-      daemon->last_service_beacon = now;
-    } else if (m->daemon_status) {
-      derr << "got status from non-daemon " << key << dendl;
-    }
-    if (m->get_connection()->peer_is_osd() || m->get_connection()->peer_is_mon()) {
-      // only OSD and MON send health_checks to me now
-      daemon->daemon_health_metrics = std::move(m->daemon_health_metrics);
-      dout(10) << "daemon_health_metrics " << daemon->daemon_health_metrics
-	       << dendl;
-    }
+    lock.unlock();
   }
 
   // if there are any schema updates, notify the python modules
@@ -639,7 +637,10 @@ bool DaemonServer::handle_report(MMgrReport *m)
     py_modules.notify_all("perf_schema_update", oss.str());
   }
 
-  m->put();
+  if (m->get_connection()->peer_is_osd()) {
+    osd_perf_metric_collector.process_reports(m->osd_perf_metric_reports);
+  }
+
   return true;
 }
 
@@ -719,16 +720,22 @@ bool DaemonServer::_allowed_command(
  */
 class CommandContext {
 public:
-  MCommand *m;
+  ceph::ref_t<MCommand> m_tell;
+  ceph::ref_t<MMgrCommand> m_mgr;
+  const std::vector<std::string>& cmd;  ///< ref into m_tell or m_mgr
+  const bufferlist& data;               ///< ref into m_tell or m_mgr
   bufferlist odata;
   cmdmap_t cmdmap;
 
-  explicit CommandContext(MCommand *m_)
-    : m(m_) {
+  explicit CommandContext(ceph::ref_t<MCommand> m)
+    : m_tell{std::move(m)},
+      cmd(m_tell->cmd),
+      data(m_tell->get_data()) {
   }
-
-  ~CommandContext() {
-    m->put();
+  explicit CommandContext(ceph::ref_t<MMgrCommand> m)
+    : m_mgr{std::move(m)},
+      cmd(m_mgr->cmd),
+      data(m_mgr->get_data()) {
   }
 
   void reply(int r, const std::stringstream &ss) {
@@ -737,21 +744,29 @@ public:
 
   void reply(int r, const std::string &rs) {
     // Let the connection drop as soon as we've sent our response
-    ConnectionRef con = m->get_connection();
+    ConnectionRef con = m_tell ? m_tell->get_connection()
+      : m_mgr->get_connection();
     if (con) {
       con->mark_disposable();
     }
 
     if (r == 0) {
-      dout(4) << __func__ << " success" << dendl;
+      dout(20) << "success" << dendl;
     } else {
       derr << __func__ << " " << cpp_strerror(r) << " " << rs << dendl;
     }
     if (con) {
-      MCommandReply *reply = new MCommandReply(r, rs);
-      reply->set_tid(m->get_tid());
-      reply->set_data(odata);
-      con->send_message(reply);
+      if (m_tell) {
+	MCommandReply *reply = new MCommandReply(r, rs);
+	reply->set_tid(m_tell->get_tid());
+	reply->set_data(odata);
+	con->send_message(reply);
+      } else {
+	MMgrCommandReply *reply = new MMgrCommandReply(r, rs);
+	reply->set_tid(m_mgr->get_tid());
+	reply->set_data(odata);
+	con->send_message(reply);
+      }
     }
   }
 };
@@ -776,12 +791,24 @@ public:
   }
 };
 
-bool DaemonServer::handle_command(MCommand *m)
+bool DaemonServer::handle_command(const ref_t<MCommand>& m)
 {
   std::lock_guard l(lock);
-  std::shared_ptr<CommandContext> cmdctx = std::make_shared<CommandContext>(m);
+  auto cmdctx = std::make_shared<CommandContext>(m);
   try {
-    return _handle_command(m, cmdctx);
+    return _handle_command(cmdctx);
+  } catch (const bad_cmd_get& e) {
+    cmdctx->reply(-EINVAL, e.what());
+    return true;
+  }
+}
+
+bool DaemonServer::handle_command(const ref_t<MMgrCommand>& m)
+{
+  std::lock_guard l(lock);
+  auto cmdctx = std::make_shared<CommandContext>(m);
+  try {
+    return _handle_command(cmdctx);
   } catch (const bad_cmd_get& e) {
     cmdctx->reply(-EINVAL, e.what());
     return true;
@@ -789,16 +816,22 @@ bool DaemonServer::handle_command(MCommand *m)
 }
 
 bool DaemonServer::_handle_command(
-  MCommand *m,
   std::shared_ptr<CommandContext>& cmdctx)
 {
+  MessageRef m;
+  if (cmdctx->m_tell) {
+    m = cmdctx->m_tell;
+  } else {
+    m = cmdctx->m_mgr;
+  }
   auto priv = m->get_connection()->get_priv();
   auto session = static_cast<MgrSession*>(priv.get());
   if (!session) {
     return true;
   }
-  if (session->inst.name == entity_name_t())
+  if (session->inst.name == entity_name_t()) {
     session->inst.name = m->get_source();
+  }
 
   std::string format;
   boost::scoped_ptr<Formatter> f;
@@ -806,7 +839,7 @@ bool DaemonServer::_handle_command(
   std::stringstream ss;
   int r = 0;
 
-  if (!cmdmap_from_json(m->cmd, &(cmdctx->cmdmap), ss)) {
+  if (!cmdmap_from_json(cmdctx->cmd, &(cmdctx->cmdmap), ss)) {
     cmdctx->reply(-EINVAL, ss);
     return true;
   }
@@ -819,8 +852,7 @@ bool DaemonServer::_handle_command(
   string prefix;
   cmd_getval(cct, cmdctx->cmdmap, "prefix", prefix);
 
-  dout(4) << "decoded " << cmdctx->cmdmap.size() << dendl;
-  dout(4) << "prefix=" << prefix << dendl;
+  dout(10) << "decoded-size=" << cmdctx->cmdmap.size() << " prefix=" << prefix  << dendl;
 
   if (prefix == "get_command_descriptions") {
     dout(10) << "reading commands from python modules" << dendl;
@@ -830,11 +862,12 @@ bool DaemonServer::_handle_command(
     JSONFormatter f;
     f.open_object_section("command_descriptions");
 
-    auto dump_cmd = [&cmdnum, &f](const MonCommand &mc){
+    auto dump_cmd = [&cmdnum, &f, m](const MonCommand &mc){
       ostringstream secname;
       secname << "cmd" << setfill('0') << std::setw(3) << cmdnum;
-      dump_cmddesc_to_json(&f, secname.str(), mc.cmdstring, mc.helpstring,
-                           mc.module, mc.req_perms, mc.availability, 0);
+      dump_cmddesc_to_json(&f, m->get_connection()->get_features(),
+                           secname.str(), mc.cmdstring, mc.helpstring,
+                           mc.module, mc.req_perms, 0);
       cmdnum++;
     };
 
@@ -858,7 +891,7 @@ bool DaemonServer::_handle_command(
 
   bool is_allowed;
   if (!mgr_cmd) {
-    MonCommand py_command = {"", "", "py", "rw", "cli"};
+    MonCommand py_command = {"", "", "py", "rw"};
     is_allowed = _allowed_command(session, py_command.module,
       prefix, cmdctx->cmdmap, param_str_map, &py_command);
   } else {
@@ -870,7 +903,7 @@ bool DaemonServer::_handle_command(
       dout(1) << " access denied" << dendl;
       audit_clog->info() << "from='" << session->inst << "' "
                          << "entity='" << session->entity_name << "' "
-                         << "cmd=" << m->cmd << ":  access denied";
+                         << "cmd=" << cmdctx->cmd << ":  access denied";
       ss << "access denied: does your client key have mgr caps? "
             "See http://docs.ceph.com/docs/master/mgr/administrator/"
             "#client-authentication";
@@ -881,7 +914,7 @@ bool DaemonServer::_handle_command(
   audit_clog->debug()
     << "from='" << session->inst << "' "
     << "entity='" << session->entity_name << "' "
-    << "cmd=" << m->cmd << ": dispatch";
+    << "cmd=" << cmdctx->cmd << ": dispatch";
 
   // ----------------
   // service map commands
@@ -900,11 +933,7 @@ bool DaemonServer::_handle_command(
       f.reset(Formatter::create("json-pretty"));
     // only include state from services that are in the persisted service map
     f->open_object_section("service_status");
-    ServiceMap s;
-    cluster_state.with_servicemap([&](const ServiceMap& service_map) {
-	s = service_map;
-      });
-    for (auto& p : s.services) {
+    for (auto& p : pending_service_map.services) {
       f->open_object_section(p.first.c_str());
       for (auto& q : p.second.daemons) {
 	f->open_object_section(q.first.c_str());
@@ -963,7 +992,7 @@ bool DaemonServer::_handle_command(
 	pg_exists = osdmap.pg_exists(pgid);
       });
     if (!pg_exists) {
-      ss << "pg " << pgid << " dne";
+      ss << "pg " << pgid << " does not exist";
       cmdctx->reply(-ENOENT, ss);
       return true;
     }
@@ -1043,21 +1072,19 @@ bool DaemonServer::_handle_command(
     for (auto osd : osds) {
       vector<spg_t> spgs;
       epoch_t epoch;
-      cluster_state.with_pgmap([&](const PGMap& pgmap) {
-	  cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	      epoch = osdmap.get_epoch();
-	      auto p = pgmap.pg_by_osd.find(osd);
-	      if (p != pgmap.pg_by_osd.end()) {
-		for (auto pgid : p->second) {
-		  int primary;
-		  spg_t spg;
-		  osdmap.get_primary_shard(pgid, &primary, &spg);
-		  if (primary == osd) {
-		    spgs.push_back(spg);
-		  }
-		}
+      cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pgmap) {
+	  epoch = osdmap.get_epoch();
+	  auto p = pgmap.pg_by_osd.find(osd);
+	  if (p != pgmap.pg_by_osd.end()) {
+	    for (auto pgid : p->second) {
+	      int primary;
+	      spg_t spg;
+	      osdmap.get_primary_shard(pgid, &primary, &spg);
+	      if (primary == osd) {
+		spgs.push_back(spg);
 	      }
-	    });
+	    }
+	  }
 	});
       auto p = osd_cons.find(osd);
       if (p == osd_cons.end()) {
@@ -1091,6 +1118,73 @@ bool DaemonServer::_handle_command(
       r = 0;
     }
     cmdctx->reply(0, ss);
+    return true;
+  } else if (prefix == "osd pool scrub" ||
+             prefix == "osd pool deep-scrub" ||
+             prefix == "osd pool repair") {
+    vector<string> pool_names;
+    cmd_getval(g_ceph_context, cmdctx->cmdmap, "who", pool_names);
+    if (pool_names.empty()) {
+      ss << "must specify one or more pool names";
+      cmdctx->reply(-EINVAL, ss);
+      return true;
+    }
+    epoch_t epoch;
+    map<int32_t, vector<pg_t>> pgs_by_primary; // legacy
+    map<int32_t, vector<spg_t>> spgs_by_primary;
+    cluster_state.with_osdmap([&](const OSDMap& osdmap) {
+      epoch = osdmap.get_epoch();
+      for (auto& pool_name : pool_names) {
+        auto pool_id = osdmap.lookup_pg_pool_name(pool_name);
+        if (pool_id < 0) {
+          ss << "unrecognized pool '" << pool_name << "'";
+          r = -ENOENT;
+          return;
+        }
+        auto pool_pg_num = osdmap.get_pg_num(pool_id);
+        for (int i = 0; i < pool_pg_num; i++) {
+          pg_t pg(i, pool_id);
+          int primary;
+          spg_t spg;
+          auto got = osdmap.get_primary_shard(pg, &primary, &spg);
+          if (!got)
+            continue;
+          pgs_by_primary[primary].push_back(pg);
+          spgs_by_primary[primary].push_back(spg);
+        }
+      }
+    });
+    if (r < 0) {
+      cmdctx->reply(r, ss);
+      return true;
+    }
+    for (auto& it : spgs_by_primary) {
+      auto primary = it.first;
+      auto p = osd_cons.find(primary);
+      if (p == osd_cons.end()) {
+        ss << "osd." << primary << " is not currently connected";
+        cmdctx->reply(-EAGAIN, ss);
+        return true;
+      }
+      for (auto& con : p->second) {
+        if (HAVE_FEATURE(con->get_features(), SERVER_MIMIC)) {
+          con->send_message(new MOSDScrub2(monc->get_fsid(),
+                                           epoch,
+                                           it.second,
+                                           prefix == "osd pool repair",
+                                           prefix == "osd pool deep-scrub"));
+        } else {
+          // legacy
+          auto q = pgs_by_primary.find(primary);
+          ceph_assert(q != pgs_by_primary.end());
+          con->send_message(new MOSDScrub(monc->get_fsid(),
+                                          q->second,
+                                          prefix == "osd pool repair",
+                                          prefix == "osd pool deep-scrub"));
+        }
+      }
+    }
+    cmdctx->reply(0, "");
     return true;
   } else if (prefix == "osd reweight-by-pg" ||
 	     prefix == "osd reweight-by-utilization" ||
@@ -1135,22 +1229,20 @@ bool DaemonServer::_handle_command(
       cmdctx->reply(-EINVAL, ss);
       return true;
     }
-    string no_increasing;
+    bool no_increasing = false;
     cmd_getval(g_ceph_context, cmdctx->cmdmap, "no_increasing", no_increasing);
     string out_str;
     mempool::osdmap::map<int32_t, uint32_t> new_weights;
-    r = cluster_state.with_pgmap([&](const PGMap& pgmap) {
-	return cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	    return reweight::by_utilization(osdmap, pgmap,
-					    oload,
-					    max_change,
-					    max_osds,
-					    by_pg,
-					    pools.empty() ? NULL : &pools,
-					    no_increasing == "--no-increasing",
-					    &new_weights,
-					    &ss, &out_str, f.get());
-	  });
+    r = cluster_state.with_osdmap_and_pgmap([&](const OSDMap &osdmap, const PGMap& pgmap) {
+	return reweight::by_utilization(osdmap, pgmap,
+					oload,
+					max_change,
+					max_osds,
+					by_pg,
+					pools.empty() ? NULL : &pools,
+					no_increasing,
+					&new_weights,
+					&ss, &out_str, f.get());
       });
     if (r >= 0) {
       dout(10) << "reweight::by_utilization: finished with " << out_str << dendl;
@@ -1188,26 +1280,32 @@ bool DaemonServer::_handle_command(
       return true;
     }
   } else if (prefix == "osd df") {
-    string method;
+    string method, filter;
     cmd_getval(g_ceph_context, cmdctx->cmdmap, "output_method", method);
-    r = cluster_state.with_pgmap([&](const PGMap& pgmap) {
-	return cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	    print_osd_utilization(osdmap, pgmap, ss,
-				  f.get(), method == "tree");
-				  
-	    cmdctx->odata.append(ss);
-	    return 0;
-	  });
+    cmd_getval(g_ceph_context, cmdctx->cmdmap, "filter", filter);
+    stringstream rs;
+    r = cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pgmap) {
+        // sanity check filter(s)
+        if (!filter.empty() &&
+             osdmap.lookup_pg_pool_name(filter) < 0 &&
+            !osdmap.crush->class_exists(filter) &&
+            !osdmap.crush->name_exists(filter)) {
+          rs << "'" << filter << "' not a pool, crush node or device class name";
+          return -EINVAL;
+        }
+	print_osd_utilization(osdmap, pgmap, ss,
+                              f.get(), method == "tree", filter);
+	cmdctx->odata.append(ss);
+	return 0;
       });
-    cmdctx->reply(r, "");
+    cmdctx->reply(r, rs);
     return true;
   } else if (prefix == "osd pool stats") {
     string pool_name;
     cmd_getval(g_ceph_context, cmdctx->cmdmap, "pool_name", pool_name);
     int64_t poolid = -ENOENT;
     bool one_pool = false;
-    r = cluster_state.with_pgmap([&](const PGMap& pg_map) {
-      return cluster_state.with_osdmap([&](const OSDMap& osdmap) {
+    r = cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pg_map) {
         if (!pool_name.empty()) {
           poolid = osdmap.lookup_pg_pool_name(pool_name);
           if (poolid < 0) {
@@ -1244,7 +1342,6 @@ bool DaemonServer::_handle_command(
         }
         return 0;
       });
-    });
     if (r != -EOPNOTSUPP) {
       cmdctx->reply(r, ss);
       return true;
@@ -1277,9 +1374,9 @@ bool DaemonServer::_handle_command(
       cmdctx->reply(r, ss);
       return true;
     }
-    set<int> active_osds, missing_stats, stored_pgs;
+    set<int> active_osds, missing_stats, stored_pgs, safe_to_destroy;
     int affected_pgs = 0;
-    cluster_state.with_pgmap([&](const PGMap& pg_map) {
+    cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pg_map) {
 	if (pg_map.num_pg_unknown > 0) {
 	  ss << pg_map.num_pg_unknown << " pgs have unknown state; cannot draw"
 	     << " any conclusions";
@@ -1293,76 +1390,149 @@ bool DaemonServer::_handle_command(
 	    num_active_clean += p.second;
 	  }
 	}
-	cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	    for (auto osd : osds) {
-	      if (!osdmap.exists(osd)) {
-		continue;  // clearly safe to destroy
-	      }
-	      auto q = pg_map.num_pg_by_osd.find(osd);
-	      if (q != pg_map.num_pg_by_osd.end()) {
-		if (q->second.acting > 0 || q->second.up > 0) {
-		  active_osds.insert(osd);
-		  affected_pgs += q->second.acting + q->second.up;
-		  continue;
-		}
-	      }
-	      if (num_active_clean < pg_map.num_pg) {
-		// all pgs aren't active+clean; we need to be careful.
-		auto p = pg_map.osd_stat.find(osd);
-		if (p == pg_map.osd_stat.end()) {
-		  missing_stats.insert(osd);
-		} else if (p->second.num_pgs > 0) {
-		  stored_pgs.insert(osd);
-		}
-	      }
+	for (auto osd : osds) {
+	  if (!osdmap.exists(osd)) {
+	    safe_to_destroy.insert(osd);
+	    continue;  // clearly safe to destroy
+	  }
+          set<int64_t> pools;
+          osdmap.get_pool_ids_by_osd(g_ceph_context, osd, &pools);
+          if (pools.empty()) {
+            // osd does not belong to any pools yet
+            safe_to_destroy.insert(osd);
+            continue;
+          }
+          if (osdmap.is_down(osd) && osdmap.is_out(osd)) {
+            // if osd is down&out and all relevant pools are active+clean,
+            // then should be safe to destroy
+            bool all_osd_pools_active_clean = true;
+            for (auto &ps: pg_map.pg_stat) {
+              auto& pg = ps.first;
+              auto state = ps.second.state;
+              if (!pools.count(pg.pool()))
+                continue;
+              if ((state & (PG_STATE_ACTIVE | PG_STATE_CLEAN)) !=
+                           (PG_STATE_ACTIVE | PG_STATE_CLEAN)) {
+                all_osd_pools_active_clean = false;
+                break;
+              }
+            }
+            if (all_osd_pools_active_clean) {
+              safe_to_destroy.insert(osd);
+              continue;
+            }
+          }
+	  auto q = pg_map.num_pg_by_osd.find(osd);
+	  if (q != pg_map.num_pg_by_osd.end()) {
+	    if (q->second.acting > 0 || q->second.up_not_acting > 0) {
+	      active_osds.insert(osd);
+	      // XXX: For overlapping PGs, this counts them again
+	      affected_pgs += q->second.acting + q->second.up_not_acting;
+	      continue;
 	    }
-	  });
+	  }
+	  if (num_active_clean < pg_map.num_pg) {
+	    // all pgs aren't active+clean; we need to be careful.
+	    auto p = pg_map.osd_stat.find(osd);
+	    if (p == pg_map.osd_stat.end() || !osdmap.is_up(osd)) {
+	      missing_stats.insert(osd);
+	      continue;
+	    } else if (p->second.num_pgs > 0) {
+	      stored_pgs.insert(osd);
+	      continue;
+	    }
+	  }
+	  safe_to_destroy.insert(osd);
+	}
       });
-    if (!r && !active_osds.empty()) {
-      ss << "OSD(s) " << active_osds << " have " << affected_pgs
-	 << " pgs currently mapped to them";
-      r = -EBUSY;
-    } else if (!missing_stats.empty()) {
-      ss << "OSD(s) " << missing_stats << " have no reported stats, and not all"
-	 << " PGs are active+clean; we cannot draw any conclusions";
-      r = -EAGAIN;
-    } else if (!stored_pgs.empty()) {
-      ss << "OSD(s) " << stored_pgs << " last reported they still store some PG"
-	 << " data, and not all PGs are active+clean; we cannot be sure they"
-	 << " aren't still needed.";
-      r = -EBUSY;
+    if (r && prefix == "osd safe-to-destroy") {
+      cmdctx->reply(r, ss); // regardless of formatter
+      return true;
+    }
+    if (!r && (!active_osds.empty() ||
+               !missing_stats.empty() || !stored_pgs.empty())) {
+       if (!safe_to_destroy.empty()) {
+         ss << "OSD(s) " << safe_to_destroy
+            << " are safe to destroy without reducing data durability. ";
+       }
+       if (!active_osds.empty()) {
+         ss << "OSD(s) " << active_osds << " have " << affected_pgs
+            << " pgs currently mapped to them. ";
+       }
+       if (!missing_stats.empty()) {
+         ss << "OSD(s) " << missing_stats << " have no reported stats, and not all"
+            << " PGs are active+clean; we cannot draw any conclusions. ";
+       }
+       if (!stored_pgs.empty()) {
+         ss << "OSD(s) " << stored_pgs << " last reported they still store some PG"
+            << " data, and not all PGs are active+clean; we cannot be sure they"
+            << " aren't still needed.";
+       }
+       if (!active_osds.empty() || !stored_pgs.empty()) {
+         r = -EBUSY;
+       } else {
+         r = -EAGAIN;
+       }
     }
 
-    if (r && (prefix == "osd destroy" ||
-	      prefix == "osd purge")) {
-      string sure;
-      if (!cmd_getval(cct, cmdctx->cmdmap, "sure", sure) ||
-	  (sure != "--force" &&
-	   sure != "--yes-i-really-mean-it" /* for backward compat */)) {
-	ss << "\nYou can proceed by passing --force, but be warned that this will likely mean real, permanent data loss.";
+    if (prefix == "osd safe-to-destroy") {
+      if (!r) {
+        ss << "OSD(s) " << osds << " are safe to destroy without reducing data"
+           << " durability.";
+      }
+      if (f) {
+        f->open_object_section("osd_status");
+        f->open_array_section("safe_to_destroy");
+        for (auto i : safe_to_destroy)
+          f->dump_int("osd", i);
+        f->close_section();
+        f->open_array_section("active");
+        for (auto i : active_osds)
+          f->dump_int("osd", i);
+        f->close_section();
+        f->open_array_section("missing_stats");
+        for (auto i : missing_stats)
+          f->dump_int("osd", i);
+        f->close_section();
+        f->open_array_section("stored_pgs");
+        for (auto i : stored_pgs)
+          f->dump_int("osd", i);
+        f->close_section();
+        f->close_section(); // osd_status
+        f->flush(cmdctx->odata);
+        r = 0;
+        std::stringstream().swap(ss);
+      }
+      cmdctx->reply(r, ss);
+      return true;
+    }
+
+    if (r) {
+      bool force = false;
+      cmd_getval(cct, cmdctx->cmdmap, "force", force);
+      if (!force) {
+        // Backward compat
+        cmd_getval(cct, cmdctx->cmdmap, "yes_i_really_mean_it", force);
+      }
+      if (!force) {
+        ss << "\nYou can proceed by passing --force, but be warned that"
+              " this will likely mean real, permanent data loss.";
       } else {
-	r = 0;
+        r = 0;
       }
     }
     if (r) {
       cmdctx->reply(r, ss);
       return true;
     }
-    if (prefix == "osd destroy" ||
-	prefix == "osd purge") {
-      const string cmd =
-	"{"
-	"\"prefix\": \"" + prefix + "-actual\", "
-	"\"id\": " + stringify(osds) + ", "
-	"\"sure\": \"--yes-i-really-mean-it\""
-	"}";
-      auto on_finish = new ReplyOnFinish(cmdctx);
-      monc->start_mon_command({cmd}, {}, nullptr, &on_finish->outs, on_finish);
-    } else {
-      ss << "OSD(s) " << osds << " are safe to destroy without reducing data"
-	 << " durability.";
-      cmdctx->reply(0, ss);
-    }
+    const string cmd =
+      "{"
+      "\"prefix\": \"" + prefix + "-actual\", "
+      "\"id\": " + stringify(osds) + ", "
+      "\"yes_i_really_mean_it\": true"
+      "}";
+    auto on_finish = new ReplyOnFinish(cmdctx);
+    monc->start_mon_command({cmd}, {}, nullptr, &on_finish->outs, on_finish);
     return true;
   } else if (prefix == "osd ok-to-stop") {
     vector<string> ids;
@@ -1380,73 +1550,84 @@ bool DaemonServer::_handle_command(
       cmdctx->reply(r, ss);
       return true;
     }
-    map<pg_t,int> pg_delta;  // pgid -> net acting set size change
+    int touched_pgs = 0;
     int dangerous_pgs = 0;
-    cluster_state.with_pgmap([&](const PGMap& pg_map) {
-	return cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	    if (pg_map.num_pg_unknown > 0) {
-	      ss << pg_map.num_pg_unknown << " pgs have unknown state; "
-		 << "cannot draw any conclusions";
-	      r = -EAGAIN;
-	      return;
-	    }
-	    for (auto osd : osds) {
-	      auto p = pg_map.pg_by_osd.find(osd);
-	      if (p != pg_map.pg_by_osd.end()) {
-		for (auto& pgid : p->second) {
-		  --pg_delta[pgid];
-		}
-	      }
-	    }
-	    for (auto& p : pg_delta) {
-	      auto q = pg_map.pg_stat.find(p.first);
-	      if (q == pg_map.pg_stat.end()) {
-		ss << "missing information about " << p.first << "; cannot draw"
-		   << " any conclusions";
-		r = -EAGAIN;
-		return;
-	      }
-	      if (!(q->second.state & PG_STATE_ACTIVE) ||
-		  (q->second.state & PG_STATE_DEGRADED)) {
-		// we don't currently have a good way to tell *how* degraded
-		// a degraded PG is, so we have to assume we cannot remove
-		// any more replicas/shards.
-		++dangerous_pgs;
+    cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pg_map) {
+	if (pg_map.num_pg_unknown > 0) {
+	  ss << pg_map.num_pg_unknown << " pgs have unknown state; "
+	     << "cannot draw any conclusions";
+	  r = -EAGAIN;
+	  return;
+	}
+	for (const auto& q : pg_map.pg_stat) {
+          set<int32_t> pg_acting;  // net acting sets (with no missing if degraded)
+	  bool found = false;
+	  if (q.second.state & PG_STATE_DEGRADED) {
+	    for (auto& anm : q.second.avail_no_missing) {
+	      if (osds.count(anm.osd)) {
+		found = true;
 		continue;
 	      }
-	      const pg_pool_t *pi = osdmap.get_pg_pool(p.first.pool());
-	      if (!pi) {
-		++dangerous_pgs; // pool is creating or deleting
-	      } else {
-		if (q->second.acting.size() + p.second < pi->min_size) {
-		  ++dangerous_pgs;
-		}
-	      }
+	      pg_acting.insert(anm.osd);
 	    }
-	  });
+	  } else {
+	    for (auto& a : q.second.acting) {
+	      if (osds.count(a)) {
+		found = true;
+		continue;
+	      }
+	      pg_acting.insert(a);
+	    }
+	  }
+	  if (!found) {
+	    continue;
+	  }
+	  touched_pgs++;
+	  if (!(q.second.state & PG_STATE_ACTIVE) ||
+	      (q.second.state & PG_STATE_DEGRADED)) {
+	    ++dangerous_pgs;
+	    continue;
+	  }
+	  const pg_pool_t *pi = osdmap.get_pg_pool(q.first.pool());
+	  if (!pi) {
+	    ++dangerous_pgs; // pool is creating or deleting
+	  } else {
+	    if (pg_acting.size() < pi->min_size) {
+	      ++dangerous_pgs;
+	    }
+	  }
+	}
       });
     if (r) {
       cmdctx->reply(r, ss);
       return true;
     }
     if (dangerous_pgs) {
-      ss << dangerous_pgs << " PGs are already degraded or might become "
-	 << "unavailable";
+      ss << dangerous_pgs << " PGs are already too degraded, would become"
+	 << " too degraded or might become unavailable";
       cmdctx->reply(-EBUSY, ss);
       return true;
     }
     ss << "OSD(s) " << osds << " are ok to stop without reducing"
-       << " availability, provided there are no other concurrent failures"
-       << " or interventions. " << pg_delta.size() << " PGs are likely to be"
+       << " availability or risking data, provided there are no other concurrent failures"
+       << " or interventions." << std::endl;
+    ss << touched_pgs << " PGs are likely to be"
        << " degraded (but remain available) as a result.";
     cmdctx->reply(0, ss);
     return true;
   } else if (prefix == "pg force-recovery" ||
-  	       prefix == "pg force-backfill" ||
-  	       prefix == "pg cancel-force-recovery" ||
-  	       prefix == "pg cancel-force-backfill") {
-    string forceop = prefix.substr(3, string::npos);
-    list<pg_t> parsed_pgs;
+  	     prefix == "pg force-backfill" ||
+  	     prefix == "pg cancel-force-recovery" ||
+  	     prefix == "pg cancel-force-backfill" ||
+             prefix == "osd pool force-recovery" ||
+             prefix == "osd pool force-backfill" ||
+             prefix == "osd pool cancel-force-recovery" ||
+             prefix == "osd pool cancel-force-backfill") {
+    vector<string> vs;
+    get_str_vec(prefix, vs);
+    auto& granularity = vs.front();
+    auto& forceop = vs.back();
+    vector<pg_t> pgs;
 
     // figure out actual op just once
     int actual_op = 0;
@@ -1460,89 +1641,109 @@ bool DaemonServer::_handle_command(
       actual_op = OFR_RECOVERY | OFR_CANCEL;
     }
 
-    // covnert pg names to pgs, discard any invalid ones while at it
-    {
-      // we don't want to keep pgidstr and pgidstr_nodup forever
-      vector<string> pgidstr;
-      // get pgids to process and prune duplicates
-      cmd_getval(g_ceph_context, cmdctx->cmdmap, "pgid", pgidstr);
-      set<string> pgidstr_nodup(pgidstr.begin(), pgidstr.end());
-      if (pgidstr.size() != pgidstr_nodup.size()) {
-	// move elements only when there were duplicates, as this
-	// reorders them
-	pgidstr.resize(pgidstr_nodup.size());
-	auto it = pgidstr_nodup.begin();
-	for (size_t i = 0 ; i < pgidstr_nodup.size(); i++) {
-	  pgidstr[i] = std::move(*it++);
-	}
+    set<pg_t> candidates; // deduped
+    if (granularity == "pg") {
+      // covnert pg names to pgs, discard any invalid ones while at it
+      vector<string> pgids;
+      cmd_getval(g_ceph_context, cmdctx->cmdmap, "pgid", pgids);
+      for (auto& i : pgids) {
+        pg_t pgid;
+        if (!pgid.parse(i.c_str())) {
+          ss << "invlaid pgid '" << i << "'; ";
+          r = -EINVAL;
+          continue;
+        }
+        candidates.insert(pgid);
       }
-
-      cluster_state.with_pgmap([&](const PGMap& pg_map) {
-	for (auto& pstr : pgidstr) {
-	  pg_t parsed_pg;
-	  if (!parsed_pg.parse(pstr.c_str())) {
-	    ss << "invalid pgid '" << pstr << "'; ";
-	    r = -EINVAL;
-	  } else {
-	    auto workit = pg_map.pg_stat.find(parsed_pg);
-	    if (workit == pg_map.pg_stat.end()) {
-	      ss << "pg " << pstr << " does not exist; ";
-	      r = -ENOENT;
-	    } else {
-	      pg_stat_t workpg = workit->second;
-
-	      // discard pgs for which user requests are pointless
-	      switch (actual_op)
-	      {
-		case OFR_RECOVERY:
-		  if ((workpg.state & (PG_STATE_DEGRADED | PG_STATE_RECOVERY_WAIT | PG_STATE_RECOVERING)) == 0) {
-		    // don't return error, user script may be racing with cluster. not fatal.
-		    ss << "pg " << pstr << " doesn't require recovery; ";
-		    continue;
-		  } else  if (workpg.state & PG_STATE_FORCED_RECOVERY) {
-		    ss << "pg " << pstr << " recovery already forced; ";
-		    // return error, as it may be a bug in user script
-		    r = -EINVAL;
-		    continue;
-		  }
-		  break;
-		case OFR_BACKFILL:
-		  if ((workpg.state & (PG_STATE_DEGRADED | PG_STATE_BACKFILL_WAIT | PG_STATE_BACKFILLING)) == 0) {
-		    ss << "pg " << pstr << " doesn't require backfilling; ";
-		    continue;
-		  } else  if (workpg.state & PG_STATE_FORCED_BACKFILL) {
-		    ss << "pg " << pstr << " backfill already forced; ";
-		    r = -EINVAL;
-		    continue;
-		  }
-		  break;
-		case OFR_BACKFILL | OFR_CANCEL:
-		  if ((workpg.state & PG_STATE_FORCED_BACKFILL) == 0) {
-		    ss << "pg " << pstr << " backfill not forced; ";
-		    continue;
-		  }
-		  break;
-		case OFR_RECOVERY | OFR_CANCEL:
-		  if ((workpg.state & PG_STATE_FORCED_RECOVERY) == 0) {
-		    ss << "pg " << pstr << " recovery not forced; ";
-		    continue;
-		  }
-		  break;
-		default:
-		  ceph_abort_msg("actual_op value is not supported");
-	      }
-
-	      parsed_pgs.push_back(std::move(parsed_pg));
-	    }
-	  }
-	}
+    } else {
+      // per pool
+      vector<string> pool_names;
+      cmd_getval(g_ceph_context, cmdctx->cmdmap, "who", pool_names);
+      if (pool_names.empty()) {
+        ss << "must specify one or more pool names";
+        cmdctx->reply(-EINVAL, ss);
+        return true;
+      }
+      cluster_state.with_osdmap([&](const OSDMap& osdmap) {
+        for (auto& pool_name : pool_names) {
+          auto pool_id = osdmap.lookup_pg_pool_name(pool_name);
+          if (pool_id < 0) {
+            ss << "unrecognized pool '" << pool_name << "'";
+            r = -ENOENT;
+            return;
+          }
+          auto pool_pg_num = osdmap.get_pg_num(pool_id);
+          for (int i = 0; i < pool_pg_num; i++)
+            candidates.insert({(unsigned int)i, (uint64_t)pool_id});
+        }
       });
+      if (r < 0) {
+        cmdctx->reply(r, ss);
+        return true;
+      }
     }
+
+    cluster_state.with_pgmap([&](const PGMap& pg_map) {
+      for (auto& i : candidates) {
+	auto it = pg_map.pg_stat.find(i);
+	if (it == pg_map.pg_stat.end()) {
+	  ss << "pg " << i << " does not exist; ";
+	  r = -ENOENT;
+          continue;
+	}
+        auto state = it->second.state;
+	// discard pgs for which user requests are pointless
+	switch (actual_op) {
+        case OFR_RECOVERY:
+          if ((state & (PG_STATE_DEGRADED |
+                        PG_STATE_RECOVERY_WAIT |
+                        PG_STATE_RECOVERING)) == 0) {
+            // don't return error, user script may be racing with cluster.
+            // not fatal.
+            ss << "pg " << i << " doesn't require recovery; ";
+            continue;
+          } else  if (state & PG_STATE_FORCED_RECOVERY) {
+            ss << "pg " << i << " recovery already forced; ";
+            // return error, as it may be a bug in user script
+            r = -EINVAL;
+            continue;
+          }
+          break;
+        case OFR_BACKFILL:
+          if ((state & (PG_STATE_DEGRADED |
+                        PG_STATE_BACKFILL_WAIT |
+                        PG_STATE_BACKFILLING)) == 0) {
+            ss << "pg " << i << " doesn't require backfilling; ";
+            continue;
+          } else if (state & PG_STATE_FORCED_BACKFILL) {
+            ss << "pg " << i << " backfill already forced; ";
+            r = -EINVAL;
+            continue;
+          }
+          break;
+        case OFR_BACKFILL | OFR_CANCEL:
+          if ((state & PG_STATE_FORCED_BACKFILL) == 0) {
+            ss << "pg " << i << " backfill not forced; ";
+            continue;
+          }
+          break;
+        case OFR_RECOVERY | OFR_CANCEL:
+          if ((state & PG_STATE_FORCED_RECOVERY) == 0) {
+            ss << "pg " << i << " recovery not forced; ";
+            continue;
+          }
+          break;
+        default:
+          ceph_abort_msg("actual_op value is not supported");
+        }
+	pgs.push_back(i);
+      } // for
+    });
 
     // respond with error only when no pgs are correct
     // yes, in case of mixed errors, only the last one will be emitted,
     // but the message presented will be fine
-    if (parsed_pgs.size() != 0) {
+    if (pgs.size() != 0) {
       // clear error to not confuse users/scripts
       r = 0;
     }
@@ -1552,7 +1753,7 @@ bool DaemonServer::_handle_command(
     cluster_state.with_osdmap([&](const OSDMap& osdmap) {
 	// group pgs to process by osd
 	map<int, vector<spg_t>> osdpgs;
-	for (auto& pgid : parsed_pgs) {
+	for (auto& pgid : pgs) {
 	  int primary;
 	  spg_t spg;
 	  if (osdmap.get_primary_shard(pgid, &primary, &spg)) {
@@ -1592,14 +1793,19 @@ bool DaemonServer::_handle_command(
     string name;
     if (!daemon) {
       ss << "no config state for daemon " << who;
-      r = -ENOENT;
-    } else if (cmd_getval(g_ceph_context, cmdctx->cmdmap, "key", name)) {
+      cmdctx->reply(-ENOENT, ss);
+      return true;
+    }
+
+    std::lock_guard l(daemon->lock);
+
+    if (cmd_getval(g_ceph_context, cmdctx->cmdmap, "key", name)) {
       auto p = daemon->config.find(name);
       if (p != daemon->config.end() &&
 	  !p->second.empty()) {
 	cmdctx->odata.append(p->second.rbegin()->second + "\n");
       } else {
-	auto& defaults = daemon->get_config_defaults();
+	auto& defaults = daemon->_get_config_defaults();
 	auto q = defaults.find(name);
 	if (q != defaults.end()) {
 	  cmdctx->odata.append(q->second + "\n");
@@ -1608,7 +1814,6 @@ bool DaemonServer::_handle_command(
 	}
       }
     } else if (daemon->config_defaults_bl.length() > 0) {
-      std::lock_guard l(daemon->lock);
       TextTable tbl;
       if (f) {
 	f->open_array_section("config");
@@ -1675,7 +1880,7 @@ bool DaemonServer::_handle_command(
 	}
       } else {
 	// show-with-defaults
-	auto& defaults = daemon->get_config_defaults();
+	auto& defaults = daemon->_get_config_defaults();
 	for (auto& i : defaults) {
 	  if (f) {
 	    f->open_object_section("value");
@@ -2002,18 +2207,18 @@ bool DaemonServer::_handle_command(
     }
 
     // fall back to feeding command to PGMap
-    r = cluster_state.with_pgmap([&](const PGMap& pg_map) {
-	return cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	    return process_pg_map_command(prefix, cmdctx->cmdmap, pg_map, osdmap,
-					  f.get(), &ss, &cmdctx->odata);
-	  });
+    r = cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pg_map) {
+	return process_pg_map_command(prefix, cmdctx->cmdmap, pg_map, osdmap,
+				      f.get(), &ss, &cmdctx->odata);
       });
 
     if (f) {
       f->close_section();
-      f->flush(cmdctx->odata);
     }
     if (r != -EOPNOTSUPP) {
+      if (f) {
+	f->flush(cmdctx->odata);
+      }
       cmdctx->reply(r, ss);
       return true;
     }
@@ -2039,12 +2244,13 @@ bool DaemonServer::_handle_command(
     return true;
   }
 
-  dout(4) << "passing through " << cmdctx->cmdmap.size() << dendl;
+  dout(10) << "passing through " << cmdctx->cmdmap.size() << dendl;
   finisher.queue(new FunctionContext([this, cmdctx, handler_name, prefix](int r_) {
     std::stringstream ss;
 
     // Validate that the module is enabled
     PyModuleRef module = py_modules.get_module(handler_name);
+    ceph_assert(module);
     if (!module->is_enabled()) {
       ss << "Module '" << handler_name << "' is not enabled (required by "
             "command '" << prefix << "'): use `ceph mgr module enable "
@@ -2087,7 +2293,7 @@ bool DaemonServer::_handle_command(
     }
 
     std::stringstream ds;
-    bufferlist inbl = cmdctx->m->get_data();
+    bufferlist inbl = cmdctx->data;
     int r = py_modules.handle_command(handler_name, cmdctx->cmdmap, inbl, &ds, &ss);
     cmdctx->odata.append(ds);
     cmdctx->reply(r, ss);
@@ -2152,6 +2358,7 @@ void DaemonServer::send_report()
 
   auto m = new MMonMgrReport();
   py_modules.get_health_checks(&m->health_checks);
+  py_modules.get_progress_events(&m->progress_events);
 
   cluster_state.with_mutable_pgmap([&](PGMap& pg_map) {
       cluster_state.update_delta_stats();
@@ -2183,6 +2390,9 @@ void DaemonServer::send_report()
 	  jf.dump_object("health_checks", m->health_checks);
 	  jf.flush(*_dout);
 	  *_dout << dendl;
+          if (osdmap.require_osd_release >= ceph_release_t::luminous) {
+              clog->debug() << "pgmap v" << pg_map.version << ": " << pg_map;
+          }
 	});
     });
 
@@ -2230,7 +2440,7 @@ void DaemonServer::adjust_pgs()
   map<string,unsigned> pg_num_to_set;
   map<string,unsigned> pgp_num_to_set;
   set<pg_t> upmaps_to_clear;
-  cluster_state.with_pgmap([&](const PGMap& pg_map) {
+  cluster_state.with_osdmap_and_pgmap([&](const OSDMap& osdmap, const PGMap& pg_map) {
       unsigned creating_or_unknown = 0;
       for (auto& i : pg_map.num_pg_by_state) {
 	if ((i.first & (PG_STATE_CREATING)) ||
@@ -2262,232 +2472,215 @@ void DaemonServer::adjust_pgs()
 	       << "; target_max_misplaced_ratio " << max_misplaced
 	       << dendl;
 
-      cluster_state.with_osdmap([&](const OSDMap& osdmap) {
-	  for (auto& i : osdmap.get_pools()) {
-	    const pg_pool_t& p = i.second;
+      for (auto& i : osdmap.get_pools()) {
+	const pg_pool_t& p = i.second;
 
-	    // adjust pg_num?
-	    if (p.get_pg_num_target() != p.get_pg_num()) {
-	      dout(20) << "pool " << i.first
+	// adjust pg_num?
+	if (p.get_pg_num_target() != p.get_pg_num()) {
+	  dout(20) << "pool " << i.first
+		   << " pg_num " << p.get_pg_num()
+		   << " target " << p.get_pg_num_target()
+		   << dendl;
+	  if (p.has_flag(pg_pool_t::FLAG_CREATING)) {
+	    dout(10) << "pool " << i.first
+		     << " pg_num_target " << p.get_pg_num_target()
+		     << " pg_num " << p.get_pg_num()
+		     << " - still creating initial pgs"
+		     << dendl;
+	  } else if (p.get_pg_num_target() < p.get_pg_num()) {
+	    // pg_num decrease (merge)
+	    pg_t merge_source(p.get_pg_num() - 1, i.first);
+	    pg_t merge_target = merge_source.get_parent();
+	    bool ok = true;
+
+	    if (p.get_pg_num() != p.get_pg_num_pending()) {
+	      dout(10) << "pool " << i.first
+		       << " pg_num_target " << p.get_pg_num_target()
 		       << " pg_num " << p.get_pg_num()
-		       << " target " << p.get_pg_num_target()
+		       << " - decrease and pg_num_pending != pg_num, waiting"
 		       << dendl;
-	      if (p.has_flag(pg_pool_t::FLAG_CREATING)) {
-		dout(10) << "pool " << i.first
-			 << " pg_num_target " << p.get_pg_num_target()
-			 << " pg_num " << p.get_pg_num()
-			 << " - still creating initial pgs"
-			 << dendl;
-	      } else if (p.get_pg_num_target() < p.get_pg_num()) {
-		// pg_num decrease (merge)
-		pg_t merge_source(p.get_pg_num() - 1, i.first);
-		pg_t merge_target = merge_source.get_parent();
-		bool ok = true;
+	      ok = false;
+	    } else if (p.get_pg_num() == p.get_pgp_num()) {
+	      dout(10) << "pool " << i.first
+		       << " pg_num_target " << p.get_pg_num_target()
+		       << " pg_num " << p.get_pg_num()
+		       << " - decrease blocked by pgp_num "
+		       << p.get_pgp_num()
+		       << dendl;
+	      ok = false;
+	    }
+            for (auto &merge_participant : {merge_source, merge_target}) {
+              bool is_merge_source = merge_participant == merge_source;
+              if (osdmap.have_pg_upmaps(merge_participant)) {
+                dout(10) << "pool " << i.first
+                         << " pg_num_target " << p.get_pg_num_target()
+                         << " pg_num " << p.get_pg_num()
+                         << (is_merge_source ? " - merge source " : " - merge target ")
+                         << merge_participant
+                         << " has upmap" << dendl;
+                upmaps_to_clear.insert(merge_participant);
+                ok = false;
+              }
+              auto q = pg_map.pg_stat.find(merge_participant);
+              if (q == pg_map.pg_stat.end()) {
+	        dout(10) << "pool " << i.first
+		         << " pg_num_target " << p.get_pg_num_target()
+		         << " pg_num " << p.get_pg_num()
+		         << " - no state for " << merge_participant
+		         << (is_merge_source ? " (merge source)" : " (merge target)")
+		         << dendl;
+	        ok = false;
+	      } else if ((q->second.state & (PG_STATE_ACTIVE | PG_STATE_CLEAN)) !=
+                                            (PG_STATE_ACTIVE | PG_STATE_CLEAN)) {
+	        dout(10) << "pool " << i.first
+		         << " pg_num_target " << p.get_pg_num_target()
+		         << " pg_num " << p.get_pg_num()
+		         << (is_merge_source ? " - merge source " : " - merge target ")
+                         << merge_participant
+		         << " not clean (" << pg_state_string(q->second.state)
+		         << ")" << dendl;
+	        ok = false;
+	      }
+            }
 
-		if (osdmap.have_pg_upmaps(merge_target)) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - merge target " << merge_target
-			   << " has upmap" << dendl;
-		  upmaps_to_clear.insert(merge_target);
-		  ok = false;
-		} else if (osdmap.have_pg_upmaps(merge_source)) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - merge source " << merge_source
-			   << " has upmap" << dendl;
-		  upmaps_to_clear.insert(merge_source);
-		  ok = false;
-		}
-
-		auto q = pg_map.pg_stat.find(merge_source);
-		if (p.get_pg_num() != p.get_pg_num_pending()) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - decrease and pg_num_pending != pg_num, waiting"
+	    if (ok) {
+	      unsigned target = p.get_pg_num() - 1;
+	      dout(10) << "pool " << i.first
+		       << " pg_num_target " << p.get_pg_num_target()
+		       << " pg_num " << p.get_pg_num()
+		       << " -> " << target
+		       << " (merging " << merge_source
+		       << " and " << merge_target
+		       << ")" << dendl;
+	      pg_num_to_set[osdmap.get_pool_name(i.first)] = target;
+              continue;
+	    }
+	  } else if (p.get_pg_num_target() > p.get_pg_num()) {
+	    // pg_num increase (split)
+	    bool active = true;
+	    auto q = pg_map.num_pg_by_pool_state.find(i.first);
+	    if (q != pg_map.num_pg_by_pool_state.end()) {
+	      for (auto& j : q->second) {
+		if ((j.first & (PG_STATE_ACTIVE|PG_STATE_PEERED)) == 0) {
+		  dout(20) << "pool " << i.first << " has " << j.second
+			   << " pgs in " << pg_state_string(j.first)
 			   << dendl;
-		  ok = false;
-		} else if (p.get_pg_num() == p.get_pgp_num()) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - decrease blocked by pgp_num "
-			   << p.get_pgp_num()
-			   << dendl;
-		  ok = false;
-		} else if (q == pg_map.pg_stat.end()) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - no state for " << merge_source
-			   << " (merge source)"
-			   << dendl;
-		  ok = false;
-		} else if (!(q->second.state & (PG_STATE_ACTIVE |
-						PG_STATE_CLEAN))) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - merge source " << merge_source
-			   << " not clean (" << pg_state_string(q->second.state)
-			   << ")" << dendl;
-		  ok = false;
-		} else if (q->second.state & PG_STATE_REMAPPED) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - merge source " << merge_source
-			   << " remapped" << dendl;
-		  ok = false;
-		}
-
-		q = pg_map.pg_stat.find(merge_target);
-		if (q == pg_map.pg_stat.end()) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - no state for " << merge_target
-			   << " (merge target)"
-			   << dendl;
-		  ok = false;
-		} else if (!(q->second.state & (PG_STATE_ACTIVE |
-						PG_STATE_CLEAN))) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - merge target " << merge_target
-			   << " not clean (" << pg_state_string(q->second.state)
-			   << ")" << dendl;
-		  ok = false;
-		} else if (q->second.state & PG_STATE_REMAPPED) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - merge target " << merge_target
-			   << " remapped" << dendl;
-		  ok = false;
-		}
-		if (ok) {
-		  unsigned target = p.get_pg_num() - 1;
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " -> " << target
-			   << " (merging " << merge_source
-			   << " and " << merge_target
-			   << ")" << dendl;
-		  pg_num_to_set[osdmap.get_pool_name(i.first)] = target;
-		}
-	      } else if (p.get_pg_num_target() > p.get_pg_num()) {
-		// pg_num increase (split)
-		bool active = true;
-		auto q = pg_map.num_pg_by_pool_state.find(i.first);
-		if (q != pg_map.num_pg_by_pool_state.end()) {
-		  for (auto& j : q->second) {
-		    if ((j.first & (PG_STATE_ACTIVE|PG_STATE_PEERED)) == 0) {
-		      dout(20) << "pool " << i.first << " has " << j.second
-			       << " pgs in " << pg_state_string(j.first)
-			       << dendl;
-		      active = false;
-                      break;
-		    }
-		  }
-		} else {
 		  active = false;
-		}
-		if (!active) {
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " - not all pgs active"
-			   << dendl;
-		} else {
-		  unsigned add = std::min(
-		    left,
-		    p.get_pg_num_target() - p.get_pg_num());
-		  unsigned target = p.get_pg_num() + add;
-		  left -= add;
-		  dout(10) << "pool " << i.first
-			   << " pg_num_target " << p.get_pg_num_target()
-			   << " pg_num " << p.get_pg_num()
-			   << " -> " << target << dendl;
-		  pg_num_to_set[osdmap.get_pool_name(i.first)] = target;
+		  break;
 		}
 	      }
+	    } else {
+	      active = false;
 	    }
-
-	    // adjust pgp_num?
-	    unsigned target = std::min(p.get_pg_num_pending(),
-				       p.get_pgp_num_target());
-	    if (target != p.get_pgp_num()) {
-	      dout(20) << "pool " << i.first
-		       << " pgp_num_target " << p.get_pgp_num_target()
-		       << " pgp_num " << p.get_pgp_num()
+	    if (!active) {
+	      dout(10) << "pool " << i.first
+		       << " pg_num_target " << p.get_pg_num_target()
+		       << " pg_num " << p.get_pg_num()
+		       << " - not all pgs active"
+		       << dendl;
+	    } else {
+	      unsigned add = std::min(
+		left,
+		p.get_pg_num_target() - p.get_pg_num());
+	      unsigned target = p.get_pg_num() + add;
+	      left -= add;
+	      dout(10) << "pool " << i.first
+		       << " pg_num_target " << p.get_pg_num_target()
+		       << " pg_num " << p.get_pg_num()
 		       << " -> " << target << dendl;
-	      if (target > p.get_pgp_num() &&
-		  p.get_pgp_num() == p.get_pg_num()) {
-		dout(10) << "pool " << i.first
-			 << " pgp_num_target " << p.get_pgp_num_target()
-			 << " pgp_num " << p.get_pgp_num()
-			 << " - increase blocked by pg_num " << p.get_pg_num()
-			 << dendl;
-	      } else if (!aggro && (inactive_pgs_ratio > 0 ||
-				    degraded_ratio > 0 ||
-				    unknown_pgs_ratio > 0)) {
-		dout(10) << "pool " << i.first
-			 << " pgp_num_target " << p.get_pgp_num_target()
-			 << " pgp_num " << p.get_pgp_num()
-			 << " - inactive|degraded|unknown pgs, deferring pgp_num"
-			 << " update" << dendl;
-	      } else if (!aggro && (misplaced_ratio > max_misplaced)) {
-		dout(10) << "pool " << i.first
-			 << " pgp_num_target " << p.get_pgp_num_target()
-			 << " pgp_num " << p.get_pgp_num()
-			 << " - misplaced_ratio " << misplaced_ratio
-			 << " > max " << max_misplaced
-			 << ", deferring pgp_num update" << dendl;
-	      } else {
-		// NOTE: this calculation assumes objects are
-		// basically uniformly distributed across all PGs
-		// (regardless of pool), which is probably not
-		// perfectly correct, but it's a start.  make no
-		// single adjustment that's more than half of the
-		// max_misplaced, to somewhat limit the magnitude of
-		// our potential error here.
-		int next;
-		if (aggro) {
-		  next = target;
-		} else {
-		  double room =
-		    std::min<double>(max_misplaced - misplaced_ratio,
-				     misplaced_ratio / 2.0);
-		  unsigned estmax = std::max<unsigned>(
-		    (double)p.get_pg_num() * room, 1u);
-		  int delta = target - p.get_pgp_num();
-		  next = p.get_pgp_num();
-		  if (delta < 0) {
-		    next += std::max<int>(-estmax, delta);
-		  } else {
-		    next += std::min<int>(estmax, delta);
-		  }
-		  dout(20) << " room " << room << " estmax " << estmax
-			   << " delta " << delta << " next " << next << dendl;
-		}
-		dout(10) << "pool " << i.first
-			 << " pgp_num_target " << p.get_pgp_num_target()
-			 << " pgp_num " << p.get_pgp_num()
-			 << " -> " << next << dendl;
-		pgp_num_to_set[osdmap.get_pool_name(i.first)] = next;
-	      }
-	    }
-	    if (left == 0) {
-	      return;
+	      pg_num_to_set[osdmap.get_pool_name(i.first)] = target;
 	    }
 	  }
-	});
+	}
+
+	// adjust pgp_num?
+	unsigned target = std::min(p.get_pg_num_pending(),
+				   p.get_pgp_num_target());
+	if (target != p.get_pgp_num()) {
+	  dout(20) << "pool " << i.first
+		   << " pgp_num_target " << p.get_pgp_num_target()
+		   << " pgp_num " << p.get_pgp_num()
+		   << " -> " << target << dendl;
+	  if (target > p.get_pgp_num() &&
+	      p.get_pgp_num() == p.get_pg_num()) {
+	    dout(10) << "pool " << i.first
+		     << " pgp_num_target " << p.get_pgp_num_target()
+		     << " pgp_num " << p.get_pgp_num()
+		     << " - increase blocked by pg_num " << p.get_pg_num()
+		     << dendl;
+	  } else if (!aggro && (inactive_pgs_ratio > 0 ||
+				degraded_ratio > 0 ||
+				unknown_pgs_ratio > 0)) {
+	    dout(10) << "pool " << i.first
+		     << " pgp_num_target " << p.get_pgp_num_target()
+		     << " pgp_num " << p.get_pgp_num()
+		     << " - inactive|degraded|unknown pgs, deferring pgp_num"
+		     << " update" << dendl;
+	  } else if (!aggro && (misplaced_ratio > max_misplaced)) {
+	    dout(10) << "pool " << i.first
+		     << " pgp_num_target " << p.get_pgp_num_target()
+		     << " pgp_num " << p.get_pgp_num()
+		     << " - misplaced_ratio " << misplaced_ratio
+		     << " > max " << max_misplaced
+		     << ", deferring pgp_num update" << dendl;
+	  } else {
+	    // NOTE: this calculation assumes objects are
+	    // basically uniformly distributed across all PGs
+	    // (regardless of pool), which is probably not
+	    // perfectly correct, but it's a start.  make no
+	    // single adjustment that's more than half of the
+	    // max_misplaced, to somewhat limit the magnitude of
+	    // our potential error here.
+	    int next;
+	    static constexpr unsigned MAX_NUM_OBJECTS_PER_PG_FOR_LEAP = 1;
+	    pool_stat_t s = pg_map.get_pg_pool_sum_stat(i.first);
+	    if (aggro ||
+		// pool is (virtually) empty; just jump to final pgp_num?
+		(p.get_pgp_num_target() > p.get_pgp_num() &&
+		 s.stats.sum.num_objects <= (MAX_NUM_OBJECTS_PER_PG_FOR_LEAP *
+					     p.get_pgp_num_target()))) {
+	      next = target;
+	    } else {
+	      double room =
+		std::min<double>(max_misplaced - misplaced_ratio,
+				 max_misplaced / 2.0);
+	      unsigned estmax = std::max<unsigned>(
+		(double)p.get_pg_num() * room, 1u);
+	      next = std::clamp(target,
+				p.get_pgp_num() - estmax,
+				p.get_pgp_num() + estmax);
+	      dout(20) << " room " << room << " estmax " << estmax
+		       << " delta " << (target-p.get_pgp_num())
+		       << " next " << next << dendl;
+	      if (p.get_pgp_num_target() == p.get_pg_num_target() &&
+		  p.get_pgp_num_target() < p.get_pg_num()) {
+		// since pgp_num is tracking pg_num, ceph is handling
+		// pgp_num.  so, be responsible: don't let pgp_num get
+		// too far out ahead of merges (if we are merging).
+		// this avoids moving lots of unmerged pgs onto a
+		// small number of OSDs where we might blow out the
+		// per-osd pg max.
+		unsigned max_outpace_merges =
+		  std::max<unsigned>(8, p.get_pg_num() * max_misplaced);
+		if (next + max_outpace_merges < p.get_pg_num()) {
+		  next = p.get_pg_num() - max_outpace_merges;
+		  dout(10) << "  using next " << next
+			   << " to avoid outpacing merges (max_outpace_merges "
+			   << max_outpace_merges << ")" << dendl;
+		}
+	      }
+	    }
+	    dout(10) << "pool " << i.first
+		     << " pgp_num_target " << p.get_pgp_num_target()
+		     << " pgp_num " << p.get_pgp_num()
+		     << " -> " << next << dendl;
+	    pgp_num_to_set[osdmap.get_pool_name(i.first)] = next;
+	  }
+	}
+	if (left == 0) {
+	  return;
+	}
+      }
     });
   for (auto i : pg_num_to_set) {
     const string cmd =
@@ -2572,8 +2765,9 @@ void DaemonServer::got_mgr_map()
       auto md_update = [&] (DaemonKey key) {
         std::ostringstream oss;
         auto c = new MetadataUpdate(daemon_state, key);
+	// FIXME remove post-nautilus: include 'id' for luminous mons
         oss << "{\"prefix\": \"mgr metadata\", \"who\": \""
-              << key.second << "\"}";
+	    << key.second << "\", \"id\": \"" << key.second << "\"}";
         monc->start_mon_command({oss.str()}, {}, &c->outbl, &c->outs, c);
       };
       if (mgrmap.active_name.size()) {
@@ -2610,29 +2804,26 @@ const char** DaemonServer::get_tracked_conf_keys() const
 void DaemonServer::handle_conf_change(const ConfigProxy& conf,
 				      const std::set <std::string> &changed)
 {
-  // We may be called within lock (via MCommand `config set`) or outwith the
-  // lock (via admin socket `config set`), so handle either case.
-  const bool initially_locked = lock.is_locked_by_me();
-  if (!initially_locked) {
-    lock.Lock();
-  }
 
   if (changed.count("mgr_stats_threshold") || changed.count("mgr_stats_period")) {
     dout(4) << "Updating stats threshold/period on "
             << daemon_connections.size() << " clients" << dendl;
     // Send a fresh MMgrConfigure to all clients, so that they can follow
     // the new policy for transmitting stats
-    for (auto &c : daemon_connections) {
-      _send_configure(c);
-    }
+    finisher.queue(new FunctionContext([this](int r) {
+      std::lock_guard l(lock);
+      for (auto &c : daemon_connections) {
+        _send_configure(c);
+      }
+    }));
   }
 }
 
 void DaemonServer::_send_configure(ConnectionRef c)
 {
-  ceph_assert(lock.is_locked_by_me());
+  ceph_assert(ceph_mutex_is_locked_by_me(lock));
 
-  auto configure = new MMgrConfigure();
+  auto configure = make_message<MMgrConfigure>();
   configure->stats_period = g_conf().get_val<int64_t>("mgr_stats_period");
   configure->stats_threshold = g_conf().get_val<int64_t>("mgr_stats_threshold");
 
@@ -2641,16 +2832,24 @@ void DaemonServer::_send_configure(ConnectionRef c)
         osd_perf_metric_collector.get_queries();
   }
 
-  c->send_message(configure);
+  c->send_message2(configure);
 }
 
 OSDPerfMetricQueryID DaemonServer::add_osd_perf_query(
-  const OSDPerfMetricQuery &query)
+    const OSDPerfMetricQuery &query,
+    const std::optional<OSDPerfMetricLimit> &limit)
 {
-  return osd_perf_metric_collector.add_query(query);
+  return osd_perf_metric_collector.add_query(query, limit);
 }
 
 int DaemonServer::remove_osd_perf_query(OSDPerfMetricQueryID query_id)
 {
   return osd_perf_metric_collector.remove_query(query_id);
+}
+
+int DaemonServer::get_osd_perf_counters(
+    OSDPerfMetricQueryID query_id,
+    std::map<OSDPerfMetricKey, PerformanceCounters> *counters)
+{
+  return osd_perf_metric_collector.get_counters(query_id, counters);
 }

@@ -7,8 +7,8 @@
 #include "include/int_types.h"
 #include "include/Context.h"
 #include "include/interval_set.h"
-#include "common/Cond.h"
-#include "common/Mutex.h"
+#include "include/rados/librados_fwd.hpp"
+#include "common/AsyncOpTracker.h"
 #include "common/Cond.h"
 #include "common/WorkQueue.h"
 #include "journal/Future.h"
@@ -28,9 +28,6 @@
 class SafeTimer;
 namespace journal {
 class Journaler;
-}
-namespace librados {
-  class IoCtx;
 }
 
 namespace librbd {
@@ -131,6 +128,8 @@ public:
                     Context *on_finish);
 
   void flush_commit_position(Context *on_finish);
+
+  void user_flushed();
 
   uint64_t append_write_event(uint64_t offset, size_t length,
                               const bufferlist &bl,
@@ -272,10 +271,10 @@ private:
 
   ContextWQ *m_work_queue = nullptr;
   SafeTimer *m_timer = nullptr;
-  Mutex *m_timer_lock = nullptr;
+  ceph::mutex *m_timer_lock = nullptr;
 
   Journaler *m_journaler;
-  mutable Mutex m_lock;
+  mutable ceph::mutex m_lock = ceph::make_mutex("Journal<I>::m_lock");
   State m_state;
   uint64_t m_max_append_size = 0;
   uint64_t m_tag_class = 0;
@@ -289,9 +288,11 @@ private:
   ReplayHandler m_replay_handler;
   bool m_close_pending;
 
-  Mutex m_event_lock;
+  ceph::mutex m_event_lock = ceph::make_mutex("Journal<I>::m_event_lock");
   uint64_t m_event_tid;
   Events m_events;
+
+  std::atomic<bool> m_user_flushed = false;
 
   std::atomic<uint64_t> m_op_tid = { 0 };
   TidToFutures m_op_futures;
@@ -301,7 +302,7 @@ private:
 
   journal::Replay<ImageCtxT> *m_journal_replay;
 
-  util::AsyncOpTracker m_async_journal_op_tracker;
+  AsyncOpTracker m_async_journal_op_tracker;
 
   struct MetadataListener : public ::journal::JournalMetadataListener {
     Journal<ImageCtxT> *journal;
@@ -318,19 +319,19 @@ private:
 
   typedef std::set<journal::Listener *> Listeners;
   Listeners m_listeners;
-  Cond m_listener_cond;
+  ceph::condition_variable m_listener_cond;
   bool m_listener_notify = false;
 
   uint64_t m_refresh_sequence = 0;
 
-  bool is_journal_replaying(const Mutex &) const;
-  bool is_tag_owner(const Mutex &) const;
+  bool is_journal_replaying(const ceph::mutex &) const;
+  bool is_tag_owner(const ceph::mutex &) const;
 
   uint64_t append_io_events(journal::EventType event_type,
                             const Bufferlists &bufferlists,
                             uint64_t offset, size_t length, bool flush_entry,
                             int filter_ret_val);
-  Future wait_event(Mutex &lock, uint64_t tid, Context *on_safe);
+  Future wait_event(ceph::mutex &lock, uint64_t tid, Context *on_safe);
 
   void create_journaler();
   void destroy_journaler(int r);

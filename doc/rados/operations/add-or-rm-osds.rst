@@ -140,6 +140,10 @@ backend, for instance, for switching from FileStore to BlueStore, OSDs need to
 be replaced. Unlike `Removing the OSD`_, replaced OSD's id and CRUSH map entry
 need to be keep intact after the OSD is destroyed for replacement.
 
+#. Make sure it is safe to destroy the OSD::
+
+     while ! ceph osd safe-to-destroy osd.{id} ; do sleep 10 ; done
+
 #. Destroy the OSD first::
 
      ceph osd destroy {id} --yes-i-really-mean-it
@@ -151,7 +155,7 @@ need to be keep intact after the OSD is destroyed for replacement.
 
 #. Prepare the disk for replacement by using the previously destroyed OSD id::
 
-     ceph-volume lvm  prepare --osd-id {id} --data /dev/sdX
+     ceph-volume lvm prepare --osd-id {id} --data /dev/sdX
 
 #. And activate the OSD::
 
@@ -160,7 +164,7 @@ need to be keep intact after the OSD is destroyed for replacement.
 Alternatively, instead of preparing and activating, the device can be recreated
 in one call, like::
 
-    ceph-volume lvm create --osd-id {id} --data /dev/sdX
+     ceph-volume lvm create --osd-id {id} --data /dev/sdX
 
 
 Starting the OSD
@@ -287,7 +291,7 @@ OSD for each drive by repeating this procedure.
 
 #. Let the cluster forget the OSD first. This step removes the OSD from the CRUSH
    map, removes its authentication key. And it is removed from the OSD map as
-   well. Please note the `purge subcommand`_ is introduced in Luminous, for older
+   well. Please note the :ref:`purge subcommand <ceph-admin-osd>` is introduced in Luminous, for older
    versions, please see below ::
 
     ceph osd purge {id} --yes-i-really-mean-it
@@ -335,4 +339,3 @@ you need to perform this step manually:
 
 
 .. _Remove an OSD: ../crush-map#removeosd
-.. _purge subcommand: /man/8/ceph#osd

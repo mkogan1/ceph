@@ -1,19 +1,26 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, EventEmitter, OnInit } from '@angular/core';
 import { FormControl, ValidatorFn, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
 import * as _ from 'lodash';
-import { Observable } from 'rxjs/Observable';
+import { Observable } from 'rxjs';
 
 import { PoolService } from '../../../shared/api/pool.service';
 import { RbdService } from '../../../shared/api/rbd.service';
+import { ActionLabelsI18n } from '../../../shared/constants/app.constants';
 import { CdFormGroup } from '../../../shared/forms/cd-form-group';
+import {
+  RbdConfigurationEntry,
+  RbdConfigurationSourceField
+} from '../../../shared/models/configuration';
 import { FinishedTask } from '../../../shared/models/finished-task';
 import { Permission } from '../../../shared/models/permissions';
 import { DimlessBinaryPipe } from '../../../shared/pipes/dimless-binary.pipe';
 import { AuthStorageService } from '../../../shared/services/auth-storage.service';
 import { FormatterService } from '../../../shared/services/formatter.service';
 import { TaskWrapperService } from '../../../shared/services/task-wrapper.service';
+import { RbdImageFeature } from './rbd-feature.interface';
 import { RbdFormCloneRequestModel } from './rbd-form-clone-request.model';
 import { RbdFormCopyRequestModel } from './rbd-form-copy-request.model';
 import { RbdFormCreateRequestModel } from './rbd-form-create-request.model';
@@ -29,20 +36,21 @@ import { RbdFormResponseModel } from './rbd-form-response.model';
 export class RbdFormComponent implements OnInit {
   poolPermission: Permission;
   rbdForm: CdFormGroup;
-  featuresFormGroups: CdFormGroup;
-  deepFlattenFormControl: FormControl;
-  layeringFormControl: FormControl;
-  exclusiveLockFormControl: FormControl;
-  objectMapFormControl: FormControl;
-  journalingFormControl: FormControl;
-  fastDiffFormControl: FormControl;
+  getDirtyConfigurationValues: (
+    includeLocalField?: boolean,
+    localField?: RbdConfigurationSourceField
+  ) => RbdConfigurationEntry[];
 
   pools: Array<string> = null;
   allPools: Array<string> = null;
   dataPools: Array<string> = null;
   allDataPools: Array<string> = null;
-  features: any;
-  featuresList = [];
+  features: { [key: string]: RbdImageFeature };
+  featuresList: RbdImageFeature[] = [];
+  initializeConfigData = new EventEmitter<{
+    initialData: RbdConfigurationEntry[];
+    sourceType: RbdConfigurationSourceField;
+  }>();
 
   pool: string;
 
@@ -72,84 +80,79 @@ export class RbdFormComponent implements OnInit {
     '16 MiB',
     '32 MiB'
   ];
+  action: string;
+  resource: string;
 
   constructor(
     private authStorageService: AuthStorageService,
     private route: ActivatedRoute,
-    private router: Router,
     private poolService: PoolService,
     private rbdService: RbdService,
     private formatter: FormatterService,
     private taskWrapper: TaskWrapperService,
-    private dimlessBinaryPipe: DimlessBinaryPipe
+    private dimlessBinaryPipe: DimlessBinaryPipe,
+    private i18n: I18n,
+    public actionLabels: ActionLabelsI18n,
+    public router: Router
   ) {
     this.poolPermission = this.authStorageService.getPermissions().pool;
+    this.resource = this.i18n('RBD');
     this.features = {
       'deep-flatten': {
-        desc: 'Deep flatten',
+        desc: this.i18n('Deep flatten'),
         requires: null,
         allowEnable: false,
         allowDisable: true
       },
       layering: {
-        desc: 'Layering',
+        desc: this.i18n('Layering'),
         requires: null,
         allowEnable: false,
         allowDisable: false
       },
       'exclusive-lock': {
-        desc: 'Exclusive lock',
+        desc: this.i18n('Exclusive lock'),
         requires: null,
         allowEnable: true,
         allowDisable: true
       },
       'object-map': {
-        desc: 'Object map (requires exclusive-lock)',
+        desc: this.i18n('Object map (requires exclusive-lock)'),
         requires: 'exclusive-lock',
         allowEnable: true,
-        allowDisable: true
+        allowDisable: true,
+        initDisabled: true
       },
       journaling: {
-        desc: 'Journaling (requires exclusive-lock)',
+        desc: this.i18n('Journaling (requires exclusive-lock)'),
         requires: 'exclusive-lock',
         allowEnable: true,
-        allowDisable: true
+        allowDisable: true,
+        initDisabled: true
       },
       'fast-diff': {
-        desc: 'Fast diff (requires object-map)',
+        desc: this.i18n('Fast diff (interlocked with object-map)'),
         requires: 'object-map',
         allowEnable: true,
-        allowDisable: true
+        allowDisable: true,
+        interlockedWith: 'object-map',
+        initDisabled: true
       }
     };
+    this.featuresList = this.objToArray(this.features);
     this.createForm();
-    for (const key of Object.keys(this.features)) {
-      const listItem = this.features[key];
-      listItem.key = key;
-      this.featuresList.push(listItem);
-    }
+  }
+
+  objToArray(obj: { [key: string]: any }) {
+    return _.map(obj, (o, key) => Object.assign(o, { key: key }));
   }
 
   createForm() {
-    this.deepFlattenFormControl = new FormControl(false);
-    this.layeringFormControl = new FormControl(false);
-    this.exclusiveLockFormControl = new FormControl(false);
-    this.objectMapFormControl = new FormControl({ value: false, disabled: true });
-    this.journalingFormControl = new FormControl({ value: false, disabled: true });
-    this.fastDiffFormControl = new FormControl({ value: false, disabled: true });
-    this.featuresFormGroups = new CdFormGroup({
-      'deep-flatten': this.deepFlattenFormControl,
-      layering: this.layeringFormControl,
-      'exclusive-lock': this.exclusiveLockFormControl,
-      'object-map': this.objectMapFormControl,
-      journaling: this.journalingFormControl,
-      'fast-diff': this.fastDiffFormControl
-    });
     this.rbdForm = new CdFormGroup(
       {
         parent: new FormControl(''),
         name: new FormControl('', {
-          validators: [Validators.required]
+          validators: [Validators.required, Validators.pattern(/^[^@/]+?$/)]
         }),
         pool: new FormControl(null, {
           validators: [Validators.required]
@@ -160,7 +163,12 @@ export class RbdFormComponent implements OnInit {
           updateOn: 'blur'
         }),
         obj_size: new FormControl(this.defaultObjectSize),
-        features: this.featuresFormGroups,
+        features: new CdFormGroup(
+          this.featuresList.reduce((acc, e) => {
+            acc[e.key] = new FormControl({ value: false, disabled: !!e.initDisabled });
+            return acc;
+          }, {})
+        ),
         stripingUnit: new FormControl(null),
         stripingCount: new FormControl(null, {
           updateOn: 'blur'
@@ -193,13 +201,18 @@ export class RbdFormComponent implements OnInit {
   ngOnInit() {
     if (this.router.url.startsWith('/block/rbd/edit')) {
       this.mode = this.rbdFormMode.editing;
+      this.action = this.actionLabels.EDIT;
       this.disableForEdit();
     } else if (this.router.url.startsWith('/block/rbd/clone')) {
       this.mode = this.rbdFormMode.cloning;
       this.disableForClone();
+      this.action = this.actionLabels.CLONE;
     } else if (this.router.url.startsWith('/block/rbd/copy')) {
       this.mode = this.rbdFormMode.copying;
+      this.action = this.actionLabels.COPY;
       this.disableForCopy();
+    } else {
+      this.action = this.actionLabels.CREATE;
     }
     if (
       this.mode === this.rbdFormMode.editing ||
@@ -217,6 +230,7 @@ export class RbdFormComponent implements OnInit {
         });
       });
     } else {
+      // New image
       this.rbdService.defaultFeatures().subscribe((defaultFeatures: Array<string>) => {
         this.setFeatures(defaultFeatures);
       });
@@ -229,14 +243,16 @@ export class RbdFormComponent implements OnInit {
           const dataPools = [];
           for (const pool of resp) {
             if (_.indexOf(pool.application_metadata, 'rbd') !== -1) {
-              if (pool.type === 'replicated') {
-                pools.push(pool);
-                dataPools.push(pool);
-              } else if (
-                pool.type === 'erasure' &&
-                pool.flags_names.indexOf('ec_overwrites') !== -1
-              ) {
-                dataPools.push(pool);
+              if (!pool.pool_name.includes('/')) {
+                if (pool.type === 'replicated') {
+                  pools.push(pool);
+                  dataPools.push(pool);
+                } else if (
+                  pool.type === 'erasure' &&
+                  pool.flags_names.indexOf('ec_overwrites') !== -1
+                ) {
+                  dataPools.push(pool);
+                }
               }
             }
           }
@@ -251,23 +267,11 @@ export class RbdFormComponent implements OnInit {
           }
         });
     }
-    this.deepFlattenFormControl.valueChanges.subscribe((value) => {
-      this.watchDataFeatures('deep-flatten', value);
-    });
-    this.layeringFormControl.valueChanges.subscribe((value) => {
-      this.watchDataFeatures('layering', value);
-    });
-    this.exclusiveLockFormControl.valueChanges.subscribe((value) => {
-      this.watchDataFeatures('exclusive-lock', value);
-    });
-    this.objectMapFormControl.valueChanges.subscribe((value) => {
-      this.watchDataFeatures('object-map', value);
-    });
-    this.journalingFormControl.valueChanges.subscribe((value) => {
-      this.watchDataFeatures('journaling', value);
-    });
-    this.fastDiffFormControl.valueChanges.subscribe((value) => {
-      this.watchDataFeatures('fast-diff', value);
+    _.each(this.features, (feature) => {
+      this.rbdForm
+        .get('features')
+        .get(feature.key)
+        .valueChanges.subscribe((value) => this.featureFormUpdate(feature.key, value));
     });
   }
 
@@ -350,41 +354,93 @@ export class RbdFormComponent implements OnInit {
     };
   }
 
+  protected getDependendChildFeatures(featureKey: string) {
+    return _.filter(this.features, (f) => f.requires === featureKey) || [];
+  }
+
   deepBoxCheck(key, checked) {
-    _.forIn(this.features, (details, feature) => {
-      if (details.requires === key) {
-        if (checked) {
-          this.rbdForm.get(feature).enable();
-        } else {
-          this.rbdForm.get(feature).disable();
-          this.rbdForm.get(feature).setValue(checked);
-          this.watchDataFeatures(feature, checked);
-          this.deepBoxCheck(feature, checked);
-        }
+    const childFeatures = this.getDependendChildFeatures(key);
+    childFeatures.forEach((feature) => {
+      const featureControl = this.rbdForm.get(feature.key);
+      if (checked) {
+        featureControl.enable({ emitEvent: false });
+      } else {
+        featureControl.disable({ emitEvent: false });
+        featureControl.setValue(false, { emitEvent: false });
+        this.deepBoxCheck(feature.key, checked);
       }
-      if (this.mode === this.rbdFormMode.editing && this.rbdForm.get(feature).enabled) {
-        if (this.response.features_name.indexOf(feature) !== -1 && !details.allowDisable) {
-          this.rbdForm.get(feature).disable();
-        } else if (this.response.features_name.indexOf(feature) === -1 && !details.allowEnable) {
-          this.rbdForm.get(feature).disable();
+
+      const featureFormGroup = this.rbdForm.get('features');
+      if (this.mode === this.rbdFormMode.editing && featureFormGroup.get(feature.key).enabled) {
+        if (this.response.features_name.indexOf(feature.key) !== -1 && !feature.allowDisable) {
+          featureFormGroup.get(feature.key).disable();
+        } else if (
+          this.response.features_name.indexOf(feature.key) === -1 &&
+          !feature.allowEnable
+        ) {
+          featureFormGroup.get(feature.key).disable();
         }
       }
     });
+  }
+
+  interlockCheck(key, checked) {
+    // Adds a compatibility layer for Ceph cluster where the feature interlock of features hasn't
+    // been implemented yet. It disables the feature interlock for images which only have one of
+    // both interlocked features (at the time of this writing: object-map and fast-diff) enabled.
+    const feature = this.featuresList.find((f) => f.key === key);
+    if (this.response) {
+      // Ignore `create` page
+      const hasInterlockedFeature = feature.interlockedWith != null;
+      const dependentInterlockedFeature = this.featuresList.find(
+        (f) => f.interlockedWith === feature.key
+      );
+      const isOriginFeatureEnabled = !!this.response.features_name.find((e) => e === feature.key); // in this case: fast-diff
+      if (hasInterlockedFeature) {
+        const isLinkedEnabled = !!this.response.features_name.find(
+          (e) => e === feature.interlockedWith
+        ); // depends: object-map
+        if (isOriginFeatureEnabled !== isLinkedEnabled) {
+          return; // Ignore incompatible setting because it's from a previous cluster version
+        }
+      } else if (dependentInterlockedFeature) {
+        const isOtherInterlockedFeatureEnabled = !!this.response.features_name.find(
+          (e) => e === dependentInterlockedFeature.key
+        );
+        if (isOtherInterlockedFeatureEnabled !== isOriginFeatureEnabled) {
+          return; // Ignore incompatible setting because it's from a previous cluster version
+        }
+      }
+    }
+
+    if (checked) {
+      _.filter(this.features, (f) => f.interlockedWith === key).forEach((f) =>
+        this.rbdForm.get(f.key).setValue(true, { emitEvent: false })
+      );
+    } else {
+      if (feature.interlockedWith) {
+        // Don't skip emitting the event here, as it prevents `fast-diff` from
+        // becoming disabled when manually unchecked.  This is because it
+        // triggers an update on `object-map` and if `object-map` doesn't emit,
+        // `fast-diff` will not be automatically disabled.
+        this.rbdForm
+          .get('features')
+          .get(feature.interlockedWith)
+          .setValue(false);
+      }
+    }
   }
 
   featureFormUpdate(key, checked) {
     if (checked) {
       const required = this.features[key].requires;
       if (required && !this.rbdForm.getValue(required)) {
-        this.rbdForm.get(key).setValue(false);
+        this.rbdForm.get(`features.${key}`).setValue(false);
         return;
       }
     }
     this.deepBoxCheck(key, checked);
-  }
-
-  watchDataFeatures(key, checked) {
-    this.featureFormUpdate(key, checked);
+    this.interlockCheck(key, checked);
   }
 
   setFeatures(features: Array<string>) {
@@ -393,7 +449,7 @@ export class RbdFormComponent implements OnInit {
       if (features.indexOf(feature.key) !== -1) {
         featuresControl.get(feature.key).setValue(true);
       }
-      this.watchDataFeatures(feature.key, featuresControl.get(feature.key).value);
+      this.featureFormUpdate(feature.key, featuresControl.get(feature.key).value);
     });
   }
 
@@ -428,6 +484,12 @@ export class RbdFormComponent implements OnInit {
       .get('stripingUnit')
       .setValue(this.dimlessBinaryPipe.transform(response.stripe_unit));
     this.rbdForm.get('stripingCount').setValue(response.stripe_count);
+
+    /* Configuration */
+    this.initializeConfigData.emit({
+      initialData: this.response.configuration,
+      sourceType: RbdConfigurationSourceField.image
+    });
   }
 
   createRequest() {
@@ -441,9 +503,15 @@ export class RbdFormComponent implements OnInit {
         request.features.push(feature.key);
       }
     });
+
+    /* Striping */
     request.stripe_unit = this.formatter.toBytes(this.rbdForm.getValue('stripingUnit'));
     request.stripe_count = this.rbdForm.getValue('stripingCount');
     request.data_pool = this.rbdForm.getValue('dataPool');
+
+    /* Configuration */
+    request.configuration = this.getDirtyConfigurationValues();
+
     return request;
   }
 
@@ -467,6 +535,9 @@ export class RbdFormComponent implements OnInit {
         request.features.push(feature.key);
       }
     });
+
+    request.configuration = this.getDirtyConfigurationValues();
+
     return request;
   }
 
@@ -480,9 +551,18 @@ export class RbdFormComponent implements OnInit {
         request.features.push(feature.key);
       }
     });
+
+    /* Striping */
     request.stripe_unit = this.formatter.toBytes(this.rbdForm.getValue('stripingUnit'));
     request.stripe_count = this.rbdForm.getValue('stripingCount');
     request.data_pool = this.rbdForm.getValue('dataPool');
+
+    /* Configuration */
+    request.configuration = this.getDirtyConfigurationValues(
+      true,
+      RbdConfigurationSourceField.image
+    );
+
     return request;
   }
 
@@ -528,14 +608,24 @@ export class RbdFormComponent implements OnInit {
         request.features.push(feature.key);
       }
     });
+
+    /* Striping */
     request.stripe_unit = this.formatter.toBytes(this.rbdForm.getValue('stripingUnit'));
     request.stripe_count = this.rbdForm.getValue('stripingCount');
     request.data_pool = this.rbdForm.getValue('dataPool');
+
+    /* Configuration */
+    request.configuration = this.getDirtyConfigurationValues(
+      true,
+      RbdConfigurationSourceField.image
+    );
+
     return request;
   }
 
   copyAction(): Observable<any> {
     const request = this.copyRequest();
+
     return this.taskWrapper.wrapTaskAroundCall({
       task: new FinishedTask('rbd/copy', {
         src_pool_name: this.response.pool_name,
@@ -549,6 +639,7 @@ export class RbdFormComponent implements OnInit {
 
   submit() {
     let action: Observable<any>;
+
     if (this.mode === this.rbdFormMode.editing) {
       action = this.editAction();
     } else if (this.mode === this.rbdFormMode.cloning) {
@@ -558,6 +649,7 @@ export class RbdFormComponent implements OnInit {
     } else {
       action = this.createAction();
     }
+
     action.subscribe(
       undefined,
       () => this.rbdForm.setErrors({ cdSubmitButton: true }),

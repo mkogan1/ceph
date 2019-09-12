@@ -1,4 +1,4 @@
-#!@PYTHON_EXECUTABLE@
+#!@Python_EXECUTABLE@
 # -*- mode:python -*-
 # vim: ts=4 sw=4 smarttab expandtab
 #
@@ -22,9 +22,10 @@ Foundation.  See file COPYING.
 from __future__ import print_function
 from time import sleep
 import codecs
+import grp
 import os
+import pwd
 import sys
-import subprocess
 import time
 import platform
 
@@ -38,12 +39,6 @@ CEPH_GIT_NICE_VER = "@CEPH_GIT_NICE_VER@"
 CEPH_RELEASE = "@CEPH_RELEASE@"
 CEPH_RELEASE_NAME = "@CEPH_RELEASE_NAME@"
 CEPH_RELEASE_TYPE = "@CEPH_RELEASE_TYPE@"
-
-# Flags from src/mon/Monitor.h
-FLAG_NOFORWARD = (1 << 0)
-FLAG_OBSOLETE = (1 << 1)
-FLAG_DEPRECATED = (1 << 2)
-FLAG_POLL = (1 << 4)
 
 # priorities from src/common/perf_counters.h
 PRIO_CRITICAL = 10
@@ -68,10 +63,10 @@ MYPDIR = os.path.dirname(MYDIR)
 DEVMODEMSG = '*** DEVELOPER MODE: setting PATH, PYTHONPATH and LD_LIBRARY_PATH ***'
 
 
-def respawn_in_path(lib_path, pybind_path, pythonlib_path):
+def respawn_in_path(lib_path, pybind_path, pythonlib_path, asan_lib_path):
     execv_cmd = []
     if 'CEPH_DBG' in os.environ:
-        execv_cmd += ['@PYTHON_EXECUTABLE@', '-mpdb']
+        execv_cmd += ['@Python_EXECUTABLE@', '-mpdb']
 
     if platform.system() == "Darwin":
         lib_path_var = "DYLD_LIBRARY_PATH"
@@ -79,6 +74,8 @@ def respawn_in_path(lib_path, pybind_path, pythonlib_path):
         lib_path_var = "LD_LIBRARY_PATH"
 
     execv_cmd += sys.argv
+    if asan_lib_path:
+        os.environ['LD_PRELOAD'] = asan_lib_path
     if lib_path_var in os.environ:
         if lib_path not in os.environ[lib_path_var]:
             os.environ[lib_path_var] += ':' + lib_path
@@ -98,13 +95,28 @@ def get_pythonlib_dir():
     """Returns the name of a distutils build directory"""
     return "lib.{version[0]}".format(version=sys.version_info)
 
+
+def get_cmake_variables(*names):
+    vars = dict((name, None) for name in names)
+    for line in open(os.path.join(MYPDIR, "CMakeCache.txt")):
+        # parse lines like "WITH_ASAN:BOOL=ON"
+        for name in names:
+            if line.startswith("{}:".format(name)):
+                type_value = line.split(":")[1].strip()
+                t, v = type_value.split("=")
+                if t == 'BOOL':
+                    v = v.upper() in ('TRUE', '1', 'Y', 'YES', 'ON')
+                vars[name] = v
+                break
+        if all(vars.values()):
+            break
+    return [vars[name] for name in names]
+
+
 if os.path.exists(os.path.join(MYPDIR, "CMakeCache.txt")) \
      and os.path.exists(os.path.join(MYPDIR, "bin/init-ceph")):
-    src_path = None
-    for l in open(os.path.join(MYPDIR, "CMakeCache.txt")):
-        if l.startswith("ceph_SOURCE_DIR:STATIC="):
-            src_path = l.split("=")[1].strip()
-
+    src_path, with_asan, asan_lib_path = \
+        get_cmake_variables("ceph_SOURCE_DIR", "WITH_ASAN", "ASAN_LIBRARY")
     if src_path is None:
         # Huh, maybe we're not really in a cmake environment?
         pass
@@ -116,8 +128,8 @@ if os.path.exists(os.path.join(MYPDIR, "CMakeCache.txt")) \
         pythonlib_path = os.path.join(lib_path,
                                       "cython_modules",
                                       get_pythonlib_dir())
-
-        respawn_in_path(lib_path, pybind_path, pythonlib_path)
+        respawn_in_path(lib_path, pybind_path, pythonlib_path,
+                        asan_lib_path if with_asan else None)
 
         if 'PATH' in os.environ and bin_path not in os.environ['PATH']:
             os.environ['PATH'] = os.pathsep.join([bin_path, os.environ['PATH']])
@@ -133,8 +145,8 @@ import subprocess
 
 from ceph_argparse import \
     concise_sig, descsort_key, parse_json_funcsigs, \
-    matchnum, validate_command, find_cmd_target, \
-    json_command, run_in_thread
+    validate_command, find_cmd_target, \
+    json_command, run_in_thread, Flag
 
 from ceph_daemon import admin_socket, DaemonWatcher, Termsize
 
@@ -156,7 +168,7 @@ else:
 
 def raw_write(buf):
     sys.stdout.flush()
-    raw_stdout.write(buf)
+    raw_stdout.write(rados.cstr(buf, ''))
 
 
 def osdids():
@@ -255,6 +267,14 @@ GLOBAL_ARGS = {
 
 
 def parse_cmdargs(args=None, target=''):
+    """
+    Consume generic arguments from the start of the ``args``
+    list.  Call this first to handle arguments that are not
+    handled by a command description provided by the server.
+
+    :returns: three tuple of ArgumentParser instance, Namespace instance
+              containing parsed values, and list of un-handled arguments
+    """
     # alias: let the line-wrapping be sane
     AP = argparse.ArgumentParser
 
@@ -273,7 +293,10 @@ def parse_cmdargs(args=None, target=''):
                         help='input file, or "-" for stdin')
     parser.add_argument('-o', '--out-file', dest='output_file',
                         help='output file, or "-" for stdout')
-
+    parser.add_argument('--setuser', dest='setuser',
+                        help='set user file permission')
+    parser.add_argument('--setgroup', dest='setgroup',
+                        help='set group file permission')
     parser.add_argument('--id', '--user', dest='client_id',
                         help='client id for authentication')
     parser.add_argument('--name', '-n', dest='client_name',
@@ -442,8 +465,6 @@ def wrap(s, width, indent):
 
             yield result
 
-    raise StopIteration
-
 
 def format_help(cmddict, partial=None):
     """
@@ -458,7 +479,7 @@ def format_help(cmddict, partial=None):
         if not cmd['help']:
             continue
         flags = cmd.get('flags', 0)
-        if flags & (FLAG_OBSOLETE | FLAG_DEPRECATED):
+        if flags & (Flag.OBSOLETE | Flag.DEPRECATED | Flag.HIDDEN):
             continue
         concise = concise_sig(cmd['sig'])
         if partial and not concise.startswith(partial):
@@ -552,7 +573,7 @@ def do_command(parsed_args, target, cmdargs, sigdict, inbuf, verbose):
                 next_header_print = Termsize().rows - 3
             next_header_print -= 1
             ret, outbuf, outs = json_command(cluster_handle, target=target,
-                argdict=valid_dict, inbuf=inbuf)
+                argdict=valid_dict, inbuf=inbuf, verbose=verbose)
             if valid_dict.get('poll', False):
                 valid_dict['print_header'] = False
             if not valid_dict.get('poll', False):
@@ -647,8 +668,6 @@ def complete(sigdict, args, target):
     Return exitcode.
     """
     # XXX this looks a lot like the front of validate_command().  Refactor?
-
-    complete_verbose = 'COMPVERBOSE' in os.environ
 
     # Repulsive hack to handle tell: lop off 'tell' and target
     # and validate the rest of the command.  'target' is already
@@ -915,8 +934,6 @@ def main():
     # For now, --admin-daemon is handled as usual.  Try it
     # first in case we can't connect() to the cluster
 
-    format = parsed_args.output_format
-
     done, ret = maybe_daemon_command(parsed_args, childargs)
     if done:
         return ret
@@ -1051,6 +1068,8 @@ def main():
         # an awfully simple callback
         def watch_cb(arg, line, channel, name, who, stamp_sec, stamp_nsec, seq, level, msg):
             # Filter on channel
+            if sys.version_info[0] >= 3:
+                channel = channel.decode('utf-8')
             if (channel == parsed_args.watch_channel or \
                            parsed_args.watch_channel == "*"):
                 print(line.decode('utf-8'))
@@ -1097,6 +1116,20 @@ def main():
         except Exception as e:
             print('Can\'t open output file {0}: {1}'.format(parsed_args.output_file, e), file=sys.stderr)
             return 1
+        if parsed_args.setuser:
+            try:
+                ownerid = pwd.getpwnam(parsed_args.setuser).pw_uid
+                os.fchown(outf.fileno(), ownerid, -1)
+            except OSError as e:
+                print('Failed to change user ownership of {0} to {1}: {2}'.format(outf, parsed_args.setuser, e))
+                return 1
+        if parsed_args.setgroup:
+            try:
+                groupid = grp.getgrnam(parsed_args.setgroup).gr_gid
+                os.fchown(outf.fileno(), -1, groupid)
+            except OSError as e:
+                print('Failed to change group ownership of {0} to {1}: {2}'.format(outf, parsed_args.setgroup, e))
+                return 1
 
     # -s behaves like a command (ceph status).
     if parsed_args.status:
@@ -1150,7 +1183,7 @@ def main():
         if ret:
             where = '{0}.{1}'.format(*target)
             if ret > 0:
-                raise RuntimeError('Unexpeceted return code from {0}: {1}'.
+                raise RuntimeError('Unexpected return code from {0}: {1}'.
                                    format(where, ret))
             outs = 'problem getting command descriptions from {0}'.format(where)
         else:

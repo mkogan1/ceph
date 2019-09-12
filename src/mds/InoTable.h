@@ -69,7 +69,7 @@ class InoTable : public MDSTable {
     decode_state(bl);
   }
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<InoTable*>& ls);
+  static void generate_test_instances(std::list<InoTable*>& ls);
 
   void skip_inos(inodeno_t i);
 
@@ -96,19 +96,7 @@ class InoTable : public MDSTable {
    *
    * @return true if the table was modified
    */
-  bool force_consume_to(inodeno_t ino)
-  {
-    if (free.contains(ino)) {
-      inodeno_t min = free.begin().get_start();
-      std::cerr << "Erasing " << min << " to " << ino << std::endl;
-      free.erase(min, ino - min + 1);
-      projected_free = free;
-      projected_version = ++version;
-      return true;
-    } else {
-      return false;
-    }
-  }
+  bool force_consume_to(inodeno_t ino);
 };
 WRITE_CLASS_ENCODER(InoTable)
 

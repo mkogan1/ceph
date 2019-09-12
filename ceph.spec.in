@@ -2,7 +2,7 @@
 #
 # spec file for package ceph
 #
-# Copyright (C) 2004-2017 The Ceph Project Developers. See COPYING file
+# Copyright (C) 2004-2019 The Ceph Project Developers. See COPYING file
 # at the top-level directory of this distribution and at
 # https://github.com/ceph/ceph/blob/master/COPYING
 #
@@ -14,8 +14,15 @@
 #
 # Please submit bugfixes or comments via http://tracker.ceph.com/
 #
-%bcond_without ocf
+
+#################################################################################
+# conditional build section
+#
+# please read http://rpm.org/user_doc/conditional_builds.html for explanation of
+# bcond syntax!
+#################################################################################
 %bcond_with make_check
+%bcond_without ceph_test_package
 %ifarch s390 s390x
 %bcond_with tcmalloc
 %else
@@ -23,38 +30,40 @@
 %endif
 %if 0%{?fedora} || 0%{?rhel}
 %bcond_without selinux
-%bcond_without ceph_test_package
 %bcond_without cephfs_java
 %bcond_without lttng
 %bcond_without libradosstriper
+%bcond_without ocf
+%bcond_without amqp_endpoint
 %global _remote_tarball_prefix https://download.ceph.com/tarballs/
 %endif
 %if 0%{?suse_version}
 %bcond_with selinux
-%bcond_with ceph_test_package
 %bcond_with cephfs_java
+%bcond_with amqp_endpoint
 #Compat macro for new _fillupdir macro introduced in Nov 2017
 %if ! %{defined _fillupdir}
 %global _fillupdir /var/adm/fillup-templates
 %endif
 %if 0%{?is_opensuse}
-%bcond_without lttng
 %bcond_without libradosstriper
+%bcond_without ocf
 %else
 %bcond_with libradosstriper
-%ifarch x86_64 aarch64
+%bcond_with ocf
+%endif
+%ifarch x86_64 aarch64 ppc64le
 %bcond_without lttng
 %else
 %bcond_with lttng
 %endif
 %endif
-%endif
 %bcond_with seastar
-%if 0%{?fedora} || 0%{?suse_version} >= 1500
-# distros where py2 is _optional_
+%if 0%{?fedora} >= 29 || 0%{?suse_version} >= 1500 || 0%{?rhel} >= 8
+# distros that need a py3 Ceph build
 %bcond_with python2
 %else
-# distros where py2 is _mandatory_
+# distros that need a py2 Ceph build
 %bcond_without python2
 %endif
 %if 0%{?fedora} || 0%{?suse_version} >= 1500
@@ -67,7 +76,9 @@
 %if 0%{without python2}
 %global _defined_if_python2_absent 1
 %endif
-
+%if 0%{?fedora} || 0%{?suse_version}
+%global weak_deps 1
+%endif
 %if %{with selinux}
 # get selinux policy version
 %{!?_selinux_policy_version: %global _selinux_policy_version 0.0.0}
@@ -76,6 +87,7 @@
 %{!?_udevrulesdir: %global _udevrulesdir /lib/udev/rules.d}
 %{!?tmpfiles_create: %global tmpfiles_create systemd-tmpfiles --create}
 %{!?python3_pkgversion: %global python3_pkgversion 3}
+%{!?python3_version: %global python3_version 3}
 # define _python_buildid macro which will expand to the empty string when
 # building with python2
 %global _python_buildid %{?_defined_if_python2_absent:%{python3_pkgversion}}
@@ -90,7 +102,7 @@
 # main package definition
 #################################################################################
 Name:		ceph
-Version:	@VERSION@
+Version:	@PROJECT_VERSION@
 Release:	@RPM_RELEASE@%{?dist}
 %if 0%{?fedora} || 0%{?rhel}
 Epoch:		2
@@ -101,7 +113,7 @@ Epoch:		2
 %global _epoch_prefix %{?epoch:%{epoch}:}
 
 Summary:	User space components of the Ceph file system
-License:	LGPL-2.1 and CC-BY-SA-3.0 and GPL-2.0 and BSL-1.0 and BSD-3-Clause and MIT
+License:	LGPL-2.1 and LGPL-3.0 and CC-BY-SA-3.0 and GPL-2.0 and BSL-1.0 and BSD-3-Clause and MIT
 %if 0%{?suse_version}
 Group:		System/Filesystems
 %endif
@@ -109,11 +121,7 @@ URL:		http://ceph.com/
 Source0:	%{?_remote_tarball_prefix}@TARBALL_BASENAME@.tar.bz2
 %if 0%{?suse_version}
 # _insert_obs_source_lines_here
-%if 0%{?is_opensuse}
-ExclusiveArch:  x86_64 aarch64 ppc64 ppc64le
-%else
 ExclusiveArch:  x86_64 aarch64 ppc64le s390x
-%endif
 %endif
 #################################################################################
 # dependencies that apply across all distro families
@@ -131,7 +139,6 @@ BuildRequires:	sharutils
 BuildRequires:	checkpolicy
 BuildRequires:	selinux-policy-devel
 %endif
-BuildRequires:	bc
 BuildRequires:	gperf
 %if 0%{?rhel} == 7
 BuildRequires:  cmake3 > 3.5
@@ -143,7 +150,7 @@ BuildRequires:	fuse-devel
 %if 0%{?rhel} == 7
 # devtoolset offers newer make and valgrind-devel, but the old ones are good
 # enough.
-BuildRequires:	devtoolset-7-gcc-c++ >= 7.3.1
+BuildRequires:	devtoolset-8-gcc-c++ >= 8.3.1-3.1
 %else
 BuildRequires:	gcc-c++
 %endif
@@ -156,18 +163,19 @@ BuildRequires:	gperftools-devel >= 2.6.1
 BuildRequires:	gperftools-devel >= 2.4
 %endif
 %endif
-BuildRequires:  jq
 BuildRequires:	leveldb-devel > 1.2
 BuildRequires:	libaio-devel
 BuildRequires:	libblkid-devel >= 2.17
 BuildRequires:	libcurl-devel
 BuildRequires:	libudev-devel
+BuildRequires:	libnl3-devel
 BuildRequires:	liboath-devel
 BuildRequires:	libtool
 BuildRequires:	libxml2-devel
-BuildRequires:	libuuid-devel
 BuildRequires:	make
+BuildRequires:	ncurses-devel
 BuildRequires:	parted
+BuildRequires:	patch
 BuildRequires:	perl
 BuildRequires:	pkgconfig
 BuildRequires:  procps
@@ -183,7 +191,13 @@ BuildRequires:	xfsprogs
 BuildRequires:	xfsprogs-devel
 BuildRequires:	xmlstarlet
 BuildRequires:	yasm
+%if 0%{with amqp_endpoint}
+BuildRequires:  librabbitmq-devel
+%endif
 %if 0%{with make_check}
+BuildRequires:  jq
+BuildRequires:	libuuid-devel
+BuildRequires:	python%{_python_buildid}-bcrypt
 BuildRequires:	python%{_python_buildid}-coverage
 BuildRequires:	python%{_python_buildid}-nose
 BuildRequires:	python%{_python_buildid}-pecan
@@ -191,6 +205,11 @@ BuildRequires:	python%{_python_buildid}-requests
 BuildRequires:	python%{_python_buildid}-six
 BuildRequires:	python%{_python_buildid}-tox
 BuildRequires:	python%{_python_buildid}-virtualenv
+%if 0%{?rhel} == 7
+BuildRequires:  pyOpenSSL%{_python_buildid}
+%else
+BuildRequires:  python%{_python_buildid}-pyOpenSSL
+%endif
 BuildRequires:	socat
 %endif
 %if 0%{with seastar}
@@ -210,66 +229,75 @@ BuildRequires:  yaml-cpp-devel
 %if 0%{?suse_version}
 BuildRequires:  pkgconfig(systemd)
 BuildRequires:	systemd-rpm-macros
-BuildRequires:	systemd
 %{?systemd_requires}
 PreReq:		%fillup_prereq
+BuildRequires:	fdupes
 BuildRequires:	net-tools
 BuildRequires:	libbz2-devel
-BuildRequires:  btrfsprogs
 BuildRequires:	mozilla-nss-devel
 BuildRequires:	keyutils-devel
 BuildRequires:  libopenssl-devel
 BuildRequires:  lsb-release
 BuildRequires:  openldap2-devel
+#BuildRequires:  krb5
+#BuildRequires:  krb5-devel
 BuildRequires:  cunit-devel
-BuildRequires:	python%{_python_buildid}-base
+BuildRequires:	python%{_python_buildid}-setuptools
 BuildRequires:	python%{_python_buildid}-Cython
 BuildRequires:	python%{_python_buildid}-PrettyTable
 BuildRequires:	python%{_python_buildid}-Sphinx
 BuildRequires:  rdma-core-devel
 BuildRequires:	liblz4-devel >= 1.7
+# for prometheus-alerts
+BuildRequires:  golang-github-prometheus-prometheus
 %endif
 %if 0%{?fedora} || 0%{?rhel}
 Requires:	systemd
 BuildRequires:  boost-random
-BuildRequires:	btrfs-progs
 BuildRequires:	nss-devel
 BuildRequires:	keyutils-libs-devel
 BuildRequires:	libibverbs-devel
 BuildRequires:  librdmacm-devel
 BuildRequires:  openldap-devel
+#BuildRequires:  krb5-devel
 BuildRequires:  openssl-devel
 BuildRequires:  CUnit-devel
 BuildRequires:  redhat-lsb-core
-BuildRequires:	Cython
+%if 0%{with python2}
+BuildRequires:	python2-Cython
+%endif
+BuildRequires:	python%{python3_pkgversion}-devel
+BuildRequires:	python%{python3_pkgversion}-setuptools
+BuildRequires:	python%{python3_pkgversion}-Cython
 BuildRequires:	python%{_python_buildid}-prettytable
 BuildRequires:	python%{_python_buildid}-sphinx
 BuildRequires:	lz4-devel >= 1.7
 %endif
-# python34-... for RHEL, python3-... for all other supported distros
-%if 0%{?rhel}
-BuildRequires:	python34-devel
-BuildRequires:	python34-setuptools
-BuildRequires:	python34-Cython
-%else
-BuildRequires:	python3-devel
-BuildRequires:	python3-setuptools
-BuildRequires:	python3-Cython
-%endif
 # distro-conditional make check dependencies
 %if 0%{with make_check}
 %if 0%{?fedora} || 0%{?rhel}
+BuildRequires:	libtool-ltdl-devel
 BuildRequires:	python%{_python_buildid}-cherrypy
+BuildRequires:	python%{_python_buildid}-jwt
 BuildRequires:	python%{_python_buildid}-routes
 BuildRequires:	python%{_python_buildid}-werkzeug
-BuildRequires:	python%{_python_buildid}-bcrypt
+BuildRequires:	xmlsec1
+BuildRequires:	xmlsec1-devel
+BuildRequires:	xmlsec1-nss
+BuildRequires:	xmlsec1-openssl
+BuildRequires:	xmlsec1-openssl-devel
 %endif
 %if 0%{?suse_version}
+BuildRequires:	libxmlsec1-1
+BuildRequires:	libxmlsec1-nss1
+BuildRequires:	libxmlsec1-openssl1
 BuildRequires:	python%{_python_buildid}-CherryPy
+BuildRequires:	python%{_python_buildid}-PyJWT
 BuildRequires:	python%{_python_buildid}-Routes
 BuildRequires:	python%{_python_buildid}-Werkzeug
 BuildRequires:	python%{_python_buildid}-numpy-devel
-BuildRequires:	python%{_python_buildid}-bcrypt
+BuildRequires:	xmlsec1-devel
+BuildRequires:	xmlsec1-openssl-devel
 %endif
 %endif
 # lttng and babeltrace for rbd-replay-prep
@@ -340,11 +368,14 @@ Requires:      util-linux
 Requires:      xfsprogs
 Requires:      which
 %if 0%{?fedora} || 0%{?rhel}
-Requires:      gdisk
+# The following is necessary due to tracker 36508 and can be removed once the
+# associated upstream bugs are resolved.
+%if 0%{with tcmalloc}
+Requires:      gperftools-libs >= 2.6.1
 %endif
-%if 0%{?suse_version}
+%endif
+%if 0%{?weak_deps}
 Recommends:    chrony
-Requires:      gptfdisk
 %endif
 %description base
 Base is the package that includes all the files shared amongst ceph servers
@@ -362,13 +393,13 @@ Requires:	python%{_python_buildid}-rbd = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{_python_buildid}-cephfs = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{_python_buildid}-rgw = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{_python_buildid}-ceph-argparse = %{_epoch_prefix}%{version}-%{release}
+Requires:	python%{_python_buildid}-ceph-common = %{_epoch_prefix}%{version}-%{release}
+Requires:	python%{_python_buildid}-requests
 %if 0%{?fedora} || 0%{?rhel}
 Requires:	python%{_python_buildid}-prettytable
-Requires:	python%{_python_buildid}-requests
 %endif
 %if 0%{?suse_version}
 Requires:	python%{_python_buildid}-PrettyTable
-Requires:	python%{_python_buildid}-requests
 %endif
 %if 0%{with libradosstriper}
 Requires:	libradosstriper1 = %{_epoch_prefix}%{version}-%{release}
@@ -411,24 +442,30 @@ Summary:        Ceph Manager Daemon
 Group:          System/Filesystems
 %endif
 Requires:       ceph-base = %{_epoch_prefix}%{version}-%{release}
+Requires:       python%{_python_buildid}-bcrypt
 Requires:       python%{_python_buildid}-pecan
 Requires:       python%{_python_buildid}-six
 %if 0%{?fedora} || 0%{?rhel}
 Requires:       python%{_python_buildid}-cherrypy
-Requires:       python%{_python_buildid}-jinja2
-Requires:       python%{_python_buildid}-routes
 Requires:       python%{_python_buildid}-werkzeug
-Requires:       pyOpenSSL%{_python_buildid}
-Requires:	python%{_python_buildid}-bcrypt
 %endif
 %if 0%{?suse_version}
 Requires:       python%{_python_buildid}-CherryPy
-Requires:       python%{_python_buildid}-Routes
-Requires:       python%{_python_buildid}-Jinja2
 Requires:       python%{_python_buildid}-Werkzeug
+%endif
+%if 0%{?weak_deps}
+Recommends:	ceph-mgr-dashboard = %{_epoch_prefix}%{version}-%{release}
+Recommends:	ceph-mgr-diskprediction-local = %{_epoch_prefix}%{version}-%{release}
+Recommends:	ceph-mgr-diskprediction-cloud = %{_epoch_prefix}%{version}-%{release}
+Recommends:	ceph-mgr-rook = %{_epoch_prefix}%{version}-%{release}
+Recommends:	ceph-mgr-k8sevents = %{_epoch_prefix}%{version}-%{release}
+Recommends:	ceph-mgr-ssh = %{_epoch_prefix}%{version}-%{release}
+Recommends:	python%{_python_buildid}-influxdb
+%endif
+%if 0%{?rhel} == 7
+Requires:       pyOpenSSL
+%else
 Requires:       python%{_python_buildid}-pyOpenSSL
-Requires:       python%{_python_buildid}-bcrypt
-Recommends:     python%{_python_buildid}-influxdb
 %endif
 %description mgr
 ceph-mgr enables python modules that provide services (such as the REST
@@ -436,12 +473,115 @@ module derived from Calamari) and expose CLI hooks.  ceph-mgr gathers
 the cluster maps, the daemon metadata, and performance counters, and
 exposes all these to the python modules.
 
+%package mgr-dashboard
+Summary:        Ceph Dashboard
+BuildArch:      noarch
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+Requires:       ceph-grafana-dashboards = %{_epoch_prefix}%{version}-%{release}
+%if 0%{?fedora} || 0%{?rhel}
+Requires:       python%{_python_buildid}-cherrypy
+Requires:       python%{_python_buildid}-ipaddress
+Requires:       python%{_python_buildid}-jwt
+Requires:       python%{_python_buildid}-routes
+Requires:       python%{_python_buildid}-werkzeug
+%endif
+%if 0%{?suse_version}
+Requires:       python%{_python_buildid}-CherryPy
+Requires:       python%{_python_buildid}-PyJWT
+Requires:       python%{_python_buildid}-Routes
+Requires:       python%{_python_buildid}-Werkzeug
+%endif
+%if 0%{?rhel} == 7
+Requires:       pyOpenSSL
+%else
+Requires:       python%{_python_buildid}-pyOpenSSL
+%endif
+%description mgr-dashboard
+ceph-mgr-dashboard is a manager plugin, providing a web-based application
+to monitor and manage many aspects of a Ceph cluster and related components.
+See the Dashboard documentation at http://docs.ceph.com/ for details and a
+detailed feature overview.
+
+%package mgr-diskprediction-local
+Summary:        Ceph Manager plugin for predicting disk failures
+BuildArch:      noarch
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+%if 0%{?fedora} || 0%{?rhel} > 7 || 0%{?suse_version}
+Requires:       python%{_python_buildid}-numpy
+%if 0%{without python2}
+Requires:       python3-scipy
+%else
+Requires:       python2-scipy
+%endif
+%endif
+%if 0%{?rhel} == 7
+Requires:       numpy
+Requires:       scipy
+%endif
+%description mgr-diskprediction-local
+ceph-mgr-diskprediction-local is a ceph-mgr plugin that tries to predict
+disk failures using local algorithms and machine-learning databases.
+
+%package mgr-diskprediction-cloud
+Summary:        Ceph Manager plugin for cloud-based disk failure prediction
+BuildArch:      noarch
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+%description mgr-diskprediction-cloud
+ceph-mgr-diskprediction-cloud is a ceph-mgr plugin that tries to predict
+disk failures using services in the Google cloud.
+
+%package mgr-rook
+BuildArch:      noarch
+Summary:        Ceph Manager plugin for Rook-based orchestration
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+Requires:       python%{_python_buildid}-kubernetes
+%description mgr-rook
+ceph-mgr-rook is a ceph-mgr plugin for orchestration functions using
+a Rook backend.
+
+%package mgr-k8sevents
+BuildArch:      noarch
+Summary:        Ceph Manager plugin to orchestrate ceph-events to kubernetes' events API
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+Requires:       python%{_python_buildid}-kubernetes
+%description mgr-k8sevents
+ceph-mgr-k8sevents is a ceph-mgr plugin that sends every ceph-events
+to kubernetes' events API
+
+%package mgr-ssh
+Summary:        Ceph Manager plugin for SSH-based orchestration
+BuildArch:	noarch
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+Requires:       python%{_python_buildid}-remoto
+%description mgr-ssh
+ceph-mgr-ssh is a ceph-mgr module for orchestration functions using
+direct SSH connections for management operations.
+
 %package fuse
 Summary:	Ceph fuse-based client
 %if 0%{?suse_version}
 Group:		System/Filesystems
 %endif
 Requires:       fuse
+Requires:	python%{python3_pkgversion}
 %description fuse
 FUSE based client for Ceph distributed network file system
 
@@ -460,11 +600,21 @@ Summary:	Ceph daemon for mirroring RBD images
 %if 0%{?suse_version}
 Group:		System/Filesystems
 %endif
-Requires:	ceph-common = %{_epoch_prefix}%{version}-%{release}
+Requires:	ceph-base = %{_epoch_prefix}%{version}-%{release}
 Requires:	librados2 = %{_epoch_prefix}%{version}-%{release}
+Requires:	librbd1 = %{_epoch_prefix}%{version}-%{release}
 %description -n rbd-mirror
 Daemon for mirroring RBD images between Ceph clusters, streaming
 changes asynchronously.
+
+%package immutable-object-cache
+Summary:	Ceph daemon for immutable object cache
+%if 0%{?suse_version}
+Group:		System/Filesystems
+%endif
+Requires:	librados2 = %{_epoch_prefix}%{version}-%{release}
+%description immutable-object-cache
+Daemon for immutable object cache.
 
 %package -n rbd-nbd
 Summary:	Ceph RBD client base on NBD
@@ -481,7 +631,7 @@ Summary:	Rados REST gateway
 %if 0%{?suse_version}
 Group:		System/Filesystems
 %endif
-Requires:	ceph-common = %{_epoch_prefix}%{version}-%{release}
+Requires:	ceph-base = %{_epoch_prefix}%{version}-%{release}
 %if 0%{with selinux}
 Requires:	ceph-selinux = %{_epoch_prefix}%{version}-%{release}
 %endif
@@ -519,10 +669,24 @@ Provides:	ceph-test:/usr/bin/ceph-osdomap-tool
 Requires:	ceph-base = %{_epoch_prefix}%{version}-%{release}
 Requires:	lvm2
 Requires:	sudo
+Requires:	libstoragemgmt
 %description osd
 ceph-osd is the object storage daemon for the Ceph distributed file
 system.  It is responsible for storing objects on a local file system
 and providing access to them over the network.
+
+%if 0%{with seastar}
+%package crimson-osd
+Summary:	Ceph Object Storage Daemon (crimson)
+%if 0%{?suse_version}
+Group:		System/Filesystems
+%endif
+Requires:	ceph-osd = %{_epoch_prefix}%{version}-%{release}
+%description crimson-osd
+crimson-osd is the object storage daemon for the Ceph distributed file
+system.  It is responsible for storing objects on a local file system
+and providing access to them over the network.
+%endif
 
 %package -n librados2
 Summary:	RADOS distributed object store client library
@@ -548,7 +712,18 @@ Obsoletes:	ceph-devel < %{_epoch_prefix}%{version}-%{release}
 Provides:	librados2-devel = %{_epoch_prefix}%{version}-%{release}
 Obsoletes:	librados2-devel < %{_epoch_prefix}%{version}-%{release}
 %description -n librados-devel
-This package contains libraries and headers needed to develop programs
+This package contains C libraries and headers needed to develop programs
+that use RADOS object store.
+
+%package -n libradospp-devel
+Summary:	RADOS headers
+%if 0%{?suse_version}
+Group:		Development/Libraries/C and C++
+%endif
+Requires:	librados2 = %{_epoch_prefix}%{version}-%{release}
+Requires:	librados-devel = %{_epoch_prefix}%{version}-%{release}
+%description -n libradospp-devel
+This package contains C++ libraries and headers needed to develop programs
 that use RADOS object store.
 
 %package -n librgw2
@@ -595,6 +770,11 @@ Group:		Development/Libraries/Python
 %endif
 Requires:	librgw2 = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-rados = %{_epoch_prefix}%{version}-%{release}
+Provides: 	python3-rgw = %{_epoch_prefix}%{version}-%{release}
+%if 0%{without python2}
+Provides:	python-rgw = %{_epoch_prefix}%{version}-%{release}
+Obsoletes:	python-rgw < %{_epoch_prefix}%{version}-%{release}
+%endif
 %description -n python%{python3_pkgversion}-rgw
 This package contains Python 3 libraries for interacting with Cephs RADOS
 gateway.
@@ -619,6 +799,11 @@ Group:		Development/Libraries/Python
 %endif
 Requires:	python%{python3_pkgversion}
 Requires:	librados2 = %{_epoch_prefix}%{version}-%{release}
+Provides:	python3-rados = %{_epoch_prefix}%{version}-%{release}
+%if 0%{without python2}
+Provides:	python-rados = %{_epoch_prefix}%{version}-%{release}
+Obsoletes:      python-rados < %{_epoch_prefix}%{version}-%{release}
+%endif
 %description -n python%{python3_pkgversion}-rados
 This package contains Python 3 libraries for interacting with Cephs RADOS
 object store.
@@ -642,6 +827,7 @@ Group:		Development/Libraries/C and C++
 %endif
 Requires:	libradosstriper1 = %{_epoch_prefix}%{version}-%{release}
 Requires:	librados-devel = %{_epoch_prefix}%{version}-%{release}
+Requires:	libradospp-devel = %{_epoch_prefix}%{version}-%{release}
 Obsoletes:	ceph-devel < %{_epoch_prefix}%{version}-%{release}
 Provides:	libradosstriper1-devel = %{_epoch_prefix}%{version}-%{release}
 Obsoletes:	libradosstriper1-devel < %{_epoch_prefix}%{version}-%{release}
@@ -675,6 +861,7 @@ Group:		Development/Libraries/C and C++
 %endif
 Requires:	librbd1 = %{_epoch_prefix}%{version}-%{release}
 Requires:	librados-devel = %{_epoch_prefix}%{version}-%{release}
+Requires:	libradospp-devel = %{_epoch_prefix}%{version}-%{release}
 Obsoletes:	ceph-devel < %{_epoch_prefix}%{version}-%{release}
 Provides:	librbd1-devel = %{_epoch_prefix}%{version}-%{release}
 Obsoletes:	librbd1-devel < %{_epoch_prefix}%{version}-%{release}
@@ -703,6 +890,11 @@ Group:		Development/Libraries/Python
 %endif
 Requires:	librbd1 = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-rados = %{_epoch_prefix}%{version}-%{release}
+Provides:	python3-rbd = %{_epoch_prefix}%{version}-%{release}
+%if 0%{without python2}
+Provides:	python-rbd = %{_epoch_prefix}%{version}-%{release}
+Obsoletes:	python-rbd < %{_epoch_prefix}%{version}-%{release}
+%endif
 %description -n python%{python3_pkgversion}-rbd
 This package contains Python 3 libraries for interacting with Cephs RADOS
 block device.
@@ -760,6 +952,11 @@ Group:		Development/Libraries/Python
 Requires:	libcephfs2 = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-rados = %{_epoch_prefix}%{version}-%{release}
 Requires:	python%{python3_pkgversion}-ceph-argparse = %{_epoch_prefix}%{version}-%{release}
+Provides:	python3-cephfs = %{_epoch_prefix}%{version}-%{release}
+%if 0%{without python2}
+Provides:	python-cephfs = %{_epoch_prefix}%{version}-%{release}
+Obsoletes:	python-cephfs < %{_epoch_prefix}%{version}-%{release}
+%endif
 %description -n python%{python3_pkgversion}-cephfs
 This package contains Python 3 libraries for interacting with Cephs distributed
 file system.
@@ -782,11 +979,33 @@ Summary:	Python 3 utility libraries for Ceph CLI
 %if 0%{?suse_version}
 Group:		Development/Libraries/Python
 %endif
+Provides:   python3-ceph-argparse = %{_epoch_prefix}%{version}-%{release}
 %description -n python%{python3_pkgversion}-ceph-argparse
 This package contains types and routines for Python 3 used by the Ceph CLI as
 well as the RESTful interface. These have to do with querying the daemons for
 command-description information, validating user command input against those
 descriptions, and submitting the command to the appropriate daemon.
+
+%if 0%{with python2}
+%package -n python-ceph-common
+Summary:	Python 2 utility libraries for Ceph
+%if 0%{?suse_version}
+Group:		Development/Libraries/Python
+%endif
+%description -n python-ceph-common
+This package contains data structures, classes and functions used by Ceph.
+It also contains utilities used for the SSH orchestrator.
+%endif
+
+%package -n python%{python3_pkgversion}-ceph-common
+Summary:	Python 3 utility libraries for Ceph
+%if 0%{?suse_version}
+Group:		Development/Libraries/Python
+%endif
+Provides:   python3-ceph-common = %{_epoch_prefix}%{version}-%{release}
+%description -n python%{python3_pkgversion}-ceph-common
+This package contains data structures, classes and functions used by Ceph.
+It also contains utilities used for the SSH orchestrator.
 
 %if 0%{with cephfs_shell}
 %package -n cephfs-shell
@@ -860,7 +1079,7 @@ Summary:        RADOS object class development kit
 %if 0%{?suse_version}
 Group:		Development/Libraries/C and C++
 %endif
-Requires:       librados2-devel = %{_epoch_prefix}%{version}-%{release}
+Requires:       libradospp-devel = %{_epoch_prefix}%{version}-%{release}
 %description -n rados-objclass-devel
 This package contains libraries and headers needed to develop RADOS object
 class plugins.
@@ -903,6 +1122,28 @@ depending on python-ceph should be fixed to depend on python-rados,
 python-rbd, python-rgw or python-cephfs instead.
 %endif
 
+%package grafana-dashboards
+Summary:	The set of Grafana dashboards for monitoring purposes
+BuildArch:	noarch
+%if 0%{?suse_version}
+Group:		System/Filesystems
+%endif
+%description grafana-dashboards
+This package provides a set of Grafana dashboards for monitoring of
+Ceph clusters. The dashboards require a Prometheus server setup
+collecting data from Ceph Manager "prometheus" module and Prometheus
+project "node_exporter" module. The dashboards are designed to be
+integrated with the Ceph Manager Dashboard web UI.
+
+%if 0%{?suse_version}
+%package prometheus-alerts
+Summary:        Prometheus alerts for a Ceph deplyoment
+BuildArch:      noarch
+Group:          System/Monitoring
+%description prometheus-alerts
+This package provides Ceph’s default alerts for Prometheus.
+%endif
+
 #################################################################################
 # common
 #################################################################################
@@ -910,9 +1151,12 @@ python-rbd, python-rgw or python-cephfs instead.
 %autosetup -p1 -n @TARBALL_BASENAME@
 
 %build
+# LTO can be enabled as soon as the following GCC bug is fixed:
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=48200
+%define _lto_cflags %{nil}
 
 %if 0%{?rhel} == 7
-. /opt/rh/devtoolset-7/enable
+. /opt/rh/devtoolset-8/enable
 %endif
 
 %if 0%{with cephfs_java}
@@ -945,7 +1189,7 @@ free -h
 echo "System limits:"
 ulimit -a
 if test -n "$CEPH_SMP_NCPUS" -a "$CEPH_SMP_NCPUS" -gt 1 ; then
-    mem_per_process=1800
+    mem_per_process=2500
     max_mem=$(LANG=C free -m | sed -n "s|^Mem: *\([0-9]*\).*$|\1|p")
     max_jobs="$(($max_mem / $mem_per_process))"
     test "$CEPH_SMP_NCPUS" -gt "$max_jobs" && CEPH_SMP_NCPUS="$max_jobs" && echo "Warning: Reducing build parallelism to -j$max_jobs because of memory limits"
@@ -973,16 +1217,13 @@ ${CMAKE} .. \
     -DCMAKE_INSTALL_DOCDIR=%{_docdir}/ceph \
     -DCMAKE_INSTALL_INCLUDEDIR=%{_includedir} \
     -DWITH_MANPAGE=ON \
-    -DWITH_PYTHON3=ON \
+    -DWITH_PYTHON3=%{python3_version} \
     -DWITH_MGR_DASHBOARD_FRONTEND=OFF \
 %if %{with python2}
     -DWITH_PYTHON2=ON \
 %else
     -DWITH_PYTHON2=OFF \
     -DMGR_PYTHON_VERSION=3 \
-%endif
-%if 0%{?rhel} && ! 0%{?centos}
-    -DWITH_SUBMAN=ON \
 %endif
 %if 0%{without ceph_test_package}
     -DWITH_TESTS=OFF \
@@ -1017,7 +1258,13 @@ ${CMAKE} .. \
 %else
     -DWITH_LIBRADOSSTRIPER=OFF \
 %endif
-    -DBOOST_J=$CEPH_SMP_NCPUS
+%if 0%{with amqp_endpoint}
+    -DWITH_RADOSGW_AMQP_ENDPOINT=ON \
+%else
+    -DWITH_RADOSGW_AMQP_ENDPOINT=OFF \
+%endif
+    -DBOOST_J=$CEPH_SMP_NCPUS \
+    -DWITH_GRAFANA=ON
 
 make "$CEPH_MFLAGS_JOBS"
 
@@ -1053,8 +1300,6 @@ install -m 0644 -D etc/sysctl/90-ceph-osd.conf %{buildroot}%{_sysctldir}/90-ceph
 
 # firewall templates and /sbin/mount.ceph symlink
 %if 0%{?suse_version}
-install -m 0644 -D etc/sysconfig/SuSEfirewall2.d/services/ceph-mon %{buildroot}%{_sysconfdir}/sysconfig/SuSEfirewall2.d/services/ceph-mon
-install -m 0644 -D etc/sysconfig/SuSEfirewall2.d/services/ceph-osd-mds %{buildroot}%{_sysconfdir}/sysconfig/SuSEfirewall2.d/services/ceph-osd-mds
 mkdir -p %{buildroot}/sbin
 ln -sf %{_sbindir}/mount.ceph %{buildroot}/sbin/mount.ceph
 %endif
@@ -1082,10 +1327,19 @@ mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-mds
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rgw
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-mgr
 mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rbd
+mkdir -p %{buildroot}%{_localstatedir}/lib/ceph/bootstrap-rbd-mirror
 
 %if 0%{?suse_version}
 # create __pycache__ directories and their contents
 %py3_compile %{buildroot}%{python3_sitelib}
+# prometheus alerts
+install -m 644 -D monitoring/prometheus/alerts/ceph_default_alerts.yml %{buildroot}/etc/prometheus/SUSE/default_rules/ceph_default_alerts.yml
+# hardlink duplicate files under /usr to save space
+%fdupes %{buildroot}%{_prefix}
+%endif
+
+%if 0%{?rhel} == 8
+%py_byte_compile %{__python3} %{buildroot}%{python3_sitelib}
 %endif
 
 %clean
@@ -1115,10 +1369,8 @@ rm -rf %{buildroot}
 %dir %{_libdir}/ceph/compressor
 %{_libdir}/ceph/compressor/libceph_*.so*
 %{_unitdir}/ceph-crash.service
-%ifarch x86_64
 %dir %{_libdir}/ceph/crypto
 %{_libdir}/ceph/crypto/libceph_*.so*
-%endif
 %if %{with lttng}
 %{_libdir}/libos_tp.so*
 %{_libdir}/libosd_tp.so*
@@ -1129,8 +1381,6 @@ rm -rf %{buildroot}
 %endif
 %if 0%{?suse_version}
 %{_fillupdir}/sysconfig.*
-%config %{_sysconfdir}/sysconfig/SuSEfirewall2.d/services/ceph-mon
-%config %{_sysconfdir}/sysconfig/SuSEfirewall2.d/services/ceph-osd-mds
 %endif
 %{_unitdir}/ceph.target
 %if 0%{with python2}
@@ -1158,6 +1408,7 @@ rm -rf %{buildroot}
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-rgw
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-mgr
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-rbd
+%attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/bootstrap-rbd-mirror
 
 %post base
 /sbin/ldconfig
@@ -1184,7 +1435,6 @@ fi
 
 %postun base
 /sbin/ldconfig
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph.target
@@ -1192,7 +1442,7 @@ DISABLE_RESTART_ON_UPDATE="yes"
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph.target
 %endif
-if [ $FIRST_ARG -ge 1 ] ; then
+if [ $1 -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
   # "yes". In any case: if units are not running, do not touch them.
   SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
@@ -1204,7 +1454,7 @@ fi
 %files common
 %dir %{_docdir}/ceph
 %doc %{_docdir}/ceph/sample.ceph.conf
-%doc %{_docdir}/ceph/COPYING
+%license %{_docdir}/ceph/COPYING
 %{_bindir}/ceph
 %{_bindir}/ceph-authtool
 %{_bindir}/ceph-conf
@@ -1325,7 +1575,6 @@ fi
 %endif
 
 %postun mds
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph-mds@\*.service ceph-mds.target
@@ -1333,7 +1582,7 @@ DISABLE_RESTART_ON_UPDATE="yes"
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph-mds@\*.service ceph-mds.target
 %endif
-if [ $FIRST_ARG -ge 1 ] ; then
+if [ $1 -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
   # "yes". In any case: if units are not running, do not touch them.
   SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
@@ -1347,7 +1596,33 @@ fi
 
 %files mgr
 %{_bindir}/ceph-mgr
-%{_libdir}/ceph/mgr
+%dir %{_datadir}/ceph/mgr
+%{_datadir}/ceph/mgr/ansible
+%{_datadir}/ceph/mgr/balancer
+%{_datadir}/ceph/mgr/crash
+%{_datadir}/ceph/mgr/deepsea
+%{_datadir}/ceph/mgr/devicehealth
+%{_datadir}/ceph/mgr/influx
+%{_datadir}/ceph/mgr/insights
+%{_datadir}/ceph/mgr/iostat
+%{_datadir}/ceph/mgr/localpool
+%{_datadir}/ceph/mgr/mgr_module.*
+%{_datadir}/ceph/mgr/mgr_util.*
+%{_datadir}/ceph/mgr/orchestrator_cli
+%{_datadir}/ceph/mgr/orchestrator.*
+%{_datadir}/ceph/mgr/osd_perf_query
+%{_datadir}/ceph/mgr/pg_autoscaler
+%{_datadir}/ceph/mgr/progress
+%{_datadir}/ceph/mgr/prometheus
+%{_datadir}/ceph/mgr/rbd_support
+%{_datadir}/ceph/mgr/restful
+%{_datadir}/ceph/mgr/selftest
+%{_datadir}/ceph/mgr/status
+%{_datadir}/ceph/mgr/telegraf
+%{_datadir}/ceph/mgr/telemetry
+%{_datadir}/ceph/mgr/test_orchestrator
+%{_datadir}/ceph/mgr/volumes
+%{_datadir}/ceph/mgr/zabbix
 %{_unitdir}/ceph-mgr@.service
 %{_unitdir}/ceph-mgr.target
 %attr(750,ceph,ceph) %dir %{_localstatedir}/lib/ceph/mgr
@@ -1374,7 +1649,6 @@ fi
 %endif
 
 %postun mgr
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph-mgr@\*.service ceph-mgr.target
@@ -1382,7 +1656,7 @@ DISABLE_RESTART_ON_UPDATE="yes"
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph-mgr@\*.service ceph-mgr.target
 %endif
-if [ $FIRST_ARG -ge 1 ] ; then
+if [ $1 -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
   # "yes". In any case: if units are not running, do not touch them.
   SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
@@ -1392,6 +1666,84 @@ if [ $FIRST_ARG -ge 1 ] ; then
   if [ "X$CEPH_AUTO_RESTART_ON_UPGRADE" = "Xyes" ] ; then
     /usr/bin/systemctl try-restart ceph-mgr@\*.service > /dev/null 2>&1 || :
   fi
+fi
+
+%files mgr-dashboard
+%{_datadir}/ceph/mgr/dashboard
+
+%post mgr-dashboard
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%postun mgr-dashboard
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%files mgr-diskprediction-local
+%{_datadir}/ceph/mgr/diskprediction_local
+
+%post mgr-diskprediction-local
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%postun mgr-diskprediction-local
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%files mgr-diskprediction-cloud
+%{_datadir}/ceph/mgr/diskprediction_cloud
+
+%post mgr-diskprediction-cloud
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%postun mgr-diskprediction-cloud
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%files mgr-rook
+%{_datadir}/ceph/mgr/rook
+
+%post mgr-rook
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%postun mgr-rook
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%files mgr-k8sevents
+%{_datadir}/ceph/mgr/k8sevents
+
+%post mgr-k8sevents
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%postun mgr-k8sevents
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%files mgr-ssh
+%{_datadir}/ceph/mgr/ssh
+
+%post mgr-ssh
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
+fi
+
+%postun mgr-ssh
+if [ $1 -eq 1 ] ; then
+    /usr/bin/systemctl try-restart ceph-mgr.target >/dev/null 2>&1 || :
 fi
 
 %files mon
@@ -1424,7 +1776,6 @@ fi
 %endif
 
 %postun mon
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph-mon@\*.service ceph-mon.target
@@ -1432,7 +1783,7 @@ DISABLE_RESTART_ON_UPDATE="yes"
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph-mon@\*.service ceph-mon.target
 %endif
-if [ $FIRST_ARG -ge 1 ] ; then
+if [ $1 -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
   # "yes". In any case: if units are not running, do not touch them.
   SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
@@ -1483,13 +1834,60 @@ fi
 %endif
 
 %postun -n rbd-mirror
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph-rbd-mirror@\*.service ceph-rbd-mirror.target
 %endif
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph-rbd-mirror@\*.service ceph-rbd-mirror.target
+%endif
+if [ $1 -ge 1 ] ; then
+  # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
+  # "yes". In any case: if units are not running, do not touch them.
+  SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
+  if [ -f $SYSCONF_CEPH -a -r $SYSCONF_CEPH ] ; then
+    source $SYSCONF_CEPH
+  fi
+  if [ "X$CEPH_AUTO_RESTART_ON_UPGRADE" = "Xyes" ] ; then
+    /usr/bin/systemctl try-restart ceph-rbd-mirror@\*.service > /dev/null 2>&1 || :
+  fi
+fi
+
+%files immutable-object-cache
+%{_bindir}/ceph-immutable-object-cache
+%{_mandir}/man8/ceph-immutable-object-cache.8*
+%{_unitdir}/ceph-immutable-object-cache@.service
+%{_unitdir}/ceph-immutable-object-cache.target
+
+%post immutable-object-cache
+%if 0%{?suse_version}
+if [ $1 -eq 1 ] ; then
+  /usr/bin/systemctl preset ceph-immutable-object-cache@\*.service ceph-immutable-object-cache.target >/dev/null 2>&1 || :
+fi
+%endif
+%if 0%{?fedora} || 0%{?rhel}
+%systemd_post ceph-immutable-object-cache@\*.service ceph-immutable-object-cache.target
+%endif
+if [ $1 -eq 1 ] ; then
+/usr/bin/systemctl start ceph-immutable-object-cache.target >/dev/null 2>&1 || :
+fi
+
+%preun immutable-object-cache
+%if 0%{?suse_version}
+%service_del_preun ceph-immutable-object-cache@\*.service ceph-immutable-object-cache.target
+%endif
+%if 0%{?fedora} || 0%{?rhel}
+%systemd_preun ceph-immutable-object-cache@\*.service ceph-immutable-object-cache.target
+%endif
+
+%postun immutable-object-cache
+test -n "$FIRST_ARG" || FIRST_ARG=$1
+%if 0%{?suse_version}
+DISABLE_RESTART_ON_UPDATE="yes"
+%service_del_postun ceph-immutable-object-cache@\*.service ceph-immutable-object-cache.target
+%endif
+%if 0%{?fedora} || 0%{?rhel}
+%systemd_postun ceph-immutable-object-cache@\*.service ceph-immutable-object-cache.target
 %endif
 if [ $FIRST_ARG -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
@@ -1499,7 +1897,7 @@ if [ $FIRST_ARG -ge 1 ] ; then
     source $SYSCONF_CEPH
   fi
   if [ "X$CEPH_AUTO_RESTART_ON_UPGRADE" = "Xyes" ] ; then
-    /usr/bin/systemctl try-restart ceph-rbd-mirror@\*.service > /dev/null 2>&1 || :
+    /usr/bin/systemctl try-restart ceph-immutable-object-cache@\*.service > /dev/null 2>&1 || :
   fi
 fi
 
@@ -1539,7 +1937,6 @@ fi
 %endif
 
 %postun radosgw
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph-radosgw@\*.service ceph-radosgw.target
@@ -1547,7 +1944,7 @@ DISABLE_RESTART_ON_UPDATE="yes"
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph-radosgw@\*.service ceph-radosgw.target
 %endif
-if [ $FIRST_ARG -ge 1 ] ; then
+if [ $1 -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
   # "yes". In any case: if units are not running, do not touch them.
   SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
@@ -1573,9 +1970,6 @@ fi
 %{_mandir}/man8/ceph-bluestore-tool.8*
 %{_mandir}/man8/ceph-volume.8*
 %{_mandir}/man8/ceph-volume-systemd.8*
-%if 0%{?rhel} && ! 0%{?centos}
-%attr(0755,-,-) %{_sysconfdir}/cron.hourly/subman
-%endif
 %{_unitdir}/ceph-osd@.service
 %{_unitdir}/ceph-osd.target
 %{_unitdir}/ceph-volume@.service
@@ -1610,7 +2004,6 @@ fi
 %endif
 
 %postun osd
-test -n "$FIRST_ARG" || FIRST_ARG=$1
 %if 0%{?suse_version}
 DISABLE_RESTART_ON_UPDATE="yes"
 %service_del_postun ceph-osd@\*.service ceph-volume@\*.service ceph-osd.target
@@ -1618,7 +2011,7 @@ DISABLE_RESTART_ON_UPDATE="yes"
 %if 0%{?fedora} || 0%{?rhel}
 %systemd_postun ceph-osd@\*.service ceph-volume@\*.service ceph-osd.target
 %endif
-if [ $FIRST_ARG -ge 1 ] ; then
+if [ $1 -ge 1 ] ; then
   # Restart on upgrade, but only if "CEPH_AUTO_RESTART_ON_UPGRADE" is set to
   # "yes". In any case: if units are not running, do not touch them.
   SYSCONF_CEPH=%{_sysconfdir}/sysconfig/ceph
@@ -1629,6 +2022,11 @@ if [ $FIRST_ARG -ge 1 ] ; then
     /usr/bin/systemctl try-restart ceph-osd@\*.service ceph-volume@\*.service > /dev/null 2>&1 || :
   fi
 fi
+
+%if 0%{with seastar}
+%files crimson-osd
+%{_bindir}/crimson-osd
+%endif
 
 %if %{with ocf}
 
@@ -1643,7 +2041,7 @@ fi
 %files -n librados2
 %{_libdir}/librados.so.*
 %dir %{_libdir}/ceph
-%{_libdir}/ceph/libceph-common.so*
+%{_libdir}/ceph/libceph-common.so.*
 %if %{with lttng}
 %{_libdir}/librados_tp.so.*
 %endif
@@ -1655,20 +2053,24 @@ fi
 %files -n librados-devel
 %dir %{_includedir}/rados
 %{_includedir}/rados/librados.h
-%{_includedir}/rados/librados.hpp
-%{_includedir}/rados/buffer.h
-%{_includedir}/rados/buffer_fwd.h
-%{_includedir}/rados/inline_memory.h
-%{_includedir}/rados/page.h
-%{_includedir}/rados/crc32c.h
 %{_includedir}/rados/rados_types.h
-%{_includedir}/rados/rados_types.hpp
 %{_libdir}/librados.so
 %if %{with lttng}
 %{_libdir}/librados_tp.so
 %endif
 %{_bindir}/librados-config
 %{_mandir}/man8/librados-config.8*
+
+%files -n libradospp-devel
+%dir %{_includedir}/rados
+%{_includedir}/rados/buffer.h
+%{_includedir}/rados/buffer_fwd.h
+%{_includedir}/rados/crc32c.h
+%{_includedir}/rados/inline_memory.h
+%{_includedir}/rados/librados.hpp
+%{_includedir}/rados/librados_fwd.hpp
+%{_includedir}/rados/page.h
+%{_includedir}/rados/rados_types.hpp
 
 %if 0%{with python2}
 %files -n python-rados
@@ -1719,8 +2121,8 @@ fi
 %{_libdir}/librgw.so.*
 %{_libdir}/librgw_admin_user.so.*
 %if %{with lttng}
-%{_libdir}/librgw_op_tp.so*
-%{_libdir}/librgw_rados_tp.so*
+%{_libdir}/librgw_op_tp.so.*
+%{_libdir}/librgw_rados_tp.so.*
 %endif
 
 %post -n librgw2 -p /sbin/ldconfig
@@ -1734,6 +2136,10 @@ fi
 %{_includedir}/rados/rgw_file.h
 %{_libdir}/librgw.so
 %{_libdir}/librgw_admin_user.so
+%if %{with lttng}
+%{_libdir}/librgw_op_tp.so
+%{_libdir}/librgw_rados_tp.so
+%endif
 
 %if 0%{with python2}
 %files -n python-rgw
@@ -1793,6 +2199,16 @@ fi
 %{python3_sitelib}/ceph_daemon.py
 %{python3_sitelib}/__pycache__/ceph_daemon.cpython*.py*
 
+%if 0%{with python2}
+%files -n python-ceph-common
+%{python_sitelib}/ceph
+%{python_sitelib}/ceph-*.egg-info
+%endif
+
+%files -n python%{python3_pkgversion}-ceph-common
+%{python3_sitelib}/ceph
+%{python3_sitelib}/ceph-*.egg-info
+
 %if 0%{with cephfs_shell}
 %files -n cephfs-shell
 %{python3_sitelib}/cephfs_shell-*.egg-info
@@ -1822,6 +2238,7 @@ fi
 %{_bindir}/ceph_test_*
 %{_bindir}/ceph-coverage
 %{_bindir}/ceph-debugpack
+%{_bindir}/ceph-dedup-tool
 %{_mandir}/man8/ceph-debugpack.8*
 %dir %{_libdir}/ceph
 %{_libdir}/ceph/ceph-monstore-update-crush.sh
@@ -1938,6 +2355,25 @@ exit 0
 %files -n python-ceph-compat
 # We need an empty %%files list for python-ceph-compat, to tell rpmbuild to
 # actually build this meta package.
+%endif
+
+%files grafana-dashboards
+%if 0%{?suse_version}
+%attr(0755,root,root) %dir %{_sysconfdir}/grafana
+%attr(0755,root,root) %dir %{_sysconfdir}/grafana/dashboards
+%attr(0755,root,root) %dir %{_sysconfdir}/grafana/dashboards/ceph-dashboard
+%else
+%attr(0755,root,root) %dir %{_sysconfdir}/grafana/dashboards/ceph-dashboard
+%endif
+%config %{_sysconfdir}/grafana/dashboards/ceph-dashboard/*
+%doc monitoring/grafana/dashboards/README
+%doc monitoring/grafana/README.md
+
+%if 0%{?suse_version}
+%files prometheus-alerts
+%dir /etc/prometheus/SUSE/
+%dir /etc/prometheus/SUSE/default_rules/
+%config /etc/prometheus/SUSE/default_rules/ceph_default_alerts.yml
 %endif
 
 

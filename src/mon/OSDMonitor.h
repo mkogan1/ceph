@@ -27,6 +27,7 @@
 #include "include/types.h"
 #include "include/encoding.h"
 #include "common/simple_cache.hpp"
+#include "common/PriorityCache.h"
 #include "msg/Messenger.h"
 
 #include "osd/OSDMap.h"
@@ -208,18 +209,28 @@ struct osdmap_manifest_t {
 };
 WRITE_CLASS_ENCODER(osdmap_manifest_t);
 
-class OSDMonitor : public PaxosService {
+class OSDMonitor : public PaxosService,
+                   public md_config_obs_t {
   CephContext *cct;
 
 public:
   OSDMap osdmap;
 
+  // config observer
+  const char** get_tracked_conf_keys() const override;
+  void handle_conf_change(const ConfigProxy& conf,
+    const std::set<std::string> &changed) override;
   // [leader]
   OSDMap::Incremental pending_inc;
   map<int, bufferlist> pending_metadata;
   set<int>             pending_metadata_rm;
   map<int, failure_info_t> failure_info;
   map<int,utime_t>    down_pending_out;  // osd down -> out
+  bool priority_convert = false;
+  map<int64_t,set<snapid_t>> pending_pseudo_purged_snaps;
+  std::shared_ptr<PriorityCache::PriCache> rocksdb_binned_kv_cache = nullptr;
+  std::shared_ptr<PriorityCache::Manager> pcm = nullptr;
+  ceph::mutex balancer_lock = ceph::make_mutex("OSDMonitor::balancer_lock");
 
   map<int,double> osd_weight;
 
@@ -248,6 +259,36 @@ public:
     FAST_READ_DEFAULT
   };
 
+  struct CleanUpmapJob : public ParallelPGMapper::Job {
+    CephContext *cct;
+    const OSDMap& osdmap;
+    OSDMap::Incremental& pending_inc;
+    // lock to protect pending_inc form changing
+    // when checking is done
+    ceph::mutex pending_inc_lock =
+      ceph::make_mutex("CleanUpmapJob::pending_inc_lock");
+
+    CleanUpmapJob(CephContext *cct, const OSDMap& om, OSDMap::Incremental& pi)
+      : ParallelPGMapper::Job(&om),
+        cct(cct),
+        osdmap(om),
+        pending_inc(pi) {}
+
+    void process(const vector<pg_t>& to_check) override {
+      vector<pg_t> to_cancel;
+      map<pg_t, mempool::osdmap::vector<pair<int,int>>> to_remap;
+      osdmap.check_pg_upmaps(cct, to_check, &to_cancel, &to_remap);
+      // don't bother taking lock if nothing changes
+      if (!to_cancel.empty() || !to_remap.empty()) {
+        std::lock_guard l(pending_inc_lock);
+        osdmap.clean_pg_upmaps(cct, &pending_inc, to_cancel, to_remap);
+      }
+    }
+
+    void process(int64_t poolid, unsigned ps_begin, unsigned ps_end) override {}
+    void complete() override {}
+  }; // public as this will need to be accessible from TestTestOSDMap.cc
+
   // svc
 public:
   void create_initial() override;
@@ -272,6 +313,28 @@ private:
   bool is_prune_enabled() const;
   bool is_prune_supported() const;
   bool do_prune(MonitorDBStore::TransactionRef tx);
+
+  // Priority cache control
+  uint32_t mon_osd_cache_size = 0;  ///< Number of cached OSDMaps
+  uint64_t rocksdb_cache_size = 0;  ///< Cache for kv Db
+  double cache_kv_ratio = 0;        ///< Cache ratio dedicated to kv
+  double cache_inc_ratio = 0;       ///< Cache ratio dedicated to inc
+  double cache_full_ratio = 0;      ///< Cache ratio dedicated to full
+  uint64_t mon_memory_base = 0;     ///< Mon base memory for cache autotuning
+  double mon_memory_fragmentation = 0; ///< Expected memory fragmentation
+  uint64_t mon_memory_target = 0;   ///< Mon target memory for cache autotuning
+  uint64_t mon_memory_min = 0;      ///< Min memory to cache osdmaps
+  bool mon_memory_autotune = false; ///< Cache auto tune setting
+  int register_cache_with_pcm();
+  int _set_cache_sizes();
+  int _set_cache_ratios();
+  void _set_new_cache_sizes();
+  void _set_cache_autotuning();
+  int _update_mon_cache_settings();
+
+  friend struct OSDMemCache;
+  friend struct IncCache;
+  friend struct FullCache;
 
   /**
    * we haven't delegated full version stashing to paxosservice for some time
@@ -309,7 +372,8 @@ private:
   void check_osdmap_subs();
   void share_map_with_random_osd();
 
-  Mutex prime_pg_temp_lock = {"OSDMonitor::prime_pg_temp_lock"};
+  ceph::mutex prime_pg_temp_lock =
+    ceph::make_mutex("OSDMonitor::prime_pg_temp_lock");
   struct PrimeTempJob : public ParallelPGMapper::Job {
     OSDMonitor *osdmon;
     PrimeTempJob(const OSDMap& om, OSDMonitor *m)
@@ -320,6 +384,7 @@ private:
 	osdmon->prime_pg_temp(*osdmap, pgid);
       }
     }
+    void process(const vector<pg_t>& pgs) override {}
     void complete() override {}
   };
   void maybe_prime_pg_temp();
@@ -370,6 +435,9 @@ private:
   bool prepare_mark_me_down(MonOpRequestRef op);
   void process_failures();
   void take_all_failures(list<MonOpRequestRef>& ls);
+
+  bool preprocess_mark_me_dead(MonOpRequestRef op);
+  bool prepare_mark_me_dead(MonOpRequestRef op);
 
   bool preprocess_full(MonOpRequestRef op);
   bool prepare_full(MonOpRequestRef op);
@@ -443,6 +511,7 @@ private:
 				 ostream *ss);
   int prepare_pool_size(const unsigned pool_type,
 			const string &erasure_code_profile,
+                        uint8_t repl_size,
 			unsigned *size, unsigned *min_size,
 			ostream *ss);
   int prepare_pool_stripe_width(const unsigned pool_type,
@@ -454,6 +523,10 @@ private:
 		       int crush_rule,
 		       const string &crush_rule_name,
                        unsigned pg_num, unsigned pgp_num,
+		       unsigned pg_num_min,
+                       uint64_t repl_size,
+		       const uint64_t target_size_bytes,
+		       const float target_size_ratio,
 		       const string &erasure_code_profile,
                        const unsigned pool_type,
                        const uint64_t expected_num_objects,
@@ -465,16 +538,49 @@ private:
   void clear_pool_flags(int64_t pool_id, uint64_t flags);
   bool update_pools_status();
 
-  string make_snap_epoch_key(int64_t pool, epoch_t epoch);
-  string make_snap_key(int64_t pool, snapid_t snap);
-  string make_snap_key_value(int64_t pool, snapid_t snap, snapid_t num,
-			     epoch_t epoch, bufferlist *v);
-  string make_snap_purged_key(int64_t pool, snapid_t snap);
-  string make_snap_purged_key_value(int64_t pool, snapid_t snap, snapid_t num,
-				    epoch_t epoch, bufferlist *v);
+  bool _is_removed_snap(int64_t pool_id, snapid_t snapid);
+  bool _is_pending_removed_snap(int64_t pool_id, snapid_t snapid);
+
+  string make_removed_snap_epoch_key(int64_t pool, epoch_t epoch);
+  string make_purged_snap_epoch_key(epoch_t epoch);
+
+  string _make_snap_key(bool purged, int64_t pool, snapid_t snap);
+  string _make_snap_key_value(bool purged,
+			      int64_t pool, snapid_t snap, snapid_t num,
+			      epoch_t epoch, bufferlist *v);
+  string make_removed_snap_key(int64_t pool, snapid_t snap) {
+    return _make_snap_key(false, pool, snap);
+  }
+  string make_removed_snap_key_value(int64_t pool, snapid_t snap, snapid_t num,
+				     epoch_t epoch, bufferlist *v) {
+    return _make_snap_key_value(false, pool, snap, num, epoch, v);
+  }
+  string make_purged_snap_key(int64_t pool, snapid_t snap) {
+    return _make_snap_key(true, pool, snap);
+  }
+  string make_purged_snap_key_value(int64_t pool, snapid_t snap, snapid_t num,
+				    epoch_t epoch, bufferlist *v) {
+    return _make_snap_key_value(true, pool, snap, num, epoch, v);
+  }
+
   bool try_prune_purged_snaps();
-  int lookup_pruned_snap(int64_t pool, snapid_t snap,
-			 snapid_t *begin, snapid_t *end);
+  int _lookup_snap(bool purged, int64_t pool, snapid_t snap,
+		   snapid_t *begin, snapid_t *end);
+  int lookup_removed_snap(int64_t pool, snapid_t snap,
+			  snapid_t *begin, snapid_t *end) {
+    return _lookup_snap(false, pool, snap, begin,end);
+  }
+  int lookup_purged_snap(int64_t pool, snapid_t snap,
+			 snapid_t *begin, snapid_t *end) {
+    return _lookup_snap(true, pool, snap, begin,end);
+  }
+
+  void insert_snap_update(
+    bool purged,
+    int64_t pool,
+    snapid_t start, snapid_t end,
+    epoch_t epoch,
+    MonitorDBStore::TransactionRef t);
 
   bool prepare_set_flag(MonOpRequestRef op, int flag);
   bool prepare_unset_flag(MonOpRequestRef op, int flag);
@@ -539,6 +645,8 @@ private:
 
   bool preprocess_remove_snaps(MonOpRequestRef op);
   bool prepare_remove_snaps(MonOpRequestRef op);
+
+  bool preprocess_get_purged_snaps(MonOpRequestRef op);
 
   int load_metadata(int osd, map<string, string>& m, ostream *err);
   void count_metadata(const string& field, Formatter *f);
@@ -632,9 +740,19 @@ public:
 
   int prepare_command_pool_set(const cmdmap_t& cmdmap,
                                stringstream& ss);
+
   int prepare_command_pool_application(const string &prefix,
                                        const cmdmap_t& cmdmap,
                                        stringstream& ss);
+  int preprocess_command_pool_application(const string &prefix,
+                                          const cmdmap_t& cmdmap,
+                                          stringstream& ss,
+                                          bool *modified);
+  int _command_pool_application(const string &prefix,
+                                       const cmdmap_t& cmdmap,
+                                       stringstream& ss,
+                                       bool *modified,
+                                       bool preparing);
 
   bool handle_osd_timeouts(const utime_t &now,
 			   std::map<int,utime_t> &last_osd_report);
@@ -645,10 +763,6 @@ public:
     send_incremental(op, start);
   }
 
-  void get_removed_snaps_range(
-    epoch_t start, epoch_t end,
-    mempool::osdmap::map<int64_t,OSDMap::snap_interval_set_t> *gap_removed_snaps);
-
   int get_version(version_t ver, bufferlist& bl) override;
   int get_version(version_t ver, uint64_t feature, bufferlist& bl);
 
@@ -658,7 +772,7 @@ public:
   int get_full_from_pinned_map(version_t ver, bufferlist& bl);
 
   epoch_t blacklist(const entity_addrvec_t& av, utime_t until);
-  epoch_t blacklist(const entity_addr_t& a, utime_t until);
+  epoch_t blacklist(entity_addr_t a, utime_t until);
 
   void dump_info(Formatter *f);
   int dump_osd_metadata(int osd, Formatter *f, ostream *err);
@@ -670,6 +784,8 @@ public:
   void do_application_enable(int64_t pool_id, const std::string &app_name,
 			     const std::string &app_key="",
 			     const std::string &app_value="");
+  void do_set_pool_opt(int64_t pool_id, pool_opts_t::key_t opt,
+		       pool_opts_t::value_t);
 
   void add_flag(int flag) {
     if (!(osdmap.flags & flag)) {
@@ -686,6 +802,7 @@ public:
       pending_inc.new_flags &= ~flag;
     }
   }
+  void convert_pool_priorities(void);
 };
 
 #endif

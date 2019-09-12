@@ -18,29 +18,28 @@
 
 #include "msg/Message.h"
 
-class MInodeFileCaps : public MessageInstance<MInodeFileCaps> {
-public:
-  friend factory;
+class MInodeFileCaps : public Message {
 private:
+  static constexpr int HEAD_VERSION = 1;
+  static constexpr int COMPAT_VERSION = 1;
   inodeno_t ino;
   __u32     caps = 0;
 
- public:
-
+public:
   inodeno_t get_ino() const { return ino; }
   int       get_caps() const { return caps; }
 
 protected:
-  MInodeFileCaps() : MessageInstance(MSG_MDS_INODEFILECAPS) {}
+  MInodeFileCaps() : Message(MSG_MDS_INODEFILECAPS, HEAD_VERSION, COMPAT_VERSION) {}
   MInodeFileCaps(inodeno_t ino, int caps) :
-    MessageInstance(MSG_MDS_INODEFILECAPS) {
+    Message(MSG_MDS_INODEFILECAPS, HEAD_VERSION, COMPAT_VERSION) {
     this->ino = ino;
     this->caps = caps;
   }
   ~MInodeFileCaps() override {}
 
 public:
-  const char *get_type_name() const override { return "inode_file_caps";}
+  std::string_view get_type_name() const override { return "inode_file_caps";}
   void print(ostream& out) const override {
     out << "inode_file_caps(" << ino << " " << ccap_string(caps) << ")";
   }
@@ -56,6 +55,9 @@ public:
     decode(ino, p);
     decode(caps, p);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

@@ -32,9 +32,13 @@
 #include <algorithm>
 #include <string>
 #include <sstream>
-#include <errno.h>
+#include <cerrno>
 
 #include "objclass/objclass.h"
+#include "osd/osd_types.h"
+
+using ceph::bufferlist;
+using std::string;
 
 CLS_VER(1,0)
 CLS_NAME(hello)
@@ -263,16 +267,10 @@ public:
   }
 
   ~PGLSHelloFilter() override {}
-  bool filter(const hobject_t &obj, bufferlist& xattr_data,
-                      bufferlist& outdata) override
+  bool filter(const hobject_t& obj,
+              const bufferlist&  xattr_data) const override
   {
-    if (val.size() != xattr_data.length())
-      return false;
-
-    if (memcmp(val.c_str(), xattr_data.c_str(), val.size()))
-      return false;
-
-    return true;
+    return xattr_data.contents_equal(val.c_str(), val.size());
   }
 };
 

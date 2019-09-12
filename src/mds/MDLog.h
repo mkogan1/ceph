@@ -100,7 +100,7 @@ protected:
   friend class ReplayThread;
   friend class C_MDL_Replay;
 
-  MDSInternalContextBase::vec waitfor_replay;
+  MDSContext::vec waitfor_replay;
 
   void _replay();         // old way
   void _replay_thread();  // new way
@@ -108,22 +108,23 @@ protected:
   // Journal recovery/rewrite logic
   class RecoveryThread : public Thread {
     MDLog *log;
-    MDSInternalContextBase *completion;
+    MDSContext *completion;
   public:
-    void set_completion(MDSInternalContextBase *c) {completion = c;}
+    void set_completion(MDSContext *c) {completion = c;}
     explicit RecoveryThread(MDLog *l) : log(l), completion(NULL) {}
     void* entry() override {
       log->_recovery_thread(completion);
       return 0;
     }
   } recovery_thread;
-  void _recovery_thread(MDSInternalContextBase *completion);
-  void _reformat_journal(JournalPointer const &jp, Journaler *old_journal, MDSInternalContextBase *completion);
+  void _recovery_thread(MDSContext *completion);
+  void _reformat_journal(JournalPointer const &jp, Journaler *old_journal, MDSContext *completion);
 
   // -- segments --
   map<uint64_t,LogSegment*> segments;
   set<LogSegment*> expiring_segments;
   set<LogSegment*> expired_segments;
+  std::size_t pre_segments_size = 0;            // the num of segments when the mds finished replay-journal, to calc the num of segments growing
   uint64_t event_seq;
   int expiring_events;
   int expired_events;
@@ -137,8 +138,8 @@ protected:
 
   int64_t mdsmap_up_features;
   map<uint64_t,list<PendingEvent> > pending_events; // log segment -> event list
-  Mutex submit_mutex;
-  Cond submit_cond;
+  ceph::mutex submit_mutex = ceph::make_mutex("MDLog::submit_mutex");
+  ceph::condition_variable submit_cond;
 
   void set_safe_pos(uint64_t pos)
   {
@@ -205,7 +206,6 @@ public:
                       recovery_thread(this),
                       event_seq(0), expiring_events(0), expired_events(0),
 		      mdsmap_up_features(0),
-                      submit_mutex("MDLog::submit_mutex"),
                       submit_thread(this),
                       cur_event(NULL) { }		  
   ~MDLog();
@@ -215,7 +215,7 @@ private:
   // -- segments --
   void _start_new_segment();
   void _prepare_new_segment();
-  void _journal_segment_subtree_map(MDSInternalContextBase *onsync);
+  void _journal_segment_subtree_map(MDSContext *onsync);
 public:
   void start_new_segment() {
     std::lock_guard l(submit_mutex);
@@ -225,10 +225,11 @@ public:
     std::lock_guard l(submit_mutex);
     _prepare_new_segment();
   }
-  void journal_segment_subtree_map(MDSInternalContextBase *onsync=NULL) {
-    submit_mutex.Lock();
-    _journal_segment_subtree_map(onsync);
-    submit_mutex.Unlock();
+  void journal_segment_subtree_map(MDSContext *onsync=NULL) {
+    {
+      std::lock_guard l{submit_mutex};
+      _journal_segment_subtree_map(onsync);
+    }
     if (onsync)
       flush();
   }
@@ -283,17 +284,17 @@ public:
   void submit_entry(LogEvent *e, MDSLogContextBase *c = 0) {
     std::lock_guard l(submit_mutex);
     _submit_entry(e, c);
-    submit_cond.Signal();
+    submit_cond.notify_all();
   }
   void start_submit_entry(LogEvent *e, MDSLogContextBase *c = 0) {
     std::lock_guard l(submit_mutex);
     _start_entry(e);
     _submit_entry(e, c);
-    submit_cond.Signal();
+    submit_cond.notify_all();
   }
   bool entry_is_open() const { return cur_event != NULL; }
 
-  void wait_for_safe( MDSInternalContextBase *c );
+  void wait_for_safe( MDSContext *c );
   void flush();
   bool is_flushed() const {
     return unflushed == 0;
@@ -319,14 +320,14 @@ public:
   };
 
 private:
-  void write_head(MDSInternalContextBase *onfinish);
+  void write_head(MDSContext *onfinish);
 
 public:
-  void create(MDSInternalContextBase *onfinish);  // fresh, empty log! 
-  void open(MDSInternalContextBase *onopen);      // append() or replay() to follow!
-  void reopen(MDSInternalContextBase *onopen);
+  void create(MDSContext *onfinish);  // fresh, empty log! 
+  void open(MDSContext *onopen);      // append() or replay() to follow!
+  void reopen(MDSContext *onopen);
   void append();
-  void replay(MDSInternalContextBase *onfinish);
+  void replay(MDSContext *onfinish);
 
   void standby_trim_segments();
 

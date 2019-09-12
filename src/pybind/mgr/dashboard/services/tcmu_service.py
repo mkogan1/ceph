@@ -49,8 +49,8 @@ class TcmuService(object):
                     name=metadata['image_name'])
                 perf_key = "{}lock_acquired_time".format(perf_key_prefix)
                 lock_acquired_time = (mgr.get_counter(
-                    'tcmu-runner', service_id, perf_key)[perf_key] or
-                                      [[0, 0]])[-1][1] / 1000000000
+                    'tcmu-runner', service_id, perf_key)[perf_key]
+                                      or [[0, 0]])[-1][1] / 1000000000
                 if lock_acquired_time > image.get('optimized_since', 0):
                     image['optimized_daemon'] = hostname
                     image['optimized_since'] = lock_acquired_time
@@ -86,13 +86,8 @@ class TcmuService(object):
         }
 
     @staticmethod
-    def get_iscsi_daemons_amount():
-        daemons = {}
-        for service in CephService.get_service_list(SERVICE_TYPE):
-            hostname = service['hostname']
-
-            daemon = daemons.get(hostname, None)
-            if daemon is None:
-                daemons[hostname] = True
-
-        return len(daemons)
+    def get_image_info(pool_name, image_name, get_iscsi_info):
+        for image in get_iscsi_info['images']:
+            if image['pool_name'] == pool_name and image['name'] == image_name:
+                return image
+        return None

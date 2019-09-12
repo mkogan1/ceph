@@ -1,105 +1,111 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 
-import { TcmuIscsiService } from '../../../shared/api/tcmu-iscsi.service';
-import { CellTemplate } from '../../../shared/enum/cell-template.enum';
-import { CephShortVersionPipe } from '../../../shared/pipes/ceph-short-version.pipe';
+import { I18n } from '@ngx-translate/i18n-polyfill';
+
+import { IscsiService } from '../../../shared/api/iscsi.service';
 import { DimlessPipe } from '../../../shared/pipes/dimless.pipe';
-import { ListPipe } from '../../../shared/pipes/list.pipe';
-import { RelativeDatePipe } from '../../../shared/pipes/relative-date.pipe';
+import { IscsiBackstorePipe } from '../../../shared/pipes/iscsi-backstore.pipe';
 
 @Component({
   selector: 'cd-iscsi',
   templateUrl: './iscsi.component.html',
   styleUrls: ['./iscsi.component.scss']
 })
-export class IscsiComponent {
-  daemons = [];
-  daemonsColumns: any;
+export class IscsiComponent implements OnInit {
+  @ViewChild('statusColorTpl', { static: true })
+  statusColorTpl: TemplateRef<any>;
+  @ViewChild('iscsiSparklineTpl', { static: true })
+  iscsiSparklineTpl: TemplateRef<any>;
+  @ViewChild('iscsiPerSecondTpl', { static: true })
+  iscsiPerSecondTpl: TemplateRef<any>;
+  @ViewChild('iscsiRelativeDateTpl', { static: true })
+  iscsiRelativeDateTpl: TemplateRef<any>;
+
+  gateways = [];
+  gatewaysColumns: any;
   images = [];
   imagesColumns: any;
 
   constructor(
-    private tcmuIscsiService: TcmuIscsiService,
-    cephShortVersionPipe: CephShortVersionPipe,
-    dimlessPipe: DimlessPipe,
-    relativeDatePipe: RelativeDatePipe,
-    listPipe: ListPipe
-  ) {
-    this.daemonsColumns = [
+    private iscsiService: IscsiService,
+    private dimlessPipe: DimlessPipe,
+    private iscsiBackstorePipe: IscsiBackstorePipe,
+    private i18n: I18n
+  ) {}
+
+  ngOnInit() {
+    this.gatewaysColumns = [
       {
-        name: 'Hostname',
-        prop: 'server_hostname'
+        name: this.i18n('Name'),
+        prop: 'name'
       },
       {
-        name: '# Active/Optimized',
-        prop: 'optimized_paths'
+        name: this.i18n('State'),
+        prop: 'state',
+        cellTemplate: this.statusColorTpl
       },
       {
-        name: '# Active/Non-Optimized',
-        prop: 'non_optimized_paths'
+        name: this.i18n('# Targets'),
+        prop: 'num_targets'
       },
       {
-        name: 'Version',
-        prop: 'version',
-        pipe: cephShortVersionPipe
+        name: this.i18n('# Sessions'),
+        prop: 'num_sessions'
       }
     ];
     this.imagesColumns = [
       {
-        name: 'Pool',
-        prop: 'pool_name'
+        name: this.i18n('Pool'),
+        prop: 'pool'
       },
       {
-        name: 'Image',
-        prop: 'name'
+        name: this.i18n('Image'),
+        prop: 'image'
       },
       {
-        name: 'Active/Optimized',
-        prop: 'optimized_paths',
-        pipe: listPipe
+        name: this.i18n('Backstore'),
+        prop: 'backstore',
+        pipe: this.iscsiBackstorePipe
       },
       {
-        name: 'Active/Non-Optimized',
-        prop: 'non_optimized_paths',
-        pipe: listPipe
-      },
-      {
-        name: 'Read Bytes',
+        name: this.i18n('Read Bytes'),
         prop: 'stats_history.rd_bytes',
-        cellTransformation: CellTemplate.sparkline
+        cellTemplate: this.iscsiSparklineTpl
       },
       {
-        name: 'Write Bytes',
+        name: this.i18n('Write Bytes'),
         prop: 'stats_history.wr_bytes',
-        cellTransformation: CellTemplate.sparkline
+        cellTemplate: this.iscsiSparklineTpl
       },
       {
-        name: 'Read Ops',
+        name: this.i18n('Read Ops'),
         prop: 'stats.rd',
-        pipe: dimlessPipe,
-        cellTransformation: CellTemplate.perSecond
+        pipe: this.dimlessPipe,
+        cellTemplate: this.iscsiPerSecondTpl
       },
       {
-        name: 'Write Ops',
+        name: this.i18n('Write Ops'),
         prop: 'stats.wr',
-        pipe: dimlessPipe,
-        cellTransformation: CellTemplate.perSecond
+        pipe: this.dimlessPipe,
+        cellTemplate: this.iscsiPerSecondTpl
       },
       {
-        name: 'A/O Since',
+        name: this.i18n('A/O Since'),
         prop: 'optimized_since',
-        pipe: relativeDatePipe
+        cellTemplate: this.iscsiRelativeDateTpl
       }
     ];
   }
 
   refresh() {
-    this.tcmuIscsiService.tcmuiscsi().then((resp) => {
-      this.daemons = resp.daemons;
-      this.images = resp.images;
+    this.iscsiService.overview().subscribe((overview: Array<any>) => {
+      this.gateways = overview['gateways'];
+      this.images = overview['images'];
       this.images.map((image) => {
-        image.stats_history.rd_bytes = image.stats_history.rd_bytes.map((i) => i[1]);
-        image.stats_history.wr_bytes = image.stats_history.wr_bytes.map((i) => i[1]);
+        if (image.stats_history) {
+          image.stats_history.rd_bytes = image.stats_history.rd_bytes.map((i) => i[1]);
+          image.stats_history.wr_bytes = image.stats_history.wr_bytes.map((i) => i[1]);
+        }
         image.cdIsBinary = true;
         return image;
       });

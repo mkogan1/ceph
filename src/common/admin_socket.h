@@ -34,7 +34,7 @@ inline constexpr auto CEPH_ADMIN_SOCK_VERSION = "2"sv;
 class AdminSocketHook {
 public:
   virtual bool call(std::string_view command, const cmdmap_t& cmdmap,
-		    std::string_view format, bufferlist& out) = 0;
+		    std::string_view format, ceph::buffer::list& out) = 0;
   virtual ~AdminSocketHook() {}
 };
 
@@ -94,6 +94,7 @@ public:
 
   void chown(uid_t uid, gid_t gid);
   void chmod(mode_t mode);
+  int execute_command(const std::string& cmd, ceph::bufferlist& out);
 
 private:
 
@@ -108,7 +109,7 @@ private:
   bool do_accept();
   bool validate(const std::string& command,
 		const cmdmap_t& cmdmap,
-		bufferlist& out) const;
+		ceph::buffer::list& out) const;
 
   CephContext *m_cct;
   std::string m_path;

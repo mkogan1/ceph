@@ -1,7 +1,7 @@
 import { Component, ElementRef, OnChanges, OnInit, SimpleChanges, ViewChild } from '@angular/core';
 import { Input } from '@angular/core';
 
-import { ChartTooltip } from '../../../shared/models/chart-tooltip';
+import { ChartTooltip } from '../../models/chart-tooltip';
 import { DimlessBinaryPipe } from '../../pipes/dimless-binary.pipe';
 
 @Component({
@@ -10,9 +10,9 @@ import { DimlessBinaryPipe } from '../../pipes/dimless-binary.pipe';
   styleUrls: ['./sparkline.component.scss']
 })
 export class SparklineComponent implements OnInit, OnChanges {
-  @ViewChild('sparkCanvas')
+  @ViewChild('sparkCanvas', { static: true })
   chartCanvasRef: ElementRef;
-  @ViewChild('sparkTooltip')
+  @ViewChild('sparkTooltip', { static: true })
   chartTooltipRef: ElementRef;
 
   @Input()
@@ -90,7 +90,7 @@ export class SparklineComponent implements OnInit, OnChanges {
   constructor(private dimlessBinaryPipe: DimlessBinaryPipe) {}
 
   ngOnInit() {
-    const getStyleTop = (tooltip, positionY) => {
+    const getStyleTop = (tooltip) => {
       return tooltip.caretY - tooltip.height - tooltip.yPadding - 5 + 'px';
     };
 
@@ -117,7 +117,6 @@ export class SparklineComponent implements OnInit, OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     this.datasets[0].data = changes['data'].currentValue;
-    this.datasets = [...this.datasets];
     this.labels = [...Array(changes['data'].currentValue.length)];
   }
 }

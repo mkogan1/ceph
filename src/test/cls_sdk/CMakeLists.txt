@@ -7,7 +7,7 @@ target_link_libraries(ceph_test_cls_sdk
   ${EXTRALIBS}
   ${BLKID_LIBRARIES}
   ${CMAKE_DL_LIBS}
-  radostest
+  radostest-cxx
   ${UNITTEST_LIBS}
   )
 install(TARGETS

@@ -1,12 +1,13 @@
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ReactiveFormsModule } from '@angular/forms';
+import { RouterTestingModule } from '@angular/router/testing';
 
 import * as _ from 'lodash';
-import { ToastModule } from 'ng2-toastr';
-import { BsModalRef, ModalModule } from 'ngx-bootstrap';
+import { BsModalRef, ModalModule } from 'ngx-bootstrap/modal';
+import { ToastrModule } from 'ngx-toastr';
 
-import { configureTestBed } from '../../../../../testing/unit-test-helper';
+import { configureTestBed, i18nProviders } from '../../../../../testing/unit-test-helper';
 import { NotificationType } from '../../../../shared/enum/notification-type.enum';
 import { NotificationService } from '../../../../shared/services/notification.service';
 import { SharedModule } from '../../../../shared/shared.module';
@@ -30,10 +31,11 @@ describe('OsdFlagsModalComponent', () => {
       ModalModule.forRoot(),
       SharedModule,
       HttpClientTestingModule,
-      ToastModule.forRoot()
+      RouterTestingModule,
+      ToastrModule.forRoot()
     ],
     declarations: [OsdFlagsModalComponent],
-    providers: [BsModalRef]
+    providers: [BsModalRef, i18nProviders]
   });
 
   beforeEach(() => {

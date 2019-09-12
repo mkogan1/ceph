@@ -185,7 +185,7 @@ void InoTable::dump(Formatter *f) const
 }
 
 
-void InoTable::generate_test_instances(list<InoTable*>& ls)
+void InoTable::generate_test_instances(std::list<InoTable*>& ls)
 {
   ls.push_back(new InoTable());
 }
@@ -221,5 +221,15 @@ bool InoTable::repair(inodeno_t id)
   projected_free.erase(id);
   projected_version = ++version;
   dout(10) << "repair: after status. ino = " << id << " pver =" << projected_version << " ver= " << version << dendl;
+  return true;
+}
+
+bool InoTable::force_consume_to(inodeno_t ino)
+{
+  inodeno_t first = free.range_start();
+  if (first > ino)
+    return false;
+
+  skip_inos(inodeno_t(ino + 1 - first));
   return true;
 }

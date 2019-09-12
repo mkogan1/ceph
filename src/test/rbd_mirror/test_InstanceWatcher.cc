@@ -10,8 +10,9 @@
 #include "test/rbd_mirror/test_fixture.h"
 #include "tools/rbd_mirror/InstanceWatcher.h"
 #include "tools/rbd_mirror/Threads.h"
+#include "common/Cond.h"
 
-#include "test/librados/test.h"
+#include "test/librados/test_cxx.h"
 #include "gtest/gtest.h"
 
 using rbd::mirror::InstanceWatcher;
@@ -44,7 +45,7 @@ public:
 TEST_F(TestInstanceWatcher, InitShutdown)
 {
   InstanceWatcher<> instance_watcher(m_local_io_ctx, m_threads->work_queue,
-                                     nullptr, m_instance_id);
+                                     nullptr, nullptr, m_instance_id);
   std::vector<std::string> instance_ids;
   get_instances(&instance_ids);
   ASSERT_EQ(0U, instance_ids.size());
@@ -93,7 +94,7 @@ TEST_F(TestInstanceWatcher, Remove)
   ASSERT_EQ("", connect_cluster_pp(cluster));
   ASSERT_EQ(0, cluster.ioctx_create(_local_pool_name.c_str(), io_ctx));
   InstanceWatcher<> instance_watcher(m_local_io_ctx, m_threads->work_queue,
-                                     nullptr, "instance_id");
+                                     nullptr, nullptr, "instance_id");
   // Init
   ASSERT_EQ(0, instance_watcher.init());
 

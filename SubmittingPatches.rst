@@ -152,7 +152,7 @@ have been included in the discussion
 --------------------------------------------------------------
 
 If this patch fixes a problem reported by somebody else, consider adding a
-Reported-by: tag to credit the reporter for their contribution. This tag should
+``Reported-by:`` tag to credit the reporter for their contribution. This tag should
 not be added without the reporter's permission, especially if the problem was
 not reported in a public forum. That said, if we diligently credit our bug
 reporters, they will, hopefully, be inspired to help us again in the future.
@@ -254,7 +254,7 @@ email list to ensure your submission is noticed.
 When addressing review comments, can should either add additional patches to
 your branch or (better yet) squash those changes into the relevant commits so
 that the sequence of changes is "clean" and gets things right the first time.
-The 'git rebase -i' command is very helpful in this process. Once you have
+The ``git rebase -i`` command is very helpful in this process. Once you have
 updated your local branch, you can simply force-push to the existing branch
 in your public repository that is referenced by the pull request with
 
@@ -397,12 +397,20 @@ could be "doc:", "osd:", or "common:". One can use::
 
      git log
 
-for more examples. Please use this "subsystem: short description"
-convention for naming pull requests (PRs) also, as it feeds directly
-into the script that generates release notes and it's tedious to clean
-up at release time. This document places no limit on the length of PR
-titles, but be aware that they are subject to editing as part of the
-release process.
+for more examples. It is also conventional to use the imperative mood in the
+commit title. For example::
+
+     mds: add perf counter for finisher of MDSRank
+
+or::
+
+     osd: make the ClassHandler::mutex private
+
+For GitHub, please use this "subsystem: short description" convention for
+naming pull requests (PRs). These titles feed directly into the script that
+generates release notes and it is tedious to clean up non-conformant PR titles
+at release time.  This document places no limit on the length of PR titles, but
+be aware that they are subject to editing as part of the release process.
 
 Commit message
 ^^^^^^^^^^^^^^

@@ -15,38 +15,122 @@
 #define MGR_MAP_H_
 
 #include <sstream>
+#include <set>
 
 #include "msg/msg_types.h"
-#include "common/Formatter.h"
 #include "include/encoding.h"
+#include "include/utime.h"
+#include "common/Formatter.h"
+#include "common/ceph_releases.h"
 #include "common/version.h"
+#include "common/options.h"
+#include "common/Clock.h"
 
 
 class MgrMap
 {
 public:
+  struct ModuleOption {
+    std::string name;
+    uint8_t type = Option::TYPE_STR;         // Option::type_t TYPE_*
+    uint8_t level = Option::LEVEL_ADVANCED;  // Option::level_t LEVEL_*
+    uint32_t flags = 0; // Option::flag_t FLAG_*
+    std::string default_value;
+    std::string min, max;
+    std::set<std::string> enum_allowed;
+    std::string desc, long_desc;
+    std::set<std::string> tags;
+    std::set<std::string> see_also;
+
+    void encode(ceph::buffer::list& bl) const {
+      ENCODE_START(1, 1, bl);
+      encode(name, bl);
+      encode(type, bl);
+      encode(level, bl);
+      encode(flags, bl);
+      encode(default_value, bl);
+      encode(min, bl);
+      encode(max, bl);
+      encode(enum_allowed, bl);
+      encode(desc, bl);
+      encode(long_desc, bl);
+      encode(tags, bl);
+      encode(see_also, bl);
+      ENCODE_FINISH(bl);
+    }
+    void decode(ceph::buffer::list::const_iterator& p) {
+      DECODE_START(1, p);
+      decode(name, p);
+      decode(type, p);
+      decode(level, p);
+      decode(flags, p);
+      decode(default_value, p);
+      decode(min, p);
+      decode(max, p);
+      decode(enum_allowed, p);
+      decode(desc, p);
+      decode(long_desc, p);
+      decode(tags, p);
+      decode(see_also, p);
+      DECODE_FINISH(p);
+    }
+    void dump(ceph::Formatter *f) const {
+      f->dump_string("name", name);
+      f->dump_string("type", Option::type_to_str(
+		       static_cast<Option::type_t>(type)));
+      f->dump_string("level", Option::level_to_str(
+		       static_cast<Option::level_t>(level)));
+      f->dump_unsigned("flags", flags);
+      f->dump_string("default_value", default_value);
+      f->dump_string("min", min);
+      f->dump_string("max", max);
+      f->open_array_section("enum_allowed");
+      for (auto& i : enum_allowed) {
+	f->dump_string("value", i);
+      }
+      f->close_section();
+      f->dump_string("desc", desc);
+      f->dump_string("long_desc", long_desc);
+      f->open_array_section("tags");
+      for (auto& i : tags) {
+	f->dump_string("tag", i);
+      }
+      f->close_section();
+      f->open_array_section("see_also");
+      for (auto& i : see_also) {
+	f->dump_string("option", i);
+      }
+      f->close_section();
+    }
+  };
+
   class ModuleInfo
   {
     public:
     std::string name;
     bool can_run = true;
     std::string error_string;
+    std::map<std::string,ModuleOption> module_options;
 
     // We do not include the module's `failed` field in the beacon,
     // because it is exposed via health checks.
-    void encode(bufferlist &bl) const {
-      ENCODE_START(1, 1, bl);
+    void encode(ceph::buffer::list &bl) const {
+      ENCODE_START(2, 1, bl);
       encode(name, bl);
       encode(can_run, bl);
       encode(error_string, bl);
+      encode(module_options, bl);
       ENCODE_FINISH(bl);
     }
 
-    void decode(bufferlist::const_iterator &bl) {
+    void decode(ceph::buffer::list::const_iterator &bl) {
       DECODE_START(1, bl);
       decode(name, bl);
       decode(can_run, bl);
       decode(error_string, bl);
+      if (struct_v >= 2) {
+	decode(module_options, bl);
+      }
       DECODE_FINISH(bl);
     }
 
@@ -55,11 +139,16 @@ public:
       return (name == rhs.name) && (can_run == rhs.can_run);
     }
 
-    void dump(Formatter *f) const {
+    void dump(ceph::Formatter *f) const {
       f->open_object_section("module");
       f->dump_string("name", name);
       f->dump_bool("can_run", can_run);
       f->dump_string("error_string", error_string);
+      f->open_object_section("module_options");
+      for (auto& i : module_options) {
+	f->dump_object(i.first.c_str(), i.second);
+      }
+      f->close_section();
       f->close_section();
     }
   };
@@ -67,22 +156,23 @@ public:
   class StandbyInfo
   {
   public:
-    uint64_t gid;
+    uint64_t gid = 0;
     std::string name;
     std::vector<ModuleInfo> available_modules;
+    uint64_t mgr_features = 0;
 
     StandbyInfo(uint64_t gid_, const std::string &name_,
-                const std::vector<ModuleInfo>& am)
-      : gid(gid_), name(name_), available_modules(am)
+                const std::vector<ModuleInfo>& am,
+		uint64_t feat)
+      : gid(gid_), name(name_), available_modules(am),
+	mgr_features(feat)
     {}
 
-    StandbyInfo()
-      : gid(0)
-    {}
+    StandbyInfo() {}
 
-    void encode(bufferlist& bl) const
+    void encode(ceph::buffer::list& bl) const
     {
-      ENCODE_START(3, 1, bl);
+      ENCODE_START(4, 1, bl);
       encode(gid, bl);
       encode(name, bl);
       std::set<std::string> old_available_modules;
@@ -91,12 +181,13 @@ public:
       }
       encode(old_available_modules, bl);  // version 2
       encode(available_modules, bl);  // version 3
+      encode(mgr_features, bl); // v4
       ENCODE_FINISH(bl);
     }
 
-    void decode(bufferlist::const_iterator& p)
+    void decode(ceph::buffer::list::const_iterator& p)
     {
-      DECODE_START(3, p);
+      DECODE_START(4, p);
       decode(gid, p);
       decode(name, p);
       if (struct_v >= 2) {
@@ -112,6 +203,9 @@ public:
       }
       if (struct_v >= 3) {
         decode(available_modules, p);
+      }
+      if (struct_v >= 4) {
+	decode(mgr_features, p);
       }
       DECODE_FINISH(p);
     }
@@ -140,6 +234,8 @@ public:
   std::string active_name;
   /// when the active mgr became active, or we lost the active mgr
   utime_t active_change;
+  /// features
+  uint64_t active_mgr_features = 0;
 
   std::map<uint64_t, StandbyInfo> standbys;
 
@@ -188,6 +284,15 @@ public:
     return false;
   }
 
+  const ModuleInfo *get_module_info(const std::string &module_name) const {
+    for (const auto &i : available_modules) {
+      if (i.name == module_name) {
+        return &i;
+      }
+    }
+    return nullptr;
+  }
+
   bool can_run_module(const std::string &module_name, std::string *error) const
   {
     for (const auto &i : available_modules) {
@@ -219,7 +324,7 @@ public:
     return false;
   }
 
-  bool have_name(const string& name) const {
+  bool have_name(const std::string& name) const {
     if (active_name == name) {
       return true;
     }
@@ -243,13 +348,13 @@ public:
   }
 
   std::set<std::string> get_always_on_modules() const {
-    auto it = always_on_modules.find(ceph_release());
+    auto it = always_on_modules.find(ceph::to_integer<uint32_t>(ceph_release()));
     if (it == always_on_modules.end())
       return {};
     return it->second;
   }
 
-  void encode(bufferlist& bl, uint64_t features) const
+  void encode(ceph::buffer::list& bl, uint64_t features) const
   {
     if (!HAVE_FEATURE(features, SERVER_NAUTILUS)) {
       ENCODE_START(5, 1, bl);
@@ -261,7 +366,7 @@ public:
       encode(standbys, bl);
       encode(modules, bl);
 
-      // Pre-version 4 string list of available modules
+      // Pre-version 4 std::string std::list of available modules
       // (replaced by direct encode of ModuleInfo below)
       std::set<std::string> old_available_modules;
       for (const auto &i : available_modules) {
@@ -274,7 +379,7 @@ public:
       ENCODE_FINISH(bl);
       return;
     }
-    ENCODE_START(8, 6, bl);
+    ENCODE_START(9, 6, bl);
     encode(epoch, bl);
     encode(active_addrs, bl, features);
     encode(active_gid, bl);
@@ -286,13 +391,14 @@ public:
     encode(available_modules, bl);
     encode(active_change, bl);
     encode(always_on_modules, bl);
+    encode(active_mgr_features, bl);
     ENCODE_FINISH(bl);
     return;
   }
 
-  void decode(bufferlist::const_iterator& p)
+  void decode(ceph::buffer::list::const_iterator& p)
   {
-    DECODE_START(7, p);
+    DECODE_START(8, p);
     decode(epoch, p);
     decode(active_addrs, p);
     decode(active_gid, p);
@@ -331,15 +437,20 @@ public:
     if (struct_v >= 8) {
       decode(always_on_modules, p);
     }
+    if (struct_v >= 9) {
+      decode(active_mgr_features, p);
+    }
     DECODE_FINISH(p);
   }
 
-  void dump(Formatter *f) const {
+  void dump(ceph::Formatter *f) const {
     f->dump_int("epoch", epoch);
     f->dump_int("active_gid", get_active_gid());
     f->dump_string("active_name", get_active_name());
     f->dump_object("active_addrs", active_addrs);
+    f->dump_stream("active_addr") << active_addrs.get_legacy_str();
     f->dump_stream("active_change") << active_change;
+    f->dump_unsigned("active_mgr_features", active_mgr_features);
     f->dump_bool("available", available);
     f->open_array_section("standbys");
     for (const auto &i : standbys) {
@@ -350,6 +461,7 @@ public:
       for (const auto& j : i.second.available_modules) {
         j.dump(f);
       }
+      f->dump_unsigned("mgr_features", i.second.mgr_features);
       f->close_section();
       f->close_section();
     }
@@ -382,16 +494,27 @@ public:
     f->close_section();
   }
 
-  static void generate_test_instances(list<MgrMap*> &l) {
+  static void generate_test_instances(std::list<MgrMap*> &l) {
     l.push_back(new MgrMap);
   }
 
-  void print_summary(Formatter *f, std::ostream *ss) const
+  void print_summary(ceph::Formatter *f, std::ostream *ss) const
   {
     // One or the other, not both
     ceph_assert((ss != nullptr) != (f != nullptr));
     if (f) {
-      dump(f);
+      f->dump_bool("available", available);
+      f->dump_int("num_standbys", standbys.size());
+      f->open_array_section("modules");
+      for (auto& i : modules) {
+	f->dump_string("module", i);
+      }
+      f->close_section();
+      f->open_object_section("services");
+      for (const auto &i : services) {
+	f->dump_string(i.first.c_str(), i.second);
+      }
+      f->close_section();
     } else {
       utime_t now = ceph_clock_now();
       if (get_active_gid() != 0) {
@@ -426,13 +549,13 @@ public:
     }
   }
 
-  friend ostream& operator<<(ostream& out, const MgrMap& m) {
-    ostringstream ss;
+  friend std::ostream& operator<<(std::ostream& out, const MgrMap& m) {
+    std::ostringstream ss;
     m.print_summary(nullptr, &ss);
     return out << ss.str();
   }
 
-  friend ostream& operator<<(ostream& out, const std::vector<ModuleInfo>& mi) {
+  friend std::ostream& operator<<(std::ostream& out, const std::vector<ModuleInfo>& mi) {
     for (const auto &i : mi) {
       out << i.name << " ";
     }
@@ -443,6 +566,7 @@ public:
 WRITE_CLASS_ENCODER_FEATURES(MgrMap)
 WRITE_CLASS_ENCODER(MgrMap::StandbyInfo)
 WRITE_CLASS_ENCODER(MgrMap::ModuleInfo);
+WRITE_CLASS_ENCODER(MgrMap::ModuleOption);
 
 #endif
 

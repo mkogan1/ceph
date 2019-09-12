@@ -13,6 +13,7 @@
 #include "cls/rbd/cls_rbd_types.h"
 #include "librbd/internal.h"
 #include "test/librados/test.h"
+#include "test/librados/test_cxx.h"
 #include <iostream>
 #include <sstream>
 #include <stdlib.h>
@@ -79,7 +80,7 @@ int TestFixture::open_image(const std::string &image_name,
   *ictx = new librbd::ImageCtx(image_name.c_str(), "", nullptr, m_ioctx, false);
   m_ictxs.insert(*ictx);
 
-  return (*ictx)->state->open(false);
+  return (*ictx)->state->open(0);
 }
 
 int TestFixture::snap_create(librbd::ImageCtx &ictx,
@@ -138,7 +139,7 @@ int TestFixture::acquire_exclusive_lock(librbd::ImageCtx &ictx) {
     return r;
   }
 
-  RWLock::RLocker owner_locker(ictx.owner_lock);
+  std::shared_lock owner_locker{ictx.owner_lock};
   ceph_assert(ictx.exclusive_lock != nullptr);
   return ictx.exclusive_lock->is_lock_owner() ? 0 : -EINVAL;
 }

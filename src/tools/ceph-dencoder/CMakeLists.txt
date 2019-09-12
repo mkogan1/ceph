@@ -9,7 +9,15 @@ if(HAS_VTA)
 endif()
 
 set(dencoder_srcs
+  denc_registry.cc
   ceph_dencoder.cc
+  common_types.cc
+  mds_types.cc
+  osd_types.cc
+  rbd_types.cc
+  rgw_types.cc
+  ../../include/uuid.cc
+  ../../include/utime.cc
   $<TARGET_OBJECTS:common_texttable_obj>)
 if(WITH_RADOSGW)
   list(APPEND dencoder_srcs
@@ -22,6 +30,10 @@ if(WITH_RADOSGW)
   list(APPEND DENCODER_EXTRALIBS
     rgw_a
     cls_rgw_client)
+  if(WITH_RADOSGW_AMQP_ENDPOINT)
+    list(APPEND DENCODER_EXTRALIBS
+      rabbitmq)
+  endif()
 endif()
 
 if(WITH_RBD)
@@ -36,11 +48,15 @@ if(WITH_RBD)
   endif()
 endif()
 
+if(WITH_CEPHFS)
+  list(APPEND DENCODER_EXTRALIBS
+    mds)
+endif()
+
 target_link_libraries(ceph-dencoder
   global
   os
   osd
-  mds
   mon
   journal
   ${DENCODER_EXTRALIBS}

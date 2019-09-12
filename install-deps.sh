@@ -23,43 +23,60 @@ export LC_ALL=C # the following is vulnerable to i18n
 
 ARCH=$(uname -m)
 
-function install_seastar_deps {
-    if [ $WITH_SEASTAR ]; then
-        $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              ragel libc-ares-dev libhwloc-dev libnuma-dev libpciaccess-dev \
-              libcrypto++-dev libgnutls28-dev libsctp-dev libprotobuf-dev \
-              protobuf-compiler systemtap-sdt-dev libyaml-cpp-dev
+function munge_ceph_spec_in {
+    local with_seastar=$1
+    shift
+    local for_make_check=$1
+    shift
+    local OUTFILE=$1
+    sed -e 's/@//g' < ceph.spec.in > $OUTFILE
+    # http://rpm.org/user_doc/conditional_builds.html
+    if $with_seastar; then
+        sed -i -e 's/%bcond_with seastar/%bcond_without seastar/g' $OUTFILE
+    fi
+    if $for_make_check; then
+        sed -i -e 's/%bcond_with make_check/%bcond_without make_check/g' $OUTFILE
     fi
 }
 
-function munge_ceph_spec_in {
-    local OUTFILE=$1
-    sed -e 's/@//g' -e 's/%bcond_with make_check/%bcond_without make_check/g' < ceph.spec.in > $OUTFILE
-    if type python2 > /dev/null 2>&1 ; then
-        sed -i -e 's/%bcond_with python2/%bcond_without python2/g' $OUTFILE
-    else
-        sed -i -e 's/%bcond_without python2/%bcond_with python2/g' $OUTFILE
+function munge_debian_control {
+    local version=$1
+    shift
+    local with_seastar=$1
+    shift
+    local for_make_check=$1
+    shift
+    local control=$1
+    case "$version" in
+        *squeeze*|*wheezy*)
+	    control="/tmp/control.$$"
+	    grep -v babeltrace debian/control > $control
+	    ;;
+    esac
+    if $with_seastar; then
+	sed -i -e 's/^# Crimson[[:space:]]//g' $control
     fi
-    if [ $WITH_SEASTAR ]; then
-        sed -i -e 's/%bcond_with seastar/%bcond_without seastar/g' $OUTFILE
+    if $for_make_check; then
+        sed -i 's/^# Make-Check[[:space:]]/             /g' $control
     fi
+    echo $control
 }
 
 function ensure_decent_gcc_on_ubuntu {
     # point gcc to the one offered by g++-7 if the used one is not
     # new enough
-    local old=$(gcc -dumpversion)
+    local old=$(gcc -dumpfullversion -dumpversion)
     local new=$1
     local codename=$2
-    if dpkg --compare-versions $old ge 7.0; then
+    if dpkg --compare-versions $old ge ${new}.0; then
 	return
     fi
 
     if [ ! -f /usr/bin/g++-${new} ]; then
 	$SUDO tee /etc/apt/sources.list.d/ubuntu-toolchain-r.list <<EOF
 deb [lang=none] http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu $codename main
-deb [arch=amd64 lang=none] http://mirror.cs.uchicago.edu/ubuntu-toolchain-r $codename main
-deb [arch=amd64,i386 lang=none] http://mirror.yandex.ru/mirrors/launchpad/ubuntu-toolchain-r $codename main
+deb [arch=amd64 lang=none] http://mirror.nullivex.com/ppa/ubuntu-toolchain-r-test $codename main
+deb [arch=amd64 lang=none] http://deb.rug.nl/ppa/mirror/ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu $codename main
 EOF
 	# import PPA's signing key into APT's keyring
 	cat << ENDOFKEY | $SUDO apt-key add -
@@ -78,7 +95,7 @@ msyaQpNl/m/lNtOLhR64v5ZybofB2EWkMxUzX8D/FQ==
 -----END PGP PUBLIC KEY BLOCK-----
 ENDOFKEY
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -y || true
-	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y g++-7
+	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y g++-${new}
     fi
 
     case $codename in
@@ -86,6 +103,8 @@ ENDOFKEY
             old=4.8;;
         xenial)
             old=5;;
+        bionic)
+            old=7;;
     esac
     $SUDO update-alternatives --remove-all gcc || true
     $SUDO update-alternatives \
@@ -105,6 +124,26 @@ ENDOFKEY
     $SUDO ln -nsf /usr/bin/g++ /usr/bin/$(uname -m)-linux-gnu-g++
 }
 
+function ensure_decent_cmake_on_ubuntu {
+    # TODO: remove me after a while
+    # remove Kitware Apt Archive Automatic Signing Key
+    $SUDO apt-key del 40CD72DA
+    $SUDO rm -f /etc/apt/sources.list.d/kitware.list
+    local new=$1
+    if command -v cmake > /dev/null; then
+        local old=$(cmake --version | grep -Po 'version \K[0-9].*')
+        if dpkg --compare-versions $old ge $new; then
+          return
+        fi
+    fi
+    install_pkg_on_ubuntu \
+	ceph-cmake \
+	d278b9d28de0f6b88f56dfe1e8bf684a41577210 \
+	xenial \
+	force \
+	cmake
+}
+
 function install_pkg_on_ubuntu {
     local project=$1
     shift
@@ -112,19 +151,50 @@ function install_pkg_on_ubuntu {
     shift
     local codename=$1
     shift
+    local force=$1
+    shift
     local pkgs=$@
     local missing_pkgs
-    for pkg in $pkgs; do
-	if ! dpkg -s $pkg &> /dev/null; then
-	    missing_pkgs+=" $pkg"
-	fi
-    done
+    if [ $force = "force" ]; then
+	missing_pkgs="$@"
+    else
+	for pkg in $pkgs; do
+	    if ! dpkg -s $pkg &> /dev/null; then
+		missing_pkgs+=" $pkg"
+	    fi
+	done
+    fi
     if test -n "$missing_pkgs"; then
 	local shaman_url="https://shaman.ceph.com/api/repos/${project}/master/${sha1}/ubuntu/${codename}/repo"
 	$SUDO curl --silent --location $shaman_url --output /etc/apt/sources.list.d/$project.list
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -y -o Acquire::Languages=none -o Acquire::Translation=none || true
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get install --allow-unauthenticated -y $missing_pkgs
     fi
+}
+
+function install_boost_on_ubuntu {
+    local codename=$1
+    install_pkg_on_ubuntu \
+	ceph-libboost1.67 \
+	dd38c27740c1f9a9e6719a07eef84a1369dc168b \
+	$codename \
+	check \
+	ceph-libboost-atomic1.67-dev \
+	ceph-libboost-chrono1.67-dev \
+	ceph-libboost-container1.67-dev \
+	ceph-libboost-context1.67-dev \
+	ceph-libboost-coroutine1.67-dev \
+	ceph-libboost-date-time1.67-dev \
+	ceph-libboost-filesystem1.67-dev \
+	ceph-libboost-iostreams1.67-dev \
+	ceph-libboost-program-options1.67-dev \
+	ceph-libboost-python1.67-dev \
+	ceph-libboost-random1.67-dev \
+	ceph-libboost-regex1.67-dev \
+	ceph-libboost-system1.67-dev \
+	ceph-libboost-test1.67-dev \
+	ceph-libboost-thread1.67-dev \
+	ceph-libboost-timer1.67-dev
 }
 
 function version_lt {
@@ -141,11 +211,11 @@ function ensure_decent_gcc_on_rh {
 	    cat <<EOF
 Your GCC is too old. Please run following command to add DTS to your environment:
 
-scl enable devtoolset-7 bash
+scl enable devtoolset-8 bash
 
 Or add following line to the end of ~/.bashrc to add it permanently:
 
-source scl_source enable devtoolset-7
+source scl_source enable devtoolset-8
 
 see https://www.softwarecollections.org/en/scls/rhscl/devtoolset-7/ for more details.
 EOF
@@ -156,9 +226,20 @@ EOF
     fi
 }
 
+for_make_check=false
+if tty -s; then
+    # interactive
+    for_make_check=true
+elif [ $FOR_MAKE_CHECK ]; then
+    for_make_check=true
+else
+    for_make_check=false
+fi
+
 if [ x$(uname)x = xFreeBSDx ]; then
     $SUDO pkg install -yq \
         devel/babeltrace \
+        devel/binutils \
         devel/git \
         devel/gperf \
         devel/gmake \
@@ -175,7 +256,6 @@ if [ x$(uname)x = xFreeBSDx ]; then
         devel/py-virtualenv \
         databases/leveldb \
         net/openldap24-client \
-        security/nss \
         archivers/snappy \
         archivers/liblz4 \
         ftp/curl \
@@ -191,18 +271,21 @@ if [ x$(uname)x = xFreeBSDx ]; then
         textproc/py-sphinx \
         emulators/fuse \
         java/junit \
-        lang/python \
-        lang/python27 \
+        lang/python36 \
         devel/py-pip \
+        devel/py-flake8 \
+        devel/py-tox \
         devel/py-argparse \
         devel/py-nose \
         devel/py-prettytable \
-	www/py-routes \
+        www/py-routes \
         www/py-flask \
-	www/node \
-	www/npm \
+        www/node \
+        www/npm \
         www/fcgi \
-	security/oath-toolkit \
+        security/nss \
+        security/krb5 \
+        security/oath-toolkit \
         sysutils/flock \
         sysutils/fusefs-libs \
 
@@ -211,6 +294,7 @@ if [ x$(uname)x = xFreeBSDx ]; then
 
     exit
 else
+    [ $WITH_SEASTAR ] && with_seastar=true || with_seastar=false
     source /etc/os-release
     case $ID in
     debian|ubuntu|devuan)
@@ -219,29 +303,16 @@ else
         $SUDO apt-get install -y dpkg-dev
         case "$VERSION" in
             *Trusty*)
-                ensure_decent_gcc_on_ubuntu 7 trusty
+                ensure_decent_gcc_on_ubuntu 8 trusty
                 ;;
             *Xenial*)
-                ensure_decent_gcc_on_ubuntu 7 xenial
-                install_pkg_on_ubuntu \
-		    ceph-libboost1.67 \
-		    dd38c27740c1f9a9e6719a07eef84a1369dc168b \
-		    xenial \
-		    ceph-libboost-atomic1.67-dev \
-		    ceph-libboost-chrono1.67-dev \
-		    ceph-libboost-container1.67-dev \
-		    ceph-libboost-context1.67-dev \
-		    ceph-libboost-coroutine1.67-dev \
-		    ceph-libboost-date-time1.67-dev \
-		    ceph-libboost-filesystem1.67-dev \
-		    ceph-libboost-iostreams1.67-dev \
-		    ceph-libboost-program-options1.67-dev \
-		    ceph-libboost-python1.67-dev \
-		    ceph-libboost-random1.67-dev \
-		    ceph-libboost-regex1.67-dev \
-		    ceph-libboost-system1.67-dev \
-		    ceph-libboost-thread1.67-dev \
-		    ceph-libboost-timer1.67-dev
+                ensure_decent_gcc_on_ubuntu 8 xenial
+                ensure_decent_cmake_on_ubuntu 3.10.1
+                [ ! $NO_BOOST_PKGS ] && install_boost_on_ubuntu xenial
+                ;;
+            *Bionic*)
+                ensure_decent_gcc_on_ubuntu 9 bionic
+                [ ! $NO_BOOST_PKGS ] && install_boost_on_ubuntu bionic
                 ;;
             *)
                 $SUDO apt-get install -y gcc
@@ -254,11 +325,9 @@ else
         touch $DIR/status
 
 	backports=""
-	control="debian/control"
+	control=$(munge_debian_control "$VERSION" "$with_seastar" "$for_make_check" "debian/control")
         case "$VERSION" in
             *squeeze*|*wheezy*)
-		control="/tmp/control.$$"
-		grep -v babeltrace debian/control > $control
                 backports="-t $codename-backports"
                 ;;
         esac
@@ -268,12 +337,11 @@ else
 	# work is done
 	$SUDO env DEBIAN_FRONTEND=noninteractive mk-build-deps --install --remove --tool="apt-get -y --no-install-recommends $backports" $control || exit 1
 	$SUDO env DEBIAN_FRONTEND=noninteractive apt-get -y remove ceph-build-deps
-	install_seastar_deps
-	if [ -n "$backports" ] ; then rm $control; fi
+	if [ "$control" != "debian/control" ] ; then rm $control; fi
         ;;
     centos|fedora|rhel|ol|virtuozzo)
         yumdnf="yum"
-        builddepcmd="yum-builddep -y"
+        builddepcmd="yum-builddep -y --setopt=*.skip_if_unavailable=true"
         if test "$(echo "$VERSION_ID >= 22" | bc)" -ne 0; then
             yumdnf="dnf"
             builddepcmd="dnf -y builddep --allowerasing"
@@ -284,7 +352,6 @@ else
 	    $SUDO yum-config-manager --disable centos-sclo-rh || true
 	    $SUDO yum remove centos-release-scl || true
 	fi
-
         case $ID in
             fedora)
                 if test $yumdnf = yum; then
@@ -292,49 +359,52 @@ else
                 fi
                 ;;
             centos|rhel|ol|virtuozzo)
+                MAJOR_VERSION="$(echo $VERSION_ID | cut -d. -f1)"
                 $SUDO yum install -y yum-utils
                 if test $ID = rhel ; then
-                    $SUDO yum-config-manager --enable rhel-$VERSION_ID-server-optional-rpms
+                    $SUDO yum-config-manager --enable rhel-$MAJOR_VERSION-server-optional-rpms
                 fi
-                $SUDO yum-config-manager --add-repo https://dl.fedoraproject.org/pub/epel/$VERSION_ID/x86_64/
+                $SUDO yum-config-manager --add-repo https://dl.fedoraproject.org/pub/epel/$MAJOR_VERSION/x86_64/
                 $SUDO yum install --nogpgcheck -y epel-release
-                $SUDO rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-$VERSION_ID
+                $SUDO rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-$MAJOR_VERSION
                 $SUDO rm -f /etc/yum.repos.d/dl.fedoraproject.org*
-                if test $ID = centos -a $VERSION_ID = 7 ; then
-                    $SUDO yum-config-manager --enable cr
+                if test $ID = centos -a $MAJOR_VERSION = 7 ; then
+		    $SUDO $yumdnf install -y python36-devel
 		    case $(uname -m) in
 			x86_64)
 			    $SUDO yum -y install centos-release-scl
-			    dts_ver=7
+			    dts_ver=8
 			    ;;
 			aarch64)
 			    $SUDO yum -y install centos-release-scl-rh
 			    $SUDO yum-config-manager --disable centos-sclo-rh
 			    $SUDO yum-config-manager --enable centos-sclo-rh-testing
-			    dts_ver=7
+			    dts_ver=8
 			    ;;
 		    esac
                 elif test $ID = rhel -a $MAJOR_VERSION = 7 ; then
-                    $SUDO yum-config-manager --enable rhel-server-rhscl-7-rpms
-                    dts_ver=7
-                elif test $ID = virtuozzo -a $MAJOR_VERSION = 7 ; then
-                    $SUDO yum-config-manager --enable cr
+                    $SUDO yum-config-manager \
+			  --enable rhel-server-rhscl-7-rpms \
+			  --enable rhel-7-server-devtools-rpms
+                    dts_ver=8
                 fi
                 ;;
         esac
-        munge_ceph_spec_in $DIR/ceph.spec
+        munge_ceph_spec_in $with_seastar $for_make_check $DIR/ceph.spec
+        $SUDO $yumdnf install -y \*rpm-macros
         $SUDO $builddepcmd $DIR/ceph.spec 2>&1 | tee $DIR/yum-builddep.out
         [ ${PIPESTATUS[0]} -ne 0 ] && exit 1
 	if [ -n "$dts_ver" ]; then
             ensure_decent_gcc_on_rh $dts_ver
 	fi
-        ! grep -q -i error: $DIR/yum-builddep.out || exit 1
+        IGNORE_YUM_BUILDEP_ERRORS="ValueError: SELinux policy is not managed or store cannot be accessed."
+        sed "/$IGNORE_YUM_BUILDEP_ERRORS/d" $DIR/yum-builddep.out | grep -qi "error:" && exit 1
         ;;
     opensuse*|suse|sles)
         echo "Using zypper to install dependencies"
         zypp_install="zypper --gpg-auto-import-keys --non-interactive install --no-recommends"
         $SUDO $zypp_install systemd-rpm-macros
-        munge_ceph_spec_in $DIR/ceph.spec
+        munge_ceph_spec_in $with_seastar $for_make_check $DIR/ceph.spec
         $SUDO $zypp_install $(rpmspec -q --buildrequires $DIR/ceph.spec) || exit 1
         ;;
     alpine)
@@ -362,10 +432,11 @@ function populate_wheelhouse() {
 
     # although pip comes with virtualenv, having a recent version
     # of pip matters when it comes to using wheel packages
-    # workaround of https://github.com/pypa/setuptools/issues/1042
-    pip --timeout 300 $install 'setuptools >= 0.8,< 36' 'pip >= 7.0' 'wheel >= 0.24' || return 1
+    PIP_OPTS="--timeout 300 --exists-action i"
+    pip $PIP_OPTS $install \
+      'setuptools >= 0.8' 'pip >= 7.0' 'wheel >= 0.24' 'tox >= 2.9.1' || return 1
     if test $# != 0 ; then
-        pip --timeout 300 $install $@ || return 1
+        pip $PIP_OPTS $install $@ || return 1
     fi
 }
 
@@ -379,6 +450,9 @@ function activate_virtualenv() {
         # because CentOS 7 has a buggy old version (v1.10.1)
         # https://github.com/pypa/virtualenv/issues/463
         virtualenv ${env_dir}_tmp
+        # install setuptools before upgrading virtualenv, as the latter needs
+        # a recent setuptools for setup commands like `extras_require`.
+        ${env_dir}_tmp/bin/pip install --upgrade setuptools
         ${env_dir}_tmp/bin/pip install --upgrade virtualenv
         ${env_dir}_tmp/bin/virtualenv --python $interpreter $env_dir
         rm -rf ${env_dir}_tmp
@@ -392,41 +466,51 @@ function activate_virtualenv() {
     . $env_dir/bin/activate
 }
 
+function preload_wheels_for_tox() {
+    local ini=$1
+    shift
+    pushd .
+    cd $(dirname $ini)
+    local require_files=$(ls *requirements*.txt 2>/dev/null) || true
+    local constraint_files=$(ls *constraints*.txt 2>/dev/null) || true
+    local require=$(echo -n "$require_files" | sed -e 's/^/-r /')
+    local constraint=$(echo -n "$constraint_files" | sed -e 's/^/-c /')
+    local md5=wheelhouse/md5
+    if test "$require"; then
+        if ! test -f $md5 || ! md5sum -c $md5 > /dev/null; then
+            rm -rf wheelhouse
+        fi
+    fi
+    if test "$require" && ! test -d wheelhouse ; then
+        for interpreter in python2.7 python3 ; do
+            type $interpreter > /dev/null 2>&1 || continue
+            activate_virtualenv $top_srcdir $interpreter || exit 1
+            populate_wheelhouse "wheel -w $wip_wheelhouse" $require $constraint || exit 1
+        done
+        mv $wip_wheelhouse wheelhouse
+        md5sum $require_files $constraint_files > $md5
+    fi
+    popd
+}
+
 # use pip cache if possible but do not store it outside of the source
 # tree
 # see https://pip.pypa.io/en/stable/reference/pip_install.html#caching
-mkdir -p install-deps-cache
-top_srcdir=$(pwd)
-export XDG_CACHE_HOME=$top_srcdir/install-deps-cache
-wip_wheelhouse=wheelhouse-wip
+if $for_make_check; then
+    mkdir -p install-deps-cache
+    top_srcdir=$(pwd)
+    export XDG_CACHE_HOME=$top_srcdir/install-deps-cache
+    wip_wheelhouse=wheelhouse-wip
+    #
+    # preload python modules so that tox can run without network access
+    #
+    find . -name tox.ini | while read ini ; do
+        preload_wheels_for_tox $ini
+    done
+    for interpreter in python2.7 python3 ; do
+        rm -rf $top_srcdir/install-deps-$interpreter
+    done
+    rm -rf $XDG_CACHE_HOME
+    git --version || (echo "Dashboard uses git to pull dependencies." ; false)
+fi
 
-#
-# preload python modules so that tox can run without network access
-#
-find . -name tox.ini | while read ini ; do
-    (
-        cd $(dirname $ini)
-        require=$(ls *requirements.txt 2>/dev/null | sed -e 's/^/-r /')
-        md5=wheelhouse/md5
-        if test "$require"; then
-            if ! test -f $md5 || ! md5sum -c $md5 ; then
-                rm -rf wheelhouse
-            fi
-        fi
-        if test "$require" && ! test -d wheelhouse ; then
-            for interpreter in python2.7 python3 ; do
-                type $interpreter > /dev/null 2>&1 || continue
-                activate_virtualenv $top_srcdir $interpreter || exit 1
-                populate_wheelhouse "wheel -w $wip_wheelhouse" $require || exit 1
-            done
-            mv $wip_wheelhouse wheelhouse
-            md5sum *requirements.txt > $md5
-        fi
-    )
-done
-
-for interpreter in python2.7 python3 ; do
-    rm -rf $top_srcdir/install-deps-$interpreter
-done
-rm -rf $XDG_CACHE_HOME
-git --version || (echo "Dashboard uses git to pull dependencies." ; false)

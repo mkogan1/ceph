@@ -66,6 +66,24 @@ void Section::dump(Formatter *f) const
   }
 }
 
+std::string Section::get_minimal_conf() const
+{
+  std::string r;
+  for (auto& i : options) {
+    if (i.second.opt->has_flag(Option::FLAG_NO_MON_UPDATE) ||
+	i.second.opt->has_flag(Option::FLAG_MINIMAL_CONF)) {
+      if (i.second.mask.empty()) {
+	r += "\t"s + i.first + " = " + i.second.raw_value + "\n";
+      } else {
+	r += "\t# masked option excluded: " + i.first + " = " +
+	  i.second.raw_value + "\n";
+      }
+    }
+  }
+  return r;
+}
+
+
 // ------------
 
 void ConfigMap::dump(Formatter *f) const
@@ -83,12 +101,12 @@ void ConfigMap::dump(Formatter *f) const
   f->close_section();
 }
 
-void ConfigMap::generate_entity_map(
+std::map<std::string,std::string,std::less<>>
+ConfigMap::generate_entity_map(
   const EntityName& name,
   const map<std::string,std::string>& crush_location,
   const CrushWrapper *crush,
   const std::string& device_class,
-  std::map<std::string,std::string> *out,
   std::map<std::string,pair<std::string,const MaskedOption*>> *src)
 {
   // global, then by type, then by full name.
@@ -101,6 +119,7 @@ void ConfigMap::generate_entity_map(
   if (q != by_id.end()) {
     sections.push_back(make_pair(name.to_str(), &q->second));
   }
+  std::map<std::string,std::string,std::less<>> out;
   MaskedOption *prev = nullptr;
   for (auto s : sections) {
     for (auto& i : s.second->options) {
@@ -124,13 +143,14 @@ void ConfigMap::generate_entity_map(
 	  prev->get_precision(crush) < o.get_precision(crush)) {
 	continue;
       }
-      (*out)[i.first] = o.raw_value;
+      out[i.first] = o.raw_value;
       if (src) {
 	(*src)[i.first] = make_pair(s.first, &o);
       }
       prev = &o;
     }
   }
+  return out;
 }
 
 bool ConfigMap::parse_mask(

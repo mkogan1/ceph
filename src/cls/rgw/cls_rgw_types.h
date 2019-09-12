@@ -1,6 +1,10 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// vim: ts=8 sw=2 smarttab
+
 #ifndef CEPH_CLS_RGW_TYPES_H
 #define CEPH_CLS_RGW_TYPES_H
 
+#include <boost/container/flat_map.hpp>
 #include "common/ceph_time.h"
 #include "common/Formatter.h"
 
@@ -88,8 +92,26 @@ struct rgw_bucket_pending_info {
 };
 WRITE_CLASS_ENCODER(rgw_bucket_pending_info)
 
+
+// categories of objects stored in a bucket index (b-i) and used to
+// differentiate their associated statistics (bucket stats, and in
+// some cases user stats)
+enum class RGWObjCategory : uint8_t {
+  None      = 0,  // b-i entries for delete markers; also used in
+                  // testing and for default values in default
+                  // constructors
+
+  Main      = 1,  // b-i entries for standard objs
+
+  Shadow    = 2,  // presumfably intended for multipart shadow
+                  // uploads; not currently used in the codebase
+
+  MultiMeta = 3,  // b-i entries for multipart upload metadata objs
+};
+
+
 struct rgw_bucket_dir_entry_meta {
-  uint8_t category;
+  RGWObjCategory category;
   uint64_t size;
   ceph::real_time mtime;
   string etag;
@@ -98,12 +120,14 @@ struct rgw_bucket_dir_entry_meta {
   string content_type;
   uint64_t accounted_size;
   string user_data;
+  string storage_class;
+  bool appendable;
 
   rgw_bucket_dir_entry_meta() :
-  category(0), size(0), accounted_size(0) { }
+    category(RGWObjCategory::None), size(0), accounted_size(0), appendable(false) { }
 
   void encode(bufferlist &bl) const {
-    ENCODE_START(5, 3, bl);
+    ENCODE_START(7, 3, bl);
     encode(category, bl);
     encode(size, bl);
     encode(mtime, bl);
@@ -113,10 +137,13 @@ struct rgw_bucket_dir_entry_meta {
     encode(content_type, bl);
     encode(accounted_size, bl);
     encode(user_data, bl);
+    encode(storage_class, bl);
+    encode(appendable, bl);
     ENCODE_FINISH(bl);
   }
+
   void decode(bufferlist::const_iterator &bl) {
-    DECODE_START_LEGACY_COMPAT_LEN(5, 3, 3, bl);
+    DECODE_START_LEGACY_COMPAT_LEN(6, 3, 3, bl);
     decode(category, bl);
     decode(size, bl);
     decode(mtime, bl);
@@ -131,6 +158,10 @@ struct rgw_bucket_dir_entry_meta {
       accounted_size = size;
     if (struct_v >= 5)
       decode(user_data, bl);
+    if (struct_v >= 6)
+      decode(storage_class, bl);
+    if (struct_v >= 7)
+      decode(appendable, bl);
     DECODE_FINISH(bl);
   }
   void dump(Formatter *f) const;
@@ -265,7 +296,7 @@ struct cls_rgw_obj_key {
   bool operator<=(const cls_rgw_obj_key& k) const {
     return !(k < *this);
   }
-  bool empty() {
+  bool empty() const {
     return name.empty();
   }
   void encode(bufferlist &bl) const {
@@ -305,8 +336,8 @@ struct rgw_bucket_dir_entry {
   rgw_bucket_entry_ver ver;
   std::string locator;
   bool exists;
-  struct rgw_bucket_dir_entry_meta meta;
-  multimap<string, struct rgw_bucket_pending_info> pending_map;
+  rgw_bucket_dir_entry_meta meta;
+  multimap<string, rgw_bucket_pending_info> pending_map;
   uint64_t index_ver;
   string tag;
   uint16_t flags;
@@ -379,11 +410,11 @@ struct rgw_bucket_dir_entry {
 };
 WRITE_CLASS_ENCODER(rgw_bucket_dir_entry)
 
-enum BIIndexType {
-  InvalidIdx    = 0,
-  PlainIdx      = 1,
-  InstanceIdx   = 2,
-  OLHIdx        = 3,
+enum class BIIndexType : uint8_t {
+  Invalid    = 0,
+  Plain      = 1,
+  Instance   = 2,
+  OLH        = 3,
 };
 
 struct rgw_bucket_category_stats;
@@ -393,11 +424,11 @@ struct rgw_cls_bi_entry {
   string idx;
   bufferlist data;
 
-  rgw_cls_bi_entry() : type(InvalidIdx) {}
+  rgw_cls_bi_entry() : type(BIIndexType::Invalid) {}
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
-    encode((uint8_t)type, bl);
+    encode(type, bl);
     encode(idx, bl);
     encode(data, bl);
     ENCODE_FINISH(bl);
@@ -416,7 +447,8 @@ struct rgw_cls_bi_entry {
   void dump(Formatter *f) const;
   void decode_json(JSONObj *obj, cls_rgw_obj_key *effective_key = NULL);
 
-  bool get_info(cls_rgw_obj_key *key, uint8_t *category, rgw_bucket_category_stats *accounted_stats);
+  bool get_info(cls_rgw_obj_key *key, RGWObjCategory *category,
+		rgw_bucket_category_stats *accounted_stats);
 };
 WRITE_CLASS_ENCODER(rgw_cls_bi_entry)
 
@@ -607,13 +639,31 @@ struct rgw_bucket_category_stats {
 WRITE_CLASS_ENCODER(rgw_bucket_category_stats)
 
 enum cls_rgw_reshard_status {
-  CLS_RGW_RESHARD_NONE        = 0,
-  CLS_RGW_RESHARD_IN_PROGRESS = 1,
-  CLS_RGW_RESHARD_DONE        = 2,
+  CLS_RGW_RESHARD_NOT_RESHARDING  = 0,
+  CLS_RGW_RESHARD_IN_PROGRESS     = 1,
+  CLS_RGW_RESHARD_DONE            = 2,
 };
 
+static inline std::string to_string(const enum cls_rgw_reshard_status status)
+{
+  switch (status) {
+  case CLS_RGW_RESHARD_NOT_RESHARDING:
+    return "not-resharding";
+    break;
+  case CLS_RGW_RESHARD_IN_PROGRESS:
+    return "in-progress";
+    break;
+  case CLS_RGW_RESHARD_DONE:
+    return "done";
+    break;
+  default:
+    break;
+  };
+  return "Unknown reshard status";
+}
+
 struct cls_rgw_bucket_instance_entry {
-  cls_rgw_reshard_status reshard_status{CLS_RGW_RESHARD_NONE};
+  cls_rgw_reshard_status reshard_status{CLS_RGW_RESHARD_NOT_RESHARDING};
   string new_bucket_instance_id;
   int32_t num_shards{-1};
 
@@ -639,7 +689,7 @@ struct cls_rgw_bucket_instance_entry {
   static void generate_test_instances(list<cls_rgw_bucket_instance_entry*>& o);
 
   void clear() {
-    reshard_status = CLS_RGW_RESHARD_NONE;
+    reshard_status = CLS_RGW_RESHARD_NOT_RESHARDING;
     new_bucket_instance_id.clear();
   }
 
@@ -650,7 +700,7 @@ struct cls_rgw_bucket_instance_entry {
   }
 
   bool resharding() const {
-    return reshard_status != CLS_RGW_RESHARD_NONE;
+    return reshard_status != CLS_RGW_RESHARD_NOT_RESHARDING;
   }
   bool resharding_in_progress() const {
     return reshard_status == CLS_RGW_RESHARD_IN_PROGRESS;
@@ -659,7 +709,7 @@ struct cls_rgw_bucket_instance_entry {
 WRITE_CLASS_ENCODER(cls_rgw_bucket_instance_entry)
 
 struct rgw_bucket_dir_header {
-  map<uint8_t, rgw_bucket_category_stats> stats;
+  map<RGWObjCategory, rgw_bucket_category_stats> stats;
   uint64_t tag_timeout;
   uint64_t ver;
   uint64_t master_ver;
@@ -720,8 +770,8 @@ struct rgw_bucket_dir_header {
 WRITE_CLASS_ENCODER(rgw_bucket_dir_header)
 
 struct rgw_bucket_dir {
-  struct rgw_bucket_dir_header header;
-  std::map<string, struct rgw_bucket_dir_entry> m;
+  rgw_bucket_dir_header header;
+  boost::container::flat_map<string, rgw_bucket_dir_entry> m;
 
   void encode(bufferlist &bl) const {
     ENCODE_START(2, 2, bl);
@@ -1044,7 +1094,7 @@ struct cls_rgw_gc_obj_info
     ls.push_back(new cls_rgw_gc_obj_info);
     ls.push_back(new cls_rgw_gc_obj_info);
     ls.back()->tag = "footag";
-    ceph_timespec ts{21, 32};
+    ceph_timespec ts{init_le32(21), init_le32(32)};
     ls.back()->time = ceph::real_clock::from_ceph_timespec(ts);
   }
 };

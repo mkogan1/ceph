@@ -12,6 +12,7 @@
  *
  */
 
+#include "include/compat.h"
 #include "common/common_init.h"
 #include "common/admin_socket.h"
 #include "common/ceph_argparse.h"
@@ -23,9 +24,6 @@
 #include "common/zipkin_trace.h"
 
 #define dout_subsys ceph_subsys_
-
-#define _STR(x) #x
-#define STRINGIFY(x) _STR(x)
 
 #ifndef WITH_SEASTAR
 CephContext *common_preinit(const CephInitParameters &iparams,
@@ -65,34 +63,18 @@ CephContext *common_preinit(const CephInitParameters &iparams,
     conf.set_val_default("err_to_stderr", "false");
     conf.set_val_default("log_flush_on_exit", "false");
   }
-  if (code_env != CODE_ENVIRONMENT_DAEMON) {
-    // NOTE: disable ms subsystem gathering in clients by default
-    conf.set_val_default("debug_ms", "0/0");
-  }
 
   return cct;
 }
 #endif	// #ifndef WITH_SEASTAR
 
-void complain_about_parse_errors(CephContext *cct,
-				 std::deque<std::string> *parse_errors)
+void complain_about_parse_error(CephContext *cct,
+				const string& parse_error)
 {
-  if (parse_errors->empty())
+  if (parse_error.empty())
     return;
   lderr(cct) << "Errors while parsing config file!" << dendl;
-  int cur_err = 0;
-  static const int MAX_PARSE_ERRORS = 20;
-  for (std::deque<std::string>::const_iterator p = parse_errors->begin();
-       p != parse_errors->end(); ++p)
-  {
-    lderr(cct) << *p << dendl;
-    if (cur_err == MAX_PARSE_ERRORS) {
-      lderr(cct) << "Suppressed " << (parse_errors->size() - MAX_PARSE_ERRORS)
-	   << " more errors." << dendl;
-      break;
-    }
-    ++cur_err;
-  }
+  lderr(cct) << parse_error << dendl;
 }
 
 #ifndef WITH_SEASTAR
@@ -108,6 +90,10 @@ void common_init_finish(CephContext *cct)
   cct->_finished = true;
   cct->init_crypto();
   ZTracer::ztrace_init();
+
+  if (!cct->_log->is_started()) {
+    cct->_log->start();
+  }
 
   int flags = cct->get_init_flags();
   if (!(flags & CINIT_FLAG_NO_DAEMON_ACTIONS))

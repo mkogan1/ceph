@@ -2,12 +2,14 @@ import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 import { FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
 import * as _ from 'lodash';
-import { BsModalRef } from 'ngx-bootstrap';
+import { BsModalRef } from 'ngx-bootstrap/modal';
 import { forkJoin as observableForkJoin } from 'rxjs';
 
 import { RoleService } from '../../../shared/api/role.service';
 import { ScopeService } from '../../../shared/api/scope.service';
+import { ActionLabelsI18n } from '../../../shared/constants/app.constants';
 import { NotificationType } from '../../../shared/enum/notification-type.enum';
 import { CdFormGroup } from '../../../shared/forms/cd-form-group';
 import { CdValidators } from '../../../shared/forms/cd-validators';
@@ -22,11 +24,11 @@ import { RoleFormModel } from './role-form.model';
   styleUrls: ['./role-form.component.scss']
 })
 export class RoleFormComponent implements OnInit {
-  @ViewChild('headerPermissionCheckboxTpl')
+  @ViewChild('headerPermissionCheckboxTpl', { static: true })
   headerPermissionCheckboxTpl: TemplateRef<any>;
-  @ViewChild('cellScopeCheckboxTpl')
+  @ViewChild('cellScopeCheckboxTpl', { static: true })
   cellScopeCheckboxTpl: TemplateRef<any>;
-  @ViewChild('cellPermissionCheckboxTpl')
+  @ViewChild('cellPermissionCheckboxTpl', { static: true })
   cellPermissionCheckboxTpl: TemplateRef<any>;
 
   modalRef: BsModalRef;
@@ -41,13 +43,19 @@ export class RoleFormComponent implements OnInit {
   roleFormMode = RoleFormMode;
   mode: RoleFormMode;
 
+  action: string;
+  resource: string;
+
   constructor(
     private route: ActivatedRoute,
     private router: Router,
     private roleService: RoleService,
     private scopeService: ScopeService,
-    private notificationService: NotificationService
+    private notificationService: NotificationService,
+    private i18n: I18n,
+    public actionLabels: ActionLabelsI18n
   ) {
+    this.resource = this.i18n('role');
     this.createForm();
     this.listenToChanges();
   }
@@ -67,14 +75,14 @@ export class RoleFormComponent implements OnInit {
     this.columns = [
       {
         prop: 'scope',
-        name: 'All',
+        name: this.i18n('All'),
         flexGrow: 2,
         cellTemplate: this.cellScopeCheckboxTpl,
         headerTemplate: this.headerPermissionCheckboxTpl
       },
       {
         prop: 'read',
-        name: 'Read',
+        name: this.i18n('Read'),
         flexGrow: 1,
         cellClass: 'text-center',
         cellTemplate: this.cellPermissionCheckboxTpl,
@@ -82,7 +90,7 @@ export class RoleFormComponent implements OnInit {
       },
       {
         prop: 'create',
-        name: 'Create',
+        name: this.i18n('Create'),
         flexGrow: 1,
         cellClass: 'text-center',
         cellTemplate: this.cellPermissionCheckboxTpl,
@@ -90,7 +98,7 @@ export class RoleFormComponent implements OnInit {
       },
       {
         prop: 'update',
-        name: 'Update',
+        name: this.i18n('Update'),
         flexGrow: 1,
         cellClass: 'text-center',
         cellTemplate: this.cellPermissionCheckboxTpl,
@@ -98,7 +106,7 @@ export class RoleFormComponent implements OnInit {
       },
       {
         prop: 'delete',
-        name: 'Delete',
+        name: this.i18n('Delete'),
         flexGrow: 1,
         cellClass: 'text-center',
         cellTemplate: this.cellPermissionCheckboxTpl,
@@ -107,6 +115,9 @@ export class RoleFormComponent implements OnInit {
     ];
     if (this.router.url.startsWith('/user-management/roles/edit')) {
       this.mode = this.roleFormMode.editing;
+      this.action = this.actionLabels.EDIT;
+    } else {
+      this.action = this.actionLabels.CREATE;
     }
     if (this.mode === this.roleFormMode.editing) {
       this.initEdit();
@@ -267,7 +278,7 @@ export class RoleFormComponent implements OnInit {
       () => {
         this.notificationService.show(
           NotificationType.success,
-          `Created role '${roleFormModel.name}'`
+          this.i18n(`Created role '{{role_name}}'`, { role_name: roleFormModel.name })
         );
         this.router.navigate(['/user-management/roles']);
       },
@@ -283,7 +294,7 @@ export class RoleFormComponent implements OnInit {
       () => {
         this.notificationService.show(
           NotificationType.success,
-          `Updated role '${roleFormModel.name}'`
+          this.i18n(`Updated role '{{role_name}}'`, { role_name: roleFormModel.name })
         );
         this.router.navigate(['/user-management/roles']);
       },

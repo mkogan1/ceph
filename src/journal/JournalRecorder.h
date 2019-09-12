@@ -7,7 +7,8 @@
 #include "include/int_types.h"
 #include "include/Context.h"
 #include "include/rados/librados.hpp"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
+#include "common/containers.h"
 #include "journal/Future.h"
 #include "journal/FutureImpl.h"
 #include "journal/JournalMetadata.h"
@@ -23,9 +24,13 @@ class JournalRecorder {
 public:
   JournalRecorder(librados::IoCtx &ioctx, const std::string &object_oid_prefix,
                   const JournalMetadataPtr &journal_metadata,
-                  uint32_t flush_interval, uint64_t flush_bytes,
-                  double flush_age, uint64_t max_in_flight_appends);
+                  uint64_t max_in_flight_appends);
   ~JournalRecorder();
+
+  void shut_down(Context *on_safe);
+
+  void set_append_batch_options(int flush_interval, uint64_t flush_bytes,
+                                double flush_age);
 
   Future append(uint64_t tag_tid, const bufferlist &bl);
   void flush(Context *on_safe);
@@ -78,23 +83,25 @@ private:
 
   JournalMetadataPtr m_journal_metadata;
 
-  uint32_t m_flush_interval;
-  uint64_t m_flush_bytes;
-  double m_flush_age;
+  uint32_t m_flush_interval = 0;
+  uint64_t m_flush_bytes = 0;
+  double m_flush_age = 0;
   uint64_t m_max_in_flight_appends;
 
   Listener m_listener;
   ObjectHandler m_object_handler;
 
-  Mutex m_lock;
+  ceph::mutex m_lock;
 
   uint32_t m_in_flight_advance_sets = 0;
   uint32_t m_in_flight_object_closes = 0;
   uint64_t m_current_set;
   ObjectRecorderPtrs m_object_ptrs;
-  std::vector<std::shared_ptr<Mutex>> m_object_locks;
+  ceph::containers::tiny_vector<ceph::mutex> m_object_locks;
 
   FutureImplPtr m_prev_future;
+
+  Context *m_on_object_set_advanced = nullptr;
 
   void open_object_set();
   bool close_object_set(uint64_t active_set);
@@ -105,8 +112,8 @@ private:
   void close_and_advance_object_set(uint64_t object_set);
 
   ObjectRecorderPtr create_object_recorder(uint64_t object_number,
-                                           std::shared_ptr<Mutex> lock);
-  void create_next_object_recorder_unlock(ObjectRecorderPtr object_recorder);
+                                           ceph::mutex* lock);
+  void create_next_object_recorder(ObjectRecorderPtr object_recorder);
 
   void handle_update();
 
@@ -115,13 +122,13 @@ private:
 
   void lock_object_recorders() {
     for (auto& lock : m_object_locks) {
-      lock->Lock();
+      lock.lock();
     }
   }
 
   void unlock_object_recorders() {
     for (auto& lock : m_object_locks) {
-      lock->Unlock();
+      lock.unlock();
     }
   }
 };

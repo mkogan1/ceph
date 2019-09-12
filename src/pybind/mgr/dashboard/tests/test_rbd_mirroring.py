@@ -1,12 +1,16 @@
 from __future__ import absolute_import
 
 import json
-import mock
+try:
+    import mock
+except ImportError:
+    import unittest.mock as mock
 
+from . import ControllerTestCase
 from .. import mgr
 from ..controllers.summary import Summary
-from ..controllers.rbd_mirroring import RbdMirror
-from .helper import ControllerTestCase
+from ..controllers.rbd_mirroring import RbdMirroringSummary
+from ..services import progress
 
 
 mock_list_servers = [{
@@ -43,7 +47,7 @@ mock_osd_map = {
 }
 
 
-class RbdMirroringControllerTest(ControllerTestCase):
+class RbdMirroringSummaryControllerTest(ControllerTestCase):
 
     @classmethod
     def setup_server(cls):
@@ -54,7 +58,11 @@ class RbdMirroringControllerTest(ControllerTestCase):
             'osd_map': mock_osd_map,
             'health': {'json': '{"status": 1}'},
             'fs_map': {'filesystems': []},
-
+            'mgr_map': {
+                'services': {
+                    'dashboard': 'https://ceph.dev:11000/'
+                    },
+            }
         }[key]
         mgr.url_prefix = ''
         mgr.get_mgr_id.return_value = 0
@@ -63,16 +71,20 @@ class RbdMirroringControllerTest(ControllerTestCase):
                       '(23d3751b897b31d2bda57aeaf01acb5ff3c4a9cd) ' \
                       'nautilus (dev)'
 
-        RbdMirror._cp_config['tools.authenticate.on'] = False  # pylint: disable=protected-access
+        progress.get_progress_tasks = mock.MagicMock()
+        progress.get_progress_tasks.return_value = ([], [])
 
-        Summary._cp_config['tools.authenticate.on'] = False  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        RbdMirroringSummary._cp_config['tools.authenticate.on'] = False
+        Summary._cp_config['tools.authenticate.on'] = False
+        # pylint: enable=protected-access
 
-        cls.setup_controllers([RbdMirror, Summary], '/test')
+        cls.setup_controllers([RbdMirroringSummary, Summary], '/test')
 
     @mock.patch('dashboard.controllers.rbd_mirroring.rbd')
     def test_default(self, rbd_mock):  # pylint: disable=W0613
-        self._get('/test/api/rbdmirror')
-        result = self.jsonBody()
+        self._get('/test/api/block/mirroring/summary')
+        result = self.json_body()
         self.assertStatus(200)
         self.assertEqual(result['status'], 0)
         for k in ['daemons', 'pools', 'image_error', 'image_syncing', 'image_ready']:
@@ -86,5 +98,5 @@ class RbdMirroringControllerTest(ControllerTestCase):
         self._get('/test/api/summary')
         self.assertStatus(200)
 
-        summary = self.jsonBody()['rbd_mirroring']
+        summary = self.json_body()['rbd_mirroring']
         self.assertEqual(summary, {'errors': 0, 'warnings': 1})

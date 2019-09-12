@@ -4,7 +4,6 @@
 #include "journal/ObjectPlayer.h"
 #include "journal/Entry.h"
 #include "include/stringify.h"
-#include "common/Mutex.h"
 #include "common/Timer.h"
 #include "gtest/gtest.h"
 #include "test/librados/test.h"
@@ -69,7 +68,7 @@ struct TestObjectPlayerParams {
 
 typedef ::testing::Types<TestObjectPlayerParams<0>,
                          TestObjectPlayerParams<10> > TestObjectPlayerTypes;
-TYPED_TEST_CASE(TestObjectPlayer, TestObjectPlayerTypes);
+TYPED_TEST_SUITE(TestObjectPlayer, TestObjectPlayerTypes);
 
 TYPED_TEST(TestObjectPlayer, Fetch) {
   std::string oid = this->get_temp_oid();
@@ -158,7 +157,7 @@ TYPED_TEST(TestObjectPlayer, FetchCorrupt) {
 
   bufferlist bl;
   encode(entry1, bl);
-  encode(this->create_payload("corruption"), bl);
+  encode(this->create_payload("corruption" + std::string(1024, 'X')), bl);
   encode(entry2, bl);
   ASSERT_EQ(0, this->append(this->get_object_name(oid), bl));
 
@@ -167,9 +166,9 @@ TYPED_TEST(TestObjectPlayer, FetchCorrupt) {
 
   journal::ObjectPlayer::Entries entries;
   object->get_entries(&entries);
-  ASSERT_EQ(2U, entries.size());
+  ASSERT_EQ(1U, entries.size());
 
-  journal::ObjectPlayer::Entries expected_entries = {entry1, entry2};
+  journal::ObjectPlayer::Entries expected_entries = {entry1};
   ASSERT_EQ(expected_entries, entries);
 }
 

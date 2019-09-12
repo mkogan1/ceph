@@ -4,12 +4,12 @@
 
 Whether you want to provide :term:`Ceph Object Storage` and/or
 :term:`Ceph Block Device` services to :term:`Cloud Platforms`, deploy
-a :term:`Ceph Filesystem` or use Ceph for another purpose, all
+a :term:`Ceph File System` or use Ceph for another purpose, all
 :term:`Ceph Storage Cluster` deployments begin with setting up each
 :term:`Ceph Node`, your network, and the Ceph Storage Cluster. A Ceph
 Storage Cluster requires at least one Ceph Monitor, Ceph Manager, and
 Ceph OSD (Object Storage Daemon). The Ceph Metadata Server is also
-required when running Ceph Filesystem clients.
+required when running Ceph File System clients.
 
 .. ditaa::  +---------------+ +------------+ +------------+ +---------------+
             |      OSDs     | | Monitors   | |  Managers  | |      MDSs     |
@@ -27,7 +27,7 @@ required when running Ceph Filesystem clients.
   responsible for keeping track of runtime metrics and the current
   state of the Ceph cluster, including storage utilization, current
   performance metrics, and system load.  The Ceph Manager daemons also
-  host python-based plugins to manage and expose Ceph cluster
+  host python-based modules to manage and expose Ceph cluster
   information, including a web-based :ref:`mgr-dashboard` and
   `REST API`_.  At least two managers are normally required for high
   availability.
@@ -40,7 +40,7 @@ required when running Ceph Filesystem clients.
   and high availability.
 
 - **MDSs**: A :term:`Ceph Metadata Server` (MDS, ``ceph-mds``) stores
-  metadata on behalf of the :term:`Ceph Filesystem` (i.e., Ceph Block
+  metadata on behalf of the :term:`Ceph File System` (i.e., Ceph Block
   Devices and Ceph Object Storage do not use MDS). Ceph Metadata
   Servers allow POSIX file system users to execute basic commands (like
   ``ls``, ``find``, etc.) without placing an enormous burden on the

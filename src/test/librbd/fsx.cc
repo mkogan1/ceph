@@ -329,7 +329,8 @@ int register_journal(rados_ioctx_t ioctx, const char *image_name) {
                 return r;
         }
 
-        journal::Journaler journaler(io_ctx, image_id, JOURNAL_CLIENT_ID, {});
+        journal::Journaler journaler(io_ctx, image_id, JOURNAL_CLIENT_ID, {},
+                                     nullptr);
         r = journaler.register_client(bufferlist());
         if (r < 0) {
                 simple_err("failed to register journal client", r);
@@ -348,7 +349,8 @@ int unregister_journal(rados_ioctx_t ioctx, const char *image_name) {
                 return r;
         }
 
-        journal::Journaler journaler(io_ctx, image_id, JOURNAL_CLIENT_ID, {});
+        journal::Journaler journaler(io_ctx, image_id, JOURNAL_CLIENT_ID, {},
+                                     nullptr);
         r = journaler.unregister_client();
         if (r < 0) {
                 simple_err("failed to unregister journal client", r);
@@ -404,7 +406,8 @@ int replay_journal(rados_ioctx_t ioctx, const char *image_name,
                 return r;
         }
 
-        journal::Journaler journaler(io_ctx, image_id, JOURNAL_CLIENT_ID, {});
+        journal::Journaler journaler(io_ctx, image_id, JOURNAL_CLIENT_ID, {},
+                                     nullptr);
         C_SaferCond init_ctx;
         journaler.init(&init_ctx);
         BOOST_SCOPE_EXIT_ALL( (&journaler) ) {
@@ -417,7 +420,8 @@ int replay_journal(rados_ioctx_t ioctx, const char *image_name,
                 return r;
         }
 
-        journal::Journaler replay_journaler(io_ctx, replay_image_id, "", {});
+        journal::Journaler replay_journaler(io_ctx, replay_image_id, "", {},
+                                            nullptr);
 
         C_SaferCond replay_init_ctx;
         replay_journaler.init(&replay_init_ctx);
@@ -431,7 +435,7 @@ int replay_journal(rados_ioctx_t ioctx, const char *image_name,
                 return r;
         }
 
-        replay_journaler.start_append(0, 0, 0, 0);
+        replay_journaler.start_append(0);
 
         C_SaferCond replay_ctx;
         ReplayHandler replay_handler(&journaler, &replay_journaler,
@@ -749,16 +753,13 @@ librbd_compare_and_write(struct rbd_ctx *ctx, uint64_t off, size_t len,
 int
 librbd_get_size(struct rbd_ctx *ctx, uint64_t *size)
 {
-	rbd_image_info_t info;
 	int ret;
 
-	ret = rbd_stat(ctx->image, &info, sizeof(info));
+	ret = rbd_get_size(ctx->image, size);
 	if (ret < 0) {
-		prt("rbd_stat failed\n");
+		prt("rbd_get_size failed\n");
 		return ret;
 	}
-
-	*size = info.size;
 
 	return 0;
 }
@@ -1093,7 +1094,7 @@ krbd_discard(struct rbd_ctx *ctx, uint64_t off, uint64_t len)
 	int ret;
 
 	/*
-	 * BLKDISCARD goes straight to disk and doesn't do anything
+	 * BLKZEROOUT goes straight to disk and doesn't do anything
 	 * about dirty buffers.  This means we need to flush so that
 	 *
 	 *   write 0..3M
@@ -1107,19 +1108,22 @@ krbd_discard(struct rbd_ctx *ctx, uint64_t off, uint64_t len)
 	 *
 	 * returns "data 0000 data" rather than "data data data" in
 	 * case 1..2M was cached.
+	 *
+         * Note: These cache coherency issues are supposed to be fixed
+         * in recent kernels.
 	 */
 	ret = __krbd_flush(ctx, true);
 	if (ret < 0)
 		return ret;
 
 	/*
-	 * off and len must be 512-byte aligned, otherwise BLKDISCARD
+	 * off and len must be 512-byte aligned, otherwise BLKZEROOUT
 	 * will fail with -EINVAL.  This means that -K (enable krbd
 	 * mode) requires -h 512 or similar.
 	 */
-	if (ioctl(ctx->krbd_fd, BLKDISCARD, &range) < 0) {
+	if (ioctl(ctx->krbd_fd, BLKZEROOUT, &range) < 0) {
 		ret = -errno;
-		prt("BLKDISCARD(%llu, %llu) failed\n", off, len);
+		prt("BLKZEROOUT(%llu, %llu) failed\n", off, len);
 		return ret;
 	}
 
@@ -1226,6 +1230,7 @@ nbd_open(const char *name, struct rbd_ctx *ctx)
 	SubProcess process("rbd-nbd", SubProcess::KEEP, SubProcess::PIPE,
 			   SubProcess::KEEP);
 	process.add_cmd_arg("map");
+	process.add_cmd_arg("--timeout=600");
 	std::string img;
 	img.append(pool);
 	img.append("/");
@@ -1606,12 +1611,16 @@ const struct rbd_operations *ops = &librbd_operations;
 static bool rbd_image_has_parent(struct rbd_ctx *ctx)
 {
 	int ret;
+	rbd_linked_image_spec_t parent_image;
+	rbd_snap_spec_t parent_snap;
 
-	ret = rbd_get_parent_info(ctx->image, NULL, 0, NULL, 0, NULL, 0);
-	if (ret < 0 && ret != -ENOENT) {
+	ret = rbd_get_parent(ctx->image, &parent_image, &parent_snap);
+        if (ret < 0 && ret != -ENOENT) {
 		prterrcode("rbd_get_parent_info", ret);
 		exit(1);
 	}
+	rbd_linked_image_spec_cleanup(&parent_image);
+	rbd_snap_spec_cleanup(&parent_snap);
 
 	return !ret;
 }

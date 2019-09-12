@@ -12,14 +12,16 @@
  * 
  */
 
+#include <poll.h>
+#include <sys/un.h>
+#include <unistd.h>
+
 #include "common/OutputDataSocket.h"
 #include "common/errno.h"
+#include "common/debug.h"
 #include "common/safe_io.h"
 #include "include/compat.h"
 #include "include/sock_compat.h"
-
-#include <poll.h>
-#include <sys/un.h>
 
 // re-include our assert to clobber the system one; fix dout:
 #include "include/ceph_assert.h"
@@ -92,7 +94,7 @@ OutputDataSocket::OutputDataSocket(CephContext *cct, uint64_t _backlog)
     m_shutdown_wr_fd(-1),
     going_down(false),
     data_size(0),
-    m_lock("OutputDataSocket::m_lock")
+    skipped(0)
 {
 }
 
@@ -274,15 +276,15 @@ void OutputDataSocket::handle_connection(int fd)
     return;
 
   do {
-    m_lock.lock();
-    cond.Wait(m_lock);
-
-    if (going_down) {
-      m_lock.unlock();
-      break;
+    {
+      std::unique_lock l(m_lock);
+      if (!going_down) {
+	cond.wait(l);
+      }
+      if (going_down) {
+	break;
+      }
     }
-    m_lock.unlock();
-
     ret = dump_data(fd);
   } while (ret >= 0);
 }
@@ -290,18 +292,19 @@ void OutputDataSocket::handle_connection(int fd)
 int OutputDataSocket::dump_data(int fd)
 {
   m_lock.lock();
-  list<bufferlist> l = std::move(data);
+  vector<buffer::list> l = std::move(data);
   data.clear();
   data_size = 0;
   m_lock.unlock();
 
-  for (list<bufferlist>::iterator iter = l.begin(); iter != l.end(); ++iter) {
+  for (auto iter = l.begin(); iter != l.end(); ++iter) {
     bufferlist& bl = *iter;
     int ret = safe_write(fd, bl.c_str(), bl.length());
     if (ret >= 0) {
       ret = safe_write(fd, delim.c_str(), delim.length());
     }
     if (ret < 0) {
+      std::scoped_lock lock(m_lock);
       for (; iter != l.end(); ++iter) {
         bufferlist& bl = *iter;
 	data.push_back(bl);
@@ -354,7 +357,7 @@ void OutputDataSocket::shutdown()
 {
   m_lock.lock();
   going_down = true;
-  cond.Signal();
+  cond.notify_all();
   m_lock.unlock();
 
   if (m_shutdown_wr_fd < 0)
@@ -381,14 +384,20 @@ void OutputDataSocket::shutdown()
 
 void OutputDataSocket::append_output(bufferlist& bl)
 {
-  std::lock_guard<Mutex> l(m_lock);
+  std::lock_guard l(m_lock);
 
   if (data_size + bl.length() > data_max_backlog) {
-    ldout(m_cct, 20) << "dropping data output, max backlog reached" << dendl;
+    if (skipped % 100 == 0) {
+      ldout(m_cct, 0) << "dropping data output, max backlog reached (skipped=="
+		      << skipped << ")"
+		      << dendl;
+      skipped = 1;
+    } else
+      ++skipped;
+    return;
   }
+
   data.push_back(bl);
-
   data_size += bl.length();
-
-  cond.Signal();
+  cond.notify_all();
 }

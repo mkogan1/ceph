@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #ifndef CEPH_RGW_FORMATS_H
 #define CEPH_RGW_FORMATS_H
@@ -123,6 +123,14 @@ protected:
   }
 public:
   RGWStreamFlusher(Formatter *f, ostream& _os) : RGWFormatterFlusher(f), os(_os) {}
+};
+
+class RGWNullFlusher : public RGWFormatterFlusher {
+protected:
+  void do_flush() override {
+  }
+public:
+  RGWNullFlusher() : RGWFormatterFlusher(nullptr) {}
 };
 
 #endif

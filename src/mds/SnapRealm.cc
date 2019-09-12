@@ -102,13 +102,13 @@ void SnapRealm::remove_open_past_parent(inodeno_t ino, snapid_t last)
   }
 }
 
-struct C_SR_RetryOpenParents : public MDSInternalContextBase {
+struct C_SR_RetryOpenParents : public MDSContext {
   SnapRealm *sr;
   snapid_t first, last, parent_last;
   inodeno_t parent;
-  MDSInternalContextBase* fin;
+  MDSContext* fin;
   C_SR_RetryOpenParents(SnapRealm *s, snapid_t f, snapid_t l, snapid_t pl,
-			inodeno_t p, MDSInternalContextBase *c) :
+			inodeno_t p, MDSContext *c) :
     sr(s), first(f), last(l), parent_last(pl),  parent(p), fin(c) {
     sr->inode->get(CInode::PIN_OPENINGSNAPPARENTS);
   }
@@ -137,7 +137,7 @@ void SnapRealm::_remove_missing_parent(snapid_t snapid, inodeno_t parent, int er
   }
 }
 
-bool SnapRealm::_open_parents(MDSInternalContextBase *finish, snapid_t first, snapid_t last)
+bool SnapRealm::_open_parents(MDSContext *finish, snapid_t first, snapid_t last)
 {
   dout(10) << "open_parents [" << first << "," << last << "]" << dendl;
   if (open) 
@@ -198,7 +198,7 @@ bool SnapRealm::_open_parents(MDSInternalContextBase *finish, snapid_t first, sn
   return true;
 }
 
-bool SnapRealm::open_parents(MDSInternalContextBase *retryorfinish) {
+bool SnapRealm::open_parents(MDSContext *retryorfinish) {
   if (!_open_parents(retryorfinish))
     return false;
   delete retryorfinish;
@@ -454,15 +454,12 @@ snapid_t SnapRealm::resolve_snapname(std::string_view n, inodeno_t atino, snapid
   // first try me
   dout(10) << "resolve_snapname '" << n << "' in [" << first << "," << last << "]" << dendl;
 
-  //snapid_t num;
-  //if (n[0] == '~') num = atoll(n.c_str()+1);
-
   bool actual = (atino == inode->ino());
   string pname;
   inodeno_t pino;
   if (n.length() && n[0] == '_') {
-    int next_ = n.find('_', 1);
-    if (next_ > 1) {
+    size_t next_ = n.find_last_of('_');
+    if (next_ > 1 && next_ + 1 < n.length()) {
       pname = n.substr(1, next_ - 1);
       pino = atoll(n.data() + next_ + 1);
       dout(10) << " " << n << " parses to name '" << pname << "' dirino " << pino << dendl;

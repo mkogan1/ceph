@@ -39,13 +39,13 @@ void SetHeadRequest<I>::send() {
 
 template <typename I>
 void SetHeadRequest<I>::send_set_size() {
-  m_image_ctx->snap_lock.get_read();
+  m_image_ctx->image_lock.lock_shared();
   if (m_image_ctx->size == m_size) {
-    m_image_ctx->snap_lock.put_read();
+    m_image_ctx->image_lock.unlock_shared();
     send_detach_parent();
     return;
   }
-  m_image_ctx->snap_lock.put_read();
+  m_image_ctx->image_lock.unlock_shared();
 
   ldout(m_cct, 20) << dendl;
 
@@ -87,9 +87,8 @@ void SetHeadRequest<I>::handle_set_size(int r) {
 
   {
     // adjust in-memory image size now that it's updated on disk
-    RWLock::WLocker snap_locker(m_image_ctx->snap_lock);
+    std::unique_lock image_locker{m_image_ctx->image_lock};
     if (m_image_ctx->size > m_size) {
-      RWLock::WLocker parent_locker(m_image_ctx->parent_lock);
       if (m_image_ctx->parent_md.spec.pool_id != -1 &&
           m_image_ctx->parent_md.overlap > m_size) {
         m_image_ctx->parent_md.overlap = m_size;
@@ -103,15 +102,15 @@ void SetHeadRequest<I>::handle_set_size(int r) {
 
 template <typename I>
 void SetHeadRequest<I>::send_detach_parent() {
-  m_image_ctx->parent_lock.get_read();
+  m_image_ctx->image_lock.lock_shared();
   if (m_image_ctx->parent_md.spec.pool_id == -1 ||
       (m_image_ctx->parent_md.spec == m_parent_spec &&
        m_image_ctx->parent_md.overlap == m_parent_overlap)) {
-    m_image_ctx->parent_lock.put_read();
+    m_image_ctx->image_lock.unlock_shared();
     send_attach_parent();
     return;
   }
-  m_image_ctx->parent_lock.put_read();
+  m_image_ctx->image_lock.unlock_shared();
 
   ldout(m_cct, 20) << dendl;
 
@@ -143,7 +142,7 @@ void SetHeadRequest<I>::handle_detach_parent(int r) {
 
   {
     // adjust in-memory parent now that it's updated on disk
-    RWLock::WLocker parent_locker(m_image_ctx->parent_lock);
+    std::unique_lock image_locker{m_image_ctx->image_lock};
     m_image_ctx->parent_md.spec = {};
     m_image_ctx->parent_md.overlap = 0;
   }
@@ -153,14 +152,14 @@ void SetHeadRequest<I>::handle_detach_parent(int r) {
 
 template <typename I>
 void SetHeadRequest<I>::send_attach_parent() {
-  m_image_ctx->parent_lock.get_read();
+  m_image_ctx->image_lock.lock_shared();
   if (m_image_ctx->parent_md.spec == m_parent_spec &&
       m_image_ctx->parent_md.overlap == m_parent_overlap) {
-    m_image_ctx->parent_lock.put_read();
+    m_image_ctx->image_lock.unlock_shared();
     finish(0);
     return;
   }
-  m_image_ctx->parent_lock.put_read();
+  m_image_ctx->image_lock.unlock_shared();
 
   ldout(m_cct, 20) << dendl;
 
@@ -177,7 +176,7 @@ void SetHeadRequest<I>::send_attach_parent() {
       finish_op_ctx->complete(0);
     });
   auto req = image::AttachParentRequest<I>::create(
-    *m_image_ctx, m_parent_spec, m_parent_overlap, ctx);
+    *m_image_ctx, m_parent_spec, m_parent_overlap, false, ctx);
   req->send();
 }
 
@@ -193,7 +192,7 @@ void SetHeadRequest<I>::handle_attach_parent(int r) {
 
   {
     // adjust in-memory parent now that it's updated on disk
-    RWLock::WLocker parent_locker(m_image_ctx->parent_lock);
+    std::unique_lock image_locker{m_image_ctx->image_lock};
     m_image_ctx->parent_md.spec = m_parent_spec;
     m_image_ctx->parent_md.overlap = m_parent_overlap;
   }
@@ -203,7 +202,7 @@ void SetHeadRequest<I>::handle_attach_parent(int r) {
 
 template <typename I>
 Context *SetHeadRequest<I>::start_lock_op(int* r) {
-  RWLock::RLocker owner_locker(m_image_ctx->owner_lock);
+  std::shared_lock owner_locker{m_image_ctx->owner_lock};
   if (m_image_ctx->exclusive_lock == nullptr) {
     return new FunctionContext([](int r) {});
   }

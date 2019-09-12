@@ -6,11 +6,13 @@
 
 #include "include/rados/librados.hpp"
 #include "include/rbd_types.h"
+#include "include/ceph_assert.h"
 #include "include/Context.h"
 #include "common/zipkin_trace.h"
 
 #include <atomic>
 #include <type_traits>
+#include <stdio.h>
 
 namespace librbd {
 
@@ -107,6 +109,19 @@ const std::string header_name(const std::string &image_id);
 const std::string old_header_name(const std::string &image_name);
 std::string unique_lock_name(const std::string &name, void *address);
 
+template <typename I>
+std::string data_object_name(I* image_ctx, uint64_t object_no) {
+  char buf[RBD_MAX_OBJ_NAME_SIZE];
+  size_t length = snprintf(buf, RBD_MAX_OBJ_NAME_SIZE,
+                           image_ctx->format_string, object_no);
+  ceph_assert(length < RBD_MAX_OBJ_NAME_SIZE);
+
+  std::string oid;
+  oid.reserve(RBD_MAX_OBJ_NAME_SIZE);
+  oid.append(buf, length);
+  return oid;
+}
+
 librados::AioCompletion *create_rados_callback(Context *on_finish);
 
 template <typename T>
@@ -155,39 +170,6 @@ Context *create_async_context_callback(WQ *work_queue, Context *on_finish) {
 inline ImageCtx *get_image_ctx(ImageCtx *image_ctx) {
   return image_ctx;
 }
-
-/// helper for tracking in-flight async ops when coordinating
-/// a shut down of the invoking class instance
-class AsyncOpTracker {
-public:
-  void start_op() {
-    m_refs++;
-  }
-
-  void finish_op() {
-    if (--m_refs == 0 && m_on_finish != nullptr) {
-      Context *on_finish = nullptr;
-      std::swap(on_finish, m_on_finish);
-      on_finish->complete(0);
-    }
-  }
-
-  template <typename I>
-  void wait(I &image_ctx, Context *on_finish) {
-    ceph_assert(m_on_finish == nullptr);
-
-    on_finish = create_async_context_callback(image_ctx, on_finish);
-    if (m_refs == 0) {
-      on_finish->complete(0);
-      return;
-    }
-    m_on_finish = on_finish;
-  }
-
-private:
-  std::atomic<uint64_t> m_refs = { 0 };
-  Context *m_on_finish = nullptr;
-};
 
 uint64_t get_rbd_default_features(CephContext* cct);
 

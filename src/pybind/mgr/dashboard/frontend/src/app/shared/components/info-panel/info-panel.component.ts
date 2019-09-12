@@ -1,5 +1,8 @@
 import { Component, Input } from '@angular/core';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
+import { Icons } from '../../../shared/enum/icons.enum';
+
 @Component({
   selector: 'cd-info-panel',
   templateUrl: './info-panel.component.html',
@@ -11,5 +14,9 @@ export class InfoPanelComponent {
    * @type {string}
    */
   @Input()
-  title = 'Information';
+  title = this.i18n('Information');
+
+  icons = Icons;
+
+  constructor(private i18n: I18n) {}
 }

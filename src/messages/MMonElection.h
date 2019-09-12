@@ -16,16 +16,14 @@
 #ifndef CEPH_MMONELECTION_H
 #define CEPH_MMONELECTION_H
 
+#include "common/ceph_releases.h"
 #include "msg/Message.h"
 #include "mon/MonMap.h"
 #include "mon/mon_types.h"
 
-class MMonElection : public MessageInstance<MMonElection> {
-public:
-  friend factory;
-
+class MMonElection : public Message {
 private:
-  static constexpr int HEAD_VERSION = 7;
+  static constexpr int HEAD_VERSION = 8;
   static constexpr int COMPAT_VERSION = 5;
 
 public:
@@ -50,17 +48,18 @@ public:
   set<int32_t> quorum;
   uint64_t quorum_features;
   mon_feature_t mon_features;
+  ceph_release_t mon_release{ceph_release_t::unknown};
   bufferlist sharing_bl;
   map<string,string> metadata;
   
-  MMonElection() : MessageInstance(MSG_MON_ELECTION, HEAD_VERSION, COMPAT_VERSION),
+  MMonElection() : Message{MSG_MON_ELECTION, HEAD_VERSION, COMPAT_VERSION},
     op(0), epoch(0),
     quorum_features(0),
     mon_features(0)
   { }
 
   MMonElection(int o, epoch_t e, MonMap *m)
-    : MessageInstance(MSG_MON_ELECTION, HEAD_VERSION, COMPAT_VERSION),
+    : Message{MSG_MON_ELECTION, HEAD_VERSION, COMPAT_VERSION},
       fsid(m->fsid), op(o), epoch(e),
       quorum_features(0),
       mon_features(0)
@@ -73,9 +72,10 @@ private:
   ~MMonElection() override {}
 
 public:  
-  const char *get_type_name() const override { return "election"; }
+  std::string_view get_type_name() const override { return "election"; }
   void print(ostream& out) const override {
-    out << "election(" << fsid << " " << get_opname(op) << " " << epoch << ")";
+    out << "election(" << fsid << " " << get_opname(op)
+	<< " rel " << (int)mon_release << " e" << epoch << ")";
   }
   
   void encode_payload(uint64_t features) override {
@@ -99,6 +99,7 @@ public:
     encode(sharing_bl, payload);
     encode(mon_features, payload);
     encode(metadata, payload);
+    encode(mon_release, payload);
   }
   void decode_payload() override {
     auto p = payload.cbegin();
@@ -118,8 +119,14 @@ public:
       decode(mon_features, p);
     if (header.version >= 7)
       decode(metadata, p);
+    if (header.version >= 8)
+      decode(mon_release, p);
+    else
+      mon_release = infer_ceph_release_from_mon_features(mon_features);
   }
-  
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);  
 };
 
 #endif

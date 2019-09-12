@@ -53,16 +53,6 @@ export class CdValidators {
   }
 
   /**
-   * Validator function in order to validate uuids.
-   * @returns {ValidatorFn} A validator function that returns an error map containing `pattern`
-   * if the validation failed, otherwise `null`.
-   */
-  static uuid(): ValidatorFn {
-    const uuidRgx = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    return Validators.pattern(uuidRgx);
-  }
-
-  /**
    * Validator function in order to validate numbers.
    * @returns {ValidatorFn} A validator function that returns an error map containing `pattern`
    * if the validation failed, otherwise `null`.
@@ -110,8 +100,20 @@ export class CdValidators {
    * @return {ValidatorFn} Returns the validator function.
    */
   static requiredIf(prerequisites: Object, condition?: Function | undefined): ValidatorFn {
+    let isWatched = false;
+
     return (control: AbstractControl): ValidationErrors | null => {
-      // Check if all prerequisites matches.
+      if (!isWatched && control.parent) {
+        Object.keys(prerequisites).forEach((key) => {
+          control.parent.get(key).valueChanges.subscribe(() => {
+            control.updateValueAndValidity({ emitEvent: false });
+          });
+        });
+
+        isWatched = true;
+      }
+
+      // Check if all prerequisites met.
       if (
         !Object.keys(prerequisites).every((key) => {
           return control.parent && control.parent.get(key).value === prerequisites[key];
@@ -123,6 +125,47 @@ export class CdValidators {
         ? condition.call(condition, control.value)
         : isEmptyInputValue(control.value);
       return success ? { required: true } : null;
+    };
+  }
+
+  /**
+   * Compose multiple validators into a single function that returns the union of
+   * the individual error maps for the provided control when the given prerequisites
+   * are fulfilled.
+   *
+   * @param {Object} prerequisites An object containing the prerequisites as
+   *   key/value pairs.
+   *   ### Example
+   *   ```typescript
+   *   {
+   *     'generate_key': true,
+   *     'username': 'Max Mustermann'
+   *   }
+   *   ```
+   * @param {ValidatorFn[]} validators List of validators that should be taken
+   *   into action when the prerequisites are met.
+   * @return {ValidatorFn} Returns the validator function.
+   */
+  static composeIf(prerequisites: Object, validators: ValidatorFn[]): ValidatorFn {
+    let isWatched = false;
+    return (control: AbstractControl): ValidationErrors | null => {
+      if (!isWatched && control.parent) {
+        Object.keys(prerequisites).forEach((key) => {
+          control.parent.get(key).valueChanges.subscribe(() => {
+            control.updateValueAndValidity({ emitEvent: false });
+          });
+        });
+        isWatched = true;
+      }
+      // Check if all prerequisites are met.
+      if (
+        !Object.keys(prerequisites).every((key) => {
+          return control.parent && control.parent.get(key).value === prerequisites[key];
+        })
+      ) {
+        return null;
+      }
+      return Validators.compose(validators)(control);
     };
   }
 
@@ -148,22 +191,39 @@ export class CdValidators {
    *
    * @param {AbstractControl} formControl
    * @param {Function} condition
-   * @param {ValidatorFn[]} validators
+   * @param {ValidatorFn[]} conditionalValidators List of validators that should only be tested
+   * when the condition is met
+   * @param {ValidatorFn[]} permanentValidators List of validators that should always be tested
+   * @param {AbstractControl[]} watchControls List of controls that the condition depend on.
+   * Every time one of this controls value is updated, the validation will be triggered
    */
-  static validateIf(formControl: AbstractControl, condition: Function, validators: ValidatorFn[]) {
-    formControl.setValidators(
-      (
-        control: AbstractControl
-      ): {
-        [key: string]: any;
-      } => {
-        const value = condition.call(this);
-        if (value) {
-          return Validators.compose(validators)(control);
-        }
-        return null;
+  static validateIf(
+    formControl: AbstractControl,
+    condition: Function,
+    conditionalValidators: ValidatorFn[],
+    permanentValidators: ValidatorFn[] = [],
+    watchControls: AbstractControl[] = []
+  ) {
+    conditionalValidators = conditionalValidators.concat(permanentValidators);
+
+    formControl.setValidators((control: AbstractControl): {
+      [key: string]: any;
+    } => {
+      const value = condition.call(this);
+      if (value) {
+        return Validators.compose(conditionalValidators)(control);
       }
-    );
+      if (permanentValidators.length > 0) {
+        return Validators.compose(permanentValidators)(control);
+      }
+      return null;
+    });
+
+    watchControls.forEach((control: AbstractControl) => {
+      control.valueChanges.subscribe(() => {
+        formControl.updateValueAndValidity({ emitEvent: false });
+      });
+    });
   }
 
   /**
@@ -179,6 +239,9 @@ export class CdValidators {
     return (control: AbstractControl): { [key: string]: any } => {
       const ctrl1 = control.get(path1);
       const ctrl2 = control.get(path2);
+      if (!ctrl1 || !ctrl2) {
+        return null;
+      }
       if (ctrl1.value !== ctrl2.value) {
         ctrl2.setErrors({ match: true });
       } else {
@@ -236,6 +299,26 @@ export class CdValidators {
         }),
         take(1)
       );
+    };
+  }
+
+  /**
+   * Validator function for UUIDs.
+   * @param required - Defines if it is mandatory to fill in the UUID
+   * @return Validator function that returns an error object containing `invalidUuid` if the
+   * validation failed, `null` otherwise.
+   */
+  static uuid(required = false): ValidatorFn {
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return (control: AbstractControl): { [key: string]: any } | null => {
+      if (control.pristine && control.untouched) {
+        return null;
+      } else if (!required && !control.value) {
+        return null;
+      } else if (uuidRe.test(control.value)) {
+        return null;
+      }
+      return { invalidUuid: 'This is not a valid UUID' };
     };
   }
 }

@@ -473,13 +473,24 @@ static int update_auth(MonitorDBStore& st, const string& keyring_path)
       cerr << "no caps granted to: " << auth_inc.name << std::endl;
       return -EINVAL;
     }
+    map<string,string> caps;
+    std::transform(begin(auth_inc.auth.caps), end(auth_inc.auth.caps),
+		   inserter(caps, end(caps)),
+		   [](auto& cap) {
+		     string c;
+		     auto p = cap.second.cbegin();
+		     decode(c, p);
+		     return make_pair(cap.first, c);
+		   });
+    cout << "adding auth for '"
+	 << auth_inc.name << "': " << auth_inc.auth
+	 << " with caps(" << caps << ")" << std::endl;
     auth_inc.op = KeyServerData::AUTH_INC_ADD;
 
     AuthMonitor::Incremental inc;
     inc.inc_type = AuthMonitor::AUTH_DATA;
     encode(auth_inc, inc.auth_data);
     inc.auth_type = CEPH_AUTH_CEPHX;
-
     inc.encode(bl, CEPH_FEATURES_ALL);
   }
 
@@ -496,14 +507,29 @@ static int update_auth(MonitorDBStore& st, const string& keyring_path)
   return 0;
 }
 
-static int update_mkfs(MonitorDBStore& st)
+static int update_mkfs(MonitorDBStore& st, const string& monmap_path)
 {
   MonMap monmap;
-  int r = monmap.build_initial(g_ceph_context, cerr);
-  if (r) {
-    cerr << "no initial monitors" << std::endl;
-    return -EINVAL;
+  if (!monmap_path.empty()) {
+    cout << __func__ << " pulling initial monmap from " << monmap_path << std::endl;
+    bufferlist bl;
+    string err;
+    int r = bl.read_file(monmap_path.c_str(), &err);
+    if (r < 0) {
+      cerr << "failed to read monmap from " << monmap_path << ": "
+	   << cpp_strerror(r) << std::endl;
+      return r;
+    }
+    monmap.decode(bl);
+  } else {
+    cout << __func__ << " generating seed initial monmap" << std::endl;
+    int r = monmap.build_initial(g_ceph_context, true, cerr);
+    if (r) {
+      cerr << "no initial monitors" << std::endl;
+      return -EINVAL;
+    }
   }
+  monmap.print(cout);
   bufferlist bl;
   monmap.encode(bl, CEPH_FEATURES_ALL);
   monmap.set_epoch(0);
@@ -533,7 +559,7 @@ static int update_creating_pgs(MonitorDBStore& st)
   auto last_osdmap_epoch = st.get("osdmap", "last_committed");
   int r = st.get("osdmap", st.combine_strings("full", last_osdmap_epoch), bl);
   if (r < 0) {
-    cerr << "unable to losd osdmap e" << last_osdmap_epoch << std::endl;
+    cerr << "unable to load osdmap e" << last_osdmap_epoch << std::endl;
     return r;
   }
 
@@ -546,7 +572,7 @@ static int update_creating_pgs(MonitorDBStore& st)
   creating.last_scan_epoch = last_osdmap_epoch;
 
   bufferlist newbl;
-  ::encode(creating, newbl);
+  encode(creating, newbl, CEPH_FEATURES_ALL);
 
   auto t = make_shared<MonitorDBStore::Transaction>();
   t->put("osd_pg_creating", "creating", newbl);
@@ -625,9 +651,12 @@ int rebuild_monstore(const char* progname,
 {
   po::options_description op_desc("Allowed 'rebuild' options");
   string keyring_path;
+  string monmap_path;
   op_desc.add_options()
     ("keyring", po::value<string>(&keyring_path),
-     "path to the client.admin key");
+     "path to the client.admin key")
+    ("monmap", po::value<string>(&monmap_path),
+     "path to the initial monmap");
   po::variables_map op_vm;
   int r = parse_cmd_args(&op_desc, nullptr, nullptr, subcmds, &op_vm);
   if (r) {
@@ -648,7 +677,7 @@ int rebuild_monstore(const char* progname,
   if ((r = update_paxos(st))) {
     return r;
   }
-  if ((r = update_mkfs(st))) {
+  if ((r = update_mkfs(st, monmap_path))) {
     return r;
   }
   if ((r = update_monitor(st))) {

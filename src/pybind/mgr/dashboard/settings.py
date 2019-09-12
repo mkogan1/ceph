@@ -21,6 +21,10 @@ class Options(object):
     ENABLE_BROWSABLE_API = (True, bool)
     REST_REQUESTS_TIMEOUT = (45, int)
 
+    # API auditing
+    AUDIT_API_ENABLED = (False, bool)
+    AUDIT_API_LOG_PAYLOAD = (True, bool)
+
     # RGW settings
     RGW_API_HOST = ('', str)
     RGW_API_PORT = (80, int)
@@ -35,6 +39,17 @@ class Options(object):
     GRAFANA_API_URL = ('', str)
     GRAFANA_API_USERNAME = ('admin', str)
     GRAFANA_API_PASSWORD = ('admin', str)
+    GRAFANA_UPDATE_DASHBOARDS = (False, bool)
+
+    # NFS Ganesha settings
+    GANESHA_CLUSTERS_RADOS_POOL_NAMESPACE = ('', str)
+
+    # Prometheus settings
+    PROMETHEUS_API_HOST = ('', str)
+    ALERTMANAGER_API_HOST = ('', str)
+
+    # iSCSI management settings
+    ISCSI_API_SSL_VERIFICATION = (True, bool)
 
     @staticmethod
     def has_default_value(name):
@@ -45,22 +60,23 @@ class Options(object):
 class SettingsMeta(type):
     def __getattr__(cls, attr):
         default, stype = getattr(Options, attr)
-        if stype == bool and str(mgr.get_config(attr,
-                                                default)).lower() == 'false':
+        if stype == bool and str(mgr.get_module_option(
+                attr,
+                default)).lower() == 'false':
             value = False
         else:
-            value = stype(mgr.get_config(attr, default))
+            value = stype(mgr.get_module_option(attr, default))
         return value
 
     def __setattr__(cls, attr, value):
         if not attr.startswith('_') and hasattr(Options, attr):
-            mgr.set_config(attr, str(value))
+            mgr.set_module_option(attr, str(value))
         else:
             setattr(SettingsMeta, attr, value)
 
-    def __delattr__(self, attr):
+    def __delattr__(cls, attr):
         if not attr.startswith('_') and hasattr(Options, attr):
-            mgr.set_config(attr, None)
+            mgr.set_module_option(attr, None)
 
 
 # pylint: disable=no-init

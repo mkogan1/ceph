@@ -1,7 +1,8 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <array>
+#include <algorithm>
 
 #include <boost/utility/string_view.hpp>
 #include <boost/container/static_vector.hpp>
@@ -90,25 +91,29 @@ void TempURLEngine::get_owner_info(const DoutPrefixProvider* dpp, const req_stat
     if (uid.tenant.empty()) {
       const rgw_user tenanted_uid(uid.id, uid.id);
 
-      if (rgw_get_user_info_by_uid(store, tenanted_uid, uinfo) >= 0) {
+      if (ctl->user->get_info_by_uid(tenanted_uid, &uinfo, s->yield) >= 0) {
         /* Succeeded. */
         bucket_tenant = uinfo.user_id.tenant;
         found = true;
       }
     }
 
-    if (!found && rgw_get_user_info_by_uid(store, uid, uinfo) < 0) {
+    if (!found && ctl->user->get_info_by_uid(uid, &uinfo, s->yield) < 0) {
       throw -EPERM;
     } else {
       bucket_tenant = uinfo.user_id.tenant;
     }
   }
 
+  rgw_bucket b;
+  b.tenant = std::move(bucket_tenant);
+  b.name = std::move(bucket_name);
+
   /* Need to get user info of bucket owner. */
   RGWBucketInfo bucket_info;
-  int ret = store->get_bucket_info(*static_cast<RGWObjectCtx *>(s->obj_ctx),
-                                   bucket_tenant, bucket_name,
-                                   bucket_info, nullptr);
+  RGWSI_MetaBackend_CtxParams bectx_params = RGWSI_MetaBackend_CtxParams_SObj(s->sysobj_ctx);
+  int ret = ctl->bucket->read_bucket_info(b, &bucket_info, null_yield, RGWBucketCtl::BucketInstance::GetParams()
+                                                                       .set_bectx_params(bectx_params));
   if (ret < 0) {
     throw ret;
   }
@@ -116,8 +121,21 @@ void TempURLEngine::get_owner_info(const DoutPrefixProvider* dpp, const req_stat
   ldpp_dout(dpp, 20) << "temp url user (bucket owner): " << bucket_info.owner
                  << dendl;
 
-  if (rgw_get_user_info_by_uid(store, bucket_info.owner, owner_info) < 0) {
+  if (ctl->user->get_info_by_uid(bucket_info.owner, &owner_info, s->yield) < 0) {
     throw -EPERM;
+  }
+}
+
+std::string TempURLEngine::convert_from_iso8601(std::string expires) const
+{
+  /* Swift's TempURL allows clients to send the expiration as ISO8601-
+   * compatible strings. Though, only plain UNIX timestamp are taken
+   * for the HMAC calculations. We need to make the conversion. */
+  struct tm date_t;
+  if (!parse_iso8601(expires.c_str(), &date_t, nullptr, true)) {
+    return expires;
+  } else {
+    return std::to_string(internal_timegm(&date_t));
   }
 }
 
@@ -140,7 +158,20 @@ bool TempURLEngine::is_expired(const std::string& expires) const
   return false;
 }
 
-std::string extract_swift_subuser(const std::string& swift_user_name) {
+bool TempURLEngine::is_disallowed_header_present(const req_info& info) const
+{
+  static const auto headers = {
+    "HTTP_X_OBJECT_MANIFEST",
+  };
+
+  return std::any_of(std::begin(headers), std::end(headers),
+                     [&info](const char* header) {
+                       return info.env->exists(header);
+                     });
+}
+
+std::string extract_swift_subuser(const std::string& swift_user_name)
+{
   size_t pos = swift_user_name.find(':');
   if (std::string::npos == pos) {
     return swift_user_name;
@@ -254,7 +285,8 @@ TempURLEngine::authenticate(const DoutPrefixProvider* dpp, const req_state* cons
    * never returns nullptr. If the requested parameter is absent, we will
    * get the empty string. */
   const std::string& temp_url_sig = s->info.args.get("temp_url_sig");
-  const std::string& temp_url_expires = s->info.args.get("temp_url_expires");
+  const std::string& temp_url_expires = \
+    convert_from_iso8601(s->info.args.get("temp_url_expires"));
 
   if (temp_url_sig.empty() || temp_url_expires.empty()) {
     return result_t::deny();
@@ -282,6 +314,11 @@ TempURLEngine::authenticate(const DoutPrefixProvider* dpp, const req_state* cons
   if (is_expired(temp_url_expires)) {
     ldpp_dout(dpp, 5) << "temp url link expired" << dendl;
     return result_t::reject(-EPERM);
+  }
+
+  if (is_disallowed_header_present(s->info)) {
+    ldout(cct, 5) << "temp url rejected due to disallowed header" << dendl;
+    return result_t::reject(-EINVAL);
   }
 
   /* We need to verify two paths because of compliance with Swift, Tempest
@@ -384,7 +421,7 @@ ExternalTokenEngine::authenticate(const DoutPrefixProvider* dpp,
 
   ldpp_dout(dpp, 10) << "rgw_swift_validate_token url=" << url_buf << dendl;
 
-  int ret = validator.process();
+  int ret = validator.process(null_yield);
   if (ret < 0) {
     throw ret;
   }
@@ -412,7 +449,7 @@ ExternalTokenEngine::authenticate(const DoutPrefixProvider* dpp,
   ldpp_dout(dpp, 10) << "swift user=" << swift_user << dendl;
 
   RGWUserInfo tmp_uinfo;
-  ret = rgw_get_user_info_by_swift(store, swift_user, tmp_uinfo);
+  ret = ctl->user->get_info_by_swift(swift_user, &tmp_uinfo, s->yield);
   if (ret < 0) {
     ldpp_dout(dpp, 0) << "NOTICE: couldn't map swift user" << dendl;
     throw ret;
@@ -420,7 +457,7 @@ ExternalTokenEngine::authenticate(const DoutPrefixProvider* dpp,
 
   auto apl = apl_factory->create_apl_local(cct, s, tmp_uinfo,
                                            extract_swift_subuser(swift_user),
-                                           boost::none, boost::none);
+                                           boost::none);
   return result_t::grant(std::move(apl));
 }
 
@@ -530,7 +567,7 @@ SignedTokenEngine::authenticate(const DoutPrefixProvider* dpp,
   }
 
   RGWUserInfo user_info;
-  ret = rgw_get_user_info_by_swift(store, swift_user, user_info);
+  ret = ctl->user->get_info_by_swift(swift_user, &user_info, s->yield);
   if (ret < 0) {
     throw ret;
   }
@@ -571,7 +608,7 @@ SignedTokenEngine::authenticate(const DoutPrefixProvider* dpp,
 
   auto apl = apl_factory->create_apl_local(cct, s, user_info,
                                            extract_swift_subuser(swift_user),
-                                           boost::none, boost::none);
+                                           boost::none);
   return result_t::grant(std::move(apl));
 }
 
@@ -647,7 +684,7 @@ void RGW_SWIFT_Auth_Get::execute()
 
   user_str = user;
 
-  if ((ret = rgw_get_user_info_by_swift(store, user_str, info)) < 0)
+  if ((ret = store->ctl()->user->get_info_by_swift(user_str, &info, s->yield)) < 0)
   {
     ret = -EACCES;
     goto done;
@@ -701,7 +738,7 @@ done:
   end_header(s);
 }
 
-int RGWHandler_SWIFT_Auth::init(RGWRados *store, struct req_state *state,
+int RGWHandler_SWIFT_Auth::init(rgw::sal::RGWRadosStore *store, struct req_state *state,
 				rgw::io::BasicClient *cio)
 {
   state->dialect = "swift-auth";

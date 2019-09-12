@@ -5,8 +5,7 @@
 #define CEPH_LIBRBD_IMAGE_WATCHER_H
 
 #include "cls/rbd/cls_rbd_types.h"
-#include "common/Mutex.h"
-#include "common/RWLock.h"
+#include "common/ceph_mutex.h"
 #include "include/Context.h"
 #include "include/rbd/librbd.hpp"
 #include "librbd/Watcher.h"
@@ -67,6 +66,9 @@ public:
 
   void notify_migrate(uint64_t request_id, ProgressContext &prog_ctx,
                       Context *on_finish);
+
+  void notify_sparsify(uint64_t request_id, size_t sparse_size,
+                       ProgressContext &prog_ctx, Context *on_finish);
 
   void notify_acquired_lock();
   void notify_released_lock();
@@ -162,11 +164,11 @@ private:
 
   TaskFinisher<Task> *m_task_finisher;
 
-  RWLock m_async_request_lock;
+  ceph::shared_mutex m_async_request_lock;
   std::map<watch_notify::AsyncRequestId, AsyncRequest> m_async_requests;
   std::set<watch_notify::AsyncRequestId> m_async_pending;
 
-  Mutex m_owner_client_id_lock;
+  ceph::mutex m_owner_client_id_lock;
   watch_notify::ClientId m_owner_client_id;
 
   void handle_register_watch(int r);
@@ -237,6 +239,8 @@ private:
   bool handle_payload(const watch_notify::UpdateFeaturesPayload& payload,
                       C_NotifyAck *ctx);
   bool handle_payload(const watch_notify::MigratePayload& payload,
+                      C_NotifyAck *ctx);
+  bool handle_payload(const watch_notify::SparsifyPayload& payload,
                       C_NotifyAck *ctx);
   bool handle_payload(const watch_notify::UnknownPayload& payload,
                       C_NotifyAck *ctx);

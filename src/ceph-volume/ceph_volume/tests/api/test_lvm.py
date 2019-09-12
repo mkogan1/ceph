@@ -33,17 +33,17 @@ class TestParseTags(object):
 class TestGetAPIVgs(object):
 
     def test_report_is_emtpy(self, monkeypatch):
-        monkeypatch.setattr(api.process, 'call', lambda x: ('\n\n', '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x,**kw: ('\n\n', '', 0))
         assert api.get_api_vgs() == []
 
     def test_report_has_stuff(self, monkeypatch):
         report = ['  VolGroup00']
-        monkeypatch.setattr(api.process, 'call', lambda x: (report, '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x, **kw: (report, '', 0))
         assert api.get_api_vgs() == [{'vg_name': 'VolGroup00'}]
 
     def test_report_has_stuff_with_empty_attrs(self, monkeypatch):
         report = ['  VolGroup00 ;;;;;;9g']
-        monkeypatch.setattr(api.process, 'call', lambda x: (report, '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x, **kw: (report, '', 0))
         result = api.get_api_vgs()[0]
         assert len(result.keys()) == 7
         assert result['vg_name'] == 'VolGroup00'
@@ -51,7 +51,7 @@ class TestGetAPIVgs(object):
 
     def test_report_has_multiple_items(self, monkeypatch):
         report = ['   VolGroup00;;;;;;;', '    ceph_vg;;;;;;;']
-        monkeypatch.setattr(api.process, 'call', lambda x: (report, '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x, **kw: (report, '', 0))
         result = api.get_api_vgs()
         assert result[0]['vg_name'] == 'VolGroup00'
         assert result[1]['vg_name'] == 'ceph_vg'
@@ -60,18 +60,18 @@ class TestGetAPIVgs(object):
 class TestGetAPILvs(object):
 
     def test_report_is_emtpy(self, monkeypatch):
-        monkeypatch.setattr(api.process, 'call', lambda x: ('', '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x, **kw: ('', '', 0))
         assert api.get_api_lvs() == []
 
     def test_report_has_stuff(self, monkeypatch):
         report = ['  ;/path;VolGroup00;root']
-        monkeypatch.setattr(api.process, 'call', lambda x: (report, '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x, **kw: (report, '', 0))
         result = api.get_api_lvs()
         assert result[0]['lv_name'] == 'VolGroup00'
 
     def test_report_has_multiple_items(self, monkeypatch):
         report = ['  ;/path;VolName;root', ';/dev/path;ceph_lv;ceph_vg']
-        monkeypatch.setattr(api.process, 'call', lambda x: (report, '', 0))
+        monkeypatch.setattr(api.process, 'call', lambda x, **kw: (report, '', 0))
         result = api.get_api_lvs()
         assert result[0]['lv_name'] == 'VolName'
         assert result[1]['lv_name'] == 'ceph_lv'
@@ -79,7 +79,7 @@ class TestGetAPILvs(object):
 
 @pytest.fixture
 def volumes(monkeypatch):
-    monkeypatch.setattr(process, 'call', lambda x: ('', '', 0))
+    monkeypatch.setattr(process, 'call', lambda x, **kw: ('', '', 0))
     volumes = api.Volumes()
     volumes._purge()
     # also patch api.Volumes so that when it is called, it will use the newly
@@ -90,7 +90,7 @@ def volumes(monkeypatch):
 
 @pytest.fixture
 def volume_groups(monkeypatch):
-    monkeypatch.setattr(process, 'call', lambda x: ('', '', 0))
+    monkeypatch.setattr(process, 'call', lambda x, **kw: ('', '', 0))
     vgs = api.VolumeGroups()
     vgs._purge()
     return vgs
@@ -384,7 +384,7 @@ class TestVolumeGroupFree(object):
         vg = api.VolumeGroup(vg_name='nosize', vg_free='F')
         with pytest.raises(RuntimeError) as error:
             vg.free
-        assert "Unable to convert vg size to integer: 'F'" in str(error)
+        assert "Unable to convert vg size to integer: 'F'" in str(error.value)
 
     def test_invalid_float(self):
         vg = api.VolumeGroup(vg_name='nosize', vg_free=' g')
@@ -464,7 +464,7 @@ class TestVolumeGroupSizing(object):
     def test_parts_and_size_errors(self):
         with pytest.raises(ValueError) as error:
             self.vg.sizing(parts=4, size=10)
-        assert "Cannot process sizing" in str(error)
+        assert "Cannot process sizing" in str(error.value)
 
     def test_zero_parts_produces_100_percent(self):
         result = self.vg.sizing(parts=0)
@@ -541,6 +541,12 @@ class TestRemoveLV(object):
         monkeypatch.setattr(process, 'call', mock_call)
         assert api.remove_lv("vg/lv")
 
+    def test_removes_lv_object(self, fake_call):
+        foo_volume = api.Volume(lv_name='foo', lv_path='/path', vg_name='foo_group', lv_tags='')
+        api.remove_lv(foo_volume)
+        # last argument from the list passed to process.call
+        assert fake_call.calls[0]['args'][0][-1] == '/path'
+
     def test_fails_to_remove_lv(self, monkeypatch):
         def mock_call(cmd, **kw):
             return ('', '', 1)
@@ -560,6 +566,14 @@ class TestCreateLV(object):
         monkeypatch.setattr(api, 'get_lv', lambda *a, **kw: self.foo_volume)
         api.create_lv('foo', 'foo_group', size='5G', tags={'ceph.type': 'data'})
         expected = ['lvcreate', '--yes', '-L', '5G', '-n', 'foo', 'foo_group']
+        assert capture.calls[0]['args'][0] == expected
+
+    def test_with_pv(self, monkeypatch, capture):
+        monkeypatch.setattr(process, 'run', capture)
+        monkeypatch.setattr(process, 'call', capture)
+        monkeypatch.setattr(api, 'get_lv', lambda *a, **kw: self.foo_volume)
+        api.create_lv('foo', 'foo_group', size='5G', tags={'ceph.type': 'data'}, pv='/path')
+        expected = ['lvcreate', '--yes', '-L', '5G', '-n', 'foo', 'foo_group', '/path']
         assert capture.calls[0]['args'][0] == expected
 
     def test_calls_to_set_type_tag(self, monkeypatch, capture):
@@ -588,6 +602,87 @@ class TestCreateLV(object):
         assert len(result) == 40
 
 
+class TestTags(object):
+
+    def setup(self):
+        self.foo_volume_clean = api.Volume(lv_name='foo_clean', lv_path='/pathclean',
+            vg_name='foo_group',
+            lv_tags='')
+        self.foo_volume = api.Volume(lv_name='foo', lv_path='/path',
+            vg_name='foo_group',
+            lv_tags='ceph.foo0=bar0,ceph.foo1=bar1,ceph.foo2=bar2')
+
+    def test_set_tag(self, monkeypatch, capture):
+        monkeypatch.setattr(process, 'run', capture)
+        monkeypatch.setattr(process, 'call', capture)
+        self.foo_volume_clean.set_tag('foo', 'bar')
+        expected = ['lvchange', '--addtag', 'foo=bar', '/pathclean']
+        assert capture.calls[0]['args'][0] == expected
+        assert self.foo_volume_clean.tags == {'foo': 'bar'}
+
+    def test_set_clear_tag(self, monkeypatch, capture):
+        monkeypatch.setattr(process, 'run', capture)
+        monkeypatch.setattr(process, 'call', capture)
+        self.foo_volume_clean.set_tag('foo', 'bar')
+        assert self.foo_volume_clean.tags == {'foo': 'bar'}
+        self.foo_volume_clean.clear_tag('foo')
+        expected = ['lvchange', '--deltag', 'foo=bar', '/pathclean']
+        assert self.foo_volume_clean.tags == {}
+        assert capture.calls[1]['args'][0] == expected
+
+    def test_set_tags(self, monkeypatch, capture):
+        monkeypatch.setattr(process, 'run', capture)
+        monkeypatch.setattr(process, 'call', capture)
+        tags = {'ceph.foo0': 'bar0', 'ceph.foo1': 'bar1', 'ceph.foo2': 'bar2'}
+        assert self.foo_volume.tags == tags
+
+        tags = {'ceph.foo0': 'bar0', 'ceph.foo1': 'baz1', 'ceph.foo2': 'baz2'}
+        self.foo_volume.set_tags(tags)
+        assert self.foo_volume.tags == tags
+
+        self.foo_volume.set_tag('ceph.foo1', 'other1')
+        tags['ceph.foo1'] = 'other1'
+        assert self.foo_volume.tags == tags
+
+        expected = [
+            ['lvchange', '--deltag', 'ceph.foo0=bar0', '/path'],
+            ['lvchange', '--addtag', 'ceph.foo0=bar0', '/path'],
+            ['lvchange', '--deltag', 'ceph.foo1=bar1', '/path'],
+            ['lvchange', '--addtag', 'ceph.foo1=baz1', '/path'],
+            ['lvchange', '--deltag', 'ceph.foo2=bar2', '/path'],
+            ['lvchange', '--addtag', 'ceph.foo2=baz2', '/path'],
+            ['lvchange', '--deltag', 'ceph.foo1=baz1', '/path'],
+            ['lvchange', '--addtag', 'ceph.foo1=other1', '/path'],
+        ]
+        # The order isn't guaranted
+        for call in capture.calls:
+            assert call['args'][0] in expected
+        assert len(capture.calls) == len(expected)
+
+    def test_clear_tags(self, monkeypatch, capture):
+        monkeypatch.setattr(process, 'run', capture)
+        monkeypatch.setattr(process, 'call', capture)
+        tags = {'ceph.foo0': 'bar0', 'ceph.foo1': 'bar1', 'ceph.foo2': 'bar2'}
+
+        self.foo_volume_clean.set_tags(tags)
+        assert self.foo_volume_clean.tags == tags
+        self.foo_volume_clean.clear_tags()
+        assert self.foo_volume_clean.tags == {}
+
+        expected = [
+            ['lvchange', '--addtag', 'ceph.foo0=bar0', '/pathclean'],
+            ['lvchange', '--addtag', 'ceph.foo1=bar1', '/pathclean'],
+            ['lvchange', '--addtag', 'ceph.foo2=bar2', '/pathclean'],
+            ['lvchange', '--deltag', 'ceph.foo0=bar0', '/pathclean'],
+            ['lvchange', '--deltag', 'ceph.foo1=bar1', '/pathclean'],
+            ['lvchange', '--deltag', 'ceph.foo2=bar2', '/pathclean'],
+        ]
+        # The order isn't guaranted
+        for call in capture.calls:
+            assert call['args'][0] in expected
+        assert len(capture.calls) == len(expected)
+
+
 class TestExtendVG(object):
 
     def setup(self):
@@ -612,6 +707,30 @@ class TestExtendVG(object):
         assert fake_run.calls[0]['args'][0] == expected
 
 
+class TestReduceVG(object):
+
+    def setup(self):
+        self.foo_volume = api.VolumeGroup(vg_name='foo', lv_tags='')
+
+    def test_uses_single_device_in_list(self, monkeypatch, fake_run):
+        monkeypatch.setattr(api, 'get_vg', lambda **kw: True)
+        api.reduce_vg(self.foo_volume, ['/dev/sda'])
+        expected = ['vgreduce', '--force', '--yes', 'foo', '/dev/sda']
+        assert fake_run.calls[0]['args'][0] == expected
+
+    def test_uses_single_device(self, monkeypatch, fake_run):
+        monkeypatch.setattr(api, 'get_vg', lambda **kw: True)
+        api.reduce_vg(self.foo_volume, '/dev/sda')
+        expected = ['vgreduce', '--force', '--yes', 'foo', '/dev/sda']
+        assert fake_run.calls[0]['args'][0] == expected
+
+    def test_uses_multiple_devices(self, monkeypatch, fake_run):
+        monkeypatch.setattr(api, 'get_vg', lambda **kw: True)
+        api.reduce_vg(self.foo_volume, ['/dev/sda', '/dev/sdb'])
+        expected = ['vgreduce', '--force', '--yes', 'foo', '/dev/sda', '/dev/sdb']
+        assert fake_run.calls[0]['args'][0] == expected
+
+
 class TestCreateVG(object):
 
     def setup(self):
@@ -628,7 +747,7 @@ class TestCreateVG(object):
         monkeypatch.setattr(api, 'get_vg', lambda **kw: True)
         api.create_vg(['/dev/sda', '/dev/sdb'], name='ceph')
         result = fake_run.calls[0]['args'][0]
-        expected = ['vgcreate', '--force', '--yes', 'ceph', '/dev/sda', '/dev/sdb']
+        expected = ['vgcreate', '-s', '1G', '--force', '--yes', 'ceph', '/dev/sda', '/dev/sdb']
         assert result == expected
 
     def test_name_prefix(self, monkeypatch, fake_run):
@@ -657,12 +776,12 @@ class TestCreateVG(object):
 
 @pytest.fixture
 def disable_kvdo_path(monkeypatch):
-    monkeypatch.setattr('os.path.isdir', lambda x: False)
+    monkeypatch.setattr('os.path.isdir', lambda x, **kw: False)
 
 
 @pytest.fixture
 def enable_kvdo_path(monkeypatch):
-    monkeypatch.setattr('os.path.isdir', lambda x: True)
+    monkeypatch.setattr('os.path.isdir', lambda x, **kw: True)
 
 
 # Stub for os.listdir
@@ -721,28 +840,28 @@ class TestIsVdo(object):
         assert api.is_vdo('/path') == '0'
 
     def test_is_vdo_returns_a_string(self, monkeypatch):
-        monkeypatch.setattr('ceph_volume.api.lvm._is_vdo', lambda x: True)
+        monkeypatch.setattr('ceph_volume.api.lvm._is_vdo', lambda x, **kw: True)
         assert api.is_vdo('/path') == '1'
 
     def test_kvdo_dir_no_devices(self, makedirs, enable_kvdo_path, listdir, monkeypatch):
         kvdo_path = makedirs('sys/kvdo')
         listdir(paths={'/sys/kvdo': kvdo_path})
-        monkeypatch.setattr('ceph_volume.api.lvm._vdo_slaves', lambda x: [])
-        monkeypatch.setattr('ceph_volume.api.lvm._vdo_parents', lambda x: [])
+        monkeypatch.setattr('ceph_volume.api.lvm._vdo_slaves', lambda x, **kw: [])
+        monkeypatch.setattr('ceph_volume.api.lvm._vdo_parents', lambda x, **kw: [])
         assert api._is_vdo('/dev/mapper/vdo0') is False
 
     def test_vdo_slaves_found_and_matched(self, makedirs, enable_kvdo_path, listdir, monkeypatch):
         kvdo_path = makedirs('sys/kvdo')
         listdir(paths={'/sys/kvdo': kvdo_path})
-        monkeypatch.setattr('ceph_volume.api.lvm._vdo_slaves', lambda x: ['/dev/dm-3'])
-        monkeypatch.setattr('ceph_volume.api.lvm._vdo_parents', lambda x: [])
+        monkeypatch.setattr('ceph_volume.api.lvm._vdo_slaves', lambda x, **kw: ['/dev/dm-3'])
+        monkeypatch.setattr('ceph_volume.api.lvm._vdo_parents', lambda x, **kw: [])
         assert api._is_vdo('/dev/dm-3') is True
 
     def test_vdo_parents_found_and_matched(self, makedirs, enable_kvdo_path, listdir, monkeypatch):
         kvdo_path = makedirs('sys/kvdo')
         listdir(paths={'/sys/kvdo': kvdo_path})
-        monkeypatch.setattr('ceph_volume.api.lvm._vdo_slaves', lambda x: [])
-        monkeypatch.setattr('ceph_volume.api.lvm._vdo_parents', lambda x: ['/dev/dm-4'])
+        monkeypatch.setattr('ceph_volume.api.lvm._vdo_slaves', lambda x, **kw: [])
+        monkeypatch.setattr('ceph_volume.api.lvm._vdo_parents', lambda x, **kw: ['/dev/dm-4'])
         assert api._is_vdo('/dev/dm-4') is True
 
 
@@ -751,7 +870,7 @@ class TestVdoSlaves(object):
     def test_slaves_are_not_found(self, makedirs, listdir, monkeypatch):
         slaves_path = makedirs('sys/block/vdo0/slaves')
         listdir(paths={'/sys/block/vdo0/slaves': slaves_path})
-        monkeypatch.setattr('ceph_volume.api.lvm.os.path.exists', lambda x: True)
+        monkeypatch.setattr('ceph_volume.api.lvm.os.path.exists', lambda x, **kw: True)
         result = sorted(api._vdo_slaves(['vdo0']))
         assert '/dev/mapper/vdo0' in result
         assert 'vdo0' in result
@@ -761,7 +880,7 @@ class TestVdoSlaves(object):
         makedirs('sys/block/vdo0/slaves/dm-4')
         makedirs('dev/mapper/vdo0')
         listdir(paths={'/sys/block/vdo0/slaves': slaves_path})
-        monkeypatch.setattr('ceph_volume.api.lvm.os.path.exists', lambda x: True)
+        monkeypatch.setattr('ceph_volume.api.lvm.os.path.exists', lambda x, **kw: True)
         result = sorted(api._vdo_slaves(['vdo0']))
         assert '/dev/dm-4' in result
         assert 'dm-4' in result
@@ -809,14 +928,14 @@ class TestSplitNameParser(object):
 class TestIsLV(object):
 
     def test_is_not_an_lv(self, monkeypatch):
-        monkeypatch.setattr(api, 'dmsetup_splitname', lambda x: {})
+        monkeypatch.setattr(api, 'dmsetup_splitname', lambda x, **kw: {})
         assert api.is_lv('/dev/sda1', lvs=[]) is False
 
     def test_lvs_not_found(self, monkeypatch, volumes):
         CephVolume = api.Volume(lv_name='foo', lv_path='/dev/vg/foo', lv_tags="ceph.type=data")
         volumes.append(CephVolume)
         splitname = {'LV_NAME': 'data', 'VG_NAME': 'ceph'}
-        monkeypatch.setattr(api, 'dmsetup_splitname', lambda x: splitname)
+        monkeypatch.setattr(api, 'dmsetup_splitname', lambda x, **kw: splitname)
         assert api.is_lv('/dev/sda1', lvs=volumes) is False
 
     def test_is_lv(self, monkeypatch, volumes):
@@ -826,5 +945,5 @@ class TestIsLV(object):
         )
         volumes.append(CephVolume)
         splitname = {'LV_NAME': 'data', 'VG_NAME': 'ceph'}
-        monkeypatch.setattr(api, 'dmsetup_splitname', lambda x: splitname)
+        monkeypatch.setattr(api, 'dmsetup_splitname', lambda x, **kw: splitname)
         assert api.is_lv('/dev/sda1', lvs=volumes) is True

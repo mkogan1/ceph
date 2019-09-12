@@ -3,7 +3,7 @@
 /*
  * Ceph - scalable distributed file system
  *
- * Copyright (C) 20127 Red Hat, Inc.
+ * Copyright (C) 2017 Red Hat, Inc.
  *
  * This is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,13 +18,20 @@
 #include <atomic>
 #include <map>
 #include <utility>
+#include <type_traits>
 #include "include/buffer.h"
 #include "include/mempool.h"
 #include "include/spinlock.h"
 
 namespace ceph::buffer {
+inline namespace v14_2_0 {
+
   class raw {
   public:
+    // In the future we might want to have a slab allocator here with few
+    // embedded slots. This would allow to avoid the "if" in dtor of ptr_node.
+    std::aligned_storage<sizeof(ptr_node),
+			 alignof(ptr_node)>::type bptr_storage;
     char *data;
     unsigned len;
     std::atomic<unsigned> nref { 0 };
@@ -36,7 +43,7 @@ namespace ceph::buffer {
     mutable ceph::spinlock crc_spinlock;
 
     explicit raw(unsigned l, int mempool=mempool::mempool_buffer_anon)
-      : data(NULL), len(l), nref(0), mempool(mempool) {
+      : data(nullptr), len(l), nref(0), mempool(mempool) {
       mempool::get_pool(mempool::pool_index_t(mempool)).adjust_count(1, len);
     }
     raw(char *c, unsigned l, int mempool=mempool::mempool_buffer_anon)
@@ -81,12 +88,12 @@ public:
       return data;
     }
     virtual raw* clone_empty() = 0;
-    raw *clone() {
-      raw *c = clone_empty();
+    ceph::unique_leakable_ptr<raw> clone() {
+      raw* const c = clone_empty();
       memcpy(c->data, data, len);
-      return c;
+      return ceph::unique_leakable_ptr<raw>(c);
     }
-    virtual bool is_shareable() {
+    virtual bool is_shareable() const {
       // true if safe to reference/share the existing buffer copy
       // false if it is not safe to share the buffer, e.g., due to special
       // and/or registered memory that is scarce
@@ -113,6 +120,8 @@ public:
       last_crc_offset.second = std::numeric_limits<size_t>::max();
     }
   };
+
+} // inline namespace v14_2_0
 } // namespace ceph::buffer
 
 #endif // CEPH_BUFFER_RAW_H

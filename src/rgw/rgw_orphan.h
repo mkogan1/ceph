@@ -1,5 +1,6 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
+
 /*
  * Ceph - scalable distributed file system
  *
@@ -19,7 +20,7 @@
 #include "common/Formatter.h"
 #include "common/errno.h"
 
-#include "rgw_rados.h"
+#include "rgw_sal.h"
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -123,13 +124,13 @@ struct RGWOrphanSearchState {
 WRITE_CLASS_ENCODER(RGWOrphanSearchState)
 
 class RGWOrphanStore {
-  RGWRados *store;
+  rgw::sal::RGWRadosStore *store;
   librados::IoCtx ioctx;
 
   string oid;
 
 public:
-  explicit RGWOrphanStore(RGWRados *_store) : store(_store), oid(RGW_ORPHAN_INDEX_OID) {}
+  explicit RGWOrphanStore(rgw::sal::RGWRadosStore *_store) : store(_store), oid(RGW_ORPHAN_INDEX_OID) {}
 
   librados::IoCtx& get_ioctx() { return ioctx; }
 
@@ -147,7 +148,7 @@ public:
 
 
 class RGWOrphanSearch {
-  RGWRados *store;
+  rgw::sal::RGWRadosStore *store;
 
   RGWOrphanStore orphan_store;
 
@@ -162,6 +163,9 @@ class RGWOrphanSearch {
 
   uint16_t max_concurrent_ios;
   uint64_t stale_secs;
+  int64_t max_list_bucket_entries;
+
+  bool detailed_mode;
 
   struct log_iter_info {
     string oid;
@@ -182,7 +186,7 @@ class RGWOrphanSearch {
 
   int remove_index(map<int, string>& index);
 public:
-  RGWOrphanSearch(RGWRados *_store, int _max_ios, uint64_t _stale_secs) : store(_store), orphan_store(store), max_concurrent_ios(_max_ios), stale_secs(_stale_secs) {}
+  RGWOrphanSearch(rgw::sal::RGWRadosStore *_store, int _max_ios, uint64_t _stale_secs) : store(_store), orphan_store(store), max_concurrent_ios(_max_ios), stale_secs(_stale_secs) {}
 
   int save_state() {
     RGWOrphanSearchState state;
@@ -191,7 +195,7 @@ public:
     return orphan_store.write_job(search_info.job_name, state);
   }
 
-  int init(const string& job_name, RGWOrphanSearchInfo *info);
+  int init(const string& job_name, RGWOrphanSearchInfo *info, bool _detailed_mode=false);
 
   int create(const string& job_name, int num_shards);
 

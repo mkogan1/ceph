@@ -60,7 +60,7 @@ void add_journal_spec_options(po::options_description *pos,
   pos->add_options()
     ((get_name_prefix(modifier) + JOURNAL_SPEC).c_str(),
      (get_description_prefix(modifier) + "journal specification\n" +
-      "(example: [<pool-name>/[<namespace-name>/]]<journal-name>)").c_str());
+      "(example: [<pool-name>/[<namespace>/]]<journal-name>)").c_str());
   add_pool_option(opt, modifier);
   add_namespace_option(opt, modifier);
   add_image_option(opt, modifier);
@@ -378,7 +378,7 @@ class Journaler : public ::journal::Journaler {
 public:
   Journaler(librados::IoCtx& io_ctx, const std::string& journal_id,
 	    const std::string &client_id) :
-    ::journal::Journaler(io_ctx, journal_id, client_id, {}) {
+    ::journal::Journaler(io_ctx, journal_id, client_id, {}, nullptr) {
   }
 
   int init() {
@@ -749,7 +749,7 @@ public:
   }
 
   bool read_entry(bufferlist& bl, int& r) {
-    // Entries are storead in the file using the following format:
+    // Entries are stored in the file using the following format:
     //
     //   # Optional comments
     //   NNN {json encoded entry}
@@ -832,7 +832,7 @@ public:
     if (r < 0) {
       return r;
     }
-    m_journaler.start_append(0, 0, 0, 0);
+    m_journaler.start_append(0);
 
     int r1 = 0;
     bufferlist bl;
@@ -856,9 +856,9 @@ public:
       ExportEntry e;
       try {
 	decode_json_obj(e, &p);
-      } catch (JSONDecoder::err& err) {
+      } catch (const JSONDecoder::err& err) {
 	std::cerr << "rbd: error json decoding import data (entry " << n << "):"
-		  << err.message << std::endl;
+		  << err.what() << std::endl;
 	r = -EINVAL;
 	if (m_no_error) {
 	  r1 = r;
@@ -1214,7 +1214,7 @@ int execute_import(const po::variables_map &vm,
   r = do_import_journal(io_ctx, journal_name, path, vm[at::NO_ERROR].as<bool>(),
 			vm[at::VERBOSE].as<bool>());
   if (r < 0) {
-    std::cerr << "rbd: journal export: " << cpp_strerror(r) << std::endl;
+    std::cerr << "rbd: journal import: " << cpp_strerror(r) << std::endl;
     return r;
   }
   return 0;

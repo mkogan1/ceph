@@ -18,9 +18,10 @@
 #include <string>
 #include <vector>
 #include <boost/optional.hpp>
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 #include "Python.h"
 #include "Gil.h"
+#include "mon/MgrMap.h"
 
 
 class MonClient;
@@ -43,18 +44,9 @@ public:
   std::string module_name;
 };
 
-
-/**
- * An option declared by the python module in its configuration schema
- */
-class ModuleOption {
-  public:
-  std::string name;
-};
-
 class PyModule
 {
-  mutable Mutex lock{"PyModule::lock"};
+  mutable ceph::mutex lock = ceph::make_mutex("PyModule::lock");
 private:
   const std::string module_name;
   std::string get_site_packages();
@@ -81,7 +73,7 @@ private:
   // Populated if loaded, can_run or failed indicates a problem
   std::string error_string;
 
-  // Helper for loading OPTIONS and COMMANDS members
+  // Helper for loading MODULE_OPTIONS and COMMANDS members
   int walk_dict_list(
       const std::string &attr_name,
       std::function<int(PyObject*)> fn);
@@ -90,7 +82,7 @@ private:
   std::vector<ModuleCommand> commands;
 
   int load_options();
-  std::map<std::string, ModuleOption> options;
+  std::map<std::string, MgrMap::ModuleOption> options;
 
 public:
   static std::string config_prefix;
@@ -107,6 +99,13 @@ public:
   ~PyModule();
 
   bool is_option(const std::string &option_name);
+  const std::map<std::string,MgrMap::ModuleOption>& get_options() const {
+    return options;
+  }
+
+  PyObject *get_typed_option_value(
+    const std::string& option,
+    const std::string& value);
 
   int load(PyThreadState *pMainThreadState);
 #if PY_MAJOR_VERSION >= 3
@@ -172,7 +171,7 @@ typedef std::shared_ptr<PyModule> PyModuleRef;
 
 class PyModuleConfig {
 public:
-  mutable Mutex lock{"PyModuleConfig::lock"};
+  mutable ceph::mutex lock = ceph::make_mutex("PyModuleConfig::lock");
   std::map<std::string, std::string> config;
 
   PyModuleConfig();

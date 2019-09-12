@@ -75,14 +75,15 @@
 
 
 typedef int32_t mds_rank_t;
-typedef int32_t fs_cluster_id_t;
+constexpr mds_rank_t MDS_RANK_NONE = -1;
 
 BOOST_STRONG_TYPEDEF(uint64_t, mds_gid_t)
 extern const mds_gid_t MDS_GID_NONE;
-constexpr fs_cluster_id_t FS_CLUSTER_ID_NONE = {-1};
+
+typedef int32_t fs_cluster_id_t;
+constexpr fs_cluster_id_t FS_CLUSTER_ID_NONE = -1;
 // The namespace ID of the anonymous default filesystem from legacy systems
-constexpr fs_cluster_id_t FS_CLUSTER_ID_ANONYMOUS = {0};
-extern const mds_rank_t MDS_RANK_NONE;
+constexpr fs_cluster_id_t FS_CLUSTER_ID_ANONYMOUS = 0;
 
 class mds_role_t
 {
@@ -208,7 +209,7 @@ struct frag_info_t : public scatter_info_t {
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator& bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<frag_info_t*>& ls);
+  static void generate_test_instances(std::list<frag_info_t*>& ls);
 };
 WRITE_CLASS_ENCODER(frag_info_t)
 
@@ -271,7 +272,7 @@ struct nest_info_t : public scatter_info_t {
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator& bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<nest_info_t*>& ls);
+  static void generate_test_instances(std::list<nest_info_t*>& ls);
 };
 WRITE_CLASS_ENCODER(nest_info_t)
 
@@ -337,7 +338,7 @@ struct quota_info_t
   }
 
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<quota_info_t *>& ls);
+  static void generate_test_instances(std::list<quota_info_t *>& ls);
 
   bool is_valid() const {
     return max_bytes >=0 && max_files >=0;
@@ -847,10 +848,18 @@ void inode_t<Allocator>::dump(Formatter *f) const
   f->dump_unsigned("backtrace_version", backtrace_version);
 
   f->dump_string("stray_prior_path", stray_prior_path);
+  f->dump_unsigned("max_size_ever", max_size_ever);
+
+  f->open_object_section("quota");
+  quota.dump(f);
+  f->close_section();
+
+  f->dump_stream("last_scrub_stamp") << last_scrub_stamp;
+  f->dump_unsigned("last_scrub_version", last_scrub_version);
 }
 
 template<template<typename> class Allocator>
-void inode_t<Allocator>::generate_test_instances(list<inode_t*>& ls)
+void inode_t<Allocator>::generate_test_instances(std::list<inode_t*>& ls)
 {
   ls.push_back(new inode_t<Allocator>);
   ls.push_back(new inode_t<Allocator>);
@@ -1038,7 +1047,7 @@ struct fnode_t {
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator& bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<fnode_t*>& ls);
+  static void generate_test_instances(std::list<fnode_t*>& ls);
   fnode_t() {}
 };
 WRITE_CLASS_ENCODER(fnode_t)
@@ -1051,7 +1060,7 @@ struct old_rstat_t {
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& p);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<old_rstat_t*>& ls);
+  static void generate_test_instances(std::list<old_rstat_t*>& ls);
 };
 WRITE_CLASS_ENCODER(old_rstat_t)
 
@@ -1137,6 +1146,7 @@ struct client_metadata_t {
   iterator find(const std::string& key) const { return kv_map.find(key); }
   iterator begin() const { return kv_map.begin(); }
   iterator end() const { return kv_map.end(); }
+  void erase(iterator it) { kv_map.erase(it); }
   std::string& operator[](const std::string& key) { return kv_map[key]; }
   void merge(const client_metadata_t& other) {
     kv_map.insert(other.kv_map.begin(), other.kv_map.end());
@@ -1180,7 +1190,7 @@ struct session_info_t {
   void encode(bufferlist& bl, uint64_t features) const;
   void decode(bufferlist::const_iterator& p);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<session_info_t*>& ls);
+  static void generate_test_instances(std::list<session_info_t*>& ls);
 };
 WRITE_CLASS_ENCODER_FEATURES(session_info_t)
 
@@ -1268,12 +1278,11 @@ struct string_snap_t {
   snapid_t snapid;
   string_snap_t() {}
   string_snap_t(std::string_view n, snapid_t s) : name(n), snapid(s) {}
-  string_snap_t(const char *n, snapid_t s) : name(n), snapid(s) {}
 
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& p);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<string_snap_t*>& ls);
+  static void generate_test_instances(std::list<string_snap_t*>& ls);
 };
 WRITE_CLASS_ENCODER(string_snap_t)
 
@@ -1301,7 +1310,7 @@ struct mds_table_pending_t {
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<mds_table_pending_t*>& ls);
+  static void generate_test_instances(std::list<mds_table_pending_t*>& ls);
 };
 WRITE_CLASS_ENCODER(mds_table_pending_t)
 
@@ -1387,20 +1396,40 @@ struct cap_reconnect_t {
   void decode_old(bufferlist::const_iterator& bl);
 
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<cap_reconnect_t*>& ls);
+  static void generate_test_instances(std::list<cap_reconnect_t*>& ls);
 };
 WRITE_CLASS_ENCODER(cap_reconnect_t)
 
+struct snaprealm_reconnect_t {
+  mutable ceph_mds_snaprealm_reconnect realm;
+
+  snaprealm_reconnect_t() {
+    memset(&realm, 0, sizeof(realm));
+  }
+  snaprealm_reconnect_t(inodeno_t ino, snapid_t seq, inodeno_t parent) {
+    realm.ino = ino;
+    realm.seq = seq;
+    realm.parent = parent;
+  }
+  void encode(bufferlist& bl) const;
+  void decode(bufferlist::const_iterator& bl);
+  void encode_old(bufferlist& bl) const;
+  void decode_old(bufferlist::const_iterator& bl);
+
+  void dump(Formatter *f) const;
+  static void generate_test_instances(std::list<snaprealm_reconnect_t*>& ls);
+};
+WRITE_CLASS_ENCODER(snaprealm_reconnect_t)
 
 // compat for pre-FLOCK feature
 struct old_ceph_mds_cap_reconnect {
-	__le64 cap_id;
-	__le32 wanted;
-	__le32 issued;
-  __le64 old_size;
+	ceph_le64 cap_id;
+	ceph_le32 wanted;
+	ceph_le32 issued;
+  ceph_le64 old_size;
   struct ceph_timespec old_mtime, old_atime;
-	__le64 snaprealm;
-	__le64 pathbase;        /* base ino for our path to this ino */
+	ceph_le64 snaprealm;
+	ceph_le64 pathbase;        /* base ino for our path to this ino */
 } __attribute__ ((packed));
 WRITE_RAW_ENCODER(old_ceph_mds_cap_reconnect)
 
@@ -1521,7 +1550,7 @@ public:
   void encode(bufferlist &bl) const;
   void decode(bufferlist::const_iterator& p);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<inode_load_vec_t*>& ls);
+  static void generate_test_instances(std::list<inode_load_vec_t*>& ls);
 
 private:
   std::array<DecayCounter, NUM> vec;
@@ -1739,7 +1768,7 @@ public:
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& bl);
   void dump(Formatter *f) const;
-  static void generate_test_instances(list<MDSCacheObjectInfo*>& ls);
+  static void generate_test_instances(std::list<MDSCacheObjectInfo*>& ls);
 };
 
 inline std::ostream& operator<<(std::ostream& out, const MDSCacheObjectInfo &info) {

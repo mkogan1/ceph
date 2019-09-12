@@ -27,13 +27,9 @@ class raw_seastar_foreign_ptr : public raw {
   raw_seastar_foreign_ptr(temporary_buffer&& buf)
     : raw(buf.get_write(), buf.size()), ptr(std::move(buf)) {}
   raw* clone_empty() override {
-    return create(len);
+    return create(len).release();
   }
 };
-
-raw* create_foreign(temporary_buffer&& buf) {
-  return new raw_seastar_foreign_ptr(std::move(buf));
-}
 
 class raw_seastar_local_ptr : public raw {
   temporary_buffer buf;
@@ -41,13 +37,21 @@ class raw_seastar_local_ptr : public raw {
   raw_seastar_local_ptr(temporary_buffer&& buf)
     : raw(buf.get_write(), buf.size()), buf(std::move(buf)) {}
   raw* clone_empty() override {
-    return create(len);
+    return create(len).release();
   }
 };
+
+inline namespace v14_2_0 {
+
+raw* create_foreign(temporary_buffer&& buf) {
+  return new raw_seastar_foreign_ptr(std::move(buf));
+}
 
 raw* create(temporary_buffer&& buf) {
   return new raw_seastar_local_ptr(std::move(buf));
 }
+
+} // inline namespace v14_2_0
 
 // buffer::ptr conversions
 
@@ -88,7 +92,7 @@ public:
   raw_seastar_local_shared_ptr(temporary_buffer& buf)
     : raw(buf.get_write(), buf.size()), buf(buf.share()) {}
   raw* clone_empty() override {
-    return ceph::buffer::create(len);
+    return ceph::buffer::create(len).release();
   }
 };
 }
@@ -103,6 +107,5 @@ buffer::ptr seastar_buffer_iterator::get_ptr(size_t len)
 
 buffer::ptr const_seastar_buffer_iterator::get_ptr(size_t len)
 {
-  buffer::raw* r = buffer::copy(get_pos_add(len), len);
-  return buffer::ptr{r};
+  return buffer::ptr{ buffer::copy(get_pos_add(len), len) };
 }

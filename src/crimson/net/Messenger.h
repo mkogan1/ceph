@@ -17,60 +17,76 @@
 #include <seastar/core/future.hh>
 
 #include "Fwd.h"
+#include "crimson/thread/Throttle.h"
+#include "msg/Message.h"
+#include "msg/Policy.h"
 
 class AuthAuthorizer;
 
+namespace ceph::auth {
+class AuthClient;
+class AuthServer;
+}
+
 namespace ceph::net {
+
+#ifdef UNIT_TESTS_BUILT
+class Interceptor;
+#endif
+
+using Throttle = ceph::thread::Throttle;
+using SocketPolicy = ceph::net::Policy<Throttle>;
 
 class Messenger {
   entity_name_t my_name;
-  entity_addr_t my_addr;
-  uint32_t global_seq = 0;
+  entity_addrvec_t my_addrs;
   uint32_t crc_flags = 0;
+  ceph::auth::AuthClient* auth_client = nullptr;
+  ceph::auth::AuthServer* auth_server = nullptr;
+  bool require_authorizer = true;
 
- public:
+public:
   Messenger(const entity_name_t& name)
     : my_name(name)
   {}
   virtual ~Messenger() {}
 
+#ifdef UNIT_TESTS_BUILT
+  Interceptor *interceptor = nullptr;
+#endif
+
+  entity_type_t get_mytype() const { return my_name.type(); }
   const entity_name_t& get_myname() const { return my_name; }
-  const entity_addr_t& get_myaddr() const { return my_addr; }
-  void set_myaddr(const entity_addr_t& addr) {
-    my_addr = addr;
+  const entity_addrvec_t& get_myaddrs() const { return my_addrs; }
+  entity_addr_t get_myaddr() const { return my_addrs.front(); }
+  virtual seastar::future<> set_myaddrs(const entity_addrvec_t& addrs) {
+    my_addrs = addrs;
+    return seastar::now();
   }
 
   /// bind to the given address
-  virtual void bind(const entity_addr_t& addr) = 0;
+  virtual seastar::future<> bind(const entity_addrvec_t& addr) = 0;
+
+  /// try to bind to the first unused port of given address
+  virtual seastar::future<> try_bind(const entity_addrvec_t& addr,
+                                     uint32_t min_port, uint32_t max_port) = 0;
 
   /// start the messenger
   virtual seastar::future<> start(Dispatcher *dispatcher) = 0;
 
   /// either return an existing connection to the peer,
   /// or a new pending connection
-  virtual ConnectionRef connect(const entity_addr_t& peer_addr,
-                                const entity_type_t& peer_type) = 0;
+  virtual seastar::future<ConnectionXRef>
+  connect(const entity_addr_t& peer_addr,
+          const entity_type_t& peer_type) = 0;
+
+  // wait for messenger shutdown
+  virtual seastar::future<> wait() = 0;
 
   /// stop listenening and wait for all connections to close. safe to destruct
   /// after this future becomes available
   virtual seastar::future<> shutdown() = 0;
 
-  uint32_t get_global_seq(uint32_t old=0) {
-    if (old > global_seq) {
-      global_seq = old;
-    }
-    return ++global_seq;
-  }
-
-  // @returns a tuple of <is_valid, auth_reply, session_key>
-  virtual seastar::future<msgr_tag_t,    /// tag for error, 0 if authorized
-                          bufferlist>    /// auth_reply
-  verify_authorizer(peer_type_t peer_type,
-		    auth_proto_t protocol,
-		    bufferlist& auth) = 0;
-  virtual seastar::future<std::unique_ptr<AuthAuthorizer>>
-  get_authorizer(peer_type_t peer_type,
-		 bool force_new) = 0;
   uint32_t get_crc_flags() const {
     return crc_flags;
   }
@@ -80,6 +96,53 @@ class Messenger {
   void set_crc_header() {
     crc_flags |= MSG_CRC_HEADER;
   }
+
+  ceph::auth::AuthClient* get_auth_client() const { return auth_client; }
+  void set_auth_client(ceph::auth::AuthClient *ac) {
+    auth_client = ac;
+  }
+  ceph::auth::AuthServer* get_auth_server() const { return auth_server; }
+  void set_auth_server(ceph::auth::AuthServer *as) {
+    auth_server = as;
+  }
+
+  // get the local messenger shard if it is accessed by another core
+  virtual Messenger* get_local_shard() {
+    return this;
+  }
+
+  virtual void print(ostream& out) const = 0;
+
+  virtual SocketPolicy get_policy(entity_type_t peer_type) const = 0;
+
+  virtual SocketPolicy get_default_policy() const = 0;
+
+  virtual void set_default_policy(const SocketPolicy& p) = 0;
+
+  virtual void set_policy(entity_type_t peer_type, const SocketPolicy& p) = 0;
+
+  virtual void set_policy_throttler(entity_type_t peer_type, Throttle* throttle) = 0;
+
+  // allow unauthenticated connections.  This is needed for compatibility with
+  // pre-nautilus OSDs, which do not authenticate the heartbeat sessions.
+  bool get_require_authorizer() const {
+    return require_authorizer;
+  }
+  void set_require_authorizer(bool r) {
+    require_authorizer = r;
+  }
+  static seastar::future<Messenger*>
+  create(const entity_name_t& name,
+         const std::string& lname,
+         const uint64_t nonce,
+         const int master_sid=-1);
 };
+
+inline ostream& operator<<(ostream& out, const Messenger& msgr) {
+  out << "[";
+  msgr.print(out);
+  out << "]";
+  return out;
+}
 
 } // namespace ceph::net

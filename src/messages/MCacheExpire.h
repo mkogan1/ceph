@@ -21,9 +21,7 @@
 
 #include "mds/mdstypes.h"
 
-class MCacheExpire : public MessageInstance<MCacheExpire> {
-public:
-  friend factory;
+class MCacheExpire : public Message {
 private:
   __s32 from;
 
@@ -68,14 +66,14 @@ public:
   int get_from() const { return from; }
 
 protected:
-  MCacheExpire() : MessageInstance(MSG_MDS_CACHEEXPIRE), from(-1) {}
+  MCacheExpire() : Message{MSG_MDS_CACHEEXPIRE}, from(-1) {}
   MCacheExpire(int f) : 
-    MessageInstance(MSG_MDS_CACHEEXPIRE),
+    Message{MSG_MDS_CACHEEXPIRE},
     from(f) { }
   ~MCacheExpire() override {}
 
 public:
-  const char *get_type_name() const override { return "cache_expire";}
+  std::string_view get_type_name() const override { return "cache_expire";}
   
   void add_inode(dirfrag_t r, vinodeno_t vino, unsigned nonce) {
     realms[r].inodes[vino] = nonce;
@@ -106,6 +104,9 @@ public:
     encode(from, payload);
     encode(realms, payload);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 WRITE_CLASS_ENCODER(MCacheExpire::realm)

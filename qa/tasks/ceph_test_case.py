@@ -26,9 +26,23 @@ class CephTestCase(unittest.TestCase):
 
     mon_manager = None
 
+    # Declarative test requirements: subclasses should override these to indicate
+    # their special needs.  If not met, tests will be skipped.
+    REQUIRE_MEMSTORE = False
+
     def setUp(self):
         self.ceph_cluster.mon_manager.raw_cluster_cmd("log",
             "Starting test {0}".format(self.id()))
+
+        if self.REQUIRE_MEMSTORE:
+            objectstore = self.ceph_cluster.get_config("osd_objectstore", "osd")
+            if objectstore != "memstore":
+                # You certainly *could* run this on a real OSD, but you don't want to sit
+                # here for hours waiting for the test to fill up a 1TB drive!
+                raise self.skipTest("Require `memstore` OSD backend (test " \
+                        "would take too long on full sized OSDs")
+
+
 
     def tearDown(self):
         self.ceph_cluster.mon_manager.raw_cluster_cmd("log",
@@ -138,8 +152,7 @@ class CephTestCase(unittest.TestCase):
         log.debug("wait_until_equal: success")
 
     @classmethod
-    def wait_until_true(cls, condition, timeout):
-        period = 5
+    def wait_until_true(cls, condition, timeout, period=5):
         elapsed = 0
         while True:
             if condition():

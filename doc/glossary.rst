@@ -44,7 +44,7 @@ reflect either technical terms or legacy ways of referring to Ceph systems.
 		The core set of storage software which stores the user's data (MON+OSD).
 
 	Ceph Cluster Map
-	cluster map
+	Cluster Map
 		The set of maps comprising the monitor map, OSD map, PG map, MDS map and
 		CRUSH map. See `Cluster Map`_ for details.
 
@@ -66,11 +66,11 @@ reflect either technical terms or legacy ways of referring to Ceph systems.
 		conjunction with ``librbd``, a hypervisor such as QEMU or Xen, and a
 		hypervisor abstraction layer such as ``libvirt``.
 
-	Ceph Filesystem
+	Ceph File System
 	CephFS
 	Ceph FS
 		The POSIX filesystem components of Ceph. Refer
-		:ref:`CephFS Architecture <arch-cephfs>` and :ref:`ceph-filesystem` for
+		:ref:`CephFS Architecture <arch-cephfs>` and :ref:`ceph-file-system` for
 		more details.
 
 	Cloud Platforms
@@ -126,10 +126,13 @@ reflect either technical terms or legacy ways of referring to Ceph systems.
 
 	Ceph Manager Dashboard
 	Ceph Dashboard
+	Dashboard Module
 	Dashboard Plugin
 	Dashboard
-                A built-in web based monitoring and administration application to
-                Ceph Manager. Refer :ref:`mgr-dashboard` for more details.
+		A built-in web-based Ceph management and monitoring application to
+		administer various aspects and objects of the cluster. The dashboard is
+		implemented as a Ceph Manager module. See :ref:`mgr-dashboard` for more
+		details.
 
 	Ceph Metadata Server
 	MDS
@@ -139,7 +142,7 @@ reflect either technical terms or legacy ways of referring to Ceph systems.
 	Ceph Client
 		The collection of Ceph components which can access a Ceph Storage
 		Cluster. These include the Ceph Object Gateway, the Ceph Block Device,
-		the Ceph Filesystem, and their corresponding libraries, kernel modules,
+		the Ceph File System, and their corresponding libraries, kernel modules,
 		and FUSEs.
 
 	Ceph Kernel Modules

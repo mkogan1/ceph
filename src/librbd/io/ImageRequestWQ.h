@@ -5,7 +5,7 @@
 #define CEPH_LIBRBD_IO_IMAGE_REQUEST_WQ_H
 
 #include "include/Context.h"
-#include "common/RWLock.h"
+#include "common/ceph_mutex.h"
 #include "common/Throttle.h"
 #include "common/WorkQueue.h"
 #include "librbd/io/Types.h"
@@ -34,7 +34,8 @@ public:
   ssize_t read(uint64_t off, uint64_t len, ReadResult &&read_result,
                int op_flags);
   ssize_t write(uint64_t off, uint64_t len, bufferlist &&bl, int op_flags);
-  ssize_t discard(uint64_t off, uint64_t len, bool skip_partial_discard);
+  ssize_t discard(uint64_t off, uint64_t len,
+                  uint32_t discard_granularity_bytes);
   ssize_t writesame(uint64_t off, uint64_t len, bufferlist &&bl, int op_flags);
   ssize_t compare_and_write(uint64_t off, uint64_t len,
                             bufferlist &&cmp_bl, bufferlist &&bl,
@@ -46,7 +47,7 @@ public:
   void aio_write(AioCompletion *c, uint64_t off, uint64_t len,
                  bufferlist &&bl, int op_flags, bool native_async=true);
   void aio_discard(AioCompletion *c, uint64_t off, uint64_t len,
-                   bool skip_partial_discard, bool native_async=true);
+                   uint32_t discard_granularity_bytes, bool native_async=true);
   void aio_flush(AioCompletion *c, bool native_async=true);
   void aio_writesame(AioCompletion *c, uint64_t off, uint64_t len,
                      bufferlist &&bl, int op_flags, bool native_async=true);
@@ -61,7 +62,7 @@ public:
   void shut_down(Context *on_shutdown);
 
   inline bool writes_blocked() const {
-    RWLock::RLocker locker(m_lock);
+    std::shared_lock locker{m_lock};
     return (m_write_blockers > 0);
   }
 
@@ -73,8 +74,9 @@ public:
 
   void set_require_lock(Direction direction, bool enabled);
 
-  void apply_qos_limit(uint64_t limit, const uint64_t flag);
+  void apply_qos_schedule_tick_min(uint64_t tick);
 
+  void apply_qos_limit(const uint64_t flag, uint64_t limit, uint64_t burst);
 protected:
   void *_void_dequeue() override;
   void process(ImageDispatchSpec<ImageCtxT> *req) override;
@@ -92,7 +94,7 @@ private:
   struct C_RefreshFinish;
 
   ImageCtxT &m_image_ctx;
-  mutable RWLock m_lock;
+  mutable ceph::shared_mutex m_lock;
   Contexts m_write_blocker_contexts;
   uint32_t m_write_blockers = 0;
   Contexts m_unblocked_write_waiter_contexts;
@@ -114,11 +116,11 @@ private:
   bool is_lock_required(bool write_op) const;
 
   inline bool require_lock_on_read() const {
-    RWLock::RLocker locker(m_lock);
+    std::shared_lock locker{m_lock};
     return m_require_lock_on_read;
   }
   inline bool writes_empty() const {
-    RWLock::RLocker locker(m_lock);
+    std::shared_lock locker{m_lock};
     return (m_queued_writes == 0);
   }
 

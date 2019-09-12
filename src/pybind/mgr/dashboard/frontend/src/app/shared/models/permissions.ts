@@ -5,10 +5,9 @@ export class Permission {
   delete: boolean;
 
   constructor(serverPermission: Array<string> = []) {
-    this.read = serverPermission.indexOf('read') !== -1;
-    this.create = serverPermission.indexOf('create') !== -1;
-    this.update = serverPermission.indexOf('update') !== -1;
-    this.delete = serverPermission.indexOf('delete') !== -1;
+    ['read', 'create', 'update', 'delete'].forEach(
+      (permission) => (this[permission] = serverPermission.includes(permission))
+    );
   }
 }
 
@@ -26,6 +25,9 @@ export class Permissions {
   manager: Permission;
   log: Permission;
   user: Permission;
+  grafana: Permission;
+  prometheus: Permission;
+  nfs: Permission;
 
   constructor(serverPermissions: any) {
     this.hosts = new Permission(serverPermissions['hosts']);
@@ -41,5 +43,8 @@ export class Permissions {
     this.manager = new Permission(serverPermissions['manager']);
     this.log = new Permission(serverPermissions['log']);
     this.user = new Permission(serverPermissions['user']);
+    this.grafana = new Permission(serverPermissions['grafana']);
+    this.prometheus = new Permission(serverPermissions['prometheus']);
+    this.nfs = new Permission(serverPermissions['nfs-ganesha']);
   }
 }

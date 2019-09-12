@@ -70,11 +70,38 @@ namespace {
 
 uint64_t get_encode_features(cls_method_context_t hctx) {
   uint64_t features = 0;
-  int8_t require_osd_release = cls_get_required_osd_release(hctx);
-  if (require_osd_release >= CEPH_RELEASE_NAUTILUS) {
+  ceph_release_t require_osd_release = cls_get_required_osd_release(hctx);
+  if (require_osd_release >= ceph_release_t::nautilus) {
     features |= CEPH_FEATURE_SERVER_NAUTILUS;
   }
   return features;
+}
+
+bool calc_sparse_extent(const bufferptr &bp, size_t sparse_size,
+                        uint64_t length, size_t *write_offset,
+                        size_t *write_length, size_t *offset) {
+  size_t extent_size;
+  if (*offset + sparse_size > length) {
+    extent_size = length - *offset;
+  } else {
+    extent_size = sparse_size;
+  }
+
+  bufferptr extent(bp, *offset, extent_size);
+  *offset += extent_size;
+
+  bool extent_is_zero = extent.is_zero();
+  if (!extent_is_zero) {
+    *write_length += extent_size;
+  }
+  if (extent_is_zero && *write_length == 0) {
+    *write_offset += extent_size;
+  }
+
+  if ((extent_is_zero || *offset == length) && *write_length != 0) {
+    return true;
+  }
+  return false;
 }
 
 } // anonymous namespace
@@ -559,7 +586,8 @@ int write(cls_method_context_t hctx, const std::string& snap_key,
 
 namespace parent {
 
-int attach(cls_method_context_t hctx, cls_rbd_parent parent) {
+int attach(cls_method_context_t hctx, cls_rbd_parent parent,
+           bool reattach) {
   int r = check_exists(hctx);
   if (r < 0) {
     CLS_LOG(20, "cls_rbd::image::parent::attach: child doesn't exist");
@@ -594,7 +622,8 @@ int attach(cls_method_context_t hctx, cls_rbd_parent parent) {
 
   if (r == 0 &&
       (on_disk_parent.head_overlap ||
-       on_disk_parent_without_overlap != parent)) {
+       on_disk_parent_without_overlap != parent) &&
+      !reattach) {
     CLS_LOG(20, "cls_rbd::parent::attach: existing legacy parent "
                 "pool=%" PRIi64 ", ns=%s, id=%s, snapid=%" PRIu64 ", "
                 "overlap=%" PRIu64,
@@ -675,8 +704,8 @@ int detach(cls_method_context_t hctx, bool legacy_api) {
     return r;
   }
 
-  int8_t require_osd_release = cls_get_required_osd_release(hctx);
-  if (has_child_snaps && require_osd_release >= CEPH_RELEASE_NAUTILUS) {
+  ceph_release_t require_osd_release = cls_get_required_osd_release(hctx);
+  if (has_child_snaps && require_osd_release >= ceph_release_t::nautilus) {
     // remove overlap from HEAD revision but keep spec for snapshots
     on_disk_parent.head_overlap = std::nullopt;
     r = write_key(hctx, "parent", on_disk_parent, get_encode_features(hctx));
@@ -1652,7 +1681,7 @@ int set_parent(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EINVAL;
   }
 
-  int r = image::parent::attach(hctx, parent);
+  int r = image::parent::attach(hctx, parent, false);
   if (r < 0) {
     return r;
   }
@@ -1702,7 +1731,7 @@ int parent_get(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
       return r;
     } else if (r == -ENOENT) {
       // examine oldest snapshot to see if it has a denormalized parent
-      auto parent_lambda = [hctx, &parent](const cls_rbd_snap& snap_meta) {
+      auto parent_lambda = [&parent](const cls_rbd_snap& snap_meta) {
         if (snap_meta.parent.exists()) {
           parent = snap_meta.parent;
         }
@@ -1789,17 +1818,22 @@ int parent_overlap_get(cls_method_context_t hctx, bufferlist *in,
 int parent_attach(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
   cls::rbd::ParentImageSpec parent_image_spec;
   uint64_t parent_overlap;
+  bool reattach = false;
 
   auto iter = in->cbegin();
   try {
     decode(parent_image_spec, iter);
     decode(parent_overlap, iter);
+    if (!iter.end()) {
+      decode(reattach, iter);
+    }
   } catch (const buffer::error &err) {
     CLS_LOG(20, "cls_rbd::parent_attach: invalid decode");
     return -EINVAL;
   }
 
-  int r = image::parent::attach(hctx, {parent_image_spec, parent_overlap});
+  int r = image::parent::attach(hctx, {parent_image_spec, parent_overlap},
+                                reattach);
   if (r < 0) {
     return r;
   }
@@ -2532,9 +2566,9 @@ int snapshot_remove(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   bool has_parent = (r >= 0 && parent.exists());
   bool is_head_child = (has_parent && parent.head_overlap);
-  int8_t require_osd_release = cls_get_required_osd_release(hctx);
+  ceph_release_t require_osd_release = cls_get_required_osd_release(hctx);
   if (has_parent && !is_head_child && !has_child_snaps &&
-      require_osd_release >= CEPH_RELEASE_NAUTILUS) {
+      require_osd_release >= ceph_release_t::nautilus) {
     // remove the unused parent image spec
     r = remove_key(hctx, "parent");
     if (r < 0 && r != -ENOENT) {
@@ -2660,6 +2694,67 @@ int copyup(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   return cls_cxx_write(hctx, 0, in->length(), in);
 }
 
+/**
+ * Input:
+ * @param extent_map map of extents to write
+ * @param data bufferlist of data to write
+ *
+ * Output:
+ * @returns 0 on success, or if block already exists in child
+ *  negative error code on other error
+ */
+
+int sparse_copyup(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  std::map<uint64_t, uint64_t> extent_map;
+  bufferlist data;
+
+  try {
+    auto iter = in->cbegin();
+    decode(extent_map, iter);
+    decode(data, iter);
+  } catch (const buffer::error &err) {
+    CLS_LOG(20, "sparse_copyup: invalid decode");
+    return -EINVAL;
+  }
+
+  int r = check_exists(hctx);
+  if (r == 0) {
+    return 0;
+  }
+
+  if (extent_map.empty()) {
+    CLS_LOG(20, "sparse_copyup: create empty object");
+    r = cls_cxx_create(hctx, true);
+    return r;
+  }
+
+  uint64_t data_offset = 0;
+  for (auto &it: extent_map) {
+    auto off = it.first;
+    auto len = it.second;
+
+    bufferlist tmpbl;
+    try {
+      tmpbl.substr_of(data, data_offset, len);
+    } catch (const buffer::error &err) {
+      CLS_LOG(20, "sparse_copyup: invalid data");
+      return -EINVAL;
+    }
+    data_offset += len;
+
+    CLS_LOG(20, "sparse_copyup: writing extent %" PRIu64 "~%" PRIu64 "\n", off,
+            len);
+    int r = cls_cxx_write(hctx, off, len, &tmpbl);
+    if (r < 0) {
+      CLS_ERR("sparse_copyup: error writing extent %" PRIu64 "~%" PRIu64 ": %s",
+              off, len, cpp_strerror(r).c_str());
+      return r;
+    }
+  }
+
+  return 0;
+}
 
 /************************ rbd_id object methods **************************/
 
@@ -2987,7 +3082,10 @@ int dir_get_name(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   string name;
   int r = read_key(hctx, dir_key_for_id(id), &name);
   if (r < 0) {
-    CLS_ERR("error reading name for id '%s': %s", id.c_str(), cpp_strerror(r).c_str());
+    if (r != -ENOENT) {
+      CLS_ERR("error reading name for id '%s': %s", id.c_str(),
+              cpp_strerror(r).c_str());
+    }
     return r;
   }
   encode(name, *out);
@@ -3031,7 +3129,9 @@ int dir_list(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     int r = cls_cxx_map_get_vals(hctx, last_read, RBD_DIR_NAME_KEY_PREFIX,
                                  max_read, &vals, &more);
     if (r < 0) {
-      CLS_ERR("error reading directory by name: %s", cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading directory by name: %s", cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -3130,7 +3230,7 @@ int dir_remove_image(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
  */
 int dir_state_assert(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
-  cls::rbd::DirectoryState directory_state;
+  cls::rbd::DirectoryState directory_state = cls::rbd::DIRECTORY_STATE_READY;
   try {
     auto iter = in->cbegin();
     decode(directory_state, iter);
@@ -3138,7 +3238,7 @@ int dir_state_assert(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EINVAL;
   }
 
-  cls::rbd::DirectoryState on_disk_directory_state;
+  cls::rbd::DirectoryState on_disk_directory_state = directory_state;
   int r = read_key(hctx, "state", &on_disk_directory_state);
   if (r < 0) {
     return r;
@@ -3400,35 +3500,57 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
     return -EINVAL;
   }
 
+  uint64_t object_byte_offset;
+  uint64_t byte_length;
+  object_map.get_header_crc_extents(&object_byte_offset, &byte_length);
+
   bufferlist footer_bl;
-  r = cls_cxx_read2(hctx, object_map.get_footer_offset(),
-		    size - object_map.get_footer_offset(), &footer_bl,
+  r = cls_cxx_read2(hctx, object_byte_offset, byte_length, &footer_bl,
                     CEPH_OSD_OP_FLAG_FADVISE_WILLNEED);
   if (r < 0) {
-    CLS_ERR("object map footer read failed");
+    CLS_ERR("object map footer read header CRC failed");
     return r;
   }
 
   try {
     auto it = footer_bl.cbegin();
-    object_map.decode_footer(it);
+    object_map.decode_header_crc(it);
   } catch (const buffer::error &err) {
-    CLS_ERR("failed to decode object map footer: %s", err.what());
+    CLS_ERR("failed to decode object map header CRC: %s", err.what());
   }
 
   if (start_object_no >= end_object_no || end_object_no > object_map.size()) {
     return -ERANGE;
   }
 
-  uint64_t byte_offset;
-  uint64_t byte_length;
-  object_map.get_data_extents(start_object_no,
-			      end_object_no - start_object_no,
-			      &byte_offset, &byte_length);
+  uint64_t object_count = end_object_no - start_object_no;
+  object_map.get_data_crcs_extents(start_object_no, object_count,
+                                   &object_byte_offset, &byte_length);
+  const auto footer_object_offset = object_byte_offset;
+
+  footer_bl.clear();
+  r = cls_cxx_read2(hctx, object_byte_offset, byte_length, &footer_bl,
+                    CEPH_OSD_OP_FLAG_FADVISE_WILLNEED);
+  if (r < 0) {
+    CLS_ERR("object map footer read data CRCs failed");
+    return r;
+  }
+
+  try {
+    auto it = footer_bl.cbegin();
+    object_map.decode_data_crcs(it, start_object_no);
+  } catch (const buffer::error &err) {
+    CLS_ERR("failed to decode object map data CRCs: %s", err.what());
+  }
+
+  uint64_t data_byte_offset;
+  object_map.get_data_extents(start_object_no, object_count,
+                              &data_byte_offset, &object_byte_offset,
+                              &byte_length);
 
   bufferlist data_bl;
-  r = cls_cxx_read2(hctx, object_map.get_header_length() + byte_offset,
-		    byte_length, &data_bl, CEPH_OSD_OP_FLAG_FADVISE_WILLNEED);
+  r = cls_cxx_read2(hctx, object_byte_offset, byte_length, &data_bl,
+                    CEPH_OSD_OP_FLAG_FADVISE_WILLNEED);
   if (r < 0) {
     CLS_ERR("object map data read failed");
     return r;
@@ -3436,10 +3558,10 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
 
   try {
     auto it = data_bl.cbegin();
-    object_map.decode_data(it, byte_offset);
+    object_map.decode_data(it, data_byte_offset);
   } catch (const buffer::error &err) {
     CLS_ERR("failed to decode data chunk [%" PRIu64 "]: %s",
-	    byte_offset, err.what());
+	    data_byte_offset, err.what());
     return -EINVAL;
   }
 
@@ -3458,13 +3580,11 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
 
   if (updated) {
     CLS_LOG(20, "object_map_update: %" PRIu64 "~%" PRIu64 " -> %" PRIu64,
-	    byte_offset, byte_length,
-	    object_map.get_header_length() + byte_offset);
+	    data_byte_offset, byte_length, object_byte_offset);
 
     bufferlist data_bl;
-    object_map.encode_data(data_bl, byte_offset, byte_length);
-    r = cls_cxx_write2(hctx, object_map.get_header_length() + byte_offset,
-		       data_bl.length(), &data_bl,
+    object_map.encode_data(data_bl, data_byte_offset, byte_length);
+    r = cls_cxx_write2(hctx, object_byte_offset, data_bl.length(), &data_bl,
                        CEPH_OSD_OP_FLAG_FADVISE_WILLNEED);
     if (r < 0) {
       CLS_ERR("failed to write object map header: %s", cpp_strerror(r).c_str());
@@ -3472,8 +3592,8 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
     }
 
     footer_bl.clear();
-    object_map.encode_footer(footer_bl);
-    r = cls_cxx_write2(hctx, object_map.get_footer_offset(), footer_bl.length(),
+    object_map.encode_data_crcs(footer_bl, start_object_no, object_count);
+    r = cls_cxx_write2(hctx, footer_object_offset, footer_bl.length(),
 		       &footer_bl, CEPH_OSD_OP_FLAG_FADVISE_WILLNEED);
     if (r < 0) {
       CLS_ERR("failed to write object map footer: %s", cpp_strerror(r).c_str());
@@ -3622,7 +3742,10 @@ int metadata_list(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     int r = cls_cxx_map_get_vals(hctx, last_read, RBD_METADATA_KEY_PREFIX,
                                  max_read, &raw_data, &more);
     if (r < 0) {
-      CLS_ERR("failed to read the vals off of disk: %s", cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("failed to read the vals off of disk: %s",
+                cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -3659,7 +3782,7 @@ int metadata_set(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   for (map<string, bufferlist>::iterator it = data.begin();
        it != data.end(); ++it) {
-    CLS_LOG(20, "metdata_set key=%s value=%.*s", it->first.c_str(),
+    CLS_LOG(20, "metadata_set key=%s value=%.*s", it->first.c_str(),
 	    it->second.length(), it->second.c_str());
     raw_data[metadata_key_for_name(it->first)].swap(it->second);
   }
@@ -3690,11 +3813,11 @@ int metadata_remove(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EINVAL;
   }
 
-  CLS_LOG(20, "metdata_remove key=%s", key.c_str());
+  CLS_LOG(20, "metadata_remove key=%s", key.c_str());
 
   int r = cls_cxx_map_remove_key(hctx, metadata_key_for_name(key));
   if (r < 0) {
-    CLS_ERR("error remove metadata: %s", cpp_strerror(r).c_str());
+    CLS_ERR("error removing metadata: %s", cpp_strerror(r).c_str());
     return r;
   }
 
@@ -3721,11 +3844,12 @@ int metadata_get(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EINVAL;
   }
 
-  CLS_LOG(20, "metdata_get key=%s", key.c_str());
+  CLS_LOG(20, "metadata_get key=%s", key.c_str());
 
   int r = cls_cxx_map_get_val(hctx, metadata_key_for_name(key), &value);
   if (r < 0) {
-    CLS_ERR("error get metadata: %s", cpp_strerror(r).c_str());
+    if (r != -ENOENT)
+      CLS_ERR("error getting metadata: %s", cpp_strerror(r).c_str());
     return r;
   }
 
@@ -4553,7 +4677,9 @@ int read_peers(cls_method_context_t hctx,
     int r = cls_cxx_map_get_vals(hctx, last_read, PEER_KEY_PREFIX.c_str(),
                                  max_read, &vals, &more);
     if (r < 0) {
-      CLS_ERR("error reading peers: %s", cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading peers: %s", cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -4844,8 +4970,10 @@ int image_status_list(cls_method_context_t hctx,
     r = cls_cxx_map_get_vals(hctx, last_read, IMAGE_KEY_PREFIX, max_read, &vals,
                              &more);
     if (r < 0) {
-      CLS_ERR("error reading mirror image directory by name: %s",
-              cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading mirror image directory by name: %s",
+                cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -4881,8 +5009,9 @@ int image_status_list(cls_method_context_t hctx,
   return 0;
 }
 
-int image_status_get_summary(cls_method_context_t hctx,
-	std::map<cls::rbd::MirrorImageStatusState, int> *states) {
+int image_status_get_summary(
+    cls_method_context_t hctx,
+    std::map<cls::rbd::MirrorImageStatusState, int> *states) {
   std::set<entity_inst_t> watchers;
   int r = list_watchers(hctx, &watchers);
   if (r < 0) {
@@ -4899,7 +5028,9 @@ int image_status_get_summary(cls_method_context_t hctx,
     r = cls_cxx_map_get_vals(hctx, last_read, IMAGE_KEY_PREFIX,
 			     max_read, &vals, &more);
     if (r < 0) {
-      CLS_ERR("error reading mirrored images: %s", cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading mirrored images: %s", cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -4951,7 +5082,9 @@ int image_status_remove_down(cls_method_context_t hctx) {
     r = cls_cxx_map_get_vals(hctx, last_read, STATUS_GLOBAL_KEY_PREFIX,
 			     max_read, &vals, &more);
     if (r < 0) {
-      CLS_ERR("error reading mirrored images: %s", cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading mirrored images: %s", cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -4985,6 +5118,95 @@ int image_status_remove_down(cls_method_context_t hctx) {
       }
     }
 
+    if (!vals.empty()) {
+      last_read = vals.rbegin()->first;
+    }
+  }
+
+  return 0;
+}
+
+int image_instance_get(cls_method_context_t hctx,
+                       const string &global_image_id,
+                       const std::set<entity_inst_t> &watchers,
+                       entity_inst_t *instance) {
+  bufferlist bl;
+  int r = cls_cxx_map_get_val(hctx, status_global_key(global_image_id), &bl);
+  if (r < 0) {
+    if (r != -ENOENT) {
+      CLS_ERR("error reading status for mirrored image, global id '%s': '%s'",
+              global_image_id.c_str(), cpp_strerror(r).c_str());
+    }
+    return r;
+  }
+
+  MirrorImageStatusOnDisk ondisk_status;
+  try {
+    auto it = bl.cbegin();
+    decode(ondisk_status, it);
+  } catch (const buffer::error &err) {
+    CLS_ERR("could not decode status for mirrored image, global id '%s'",
+            global_image_id.c_str());
+    return -EIO;
+  }
+
+  if (watchers.find(ondisk_status.origin) == watchers.end()) {
+    return -ESTALE;
+  }
+
+  *instance = ondisk_status.origin;
+  return 0;
+}
+
+int image_instance_list(cls_method_context_t hctx,
+                        const std::string &start_after,
+                        uint64_t max_return,
+                        map<std::string, entity_inst_t> *instances) {
+  std::string last_read = image_key(start_after);
+  int max_read = RBD_MAX_KEYS_READ;
+  bool more = true;
+
+  std::set<entity_inst_t> watchers;
+  int r = list_watchers(hctx, &watchers);
+  if (r < 0) {
+    return r;
+  }
+
+  while (more && instances->size() < max_return) {
+    std::map<std::string, bufferlist> vals;
+    CLS_LOG(20, "last_read = '%s'", last_read.c_str());
+    r = cls_cxx_map_get_vals(hctx, last_read, IMAGE_KEY_PREFIX, max_read, &vals,
+                             &more);
+    if (r < 0) {
+      if (r != -ENOENT) {
+        CLS_ERR("error reading mirror image directory by name: %s",
+                cpp_strerror(r).c_str());
+      }
+      return r;
+    }
+
+    for (auto it = vals.begin(); it != vals.end() &&
+           instances->size() < max_return; ++it) {
+      const std::string &image_id = it->first.substr(IMAGE_KEY_PREFIX.size());
+      cls::rbd::MirrorImage mirror_image;
+      auto iter = it->second.cbegin();
+      try {
+        decode(mirror_image, iter);
+      } catch (const buffer::error &err) {
+        CLS_ERR("could not decode mirror image payload of image '%s'",
+                image_id.c_str());
+        return -EIO;
+      }
+
+      entity_inst_t instance;
+      r = image_instance_get(hctx, mirror_image.global_image_id, watchers,
+                             &instance);
+      if (r < 0) {
+        continue;
+      }
+
+      (*instances)[image_id] = instance;
+    }
     if (!vals.empty()) {
       last_read = vals.rbegin()->first;
     }
@@ -5466,8 +5688,10 @@ int mirror_image_list(cls_method_context_t hctx, bufferlist *in,
     int r = cls_cxx_map_get_vals(hctx, last_read, mirror::IMAGE_KEY_PREFIX,
                                  max_read, &vals, &more);
     if (r < 0) {
-      CLS_ERR("error reading mirror image directory by name: %s",
-              cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading mirror image directory by name: %s",
+                cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -5519,8 +5743,10 @@ int mirror_image_get_image_id(cls_method_context_t hctx, bufferlist *in,
   std::string image_id;
   int r = read_key(hctx, mirror::global_key(global_id), &image_id);
   if (r < 0) {
-    CLS_ERR("error retrieving image id for global id '%s': %s",
-            global_id.c_str(), cpp_strerror(r).c_str());
+    if (r != -ENOENT) {
+      CLS_ERR("error retrieving image id for global id '%s': %s",
+              global_id.c_str(), cpp_strerror(r).c_str());
+    }
     return r;
   }
 
@@ -5763,6 +5989,73 @@ int mirror_image_status_remove_down(cls_method_context_t hctx, bufferlist *in,
   if (r < 0) {
     return r;
   }
+  return 0;
+}
+
+/**
+ * Input:
+ * @param global_image_id (std::string)
+ *
+ * Output:
+ * @param entity_inst_t - instance
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_instance_get(cls_method_context_t hctx, bufferlist *in,
+                              bufferlist *out) {
+  string global_image_id;
+  try {
+    auto it = in->cbegin();
+    decode(global_image_id, it);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  std::set<entity_inst_t> watchers;
+  int r = mirror::list_watchers(hctx, &watchers);
+  if (r < 0) {
+    return r;
+  }
+
+  entity_inst_t instance;
+  r = mirror::image_instance_get(hctx, global_image_id, watchers, &instance);
+  if (r < 0) {
+    return r;
+  }
+
+  encode(instance, *out, cls_get_features(hctx));
+  return 0;
+}
+
+/**
+ * Input:
+ * @param start_after which name to begin listing after
+ *        (use the empty string to start at the beginning)
+ * @param max_return the maximum number of names to list
+ *
+ * Output:
+ * @param std::map<std::string, entity_inst_t>: image id to instance map
+ * @returns 0 on success, negative error code on failure
+ */
+int mirror_image_instance_list(cls_method_context_t hctx, bufferlist *in,
+                               bufferlist *out) {
+  std::string start_after;
+  uint64_t max_return;
+  try {
+    auto iter = in->cbegin();
+    decode(start_after, iter);
+    decode(max_return, iter);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  map<std::string, entity_inst_t> instances;
+  int r = mirror::image_instance_list(hctx, start_after, max_return,
+                                      &instances);
+  if (r < 0) {
+    return r;
+  }
+
+  encode(instances, *out, cls_get_features(hctx));
   return 0;
 }
 
@@ -6126,7 +6419,9 @@ int group_dir_list(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     int r = cls_cxx_map_get_vals(hctx, last_read, RBD_DIR_NAME_KEY_PREFIX,
                                  max_read, &vals, &more);
     if (r < 0) {
-      CLS_ERR("error reading directory by name: %s", cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("error reading directory by name: %s", cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -6834,8 +7129,10 @@ int trash_list(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     int r = cls_cxx_map_get_vals(hctx, last_read, trash::IMAGE_KEY_PREFIX,
                                  max_read, &raw_data, &more);
     if (r < 0) {
-      CLS_ERR("failed to read the vals off of disk: %s",
-              cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("failed to read the vals off of disk: %s",
+                cpp_strerror(r).c_str());
+      }
       return r;
     }
     if (raw_data.empty()) {
@@ -7071,8 +7368,10 @@ int namespace_list(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     int r = cls_cxx_map_get_vals(hctx, last_read, nspace::NAME_KEY_PREFIX,
                                  max_read, &raw_data, &more);
     if (r < 0) {
-      CLS_ERR("failed to read the vals off of disk: %s",
-              cpp_strerror(r).c_str());
+      if (r != -ENOENT) {
+        CLS_ERR("failed to read the vals off of disk: %s",
+                cpp_strerror(r).c_str());
+      }
       return r;
     }
 
@@ -7088,6 +7387,100 @@ int namespace_list(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   encode(data, *out);
+  return 0;
+}
+
+/**
+ *  Reclaim space for zeroed extents
+ *
+ * Input:
+ * @param sparse_size minimal zeroed block to sparse
+ * @param remove_empty boolean, true if the object should be removed if empty
+ *
+ * Output:
+ * @returns -ENOENT if the object does not exist or has been removed
+ * @returns 0 on success, negative error code on failure
+ */
+int sparsify(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  size_t sparse_size;
+  bool remove_empty;
+  try {
+    auto iter = in->cbegin();
+    decode(sparse_size, iter);
+    decode(remove_empty, iter);
+  } catch (const buffer::error &err) {
+    return -EINVAL;
+  }
+
+  int r = check_exists(hctx);
+  if (r < 0) {
+    return r;
+  }
+
+  bufferlist bl;
+  r = cls_cxx_read(hctx, 0, 0, &bl);
+  if (r < 0) {
+    CLS_ERR("failed to read data off of disk: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  if (bl.is_zero()) {
+    if (remove_empty) {
+      CLS_LOG(20, "remove");
+      r = cls_cxx_remove(hctx);
+      if (r < 0) {
+        CLS_ERR("remove failed: %s", cpp_strerror(r).c_str());
+        return r;
+      }
+    } else if (bl.length() > 0) {
+      CLS_LOG(20, "truncate");
+      bufferlist write_bl;
+      r = cls_cxx_replace(hctx, 0, 0, &write_bl);
+      if (r < 0) {
+        CLS_ERR("truncate failed: %s", cpp_strerror(r).c_str());
+        return r;
+      }
+    } else {
+      CLS_LOG(20, "skip empty");
+    }
+    return 0;
+  }
+
+  bl.rebuild(buffer::ptr_node::create(bl.length()));
+  size_t write_offset = 0;
+  size_t write_length = 0;
+  size_t offset = 0;
+  size_t length = bl.length();
+  const auto& ptr = bl.front();
+  bool replace = true;
+  while (offset < length) {
+    if (calc_sparse_extent(ptr, sparse_size, length, &write_offset,
+                           &write_length, &offset)) {
+      if (write_offset == 0 && write_length == length) {
+        CLS_LOG(20, "nothing to do");
+        return 0;
+      }
+      CLS_LOG(20, "write%s %" PRIu64 "~%" PRIu64, (replace ? "(replace)" : ""),
+              write_offset, write_length);
+      bufferlist write_bl;
+      write_bl.push_back(buffer::ptr_node::create(ptr, write_offset,
+                                                  write_length));
+      if (replace) {
+        r = cls_cxx_replace(hctx, write_offset, write_length, &write_bl);
+        replace = false;
+      } else {
+        r = cls_cxx_write(hctx, write_offset, write_length, &write_bl);
+      }
+      if (r < 0) {
+        CLS_ERR("write failed: %s", cpp_strerror(r).c_str());
+        return r;
+      }
+      write_offset = offset;
+      write_length = 0;
+    }
+  }
+
   return 0;
 }
 
@@ -7133,7 +7526,6 @@ CLS_INIT(rbd)
   cls_method_handle_t h_snapshot_rename;
   cls_method_handle_t h_snapshot_trash_add;
   cls_method_handle_t h_get_all_features;
-  cls_method_handle_t h_copyup;
   cls_method_handle_t h_get_id;
   cls_method_handle_t h_set_id;
   cls_method_handle_t h_set_modify_timestamp;
@@ -7165,7 +7557,6 @@ CLS_INIT(rbd)
   cls_method_handle_t h_migration_set_state;
   cls_method_handle_t h_migration_get;
   cls_method_handle_t h_migration_remove;
-  cls_method_handle_t h_assert_snapc_seq;
   cls_method_handle_t h_old_snapshots_list;
   cls_method_handle_t h_old_snapshot_add;
   cls_method_handle_t h_old_snapshot_remove;
@@ -7190,6 +7581,8 @@ CLS_INIT(rbd)
   cls_method_handle_t h_mirror_image_status_list;
   cls_method_handle_t h_mirror_image_status_get_summary;
   cls_method_handle_t h_mirror_image_status_remove_down;
+  cls_method_handle_t h_mirror_image_instance_get;
+  cls_method_handle_t h_mirror_image_instance_list;
   cls_method_handle_t h_mirror_instances_list;
   cls_method_handle_t h_mirror_instances_add;
   cls_method_handle_t h_mirror_instances_remove;
@@ -7218,6 +7611,10 @@ CLS_INIT(rbd)
   cls_method_handle_t h_namespace_add;
   cls_method_handle_t h_namespace_remove;
   cls_method_handle_t h_namespace_list;
+  cls_method_handle_t h_copyup;
+  cls_method_handle_t h_sparse_copyup;
+  cls_method_handle_t h_assert_snapc_seq;
+  cls_method_handle_t h_sparsify;
 
   cls_register("rbd", &h_class);
   cls_register_cxx_method(h_class, "create",
@@ -7267,9 +7664,6 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "get_all_features",
 			  CLS_METHOD_RD,
 			  get_all_features, &h_get_all_features);
-  cls_register_cxx_method(h_class, "copyup",
-			  CLS_METHOD_RD | CLS_METHOD_WR,
-			  copyup, &h_copyup);
 
   // NOTE: deprecate v1 parent APIs after mimic EOLed
   cls_register_cxx_method(h_class, "get_parent",
@@ -7365,10 +7759,6 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "migration_remove",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           migration_remove, &h_migration_remove);
-  cls_register_cxx_method(h_class, "assert_snapc_seq",
-                          CLS_METHOD_RD | CLS_METHOD_WR,
-                          assert_snapc_seq,
-                          &h_assert_snapc_seq);
 
   cls_register_cxx_method(h_class, "set_modify_timestamp",
 	            	  CLS_METHOD_RD | CLS_METHOD_WR,
@@ -7513,6 +7903,12 @@ CLS_INIT(rbd)
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           mirror_image_status_remove_down,
 			  &h_mirror_image_status_remove_down);
+  cls_register_cxx_method(h_class, "mirror_image_instance_get", CLS_METHOD_RD,
+                          mirror_image_instance_get,
+                          &h_mirror_image_instance_get);
+  cls_register_cxx_method(h_class, "mirror_image_instance_list", CLS_METHOD_RD,
+                          mirror_image_instance_list,
+                          &h_mirror_image_instance_list);
   cls_register_cxx_method(h_class, "mirror_instances_list", CLS_METHOD_RD,
                           mirror_instances_list, &h_mirror_instances_list);
   cls_register_cxx_method(h_class, "mirror_instances_add",
@@ -7602,4 +7998,19 @@ CLS_INIT(rbd)
                           namespace_remove, &h_namespace_remove);
   cls_register_cxx_method(h_class, "namespace_list", CLS_METHOD_RD,
                           namespace_list, &h_namespace_list);
+
+  /* data object methods */
+  cls_register_cxx_method(h_class, "copyup",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  copyup, &h_copyup);
+  cls_register_cxx_method(h_class, "sparse_copyup",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  sparse_copyup, &h_sparse_copyup);
+  cls_register_cxx_method(h_class, "assert_snapc_seq",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          assert_snapc_seq,
+                          &h_assert_snapc_seq);
+  cls_register_cxx_method(h_class, "sparsify",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  sparsify, &h_sparsify);
 }

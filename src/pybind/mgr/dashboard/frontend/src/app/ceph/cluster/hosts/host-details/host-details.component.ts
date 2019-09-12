@@ -1,22 +1,24 @@
-import { Component, Input, OnChanges } from '@angular/core';
+import { Component, Input, ViewChild } from '@angular/core';
+
+import { TabsetComponent } from 'ngx-bootstrap/tabs';
 
 import { CdTableSelection } from '../../../../shared/models/cd-table-selection';
+import { Permissions } from '../../../../shared/models/permissions';
 
 @Component({
   selector: 'cd-host-details',
   templateUrl: './host-details.component.html',
   styleUrls: ['./host-details.component.scss']
 })
-export class HostDetailsComponent implements OnChanges {
+export class HostDetailsComponent {
+  @Input()
+  permissions: Permissions;
+
   @Input()
   selection: CdTableSelection;
-  host: any;
+
+  @ViewChild(TabsetComponent, { static: false })
+  tabsetChild: TabsetComponent;
 
   constructor() {}
-
-  ngOnChanges() {
-    if (this.selection.hasSelection) {
-      this.host = this.selection.first();
-    }
-  }
 }

@@ -1,4 +1,4 @@
-// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 /*
  * Ceph - scalable distributed file system
@@ -7,9 +7,9 @@
  *
  * This is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
- * License version 2.1, as published by the Free Software 
+ * License version 2.1, as published by the Free Software
  * Foundation.  See file COPYING.
- * 
+ *
  */
 
 
@@ -27,15 +27,13 @@
 #include "Message.h"
 #include "Dispatcher.h"
 #include "Policy.h"
-#include "common/Cond.h"
-#include "common/Mutex.h"
 #include "common/Throttle.h"
 #include "include/Context.h"
 #include "include/types.h"
 #include "include/ceph_features.h"
 #include "auth/Crypto.h"
 #include "common/item_history.h"
-#include "auth/AuthAuthorizeHandler.h"
+#include "auth/AuthRegistry.h"
 #include "include/ceph_assert.h"
 
 #include <errno.h>
@@ -46,7 +44,26 @@
 
 class Timer;
 
-class AuthAuthorizerHandlerRegistry;
+class AuthClient;
+class AuthServer;
+
+#ifdef UNIT_TESTS_BUILT
+
+struct Interceptor {
+  std::mutex lock;
+  std::condition_variable cond_var;
+
+  enum ACTION : uint32_t {
+    CONTINUE = 0,
+    FAIL,
+    STOP
+  };
+
+  virtual ~Interceptor() {}
+  virtual ACTION intercept(Connection *conn, uint32_t step) = 0;
+};
+
+#endif
 
 class Messenger {
 private:
@@ -66,12 +83,19 @@ protected:
   safe_item_history<entity_addrvec_t> my_addrs;
 
   int default_send_priority;
-  /// set to true once the Messenger has started, and set to false on shutdown
+  /// std::set to true once the Messenger has started, and std::set to false on shutdown
   bool started;
   uint32_t magic;
   int socket_priority;
 
 public:
+  AuthClient *auth_client = 0;
+  AuthServer *auth_server = 0;
+
+#ifdef UNIT_TESTS_BUILT
+  Interceptor *interceptor = nullptr;
+#endif
+
   /**
    * Various Messenger conditional config/type flags to allow
    * different "transport" Messengers to tune themselves
@@ -89,10 +113,15 @@ public:
 
   using Policy = ceph::net::Policy<Throttle>;
 
+public:
+  // allow unauthenticated connections.  This is needed for
+  // compatibility with pre-nautilus OSDs, which do not authenticate
+  // the heartbeat sessions.
+  bool require_authorizer = true;
+
 protected:
   // for authentication
-  std::unique_ptr<AuthAuthorizeHandlerRegistry> auth_ah_service_registry;
-  std::unique_ptr<AuthAuthorizeHandlerRegistry> auth_ah_cluster_registry;
+  AuthRegistry auth_registry;
 
 public:
   /**
@@ -115,12 +144,12 @@ public:
    * @param lname logical name of the messenger in this process (e.g., "client")
    * @param nonce nonce value to uniquely identify this instance on the current host
    * @param features bits for the local connection
-   * @param cflags general set of flags to configure transport resources
+   * @param cflags general std::set of flags to configure transport resources
    */
   static Messenger *create(CephContext *cct,
-                           const string &type,
+                           const std::string &type,
                            entity_name_t name,
-			   string lname,
+			   std::string lname,
                            uint64_t nonce,
 			   uint64_t cflags);
 
@@ -137,7 +166,7 @@ public:
    * @param cct context
    * @param lname logical name of the messenger in this process (e.g., "client")
    */
-  static Messenger *create_client_messenger(CephContext *cct, string lname);
+  static Messenger *create_client_messenger(CephContext *cct, std::string lname);
 
   /**
    * @defgroup Accessors
@@ -159,22 +188,37 @@ public:
    * @return A const reference to the address this Messenger
    * currently believes to be its own.
    */
-  entity_addr_t get_myaddr() {
-    return my_addrs->front();
-  }
   const entity_addrvec_t& get_myaddrs() {
     return *my_addrs;
   }
 
   /**
-   * set messenger's instance
+   * get legacy addr for myself, suitable for protocol v1
+   *
+   * Note that myaddrs might be a proper addrvec with v1 in it, or it might be an
+   * ANY addr (if i am a pure client).
+   */
+  entity_addr_t get_myaddr_legacy() {
+    return my_addrs->as_legacy_addr();
+  }
+
+
+  /**
+   * std::set messenger's instance
    */
   uint32_t get_magic() { return magic; }
   void set_magic(int _magic) { magic = _magic; }
 
+  void set_auth_client(AuthClient *ac) {
+    auth_client = ac;
+  }
+  void set_auth_server(AuthServer *as) {
+    auth_server = as;
+  }
+
 protected:
   /**
-   * set messenger's address
+   * std::set messenger's address
    */
   virtual void set_myaddrs(const entity_addrvec_t& a) {
     my_addrs = a;
@@ -189,16 +233,16 @@ public:
   }
 
   /**
-   * Set the name of the local entity. The name is reported to others and
+   * std::Set the name of the local entity. The name is reported to others and
    * can be changed while the system is running, but doing so at incorrect
    * times may have bad results.
    *
-   * @param m The name to set.
+   * @param m The name to std::set.
    */
   void set_myname(const entity_name_t& m) { my_name = m; }
 
   /**
-   * Set the unknown address components for this Messenger.
+   * std::Set the unknown address components for this Messenger.
    * This is useful if the Messenger doesn't know its full address just by
    * binding, but another Messenger on the same interface has already learned
    * its full address. This function does not fill in known address elements,
@@ -208,7 +252,7 @@ public:
    */
   virtual bool set_addr_unknowns(const entity_addrvec_t &addrs) = 0;
   /**
-   * Set the address for this Messenger. This is useful if the Messenger
+   * std::Set the address for this Messenger. This is useful if the Messenger
    * binds to a specific address but advertises a different address on the
    * the network.
    *
@@ -238,7 +282,7 @@ public:
    * @{
    */
   /**
-   * Set the cluster protocol in use by this daemon.
+   * std::Set the cluster protocol in use by this daemon.
    * This is an init-time function and cannot be called after calling
    * start() or bind().
    *
@@ -246,7 +290,7 @@ public:
    */
   virtual void set_cluster_protocol(int p) = 0;
   /**
-   * Set a policy which is applied to all peers who do not have a type-specific
+   * std::Set a policy which is applied to all peers who do not have a type-specific
    * Policy.
    * This is an init-time function and cannot be called after calling
    * start() or bind().
@@ -255,7 +299,7 @@ public:
    */
   virtual void set_default_policy(Policy p) = 0;
   /**
-   * Set a policy which is applied to all peers of the given type.
+   * std::Set a policy which is applied to all peers of the given type.
    * This is an init-time function and cannot be called after calling
    * start() or bind().
    *
@@ -264,7 +308,7 @@ public:
    */
   virtual void set_policy(int type, Policy p) = 0;
   /**
-   * Set the Policy associated with a type of peer.
+   * std::Set the Policy associated with a type of peer.
    *
    * This can be called either on initial setup, or after connections
    * are already established.  However, the policies for existing
@@ -282,7 +326,7 @@ public:
    */
   virtual Policy get_default_policy() = 0;
   /**
-   * Set Throttlers applied to all Messages from the given type of peer
+   * std::Set Throttlers applied to all Messages from the given type of peer
    *
    * This is an init-time function and cannot be called after calling
    * start() or bind().
@@ -295,7 +339,7 @@ public:
    */
   virtual void set_policy_throttlers(int type, Throttle *bytes, Throttle *msgs=NULL) = 0;
   /**
-   * Set the default send priority
+   * std::Set the default send priority
    *
    * This is an init-time function and must be called *before* calling
    * start().
@@ -307,7 +351,7 @@ public:
     default_send_priority = p;
   }
   /**
-   * Set the priority(SO_PRIORITY) for all packets to be sent on this socket.
+   * std::Set the priority(SO_PRIORITY) for all packets to be sent on this socket.
    *
    * Linux uses this value to order the networking queues: packets with a higher
    * priority may be processed first depending on the selected device queueing
@@ -334,7 +378,7 @@ public:
    *
    * @param d The Dispatcher to insert into the list.
    */
-  void add_dispatcher_head(Dispatcher *d) { 
+  void add_dispatcher_head(Dispatcher *d) {
     bool first = dispatchers.empty();
     dispatchers.push_front(d);
     if (d->ms_can_fast_dispatch_any())
@@ -349,7 +393,7 @@ public:
    *
    * @param d The Dispatcher to insert into the list.
    */
-  void add_dispatcher_tail(Dispatcher *d) { 
+  void add_dispatcher_tail(Dispatcher *d) {
     bool first = dispatchers.empty();
     dispatchers.push_back(d);
     if (d->ms_can_fast_dispatch_any())
@@ -378,7 +422,7 @@ public:
    *
    * @param avoid_ports Additional port to avoid binding to.
    */
-  virtual int rebind(const set<int>& avoid_ports) { return -EOPNOTSUPP; }
+  virtual int rebind(const std::set<int>& avoid_ports) { return -EOPNOTSUPP; }
   /**
    * Bind the 'client' Messenger to a specific address.Messenger will bind
    * the address before connect to others when option ms_bind_before_connect
@@ -389,6 +433,11 @@ public:
   virtual int client_bind(const entity_addr_t& bind_addr) = 0;
 
   virtual int bindv(const entity_addrvec_t& addrs);
+
+
+  virtual bool should_use_msgr2() {
+    return false;
+  }
 
   /**
    * @} // Configuration
@@ -402,7 +451,7 @@ public:
    * Perform any resource allocation, thread startup, etc
    * that is required before attempting to connect to other
    * Messengers or transmit messages.
-   * Once this function completes, started shall be set to true.
+   * Once this function completes, started shall be std::set to true.
    *
    * @return 0 on success; -errno on failure.
    */
@@ -445,10 +494,6 @@ public:
    *
    * @return 0 on success, or -errno on failure.
    */
-  virtual int send_message(Message *m, const entity_inst_t& dest) {
-    return send_to(m, dest.name.type(), entity_addrvec_t(dest.addr));
-  }
-
   virtual int send_to(
     Message *m,
     int type,
@@ -485,12 +530,6 @@ public:
    *
    * @param dest The entity to get a connection for.
    */
-  virtual ConnectionRef get_connection(const entity_inst_t& dest) {
-    // temporary
-    return connect_to(dest.name.type(),
-		      entity_addrvec_t(dest.addr));
-  }
-
   virtual ConnectionRef connect_to(
     int type, const entity_addrvec_t& dest) = 0;
   ConnectionRef connect_to_mon(const entity_addrvec_t& dest) {
@@ -609,7 +648,7 @@ public:
    *
    * @param m The Message we are testing.
    */
-  bool ms_can_fast_dispatch(const Message::const_ref& m) {
+  bool ms_can_fast_dispatch(const cref_t<Message>& m) {
     for (const auto &dispatcher : fast_dispatchers) {
       if (dispatcher->ms_can_fast_dispatch2(m))
 	return true;
@@ -623,7 +662,7 @@ public:
    * @param m The Message we are fast dispatching.
    * If none of our Dispatchers can handle it, ceph_abort().
    */
-  void ms_fast_dispatch(const Message::ref &m) {
+  void ms_fast_dispatch(const ref_t<Message> &m) {
     m->set_dispatch_stamp(ceph_clock_now());
     for (const auto &dispatcher : fast_dispatchers) {
       if (dispatcher->ms_can_fast_dispatch2(m)) {
@@ -634,12 +673,12 @@ public:
     ceph_abort();
   }
   void ms_fast_dispatch(Message *m) {
-    return ms_fast_dispatch(Message::ref(m, false)); /* consume ref */
+    return ms_fast_dispatch(ref_t<Message>(m, false)); /* consume ref */
   }
   /**
    *
    */
-  void ms_fast_preprocess(const Message::ref &m) {
+  void ms_fast_preprocess(const ref_t<Message> &m) {
     for (const auto &dispatcher : fast_dispatchers) {
       dispatcher->ms_fast_preprocess2(m);
     }
@@ -651,7 +690,7 @@ public:
    *
    *  @param m The Message to deliver.
    */
-  void ms_deliver_dispatch(const Message::ref &m) {
+  void ms_deliver_dispatch(const ref_t<Message> &m) {
     m->set_dispatch_stamp(ceph_clock_now());
     for (const auto &dispatcher : dispatchers) {
       if (dispatcher->ms_dispatch2(m))
@@ -662,7 +701,7 @@ public:
     ceph_assert(!cct->_conf->ms_die_on_unhandled_msg);
   }
   void ms_deliver_dispatch(Message *m) {
-    return ms_deliver_dispatch(Message::ref(m, false)); /* consume ref */
+    return ms_deliver_dispatch(ref_t<Message>(m, false)); /* consume ref */
   }
   /**
    * Notify each Dispatcher of a new Connection. Call
@@ -755,40 +794,9 @@ public:
     }
   }
 
-  /**
-   * Get the AuthAuthorizer for a new outgoing Connection.
-   *
-   * @param peer_type The peer type for the new Connection
-   * @param force_new True if we want to wait for new keys, false otherwise.
-   * @return A pointer to the AuthAuthorizer, if we have one; NULL otherwise
-   */
-  AuthAuthorizer *ms_deliver_get_authorizer(int peer_type, bool force_new) {
-    AuthAuthorizer *a = 0;
-    for (const auto& dispatcher : dispatchers) {
-      if (dispatcher->ms_get_authorizer(peer_type, &a, force_new))
-	return a;
-    }
-    return NULL;
+  void set_require_authorizer(bool b) {
+    require_authorizer = b;
   }
-  /**
-   * Verify that the authorizer on a new incoming Connection is correct.
-   *
-   * @param con The new incoming Connection
-   * @param peer_type The type of the endpoint on the new Connection
-   * @param protocol The ID of the protocol in use (at time of writing, cephx or none)
-   * @param authorizer The authorization string supplied by the remote
-   * @param authorizer_reply Output param: The string we should send back to
-   * the remote to authorize ourselves. Only filled in if isvalid
-   * @param isvalid Output param: True if authorizer is valid, false otherwise
-   *
-   * @return True if we were able to prove or disprove correctness of
-   * authorizer, false otherwise.
-   */
-  bool ms_deliver_verify_authorizer(
-    Connection *con, int peer_type,
-    int protocol, bufferlist& authorizer, bufferlist& authorizer_reply,
-    bool& isvalid, CryptoKey& session_key,
-    std::unique_ptr<AuthAuthorizerChallenge> *challenge);
 
   /**
    * @} // Dispatcher Interfacing

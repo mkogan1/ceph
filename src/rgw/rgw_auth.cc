@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <array>
 
@@ -320,6 +320,54 @@ rgw::auth::Strategy::add_engine(const Control ctrl_flag,
   auth_stack.push_back(std::make_pair(std::cref(engine), ctrl_flag));
 }
 
+void rgw::auth::WebIdentityApplier::to_str(std::ostream& out) const
+{
+  out << "rgw::auth::WebIdentityApplier(sub =" << token_claims.sub
+      << ", user_name=" << token_claims.user_name
+      << ", aud =" << token_claims.aud
+      << ", provider_id =" << token_claims.iss << ")";
+}
+
+string rgw::auth::WebIdentityApplier::get_idp_url() const
+{
+  string idp_url = token_claims.iss;
+  auto pos = idp_url.find("http://");
+  if (pos == std::string::npos) {
+      pos = idp_url.find("https://");
+      if (pos != std::string::npos) {
+        idp_url.erase(pos, 8);
+    }
+  } else {
+    idp_url.erase(pos, 7);
+  }
+  return idp_url;
+}
+
+void rgw::auth::WebIdentityApplier::modify_request_state(const DoutPrefixProvider *dpp, req_state* s) const
+{
+  s->info.args.append("sub", token_claims.sub);
+  s->info.args.append("aud", token_claims.aud);
+  s->info.args.append("provider_id", token_claims.iss);
+
+  string idp_url = get_idp_url();
+  string condition = idp_url + ":app_id";
+  s->env.emplace(condition, token_claims.aud);
+}
+
+bool rgw::auth::WebIdentityApplier::is_identity(const idset_t& ids) const
+{
+  if (ids.size() > 1) {
+    return false;
+  }
+
+  for (auto id : ids) {
+    string idp_url = get_idp_url();
+    if (id.is_oidc_provider() && id.get_idp_url() == idp_url) {
+      return true;
+    }
+  }
+    return false;
+}
 
 /* rgw::auth::RemoteAuthApplier */
 uint32_t rgw::auth::RemoteApplier::get_perms_from_aclspec(const DoutPrefixProvider* dpp, const aclspec_t& aclspec) const
@@ -398,8 +446,48 @@ void rgw::auth::RemoteApplier::to_str(std::ostream& out) const
       << ", is_admin=" << info.is_admin << ")";
 }
 
+void rgw::auth::ImplicitTenants::recompute_value(const ConfigProxy& c)
+{
+  std::string s = c.get_val<std::string>("rgw_keystone_implicit_tenants");
+  int v = 0;
+  if (boost::iequals(s, "both")
+    || boost::iequals(s, "true")
+    || boost::iequals(s, "1")) {
+    v = IMPLICIT_TENANTS_S3|IMPLICIT_TENANTS_SWIFT;
+  } else if (boost::iequals(s, "0")
+    || boost::iequals(s, "none")
+    || boost::iequals(s, "false")) {
+    v = 0;
+  } else if (boost::iequals(s, "s3")) {
+    v = IMPLICIT_TENANTS_S3;
+  } else if (boost::iequals(s, "swift")) {
+    v = IMPLICIT_TENANTS_SWIFT;
+  } else {  /* "" (and anything else) */
+    v = IMPLICIT_TENANTS_BAD;
+    // assert(0);
+  }
+  saved = v;
+}
+
+const char **rgw::auth::ImplicitTenants::get_tracked_conf_keys() const
+{
+  static const char *keys[] = {
+    "rgw_keystone_implicit_tenants",
+  nullptr };
+  return keys;
+}
+
+void rgw::auth::ImplicitTenants::handle_conf_change(const ConfigProxy& c,
+	const std::set <std::string> &changed)
+{
+  if (changed.count("rgw_keystone_implicit_tenants")) {
+    recompute_value(c);
+  }
+}
+
 void rgw::auth::RemoteApplier::create_account(const DoutPrefixProvider* dpp,
                                               const rgw_user& acct_user,
+                                              bool implicit_tenant,
                                               RGWUserInfo& user_info) const      /* out */
 {
   rgw_user new_acct_user = acct_user;
@@ -411,7 +499,7 @@ void rgw::auth::RemoteApplier::create_account(const DoutPrefixProvider* dpp,
 
   /* An upper layer may enforce creating new accounts within their own
    * tenants. */
-  if (new_acct_user.tenant.empty() && implicit_tenants) {
+  if (new_acct_user.tenant.empty() && implicit_tenant) {
     new_acct_user.tenant = new_acct_user.id;
   }
 
@@ -422,8 +510,8 @@ void rgw::auth::RemoteApplier::create_account(const DoutPrefixProvider* dpp,
   rgw_apply_default_bucket_quota(user_info.bucket_quota, cct->_conf);
   rgw_apply_default_user_quota(user_info.user_quota, cct->_conf);
 
-  int ret = rgw_store_user_info(store, user_info, nullptr, nullptr,
-                                real_time(), true);
+  int ret = ctl->user->store_info(user_info, null_yield,
+                                  RGWUserCtl::PutParams().set_exclusive(true));
   if (ret < 0) {
     ldpp_dout(dpp, 0) << "ERROR: failed to store new user info: user="
                   << user_info.user_id << " ret=" << ret << dendl;
@@ -438,6 +526,9 @@ void rgw::auth::RemoteApplier::load_acct_info(const DoutPrefixProvider* dpp, RGW
    * that belongs to the authenticated identity. Another policy may be
    * applied by using a RGWThirdPartyAccountAuthApplier decorator. */
   const rgw_user& acct_user = info.acct_user;
+  auto implicit_value = implicit_tenant_context.get_value();
+  bool implicit_tenant = implicit_value.implicit_tenants_for_(implicit_tenant_bit);
+  bool split_mode = implicit_value.is_split_mode();
 
   /* Normally, empty "tenant" field of acct_user means the authenticated
    * identity has the legacy, global tenant. However, due to inclusion
@@ -449,20 +540,33 @@ void rgw::auth::RemoteApplier::load_acct_info(const DoutPrefixProvider* dpp, RGW
    * the wiser.
    * If that fails, we look up in the requested (possibly empty) tenant.
    * If that fails too, we create the account within the global or separated
-   * namespace depending on rgw_keystone_implicit_tenants. */
-  if (acct_user.tenant.empty()) {
+   * namespace depending on rgw_keystone_implicit_tenants.
+   * For compatibility with previous versions of ceph, it is possible
+   * to enable implicit_tenants for only s3 or only swift.
+   * in this mode ("split_mode"), we must constrain the id lookups to
+   * only use the identifier space that would be used if the id were
+   * to be created. */
+
+  if (split_mode && !implicit_tenant)
+	;	/* suppress lookup for id used by "other" protocol */
+  else if (acct_user.tenant.empty()) {
     const rgw_user tenanted_uid(acct_user.id, acct_user.id);
 
-    if (rgw_get_user_info_by_uid(store, tenanted_uid, user_info) >= 0) {
+    if (ctl->user->get_info_by_uid(tenanted_uid, &user_info, null_yield) >= 0) {
       /* Succeeded. */
       return;
     }
   }
 
-  if (rgw_get_user_info_by_uid(store, acct_user, user_info) < 0) {
-    ldpp_dout(dpp, 0) << "NOTICE: couldn't map swift user " << acct_user << dendl;
-    create_account(dpp, acct_user, user_info);
+  if (split_mode && implicit_tenant)
+	;	/* suppress lookup for id used by "other" protocol */
+  else if (ctl->user->get_info_by_uid(acct_user, &user_info, null_yield) >= 0) {
+      /* Succeeded. */
+      return;
   }
+
+  ldpp_dout(dpp, 0) << "NOTICE: couldn't map swift user " << acct_user << dendl;
+  create_account(dpp, acct_user, implicit_tenant, user_info);
 
   /* Succeeded if we are here (create_account() hasn't throwed). */
 }
@@ -535,7 +639,39 @@ void rgw::auth::LocalApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWU
   user_info = this->user_info;
 }
 
-void rgw::auth::LocalApplier::modify_request_state(const DoutPrefixProvider *dpp, req_state* s) const
+void rgw::auth::RoleApplier::to_str(std::ostream& out) const {
+  out << "rgw::auth::LocalApplier(role name =" << role_name;
+  for (auto policy : role_policies) {
+    out << ", role policy =" << policy;
+  }
+  out << ")";
+}
+
+bool rgw::auth::RoleApplier::is_identity(const idset_t& ids) const {
+  for (auto& p : ids) {
+    string name;
+    string tenant = p.get_tenant();
+    if (tenant.empty()) {
+      name = p.get_id();
+    } else {
+      name = tenant + "$" + p.get_id();
+    }
+    if (p.is_wildcard()) {
+      return true;
+    } else if (p.is_role() && name == role_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void rgw::auth::RoleApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const /* out */
+{
+  /* Load the user id */
+  user_info.user_id = this->user_id;
+}
+
+void rgw::auth::RoleApplier::modify_request_state(const DoutPrefixProvider *dpp, req_state* s) const
 {
   for (auto it : role_policies) {
     try {
@@ -562,7 +698,7 @@ rgw::auth::AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, const re
     auto apl = \
       apl_factory->create_apl_local(cct, s, user_info,
                                     rgw::auth::LocalApplier::NO_SUBUSER,
-                                    boost::none, boost::none);
+                                    boost::none);
     return result_t::grant(std::move(apl));
   }
 }

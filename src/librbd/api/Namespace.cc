@@ -3,6 +3,7 @@
 
 #include "common/errno.h"
 #include "cls/rbd/cls_rbd_client.h"
+#include "librbd/api/Mirror.h"
 #include "librbd/api/Namespace.h"
 #include "librbd/ImageCtx.h"
 
@@ -117,6 +118,13 @@ int Namespace<I>::remove(librados::IoCtx& io_ctx, const std::string& name)
     goto rollback;
   }
 
+  r = Mirror<I>::mode_set(ns_ctx, RBD_MIRROR_MODE_DISABLED);
+  if (r < 0) {
+    lderr(cct) << "failed to disable mirroring: " << cpp_strerror(r)
+               << dendl;
+    return r;
+  }
+
   r = cls_client::namespace_remove(&default_ns_ctx, name);
   if (r < 0) {
     lderr(cct) << "failed to remove namespace: " << cpp_strerror(r) << dendl;
@@ -177,6 +185,7 @@ int Namespace<I>::exists(librados::IoCtx& io_ctx, const std::string& name, bool 
   CephContext *cct = (CephContext *)io_ctx.cct();
   ldout(cct, 5) << "name=" << name << dendl;
 
+  *exists = false;
   if (name.empty()) {
     return -EINVAL;
   }
@@ -189,9 +198,7 @@ int Namespace<I>::exists(librados::IoCtx& io_ctx, const std::string& name, bool 
                                                cls::rbd::DIRECTORY_STATE_READY);
   if (r == 0) {
     *exists = true;
-  } else if (r == -ENOENT) {
-    *exists = false;
-  } else {
+  } else if (r != -ENOENT) {
     lderr(cct) << "error asserting namespace: " << cpp_strerror(r) << dendl;
     return r;
   }

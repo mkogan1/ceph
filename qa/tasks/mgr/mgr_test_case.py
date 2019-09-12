@@ -1,5 +1,3 @@
-
-from unittest import case
 import json
 import logging
 
@@ -36,10 +34,8 @@ class MgrCluster(CephCluster):
         self.mgr_daemons[mgr_id].restart()
 
     def get_mgr_map(self):
-        status = json.loads(
-            self.mon_manager.raw_cluster_cmd("status", "--format=json-pretty"))
-
-        return status["mgrmap"]
+        return json.loads(
+            self.mon_manager.raw_cluster_cmd("mgr", "dump", "--format=json-pretty"))
 
     def get_active_id(self):
         return self.get_mgr_map()["active_name"]
@@ -101,16 +97,30 @@ class MgrTestCase(CephTestCase):
         assert cls.mgr_cluster is not None
 
         if len(cls.mgr_cluster.mgr_ids) < cls.MGRS_REQUIRED:
-            raise case.SkipTest("Only have {0} manager daemons, "
+            self.skipTest("Only have {0} manager daemons, "
                                 "{1} are required".format(
                 len(cls.mgr_cluster.mgr_ids), cls.MGRS_REQUIRED))
 
         cls.setup_mgrs()
 
     @classmethod
+    def _unload_module(cls, module_name):
+        def is_disabled():
+            enabled_modules = json.loads(cls.mgr_cluster.mon_manager.raw_cluster_cmd(
+                'mgr', 'module', 'ls'))['enabled_modules']
+            return module_name not in enabled_modules
+
+        if is_disabled():
+            return
+
+        log.info("Unloading Mgr module %s ...", module_name)
+        cls.mgr_cluster.mon_manager.raw_cluster_cmd('mgr', 'module', 'disable', module_name)
+        cls.wait_until_true(is_disabled, timeout=30)
+
+    @classmethod
     def _load_module(cls, module_name):
         loaded = json.loads(cls.mgr_cluster.mon_manager.raw_cluster_cmd(
-                   "mgr", "module", "ls"))['enabled_modules']
+            "mgr", "module", "ls"))['enabled_modules']
         if module_name in loaded:
             # The enable command is idempotent, but our wait for a restart
             # isn't, so let's return now if it's already loaded
@@ -120,7 +130,7 @@ class MgrTestCase(CephTestCase):
 
         # check if the the module is configured as an always on module
         mgr_daemons = json.loads(cls.mgr_cluster.mon_manager.raw_cluster_cmd(
-                   "mgr", "metadata"))
+            "mgr", "metadata"))
 
         for daemon in mgr_daemons:
             if daemon["name"] == initial_mgr_map["active_name"]:
@@ -129,9 +139,10 @@ class MgrTestCase(CephTestCase):
                 if module_name in always_on:
                     return
 
+        log.info("Loading Mgr module %s ...", module_name)
         initial_gid = initial_mgr_map['active_gid']
-        cls.mgr_cluster.mon_manager.raw_cluster_cmd("mgr", "module", "enable",
-                                                    module_name, "--force")
+        cls.mgr_cluster.mon_manager.raw_cluster_cmd(
+            "mgr", "module", "enable", module_name, "--force")
 
         # Wait for the module to load
         def has_restarted():
@@ -139,7 +150,7 @@ class MgrTestCase(CephTestCase):
             done = mgr_map['active_gid'] != initial_gid and mgr_map['available']
             if done:
                 log.info("Restarted after module load (new active {0}/{1})".format(
-                    mgr_map['active_name'] , mgr_map['active_gid']))
+                    mgr_map['active_name'], mgr_map['active_gid']))
             return done
         cls.wait_until_true(has_restarted, timeout=30)
 
@@ -199,6 +210,6 @@ class MgrTestCase(CephTestCase):
             done = mgr_map['available']
             if done:
                 log.info("Available after assign ports (new active {0}/{1})".format(
-                    mgr_map['active_name'] , mgr_map['active_gid']))
+                    mgr_map['active_name'], mgr_map['active_gid']))
             return done
         cls.wait_until_true(is_available, timeout=30)

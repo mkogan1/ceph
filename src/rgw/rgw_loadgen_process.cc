@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "common/errno.h"
 #include "common/Throttle.h"
@@ -107,7 +107,7 @@ void RGWLoadGenProcess::gen_request(const string& method,
 				    int content_length, std::atomic<bool>* fail_flag)
 {
   RGWLoadGenRequest* req =
-    new RGWLoadGenRequest(store->get_new_req_id(), method, resource,
+    new RGWLoadGenRequest(store->getRados()->get_new_req_id(), method, resource,
 			  content_length, fail_flag);
   dout(10) << "allocated request req=" << hex << req << dec << dendl;
   req_throttle.get(1);
@@ -134,7 +134,8 @@ void RGWLoadGenProcess::handle_request(RGWRequest* r)
   RGWRestfulIO client_io(cct, &real_client_io);
 
   int ret = process_request(store, rest, req, uri_prefix,
-                            *auth_registry, &client_io, olog);
+                            *auth_registry, &client_io, olog,
+                            null_yield, nullptr);
   if (ret < 0) {
     /* we don't really care about return code */
     dout(20) << "process_request() returned " << ret << dendl;

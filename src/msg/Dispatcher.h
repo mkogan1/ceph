@@ -1,4 +1,4 @@
-// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 /*
  * Ceph - scalable distributed file system
@@ -7,9 +7,9 @@
  *
  * This is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
- * License version 2.1, as published by the Free Software 
+ * License version 2.1, as published by the Free Software
  * Foundation.  See file COPYING.
- * 
+ *
  */
 
 
@@ -23,10 +23,8 @@
 
 class Messenger;
 class Connection;
-class AuthAuthorizer;
 class CryptoKey;
 class CephContext;
-class AuthAuthorizerChallenge;
 class KeyStore;
 
 class Dispatcher {
@@ -167,7 +165,7 @@ public:
   virtual void ms_handle_fast_accept(Connection *con) {}
 
   /*
-   * this indicates that the ordered+reliable delivery semantics have 
+   * this indicates that the ordered+reliable delivery semantics have
    * been violated.  Messages may have been lost due to a fault
    * in the network connection.
    * Only called on lossy Connections.
@@ -187,7 +185,7 @@ public:
    * a reference to it.
    */
   virtual void ms_handle_remote_reset(Connection *con) = 0;
-  
+
   /**
    * This indicates that the connection is both broken and further
    * connection attempts are failing because other side refuses
@@ -202,6 +200,7 @@ public:
    * @defgroup Authentication
    * @{
    */
+
   /**
    * handle successful authentication (msgr2)
    *
@@ -216,43 +215,11 @@ public:
   }
 
   /**
-   * get authentication keyring
-   *
-   * Return the keyring to use for authentication with msgr1.  Remove me
-   * someday.
-   */
-  virtual KeyStore* ms_get_auth1_authorizer_keystore() {
-    return nullptr;
-  }
-
-  /**
-   * Retrieve the AuthAuthorizer for the given peer type. It might not
-   * provide one if it knows there is no AuthAuthorizer for that type.
-   *
-   * @param dest_type The peer type we want the authorizer for.
-   * @param a Double pointer to an AuthAuthorizer. The Dispatcher will fill
-   * in *a with the correct AuthAuthorizer, if it can. Make sure that you have
-   * set *a to NULL before calling in.
-   * @param force_new Force the Dispatcher to wait for a new set of keys before
-   * returning the authorizer.
-   *
-   * @return True if this function call properly filled in *a, false otherwise.
-   */
-  virtual bool ms_get_authorizer(int dest_type, AuthAuthorizer **a, bool force_new) { return false; }
-  /**
    * @} //Authentication
    */
 
-  void ms_set_require_authorizer(bool b) {
-    require_authorizer = b;
-  }
 protected:
   CephContext *cct;
-public:
-  // allow unauthenticated connections.  This is needed for
-  // compatibility with pre-nautilus OSDs, which do not authenticate
-  // the heartbeat sessions.
-  bool require_authorizer = true;
 private:
   explicit Dispatcher(const Dispatcher &rhs);
   Dispatcher& operator=(const Dispatcher &rhs);

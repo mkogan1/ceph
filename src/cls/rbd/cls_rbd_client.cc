@@ -7,6 +7,7 @@
 #include "include/encoding.h"
 #include "include/rbd_types.h"
 #include "include/rados/librados.hpp"
+#include "common/bit_vector.hpp"
 
 #include <errno.h>
 
@@ -445,18 +446,19 @@ int parent_overlap_get(librados::IoCtx* ioctx, const std::string &oid,
 
 void parent_attach(librados::ObjectWriteOperation* op,
                    const cls::rbd::ParentImageSpec& parent_image_spec,
-                   uint64_t parent_overlap) {
+                   uint64_t parent_overlap, bool reattach) {
   bufferlist in_bl;
   encode(parent_image_spec, in_bl);
   encode(parent_overlap, in_bl);
+  encode(reattach, in_bl);
   op->exec("rbd", "parent_attach", in_bl);
 }
 
 int parent_attach(librados::IoCtx *ioctx, const std::string &oid,
                   const cls::rbd::ParentImageSpec& parent_image_spec,
-                  uint64_t parent_overlap) {
+                  uint64_t parent_overlap, bool reattach) {
   librados::ObjectWriteOperation op;
-  parent_attach(&op, parent_image_spec, parent_overlap);
+  parent_attach(&op, parent_image_spec, parent_overlap, reattach);
   return ioctx->operate(oid, &op);
 }
 
@@ -831,10 +833,34 @@ int get_all_features(librados::IoCtx *ioctx, const std::string &oid,
   return get_all_features_finish(&it, all_features);
 }
 
+void copyup(librados::ObjectWriteOperation *op, bufferlist data) {
+  op->exec("rbd", "copyup", data);
+}
+
 int copyup(librados::IoCtx *ioctx, const std::string &oid,
            bufferlist data) {
-  bufferlist out;
-  return ioctx->exec(oid, "rbd", "copyup", data, out);
+  librados::ObjectWriteOperation op;
+  copyup(&op, data);
+
+  return ioctx->operate(oid, &op);
+}
+
+void sparse_copyup(librados::ObjectWriteOperation *op,
+                   const std::map<uint64_t, uint64_t> &extent_map,
+                   bufferlist data) {
+  bufferlist bl;
+  encode(extent_map, bl);
+  encode(data, bl);
+  op->exec("rbd", "sparse_copyup", bl);
+}
+
+int sparse_copyup(librados::IoCtx *ioctx, const std::string &oid,
+                  const std::map<uint64_t, uint64_t> &extent_map,
+                  bufferlist data) {
+  librados::ObjectWriteOperation op;
+  sparse_copyup(&op, extent_map, data);
+
+  return ioctx->operate(oid, &op);
 }
 
 void get_protection_status_start(librados::ObjectReadOperation *op,
@@ -2170,6 +2196,84 @@ void mirror_image_status_remove_down(librados::ObjectWriteOperation *op) {
   op->exec("rbd", "mirror_image_status_remove_down", bl);
 }
 
+int mirror_image_instance_get(librados::IoCtx *ioctx,
+                              const std::string &global_image_id,
+                              entity_inst_t *instance) {
+  librados::ObjectReadOperation op;
+  mirror_image_instance_get_start(&op, global_image_id);
+
+  bufferlist out_bl;
+  int r = ioctx->operate(RBD_MIRRORING, &op, &out_bl);
+  if (r < 0) {
+    return r;
+  }
+
+  auto iter = out_bl.cbegin();
+  r = mirror_image_instance_get_finish(&iter, instance);
+  if (r < 0) {
+    return r;
+  }
+  return 0;
+}
+
+void mirror_image_instance_get_start(librados::ObjectReadOperation *op,
+                                     const std::string &global_image_id) {
+  bufferlist bl;
+  encode(global_image_id, bl);
+  op->exec("rbd", "mirror_image_instance_get", bl);
+}
+
+int mirror_image_instance_get_finish(bufferlist::const_iterator *iter,
+                                     entity_inst_t *instance) {
+  try {
+    decode(*instance, *iter);
+  } catch (const buffer::error &err) {
+    return -EBADMSG;
+  }
+  return 0;
+}
+
+int mirror_image_instance_list(
+    librados::IoCtx *ioctx, const std::string &start, uint64_t max_return,
+    std::map<std::string, entity_inst_t> *instances) {
+  librados::ObjectReadOperation op;
+  mirror_image_instance_list_start(&op, start, max_return);
+
+  bufferlist out_bl;
+  int r = ioctx->operate(RBD_MIRRORING, &op, &out_bl);
+  if (r < 0) {
+    return r;
+  }
+
+  auto iter = out_bl.cbegin();
+  r = mirror_image_instance_list_finish(&iter, instances);
+  if (r < 0) {
+    return r;
+  }
+  return 0;
+}
+
+void mirror_image_instance_list_start(librados::ObjectReadOperation *op,
+                                      const std::string &start,
+                                      uint64_t max_return) {
+  bufferlist bl;
+  encode(start, bl);
+  encode(max_return, bl);
+  op->exec("rbd", "mirror_image_instance_list", bl);
+}
+
+int mirror_image_instance_list_finish(
+    bufferlist::const_iterator *iter,
+    std::map<std::string, entity_inst_t> *instances) {
+  instances->clear();
+  try {
+    decode(*instances, *iter);
+  } catch (const buffer::error &err) {
+    return -EBADMSG;
+  }
+  return 0;
+}
+
 void mirror_instances_list_start(librados::ObjectReadOperation *op) {
   bufferlist bl;
   op->exec("rbd", "mirror_instances_list", bl);
@@ -2703,6 +2807,24 @@ int namespace_list(librados::IoCtx *ioctx,
 
   auto iter = out_bl.cbegin();
   return namespace_list_finish(&iter, entries);
+}
+
+void sparsify(librados::ObjectWriteOperation *op, size_t sparse_size,
+              bool remove_empty)
+{
+  bufferlist bl;
+  encode(sparse_size, bl);
+  encode(remove_empty, bl);
+  op->exec("rbd", "sparsify", bl);
+}
+
+int sparsify(librados::IoCtx *ioctx, const std::string &oid, size_t sparse_size,
+             bool remove_empty)
+{
+  librados::ObjectWriteOperation op;
+  sparsify(&op, sparse_size, remove_empty);
+
+  return ioctx->operate(oid, &op);
 }
 
 } // namespace cls_client

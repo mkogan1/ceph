@@ -7,22 +7,21 @@
               selectionType="single"
               (updateSelection)="updateSelection($event)"
               [updateSelectionOnRefresh]="'never'">
-      <div class="table-actions btn-toolbar" *ngIf="permission.update">
-        <cd-table-actions [permission]="permission"
+      <div class="table-actions btn-toolbar">
+        <cd-table-actions [permission]="permissions.osd"
                           [selection]="selection"
-                          onlyDropDown="Perform Task"
                           class="btn-group"
+                          id="osd-actions"
                           [tableActions]="tableActions">
         </cd-table-actions>
-
-        <button class="btn btn-sm btn-default btn-label tc_configureCluster"
-                type="button"
-                (click)="configureClusterAction()">
-          <i class="fa fa-fw fa-cog"
-             aria-hidden="true">
-          </i>
-          <ng-container i18n>Set Cluster-wide OSD Flags</ng-container>
-        </button>
+        <cd-table-actions [permission]="{read: true}"
+                          [selection]="selection"
+                          dropDownOnly="Cluster-wide configuration"
+                          btnColor="light"
+                          class="btn-group"
+                          id="cluster-wide-actions"
+                          [tableActions]="clusterWideActions">
+        </cd-table-actions>
       </div>
 
       <cd-osd-details cdTableDetail
@@ -33,8 +32,8 @@
     <ng-template #statusColor
                  let-value="value">
       <span *ngFor="let state of value; last as last">
-        <span class="label"
-              [ngClass]="{'label-success': ['in', 'up'].includes(state), 'label-danger': ['down', 'out'].includes(state)}">{{ state }}</span>
+        <span class="badge"
+              [ngClass]="{'badge-success': ['in', 'up'].includes(state), 'badge-danger': ['down', 'out'].includes(state)}">{{ state }}</span>
         <span *ngIf="!last">&nbsp;</span>
       </span>
     </ng-template>
@@ -47,9 +46,28 @@
     </ng-template>
   </tab>
   <tab i18n-heading
+       *ngIf="permissions.grafana.read"
        heading="Overall Performance">
-    <cd-grafana [grafanaPath]="'lo02I1Aiz/osd-overview?'"
+    <cd-grafana [grafanaPath]="'osd-overview?'"
+                uid="lo02I1Aiz"
                 grafanaStyle="three">
     </cd-grafana>
   </tab>
 </tabset>
+
+<ng-template #markOsdConfirmationTpl
+             let-markActionDescription="markActionDescription">
+  <ng-container i18n><strong>OSD {{ selection.first().id }}</strong> will be marked
+<strong>{{ markActionDescription }}</strong> if you proceed.</ng-container>
+</ng-template>
+
+<ng-template #criticalConfirmationTpl
+             let-safeToDestroyResult="result"
+             let-actionDescription="actionDescription">
+  <div *ngIf="!safeToDestroyResult['is_safe_to_destroy']"
+       class="danger">
+    <cd-warning-panel i18n>The OSD is not safe to destroy!</cd-warning-panel>
+  </div>
+  <ng-container i18n><strong>OSD {{ selection.first().id }}</strong> will be
+<strong>{{ actionDescription }}</strong> if you proceed.</ng-container>
+</ng-template>

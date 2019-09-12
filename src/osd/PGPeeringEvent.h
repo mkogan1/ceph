@@ -26,7 +26,7 @@ struct PGCreateInfo {
 class PGPeeringEvent {
   epoch_t epoch_sent;
   epoch_t epoch_requested;
-  string desc;
+  std::string desc;
 public:
   boost::intrusive_ptr< const boost::statechart::event_base > evt;
   bool requires_pg;
@@ -44,7 +44,7 @@ public:
       evt(evt_.intrusive_from_this()),
       requires_pg(req),
       create_info(ci) {
-    stringstream out;
+    std::stringstream out;
     out << "epoch_sent: " << epoch_sent
 	<< " epoch_requested: " << epoch_requested << " ";
     evt_.print(&out);
@@ -53,20 +53,21 @@ public:
     }
     desc = out.str();
   }
-  epoch_t get_epoch_sent() {
+  epoch_t get_epoch_sent() const {
     return epoch_sent;
   }
-  epoch_t get_epoch_requested() {
+  epoch_t get_epoch_requested() const {
     return epoch_requested;
   }
-  const boost::statechart::event_base &get_event() {
+  const boost::statechart::event_base &get_event() const {
     return *evt;
   }
-  const string& get_desc() {
+  const std::string& get_desc() const {
     return desc;
   }
 };
 typedef std::shared_ptr<PGPeeringEvent> PGPeeringEventRef;
+typedef std::unique_ptr<PGPeeringEvent> PGPeeringEventURef;
 
 struct MInfoRec : boost::statechart::event< MInfoRec > {
   pg_shard_t from;
@@ -82,8 +83,7 @@ struct MInfoRec : boost::statechart::event< MInfoRec > {
 struct MLogRec : boost::statechart::event< MLogRec > {
   pg_shard_t from;
   boost::intrusive_ptr<MOSDPGLog> msg;
-  MLogRec(pg_shard_t from, MOSDPGLog *msg) :
-    from(from), msg(msg) {}
+  MLogRec(pg_shard_t from, MOSDPGLog *msg);
   void print(std::ostream *out) const {
     *out << "MLogRec from " << from;
   }
@@ -94,14 +94,11 @@ struct MNotifyRec : boost::statechart::event< MNotifyRec > {
   pg_shard_t from;
   pg_notify_t notify;
   uint64_t features;
-  PastIntervals past_intervals;
-  MNotifyRec(spg_t p, pg_shard_t from, const pg_notify_t &notify, uint64_t f,
-	     const PastIntervals& pi)
-    : pgid(p), from(from), notify(notify), features(f), past_intervals(pi) {}
+  MNotifyRec(spg_t p, pg_shard_t from, const pg_notify_t &notify, uint64_t f)
+    : pgid(p), from(from), notify(notify), features(f) {}
   void print(std::ostream *out) const {
     *out << "MNotifyRec " << pgid << " from " << from << " notify: " << notify
-	 << " features: 0x" << hex << features << dec
-	 << " " << past_intervals;
+	 << " features: 0x" << std::hex << features << std::dec;
   }
 };
 
@@ -134,11 +131,15 @@ struct MTrim : boost::statechart::event<MTrim> {
 
 struct RequestBackfillPrio : boost::statechart::event< RequestBackfillPrio > {
   unsigned priority;
-  explicit RequestBackfillPrio(unsigned prio) :
+  int64_t primary_num_bytes;
+  int64_t local_num_bytes;
+  explicit RequestBackfillPrio(unsigned prio, int64_t pbytes, int64_t lbytes) :
     boost::statechart::event< RequestBackfillPrio >(),
-    priority(prio) {}
+    priority(prio), primary_num_bytes(pbytes), local_num_bytes(lbytes) {}
   void print(std::ostream *out) const {
-    *out << "RequestBackfillPrio: priority " << priority;
+    *out << "RequestBackfillPrio: priority " << priority
+         << " primary bytes " << primary_num_bytes
+         << " local bytes " << local_num_bytes;
   }
 };
 
@@ -161,7 +162,7 @@ struct RequestRecoveryPrio : boost::statechart::event< RequestRecoveryPrio > {
 
 TrivialEvent(NullEvt)
 TrivialEvent(RemoteBackfillReserved)
-TrivialEvent(RemoteReservationRejected)
+TrivialEvent(RemoteReservationRejectedTooFull)
 TrivialEvent(RemoteReservationRevokedTooFull)
 TrivialEvent(RemoteReservationRevoked)
 TrivialEvent(RemoteReservationCanceled)

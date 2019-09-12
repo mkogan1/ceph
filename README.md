@@ -5,7 +5,7 @@ Please see http://ceph.com/ for current info.
 
 ## Contributing Code
 
-Most of Ceph is licensed under the LGPL version 2.1.  Some
+Most of Ceph is dual licensed under the LGPL version 2.1 or 3.0.  Some
 miscellaneous code is under BSD-style license or is public domain.
 The documentation is licensed under Creative Commons
 Attribution Share Alike 3.0 (CC-BY-SA-3.0).  There are a handful of headers
@@ -58,6 +58,11 @@ Build instructions:
 	./do_cmake.sh
 	cd build
 	make
+
+(Note: do_cmake.sh now defaults to creating a debug build of ceph that can
+be up to 5x slower with some workloads. Please pass 
+"-DCMAKE_BUILD_TYPE=RelWithDebInfo" to do_cmake.sh to create a non-debug 
+release.)
 
 This assumes you make your build dir a subdirectory of the ceph.git
 checkout. If you put it elsewhere, just replace `..` in do_cmake.sh with a

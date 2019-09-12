@@ -22,6 +22,7 @@
 #include "common/Formatter.h"
 #include "common/errno.h"
 #include "common/ceph_argparse.h"
+#include "common/url_escape.h"
 
 #include "global/global_init.h"
 
@@ -35,6 +36,7 @@
 #include "osd/PGLog.h"
 #include "osd/OSD.h"
 #include "osd/PG.h"
+#include "osd/ECUtil.h"
 
 #include "json_spirit/json_spirit_value.h"
 #include "json_spirit/json_spirit_reader.h"
@@ -285,9 +287,127 @@ struct lookup_ghobject : public action_on_object_t {
   }
 };
 
+struct lookup_slow_ghobject : public action_on_object_t {
+  list<tuple<
+    coll_t,
+    ghobject_t,
+    ceph::signedspan,
+    ceph::signedspan,
+    ceph::signedspan,
+    string> > _objects;
+  const string _name;
+  double threshold;
+
+  coll_t last_coll;
+
+  lookup_slow_ghobject(const string& name, double _threshold) :
+    _name(name), threshold(_threshold) { }
+
+  void call(ObjectStore *store, coll_t coll, ghobject_t &ghobj, object_info_t &oi) override {
+    ObjectMap::ObjectMapIterator iter;
+    auto start1 = mono_clock::now();
+    ceph::signedspan first_seek_time = start1 - start1;
+    ceph::signedspan last_seek_time = first_seek_time;
+    ceph::signedspan total_time = first_seek_time;
+    {
+      auto ch = store->open_collection(coll);
+      iter = store->get_omap_iterator(ch, ghobj);
+      if (!iter) {
+	cerr << "omap_get_iterator: " << cpp_strerror(ENOENT)
+	     << " obj:" << ghobj
+	     << std::endl;
+	return;
+      }
+      auto start = mono_clock::now();
+      iter->seek_to_first();
+      first_seek_time = mono_clock::now() - start;
+
+      while(iter->valid()) {
+        start = mono_clock::now();
+	iter->next();
+	last_seek_time = mono_clock::now() - start;
+      }
+    }
+
+    if (coll != last_coll) {
+      cerr << ">>> inspecting coll" << coll << std::endl;
+      last_coll = coll;
+    }
+
+    total_time = mono_clock::now() - start1;
+    if ( total_time >= make_timespan(threshold)) {
+      _objects.emplace_back(coll, ghobj,
+	first_seek_time, last_seek_time, total_time,
+	url_escape(iter->tail_key()));
+      cerr << ">>>>>  found obj " << ghobj
+	   << " first_seek_time "
+	   << std::chrono::duration_cast<std::chrono::seconds>(first_seek_time).count()
+	   << " last_seek_time "
+	   << std::chrono::duration_cast<std::chrono::seconds>(last_seek_time).count()
+	   << " total_time "
+	   << std::chrono::duration_cast<std::chrono::seconds>(total_time).count()
+	   << " tail key: " << url_escape(iter->tail_key())
+	   << std::endl;
+    }
+    return;
+  }
+
+  int size() const {
+    return _objects.size();
+  }
+
+  void dump(Formatter *f, bool human_readable) const {
+    if (!human_readable)
+      f->open_array_section("objects");
+    for (auto i = _objects.begin();
+	 i != _objects.end();
+	 ++i) {
+      f->open_array_section("object");
+      coll_t coll;
+      ghobject_t ghobj;
+      ceph::signedspan first_seek_time;
+      ceph::signedspan last_seek_time;
+      ceph::signedspan total_time;
+      string tail_key;
+      std::tie(coll, ghobj, first_seek_time, last_seek_time, total_time, tail_key) = *i;
+
+      spg_t pgid;
+      bool is_pg = coll.is_pg(&pgid);
+      if (is_pg)
+        f->dump_string("pgid", stringify(pgid));
+      if (!is_pg || !human_readable)
+        f->dump_string("coll", coll.to_str());
+      f->dump_object("ghobject", ghobj);
+      f->open_object_section("times");
+      f->dump_int("first_seek_time",
+	std::chrono::duration_cast<std::chrono::seconds>(first_seek_time).count());
+      f->dump_int("last_seek_time",
+	std::chrono::duration_cast<std::chrono::seconds>
+	  (last_seek_time).count());
+      f->dump_int("total_time",
+	std::chrono::duration_cast<std::chrono::seconds>(total_time).count());
+      f->dump_string("tail_key", tail_key);
+      f->close_section();
+
+      f->close_section();
+      if (human_readable) {
+        f->flush(cout);
+        cout << std::endl;
+      }
+    }
+    if (!human_readable) {
+      f->close_section();
+      f->flush(cout);
+      cout << std::endl;
+    }
+  }
+};
+
 int file_fd = fd_none;
 bool debug;
 bool force = false;
+bool no_superblock = false;
+
 super_header sh;
 
 static int get_fd_data(int fd, bufferlist &bl)
@@ -458,7 +578,7 @@ int write_info(ObjectStore::Transaction &t, epoch_t epoch, pg_info_t &info,
   ghobject_t pgmeta_oid(info.pgid.make_pgmeta_oid());
   map<string,bufferlist> km;
   pg_info_t last_written_info;
-  int ret = PG::_prepare_write_info(
+  int ret = prepare_info_keymap(
     g_ceph_context,
     &km, epoch,
     info,
@@ -534,7 +654,7 @@ int do_trim_pg_log(ObjectStore *store, const coll_t &coll,
     ObjectMap::ObjectMapIterator p = store->get_omap_iterator(ch, oid);
     if (!p)
       break;
-    for (p->seek_to_first(); p->valid(); p->next(false)) {
+    for (p->seek_to_first(); p->valid(); p->next()) {
       if (p->key()[0] == '_')
 	continue;
       if (p->key() == "can_rollback_to")
@@ -1454,7 +1574,7 @@ void filter_divergent_priors(spg_t import_pgid, const OSDMap &curmap,
   }
 }
 
-int ObjectStoreTool::dump_import(Formatter *formatter)
+int ObjectStoreTool::dump_export(Formatter *formatter)
 {
   bufferlist ebl;
   pg_info_t info;
@@ -1509,7 +1629,7 @@ int ObjectStoreTool::dump_import(Formatter *formatter)
       return ret;
 
     if (debug) {
-      cerr << "dump_import: Section type " << std::to_string(type) << std::endl;
+      cerr << "dump_export: Section type " << std::to_string(type) << std::endl;
     }
     if (type >= END_OF_TYPES) {
       cerr << "Skipping unknown section type" << std::endl;
@@ -1710,7 +1830,8 @@ int ObjectStoreTool::do_import(ObjectStore *store, OSDSuperblock& sb,
 	auto p = pg_num_history.pg_nums.find(pgid.pgid.m_pool);
 	if (p != pg_num_history.pg_nums.end() &&
 	    !p->second.empty()) {
-	  unsigned pg_num = ms.osdmap.get_pg_num(pgid.pgid.pool());
+	  unsigned start_pg_num = ms.osdmap.get_pg_num(pgid.pgid.pool());
+	  unsigned pg_num = start_pg_num;
 	  for (auto q = p->second.lower_bound(ms.map_epoch);
 	       q != p->second.end();
 	       ++q) {
@@ -1733,7 +1854,8 @@ int ObjectStoreTool::do_import(ObjectStore *store, OSDSuperblock& sb,
 
 	    // check for split children
 	    set<spg_t> children;
-	    if (pgid.is_split(pg_num, new_pg_num, &children)) {
+	    if (pgid.is_split(start_pg_num, new_pg_num, &children)) {
+	      cerr << " children are " << children << std::endl;
 	      for (auto child : children) {
 		coll_t coll(child);
 		if (store->collection_exists(coll)) {
@@ -1754,10 +1876,10 @@ int ObjectStoreTool::do_import(ObjectStore *store, OSDSuperblock& sb,
       if (!dry_run) {
 	ObjectStore::Transaction t;
 	ch = store->create_new_collection(coll);
-	PG::_create(
+	create_pg_collection(
 	  t, pgid,
 	  pgid.get_split_bits(ms.osdmap.get_pg_pool(pgid.pool())->get_pg_num()));
-	PG::_init(t, pgid, NULL);
+	init_pg_ondisk(t, pgid, NULL);
 
 	// mark this coll for removal until we're done
 	map<string,bufferlist> values;
@@ -1879,6 +2001,23 @@ int do_list(ObjectStore *store, string pgidstr, string object, boost::optional<s
   return 0;
 }
 
+int do_list_slow(ObjectStore *store, string pgidstr, string object,
+	    double threshold, Formatter *formatter, bool debug, bool human_readable)
+{
+  int r;
+  lookup_slow_ghobject lookup(object, threshold);
+  if (pgidstr.length() > 0) {
+    r = action_on_all_objects_in_pg(store, pgidstr, lookup, debug);
+  } else {
+    r = action_on_all_objects(store, lookup, debug);
+  }
+  if (r)
+    return r;
+  lookup.dump(formatter, human_readable);
+  formatter->flush(cout);
+  return 0;
+}
+
 int do_meta(ObjectStore *store, string object, Formatter *formatter, bool debug, bool human_readable)
 {
   int r;
@@ -1892,25 +2031,36 @@ int do_meta(ObjectStore *store, string object, Formatter *formatter, bool debug,
   return 0;
 }
 
+enum rmtype {
+  BOTH,
+  SNAPMAP,
+  NOSNAPMAP
+};
+
 int remove_object(coll_t coll, ghobject_t &ghobj,
   SnapMapper &mapper,
   MapCacher::Transaction<std::string, bufferlist> *_t,
-  ObjectStore::Transaction *t)
+  ObjectStore::Transaction *t,
+  enum rmtype type)
 {
-  int r = mapper.remove_oid(ghobj.hobj, _t);
-  if (r < 0 && r != -ENOENT) {
-    cerr << "remove_oid returned " << cpp_strerror(r) << std::endl;
-    return r;
+  if (type == BOTH || type == SNAPMAP) {
+    int r = mapper.remove_oid(ghobj.hobj, _t);
+    if (r < 0 && r != -ENOENT) {
+      cerr << "remove_oid returned " << cpp_strerror(r) << std::endl;
+      return r;
+    }
   }
 
-  t->remove(coll, ghobj);
+  if (type == BOTH || type == NOSNAPMAP) {
+    t->remove(coll, ghobj);
+  }
   return 0;
 }
 
 int get_snapset(ObjectStore *store, coll_t coll, ghobject_t &ghobj, SnapSet &ss, bool silent);
 
 int do_remove_object(ObjectStore *store, coll_t coll,
-		     ghobject_t &ghobj, bool all, bool force)
+		     ghobject_t &ghobj, bool all, bool force, enum rmtype type)
 {
   auto ch = store->open_collection(coll);
   spg_t pg;
@@ -1933,16 +2083,20 @@ int do_remove_object(ObjectStore *store, coll_t coll,
     r = get_snapset(store, coll, ghobj, ss, false);
     if (r < 0) {
       cerr << "Can't get snapset error " << cpp_strerror(r) << std::endl;
-      return r;
+      // If --force and bad snapset let them remove the head
+      if (!(force && !all))
+        return r;
     }
-    if (!ss.snaps.empty() && !all) {
+//    cout << "snapset " << ss << std::endl;
+    if (!ss.clone_snaps.empty() && !all) {
       if (force) {
         cout << "WARNING: only removing "
              << (ghobj.hobj.is_head() ? "head" : "snapdir")
-             << " with snapshots present" << std::endl;
-        ss.snaps.clear();
+             << " with clones present" << std::endl;
+        ss.clone_snaps.clear();
       } else {
-        cerr << "Snapshots are present, use removeall to delete everything" << std::endl;
+        cerr << "Clones are present, use removeall to delete everything"
+	     << std::endl;
         return -EINVAL;
       }
     }
@@ -1951,24 +2105,23 @@ int do_remove_object(ObjectStore *store, coll_t coll,
   ObjectStore::Transaction t;
   OSDriver::OSTransaction _t(driver.get_transaction(&t));
 
-  cout << "remove " << ghobj << std::endl;
-
-  if (!dry_run) {
-    r = remove_object(coll, ghobj, mapper, &_t, &t);
-    if (r < 0)
-      return r;
-  }
-
   ghobject_t snapobj = ghobj;
-  for (vector<snapid_t>::iterator i = ss.snaps.begin() ;
-       i != ss.snaps.end() ; ++i) {
-    snapobj.hobj.snap = *i;
-    cout << "remove " << snapobj << std::endl;
+  for (auto& p : ss.clone_snaps) {
+    snapobj.hobj.snap = p.first;
+    cout << "remove clone " << snapobj << std::endl;
     if (!dry_run) {
-      r = remove_object(coll, snapobj, mapper, &_t, &t);
+      r = remove_object(coll, snapobj, mapper, &_t, &t, type);
       if (r < 0)
         return r;
     }
+  }
+
+  cout << "remove " << ghobj << std::endl;
+
+  if (!dry_run) {
+    r = remove_object(coll, ghobj, mapper, &_t, &t, type);
+    if (r < 0)
+      return r;
   }
 
   if (!dry_run) {
@@ -2406,6 +2559,24 @@ int print_obj_info(ObjectStore *store, coll_t coll, ghobject_t &ghobj, Formatter
       formatter->close_section();
     }
   }
+  bufferlist hattr;
+  gr = store->getattr(ch, ghobj, ECUtil::get_hinfo_key(), hattr);
+  if (gr == 0) {
+    ECUtil::HashInfo hinfo;
+    auto hp = hattr.cbegin();
+    try {
+      decode(hinfo, hp);
+      formatter->open_object_section("hinfo");
+      hinfo.dump(formatter);
+      formatter->close_section();
+    } catch (...) {
+      r = -EINVAL;
+      cerr << "Error decoding hinfo on : " << make_pair(coll, ghobj) << ", "
+           << cpp_strerror(r) << std::endl;
+    }
+  }
+  gr = store->dump_onode(ch, ghobj, "onode", formatter);
+
   formatter->close_section();
   formatter->flush(cout);
   cout << std::endl;
@@ -2552,6 +2723,42 @@ int set_size(
   return 0;
 }
 
+int clear_data_digest(ObjectStore *store, coll_t coll, ghobject_t &ghobj) {
+  auto ch = store->open_collection(coll);
+  bufferlist attr;
+  int r = store->getattr(ch, ghobj, OI_ATTR, attr);
+  if (r < 0) {
+    cerr << "Error getting attr on : " << make_pair(coll, ghobj) << ", "
+       << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  object_info_t oi;
+  auto bp = attr.cbegin();
+  try {
+    decode(oi, bp);
+  } catch (...) {
+    r = -EINVAL;
+    cerr << "Error getting attr on : " << make_pair(coll, ghobj) << ", "
+         << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  if (!dry_run) {
+    attr.clear();
+    oi.clear_data_digest();
+    encode(oi, attr, -1); /* fixme: using full features */
+    ObjectStore::Transaction t;
+    t.setattr(coll, ghobj, OI_ATTR, attr);
+    auto ch = store->open_collection(coll);
+    r = store->queue_transaction(ch, std::move(t));
+    if (r < 0) {
+      cerr << "Error writing object info: " << make_pair(coll, ghobj) << ", "
+         << cpp_strerror(r) << std::endl;
+      return r;
+    }
+  }
+  return 0;
+}
+
 int clear_snapset(ObjectStore *store, coll_t coll, ghobject_t &ghobj,
                   string arg)
 {
@@ -2564,9 +2771,9 @@ int clear_snapset(ObjectStore *store, coll_t coll, ghobject_t &ghobj,
   // Use "seq" to just corrupt SnapSet.seq
   if (arg == "corrupt" || arg == "seq")
     ss.seq = 0;
-  // Use "snaps" to just clear SnapSet.snaps
+  // Use "snaps" to just clear SnapSet.clone_snaps
   if (arg == "corrupt" || arg == "snaps")
-    ss.snaps.clear();
+    ss.clone_snaps.clear();
   // By default just clear clone, clone_overlap and clone_size
   if (arg == "corrupt")
     arg = "";
@@ -2881,6 +3088,7 @@ void usage(po::options_description &desc)
     cerr << "ceph-objectstore-tool ... <object> remove|removeall" << std::endl;
     cerr << "ceph-objectstore-tool ... <object> dump" << std::endl;
     cerr << "ceph-objectstore-tool ... <object> set-size" << std::endl;
+    cerr << "ceph-objectstore-tool ... <object> clear-data-digest" << std::endl;
     cerr << "ceph-objectstore-tool ... <object> remove-clone-metadata <cloneid>" << std::endl;
     cerr << std::endl;
     cerr << "<object> can be a JSON object description as displayed" << std::endl;
@@ -2983,10 +3191,11 @@ int main(int argc, char **argv)
 {
   string dpath, jpath, pgidstr, op, file, mountpoint, mon_store_path, object;
   string target_data_path, fsid;
-  string objcmd, arg1, arg2, type, format, argnspace, pool;
+  string objcmd, arg1, arg2, type, format, argnspace, pool, rmtypestr;
   boost::optional<std::string> nspace;
   spg_t pgid;
   unsigned epoch = 0;
+  unsigned slow_threshold = 16;
   ghobject_t ghobj;
   bool human_readable;
   Formatter *formatter;
@@ -3006,8 +3215,8 @@ int main(int argc, char **argv)
     ("pool", po::value<string>(&pool),
      "Pool name, mandatory for apply-layout-settings if --pgid is not specified")
     ("op", po::value<string>(&op),
-     "Arg is one of [info, log, remove, mkfs, fsck, repair, fuse, dup, export, export-remove, import, list, fix-lost, list-pgs, dump-journal, dump-super, meta-list, "
-     "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, apply-layout-settings, update-mon-db, dump-import, trim-pg-log]")
+     "Arg is one of [info, log, remove, mkfs, fsck, repair, fuse, dup, export, export-remove, import, list, list-slow-omap, fix-lost, list-pgs, dump-journal, dump-super, meta-list, "
+     "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, apply-layout-settings, update-mon-db, dump-export, trim-pg-log]")
     ("epoch", po::value<unsigned>(&epoch),
      "epoch# for get-osdmap and get-inc-osdmap, the current epoch in use if not specified")
     ("file", po::value<string>(&file),
@@ -3023,12 +3232,17 @@ int main(int argc, char **argv)
     ("format", po::value<string>(&format)->default_value("json-pretty"),
      "Output format which may be json, json-pretty, xml, xml-pretty")
     ("debug", "Enable diagnostic output to stderr")
+    ("no-mon-config", "Do not contact mons for config")
+    ("no-superblock", "Do not read superblock")
     ("force", "Ignore some types of errors and proceed with operation - USE WITH CAUTION: CORRUPTION POSSIBLE NOW OR IN THE FUTURE")
     ("skip-journal-replay", "Disable journal replay")
     ("skip-mount-omap", "Disable mounting of omap")
     ("head", "Find head/snapdir when searching for objects by name")
     ("dry-run", "Don't modify the objectstore")
     ("namespace", po::value<string>(&argnspace), "Specify namespace when searching for objects")
+    ("rmtype", po::value<string>(&rmtypestr), "Specify corrupting object removal 'snapmap' or 'nosnapmap' - TESTING USE ONLY")
+    ("slow-omap-threshold", po::value<unsigned>(&slow_threshold),
+      "Threshold (in seconds) to consider omap listing slow (for op=list-slow-omap)")
     ;
 
   po::options_description positional("Positional options");
@@ -3065,9 +3279,15 @@ int main(int argc, char **argv)
     return 1;
   }
 
+  // Compatibility with previous option name
+  if (op == "dump-import")
+    op = "dump-export";
+
   debug = (vm.count("debug") > 0);
 
   force = (vm.count("force") > 0);
+
+  no_superblock = (vm.count("no-superblock") > 0);
 
   if (vm.count("namespace"))
     nspace = argnspace;
@@ -3133,7 +3353,7 @@ int main(int argc, char **argv)
     type = "bluestore";
   }
   if (!vm.count("data-path") &&
-     op != "dump-import" &&
+     op != "dump-export" &&
      !(op == "dump-journal" && type == "filestore")) {
     cerr << "Must provide --data-path" << std::endl;
     usage(desc);
@@ -3182,7 +3402,7 @@ int main(int argc, char **argv)
     } else {
       file_fd = open(file.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0666);
     }
-  } else if (op == "import" || op == "dump-import" || op == "set-osdmap" || op == "set-inc-osdmap") {
+  } else if (op == "import" || op == "dump-export" || op == "set-osdmap" || op == "set-inc-osdmap") {
     if (!vm.count("file") || file == "-") {
       if (isatty(STDIN_FILENO)) {
         cerr << "stdin is a tty and no --file filename specified" << std::endl;
@@ -3197,7 +3417,7 @@ int main(int argc, char **argv)
   ObjectStoreTool tool = ObjectStoreTool(file_fd, dry_run);
 
   if (vm.count("file") && file_fd == fd_none && !dry_run) {
-    cerr << "--file option only applies to import, dump-import, export, export-remove, "
+    cerr << "--file option only applies to import, dump-export, export, export-remove, "
 	 << "get-osdmap, set-osdmap, get-inc-osdmap or set-inc-osdmap" << std::endl;
     return 1;
   }
@@ -3207,12 +3427,16 @@ int main(int argc, char **argv)
     perror(err.c_str());
     return 1;
   }
+  int init_flags = 0;
+  if (vm.count("no-mon-config") > 0) {
+    init_flags |= CINIT_FLAG_NO_MON_CONFIG;
+  }
 
   auto cct = global_init(
     NULL, ceph_options,
     CEPH_ENTITY_TYPE_OSD,
     CODE_ENVIRONMENT_UTILITY_NODOUT,
-    0);
+    init_flags);
   common_init_finish(g_ceph_context);
   if (debug) {
     g_conf().set_val_or_die("log_to_stderr", "true");
@@ -3246,10 +3470,10 @@ int main(int argc, char **argv)
     return 0;
   }
 
-  if (op == "dump-import") {
-    int ret = tool.dump_import(formatter);
+  if (op == "dump-export") {
+    int ret = tool.dump_export(formatter);
     if (ret < 0) {
-      cerr << "dump-import: "
+      cerr << "dump-export: "
 	   << cpp_strerror(ret) << std::endl;
       return 1;
     }
@@ -3398,32 +3622,35 @@ int main(int argc, char **argv)
 #endif
 
   bufferlist bl;
-  OSDSuperblock superblock;
   auto ch = fs->open_collection(coll_t::meta());
-  bufferlist::const_iterator p;
-  ret = fs->read(ch, OSD_SUPERBLOCK_GOBJECT, 0, 0, bl);
-  if (ret < 0) {
-    cerr << "Failure to read OSD superblock: " << cpp_strerror(ret) << std::endl;
-    goto out;
-  }
+  std::unique_ptr<OSDSuperblock> superblock;
+  if (!no_superblock) {
+    superblock.reset(new OSDSuperblock);
+    bufferlist::const_iterator p;
+    ret = fs->read(ch, OSD_SUPERBLOCK_GOBJECT, 0, 0, bl);
+    if (ret < 0) {
+      cerr << "Failure to read OSD superblock: " << cpp_strerror(ret) << std::endl;
+      goto out;
+    }
 
-  p = bl.cbegin();
-  decode(superblock, p);
+    p = bl.cbegin();
+    decode(*superblock, p);
 
-  if (debug) {
-    cerr << "Cluster fsid=" << superblock.cluster_fsid << std::endl;
-  }
+    if (debug) {
+      cerr << "Cluster fsid=" << superblock->cluster_fsid << std::endl;
+    }
 
-  if (debug) {
-    cerr << "Supported features: " << supported << std::endl;
-    cerr << "On-disk features: " << superblock.compat_features << std::endl;
-  }
-  if (supported.compare(superblock.compat_features) == -1) {
-    CompatSet unsupported = supported.unsupported(superblock.compat_features);
-    cerr << "On-disk OSD incompatible features set "
-      << unsupported << std::endl;
-    ret = -EINVAL;
-    goto out;
+    if (debug) {
+      cerr << "Supported features: " << supported << std::endl;
+      cerr << "On-disk features: " << superblock->compat_features << std::endl;
+    }
+    if (supported.compare(superblock->compat_features) == -1) {
+      CompatSet unsupported = supported.unsupported(superblock->compat_features);
+      cerr << "On-disk OSD incompatible features set "
+	<< unsupported << std::endl;
+      ret = -EINVAL;
+      goto out;
+    }
   }
 
   if (op == "apply-layout-settings") {
@@ -3438,7 +3665,8 @@ int main(int argc, char **argv)
     } else if (vm.count("arg1") && isdigit(arg1[0])) {
       target_level = atoi(arg1.c_str());
     }
-    ret = apply_layout_settings(fs, superblock, pool, pgid, dry_run, target_level);
+    ceph_assert(superblock != nullptr);
+    ret = apply_layout_settings(fs, *superblock, pool, pgid, dry_run, target_level);
     goto out;
   }
 
@@ -3543,6 +3771,7 @@ int main(int argc, char **argv)
   // mentioned in the usage for --pgid.
   if ((op == "info" || op == "log" || op == "remove" || op == "export"
       || op == "export-remove" || op == "mark-complete"
+      || op == "reset-last-complete"
       || op == "trim-pg-log") &&
       pgidstr.length() == 0) {
     cerr << "Must provide pgid" << std::endl;
@@ -3552,9 +3781,9 @@ int main(int argc, char **argv)
   }
 
   if (op == "import") {
-
+    ceph_assert(superblock != nullptr);
     try {
-      ret = tool.do_import(fs, superblock, force, pgidstr);
+      ret = tool.do_import(fs, *superblock, force, pgidstr);
     }
     catch (const buffer::error &e) {
       cerr << "do_import threw exception error " << e.what() << std::endl;
@@ -3583,7 +3812,8 @@ int main(int argc, char **argv)
     bufferlist bl;
     OSDMap osdmap;
     if (epoch == 0) {
-      epoch = superblock.current_epoch;
+      ceph_assert(superblock != nullptr);
+      epoch = superblock->current_epoch;
     }
     ret = get_osdmap(fs, epoch, osdmap, bl);
     if (ret) {
@@ -3610,7 +3840,8 @@ int main(int argc, char **argv)
   } else if (op == "get-inc-osdmap") {
     bufferlist bl;
     if (epoch == 0) {
-      epoch = superblock.current_epoch;
+      ceph_assert(superblock != nullptr);
+      epoch = superblock->current_epoch;
     }
     ret = get_inc_osdmap(fs, epoch, bl);
     if (ret < 0) {
@@ -3640,7 +3871,8 @@ int main(int argc, char **argv)
       cerr << "Please specify the path to monitor db to update" << std::endl;
       ret = -EINVAL;
     } else {
-      ret = update_mon_db(*fs, superblock, dpath + "/keyring", mon_store_path);
+      ceph_assert(superblock != nullptr);
+      ret = update_mon_db(*fs, *superblock, dpath + "/keyring", mon_store_path);
     }
     goto out;
   }
@@ -3678,10 +3910,19 @@ int main(int argc, char **argv)
     }
     goto out;
   }
+  if (op == "list-slow-omap") {
+    ret = do_list_slow(fs, pgidstr, object, slow_threshold, formatter, debug,
+                  human_readable);
+    if (ret < 0) {
+      cerr << "do_list failed: " << cpp_strerror(ret) << std::endl;
+    }
+    goto out;
+  }
 
   if (op == "dump-super") {
+    ceph_assert(superblock != nullptr);
     formatter->open_object_section("superblock");
-    superblock.dump(formatter);
+    superblock->dump(formatter);
     formatter->close_section();
     formatter->flush(cout);
     cout << std::endl;
@@ -3745,7 +3986,7 @@ int main(int argc, char **argv)
   // before complaining about a bad pgid
   if (!vm.count("objcmd") && op != "export" && op != "export-remove" && op != "info" && op != "log" && op != "mark-complete" && op != "trim-pg-log") {
     cerr << "Must provide --op (info, log, remove, mkfs, fsck, repair, export, export-remove, import, list, fix-lost, list-pgs, dump-journal, dump-super, meta-list, "
-      "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, dump-import, trim-pg-log)"
+      "get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, dump-export, trim-pg-log)"
 	 << std::endl;
     usage(desc);
     ret = 1;
@@ -3761,7 +4002,12 @@ int main(int argc, char **argv)
       ret = 0;
       if (objcmd == "remove" || objcmd == "removeall") {
         bool all = (objcmd == "removeall");
-        ret = do_remove_object(fs, coll, ghobj, all, force);
+        enum rmtype type = BOTH;
+        if (rmtypestr == "nosnapmap")
+          type = NOSNAPMAP;
+        else if (rmtypestr == "snapmap")
+          type = SNAPMAP;
+        ret = do_remove_object(fs, coll, ghobj, all, force, type);
         goto out;
       } else if (objcmd == "list-attrs") {
         ret = do_list_attrs(fs, coll, ghobj);
@@ -3965,6 +4211,9 @@ int main(int argc, char **argv)
 	uint64_t size = atoll(arg1.c_str());
 	ret = set_size(fs, coll, ghobj, size, formatter, corrupt);
 	goto out;
+      } else if (objcmd == "clear-data-digest") {
+        ret = clear_data_digest(fs, coll, ghobj);
+        goto out;
       } else if (objcmd == "clear-snapset") {
         // UNDOCUMENTED: For testing zap SnapSet
         // IGNORE extra args since not in usage anyway
@@ -4026,7 +4275,8 @@ int main(int argc, char **argv)
       cerr << "struct_v " << (int)struct_ver << std::endl;
 
     if (op == "export" || op == "export-remove") {
-      ret = tool.do_export(fs, coll, pgid, info, map_epoch, struct_ver, superblock, past_intervals);
+      ceph_assert(superblock != nullptr);
+      ret = tool.do_export(fs, coll, pgid, info, map_epoch, struct_ver, *superblock, past_intervals);
       if (ret == 0) {
         cerr << "Export successful" << std::endl;
         if (op == "export-remove") {
@@ -4064,11 +4314,12 @@ int main(int argc, char **argv)
 
       cout << "Marking complete " << std::endl;
 
-      info.last_update = eversion_t(superblock.current_epoch, info.last_update.version + 1);
+      ceph_assert(superblock != nullptr);
+      info.last_update = eversion_t(superblock->current_epoch, info.last_update.version + 1);
       info.last_backfill = hobject_t::get_max();
-      info.last_epoch_started = superblock.current_epoch;
-      info.history.last_epoch_started = superblock.current_epoch;
-      info.history.last_epoch_clean = superblock.current_epoch;
+      info.last_epoch_started = superblock->current_epoch;
+      info.history.last_epoch_started = superblock->current_epoch;
+      info.history.last_epoch_clean = superblock->current_epoch;
       past_intervals.clear();
 
       if (!dry_run) {
@@ -4088,6 +4339,38 @@ int main(int argc, char **argv)
       }
       cout << "Finished trimming pg log" << std::endl;
       goto out;
+    } else if (op == "reset-last-complete") {
+      if (!force) {
+        std::cerr << "WARNING: reset-last-complete is extremely dangerous and almost "
+                  << "certain to lead to permanent data loss unless you know exactly "
+                  << "what you are doing. Pass --force to proceed anyway."
+                  << std::endl;
+        ret = -EINVAL;
+        goto out;
+      }
+      ObjectStore::Transaction tran;
+      ObjectStore::Transaction *t = &tran;
+
+      if (struct_ver < PG::get_compat_struct_v()) {
+        cerr << "Can't reset-last-complete, version mismatch " << (int)struct_ver
+	     << " (pg)  < compat " << (int)PG::get_compat_struct_v() << " (tool)"
+	     << std::endl;
+	ret = 1;
+	goto out;
+      }
+
+      cout << "Reseting last_complete " << std::endl;
+
+      info.last_complete = info.last_update;
+
+      if (!dry_run) {
+	ret = write_info(*t, map_epoch, info, past_intervals);
+	if (ret != 0)
+	  goto out;
+	fs->queue_transaction(ch, std::move(*t));
+      }
+      cout << "Reseting last_complete succeeded" << std::endl;
+   
     } else {
       ceph_assert(!"Should have already checked for valid --op");
     }
@@ -4097,6 +4380,16 @@ int main(int argc, char **argv)
   }
 
 out:
+  if (debug) {
+    ostringstream ostr;
+    Formatter* f = Formatter::create("json-pretty", "json-pretty", "json-pretty");
+    cct->get_perfcounters_collection()->dump_formatted(f, false);
+    ostr << "ceph-objectstore-tool ";
+    f->flush(ostr);
+    delete f;
+    cout <<  ostr.str() << std::endl;
+  }
+
   int r = fs->umount();
   if (r < 0) {
     cerr << "umount failed: " << cpp_strerror(r) << std::endl;

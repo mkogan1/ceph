@@ -19,10 +19,10 @@
 #include "msg/Message.h"
 #include "mds/mdstypes.h"
 
-class MMDSSlaveRequest : public MessageInstance<MMDSSlaveRequest> {
+class MMDSSlaveRequest : public Message {
+  static constexpr int HEAD_VERSION = 1;
+  static constexpr int COMPAT_VERSION = 1;
 public:
-  friend factory;
-
   static constexpr int OP_XLOCK =       1;
   static constexpr int OP_XLOCKACK =   -1;
   static constexpr int OP_UNXLOCK =     2;
@@ -158,9 +158,9 @@ public:
   bufferlist& get_lock_data() { return inode_export; }
 
 protected:
-  MMDSSlaveRequest() : MessageInstance(MSG_MDS_SLAVE_REQUEST) { }
+  MMDSSlaveRequest() : Message{MSG_MDS_SLAVE_REQUEST, HEAD_VERSION, COMPAT_VERSION} { }
   MMDSSlaveRequest(metareqid_t ri, __u32 att, int o) : 
-    MessageInstance(MSG_MDS_SLAVE_REQUEST),
+    Message{MSG_MDS_SLAVE_REQUEST, HEAD_VERSION, COMPAT_VERSION},
     reqid(ri), attempt(att), op(o), flags(0), lock_type(0),
     inode_export_v(0), srcdn_auth(MDS_RANK_NONE) { }
   ~MMDSSlaveRequest() override {}
@@ -207,14 +207,16 @@ public:
     decode(desti_snapbl, p);
   }
 
-  const char *get_type_name() const override { return "slave_request"; }
+  std::string_view get_type_name() const override { return "slave_request"; }
   void print(ostream& out) const override {
     out << "slave_request(" << reqid
 	<< "." << attempt
 	<< " " << get_opname(op) 
 	<< ")";
   }  
-	
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);	
 };
 
 #endif

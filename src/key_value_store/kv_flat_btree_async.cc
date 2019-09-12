@@ -11,17 +11,16 @@
  * Foundation.  See file COPYING.
  */
 
+#include "include/compat.h"
 #include "key_value_store/key_value_structure.h"
 #include "key_value_store/kv_flat_btree_async.h"
 #include "key_value_store/kvs_arg_types.h"
 #include "include/rados/librados.hpp"
-#include "/usr/include/asm-generic/errno.h"
-#include "/usr/include/asm-generic/errno-base.h"
 #include "common/ceph_context.h"
 #include "common/Clock.h"
 #include "include/types.h"
 
-
+#include <errno.h>
 #include <string>
 #include <iostream>
 #include <cassert>
@@ -244,13 +243,13 @@ int KvFlatBtreeAsync::read_index(const string &key, index_data * idata,
     if (verbose) cout << "\t" << client_name
 	<< "-read_index: getting index_data for " << key
 	<< " from cache" << std::endl;
-    icache_lock.Lock();
+    icache_lock.lock();
     if (next_idata != NULL) {
       err = icache.get(key, idata, next_idata);
     } else {
       err = icache.get(key, idata);
     }
-    icache_lock.Unlock();
+    icache_lock.unlock();
 
     if (err == 0) {
       //if (verbose) cout << "CACHE SUCCESS" << std::endl;
@@ -304,9 +303,8 @@ int KvFlatBtreeAsync::read_index(const string &key, index_data * idata,
       }
       return read_index(key, idata, next_idata, force_update);
     }
-    icache_lock.Lock();
+    std::scoped_lock l{icache_lock};
     icache.push(this_idata);
-    icache_lock.Unlock();
   }
   auto b = kvmap.begin()->second.cbegin();
   idata->decode(b);
@@ -316,17 +314,16 @@ int KvFlatBtreeAsync::read_index(const string &key, index_data * idata,
       << ", idata is " << idata->str() << std::endl;
 
   ceph_assert(idata->obj != "");
-  icache_lock.Lock();
+  icache_lock.lock();
   icache.push(key, *idata);
-  icache_lock.Unlock();
+  icache_lock.unlock();
 
   if (next_idata != NULL && idata->kdata.prefix != "1") {
     next_idata->kdata.parse((++kvmap.begin())->first);
     auto nb = (++kvmap.begin())->second.cbegin();
     next_idata->decode(nb);
-    icache_lock.Lock();
+    std::scoped_lock l{icache_lock};
     icache.push(*next_idata);
-    icache_lock.Unlock();
   }
   return err;
 }
@@ -365,9 +362,9 @@ int KvFlatBtreeAsync::split(const index_data &idata) {
 
   //for lower half object
   map<std::string, bufferlist>::const_iterator it = args.odata.omap.begin();
-  client_index_lock.Lock();
+  client_index_lock.lock();
   to_create.push_back(object_data(to_string(client_name, client_index++)));
-  client_index_lock.Unlock();
+  client_index_lock.unlock();
   for (int i = 0; i < k; i++) {
     to_create[0].omap.insert(*it);
     ++it;
@@ -376,11 +373,11 @@ int KvFlatBtreeAsync::split(const index_data &idata) {
   to_create[0].max_kdata = key_data(to_create[0].omap.rbegin()->first);
 
   //for upper half object
-  client_index_lock.Lock();
+  client_index_lock.lock();
   to_create.push_back(object_data(to_create[0].max_kdata,
         args.odata.max_kdata,
         to_string(client_name, client_index++)));
-  client_index_lock.Unlock();
+  client_index_lock.unlock();
   to_create[1].omap.insert(
       ++args.odata.omap.find(to_create[0].omap.rbegin()->first),
       args.odata.omap.end());
@@ -407,7 +404,7 @@ int KvFlatBtreeAsync::split(const index_data &idata) {
   if (verbose) cout << "\t\t" << client_name << "-split: done splitting."
       << std::endl;
   /////END CRITICAL SECTION/////
-  icache_lock.Lock();
+  icache_lock.lock();
   for (vector<delete_data>::iterator it = out_data.to_delete.begin();
       it != out_data.to_delete.end(); ++it) {
     icache.erase(it->max);
@@ -416,7 +413,7 @@ int KvFlatBtreeAsync::split(const index_data &idata) {
       it != out_data.to_create.end(); ++it) {
     icache.push(index_data(*it));
   }
-  icache_lock.Unlock();
+  icache_lock.unlock();
   return err;
 }
 
@@ -534,9 +531,9 @@ int KvFlatBtreeAsync::rebalance(const index_data &idata1,
   }
 
   //this is the high object. it gets created regardless of rebalance or merge.
-  client_index_lock.Lock();
+  client_index_lock.lock();
   string o2w = to_string(client_name, client_index++);
-  client_index_lock.Unlock();
+  client_index_lock.unlock();
   index_data idata;
   vector<object_data> to_create;
   vector<object_data> to_delete;
@@ -570,9 +567,9 @@ int KvFlatBtreeAsync::rebalance(const index_data &idata1,
     map<std::string, bufferlist> write1_map;
     map<std::string, bufferlist> write2_map;
     map<std::string, bufferlist>::iterator it;
-    client_index_lock.Lock();
+    client_index_lock.lock();
     string o1w = to_string(client_name, client_index++);
-    client_index_lock.Unlock();
+    client_index_lock.unlock();
     int target_size_1 = ceil(((int)args1.odata.size + (int)args2.odata.size)
 	/ 2.0);
     if (args1.odata.max_kdata != idata1.kdata) {
@@ -637,7 +634,7 @@ int KvFlatBtreeAsync::rebalance(const index_data &idata1,
   if (err < 0) {
     return err;
   }
-  icache_lock.Lock();
+  icache_lock.lock();
   for (vector<delete_data>::iterator it = out_data.to_delete.begin();
       it != out_data.to_delete.end(); ++it) {
     icache.erase(it->max);
@@ -646,7 +643,7 @@ int KvFlatBtreeAsync::rebalance(const index_data &idata1,
       it != out_data.to_create.end(); ++it) {
     icache.push(index_data(*it));
   }
-  icache_lock.Unlock();
+  icache_lock.unlock();
   if (verbose) cout << "\t\t" << client_name << "-rebalance: done rebalancing."
       << std::endl;
   /////END CRITICAL SECTION/////
@@ -1923,7 +1920,7 @@ int KvFlatBtreeAsync::set_many(const map<string, bufferlist> &in_map) {
   if (verbose) cout << "\t\t" << client_name << "-split: done splitting."
       << std::endl;
   /////END CRITICAL SECTION/////
-  icache_lock.Lock();
+  std::scoped_lock l{icache_lock};
   for (vector<delete_data>::iterator it = idata.to_delete.begin();
       it != idata.to_delete.end(); ++it) {
     icache.erase(it->max);
@@ -1932,7 +1929,6 @@ int KvFlatBtreeAsync::set_many(const map<string, bufferlist> &in_map) {
       it != idata.to_create.end(); ++it) {
     icache.push(index_data(*it));
   }
-  icache_lock.Unlock();
   return err;
 }
 

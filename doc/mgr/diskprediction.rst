@@ -1,27 +1,37 @@
+.. _diskprediction:
+
 =====================
-DISKPREDICTION PLUGIN
+Diskprediction Module
 =====================
 
-The *diskprediction* plugin supports two modes: cloud mode and local mode. In cloud mode, the disk and Ceph operating status information is collected from Ceph cluster and sent to a cloud-based DiskPrediction server over the Internet. DiskPrediction server analyzes the data and provides the analytics and prediction results of performance and disk health states for Ceph clusters. 
+The *diskprediction* module supports two modes: cloud mode and local mode. In cloud mode, the disk and Ceph operating status information is collected from Ceph cluster and sent to a cloud-based DiskPrediction server over the Internet. DiskPrediction server analyzes the data and provides the analytics and prediction results of performance and disk health states for Ceph clusters. 
 
-Local mode doesn't require any external server for data analysis and output results. In local mode, the *diskprediction* plugin uses an internal predictor module for disk prediction service, and then returns the disk prediction result to the Ceph system. 
+Local mode doesn't require any external server for data analysis and output results. In local mode, the *diskprediction* module uses an internal predictor module for disk prediction service, and then returns the disk prediction result to the Ceph system.
+
+| Local predictor: 70% accuracy
+| Cloud predictor for free: 95% accuracy
 
 Enabling
 ========
 
 Run the following command to enable the *diskprediction* module in the Ceph
-environment:
+environment::
 
-::
+    ceph mgr module enable diskprediction_cloud
+    ceph mgr module enable diskprediction_local
 
-    ceph mgr module enable diskprediction
 
+Select the prediction mode::
 
-Select the prediction mode:
+    ceph config set global device_failure_prediction_mode local
 
-::
+or::
+  
+    ceph config set global device_failure_prediction_mode cloud
 
-    ceph device set-prediction-mode <local/cloud>
+To disable prediction,::
+
+  ceph config set global device_failure_prediction_mode none
 
 
 Connection settings
@@ -31,7 +41,7 @@ The connection settings are used for connection between Ceph and DiskPrediction 
 Local Mode
 ----------
 
-The *diskprediction* plugin leverages Ceph device health check to collect disk health metrics and uses internal predictor module to produce the disk failure prediction and returns back to Ceph. Thus, no connection settings are required in local mode. The local predictor module requires at least six datasets of device health metrics to implement the prediction.
+The *diskprediction* module leverages Ceph device health check to collect disk health metrics and uses internal predictor module to produce the disk failure prediction and returns back to Ceph. Thus, no connection settings are required in local mode. The local predictor module requires at least six datasets of device health metrics to implement the prediction.
 
 Run the following command to use local predictor predict device life expectancy.
 
@@ -78,7 +88,7 @@ Additional optional configuration settings are the following:
 Diskprediction Data
 ===================
 
-The *diskprediction* plugin actively sends/retrieves the following data to/from DiskPrediction server.
+The *diskprediction* module actively sends/retrieves the following data to/from DiskPrediction server.
 
 
 Metrics Data
@@ -236,7 +246,7 @@ Osd:
 +----------------------+-----------------------------------------+
 |rd_bytes              |Number of bytes read in the pool         |
 +----------------------+-----------------------------------------+
-|raw_bytes_used        |Bytes used in pool including copies made |
+|stored_raw            |Bytes used in pool including copies made |
 +----------------------+-----------------------------------------+
 
 - Ceph physical device metadata
@@ -246,7 +256,7 @@ Osd:
 +======================+=========================================+
 |disk_domain_id        |Physical device identify id              |
 +----------------------+-----------------------------------------+
-|disk_name             |Device attachement name                  |
+|disk_name             |Device attachment name                   |
 +----------------------+-----------------------------------------+
 |disk_wwn              |Device wwn                               |
 +----------------------+-----------------------------------------+
@@ -260,14 +270,14 @@ Osd:
 +----------------------+-----------------------------------------+
 
 - Ceph each objects correlation information
-- The plugin agent information
-- The plugin agent cluster information
-- The plugin agent host information
+- The module agent information
+- The module agent cluster information
+- The module agent host information
 
 
 SMART Data
 -----------
-- Ceph physical device SMART data (provided by Ceph *devicehealth* plugin)
+- Ceph physical device SMART data (provided by Ceph *devicehealth* module)
 
 
 Prediction Data
@@ -340,6 +350,6 @@ use the following command.
 
         debug mgr = 20
 
-With logging set to debug for the manager the plugin will print out logging
+With logging set to debug for the manager the module will print out logging
 message with prefix *mgr[diskprediction]* for easy filtering.
 

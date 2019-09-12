@@ -16,9 +16,8 @@
 
 #include "common/config_fwd.h"
 #include "common/Cond.h"
-#include "common/Mutex.h"
-#include "common/RWLock.h"
 #include "common/Timer.h"
+#include "common/ceph_mutex.h"
 #include "common/ceph_time.h"
 #include "include/rados/librados.h"
 #include "include/rados/librados.hpp"
@@ -61,7 +60,6 @@ private:
   bool _dispatch(Message *m);
   bool ms_dispatch(Message *m) override;
 
-  bool ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer, bool force_new) override;
   void ms_handle_connect(Connection *con) override;
   bool ms_handle_reset(Connection *con) override;
   void ms_handle_remote_reset(Connection *con) override;
@@ -69,8 +67,8 @@ private:
 
   Objecter *objecter;
 
-  Mutex lock;
-  Cond cond;
+  ceph::mutex lock = ceph::make_mutex("librados::RadosClient::lock");
+  ceph::condition_variable cond;
   SafeTimer timer;
   int refcnt;
 
@@ -119,7 +117,8 @@ public:
 		    bool wait_latest_map = false);
 
   int pool_list(std::list<std::pair<int64_t, string> >& ls);
-  int get_pool_stats(std::list<string>& ls, map<string,::pool_stat_t>& result);
+  int get_pool_stats(std::list<string>& ls, map<string,::pool_stat_t> *result,
+    bool *per_pool);
   int get_fs_stats(ceph_statfs& result);
   bool get_pool_is_selfmanaged_snaps_mode(const std::string& pool);
 
@@ -172,6 +171,8 @@ public:
     std::map<std::string,std::string>&& status);
 
   mon_feature_t get_required_monitor_features() const;
+
+  int get_inconsistent_pgs(int64_t pool_id, std::vector<std::string>* pgs);
 };
 
 #endif

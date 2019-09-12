@@ -276,7 +276,7 @@ private:
    */
   int commits_started = 0;
 
-  Cond shutdown_cond;
+  ceph::condition_variable shutdown_cond;
 
 public:
   /**
@@ -402,7 +402,7 @@ private:
    * keep leases. Each lease will have an expiration date, which may or may
    * not be extended. 
    */
-  utime_t lease_expire;
+  ceph::real_clock::time_point lease_expire;
   /**
    * List of callbacks waiting for our state to change into STATE_ACTIVE.
    */
@@ -597,6 +597,15 @@ private:
    * this list.  When it commits, these finishers are notified.
    */
   list<Context*> committing_finishers;
+  /**
+   * This function re-triggers pending_ and committing_finishers
+   * safely, so as to maintain existing system invariants. In particular
+   * we maintain ordering by triggering committing before pending, and
+   * we clear out pending_finishers prior to any triggers so that
+   * we don't trigger asserts on them being empty. You should
+   * use it instead of sending -EAGAIN to them with finish_contexts.
+   */
+  void reset_pending_committing_finishers();
 
   /**
    * @defgroup Paxos_h_sync_warns Synchronization warnings

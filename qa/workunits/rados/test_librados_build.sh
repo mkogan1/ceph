@@ -8,6 +8,8 @@
 # libradosstriper headers, boost headers, etc. - are already installed.
 #
 
+source $(dirname $0)/../ceph-helpers-root.sh
+
 trap cleanup EXIT
 
 SOURCES="hello_radosstriper.cc
@@ -20,7 +22,7 @@ hello_world_cpp
 "
 BINARIES="${BINARIES_TO_RUN}hello_radosstriper_cpp
 "
-DL_PREFIX="http://git.ceph.com/?p=ceph.git;a=blob_plain;f=examples/librados/"
+DL_PREFIX="http://git.ceph.com/?p=ceph.git;a=blob_plain;hb=master;f=examples/librados/"
 #DL_PREFIX="https://raw.githubusercontent.com/ceph/ceph/master/examples/librados/"
 DESTDIR=$(pwd)
 
@@ -56,6 +58,14 @@ function run_binaries () {
 }
 
 pushd $DESTDIR
+case $(distro_id) in
+    centos|fedora|rhel|opensuse*|suse|sles)
+        install gcc-c++ make libradospp-devel librados-devel;;
+    ubuntu|debian|devuan)
+        install g++ make libradospp-dev librados-dev;;
+    *)
+        echo "$(distro_id) is unknown, $@ will have to be installed manually."
+esac
 get_sources
 check_sources
 make all-system

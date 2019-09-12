@@ -20,10 +20,11 @@
 
 #include "msg/Message.h"
 
-class MDentryLink : public MessageInstance<MDentryLink> {
-public:
-  friend factory;
+class MDentryLink : public Message {
 private:
+  static const int HEAD_VERSION = 1;
+  static const int COMPAT_VERSION = 1;
+  
   dirfrag_t subtree;
   dirfrag_t dirfrag;
   string dn;
@@ -39,9 +40,9 @@ private:
 
 protected:
   MDentryLink() :
-    MessageInstance(MSG_MDS_DENTRYLINK) { }
+    Message(MSG_MDS_DENTRYLINK, HEAD_VERSION, COMPAT_VERSION) { }
   MDentryLink(dirfrag_t r, dirfrag_t df, std::string_view n, bool p) :
-    MessageInstance(MSG_MDS_DENTRYLINK),
+    Message(MSG_MDS_DENTRYLINK, HEAD_VERSION, COMPAT_VERSION),
     subtree(r),
     dirfrag(df),
     dn(n),
@@ -49,7 +50,7 @@ protected:
   ~MDentryLink() override {}
 
 public:
-  const char *get_type_name() const override { return "dentry_link";}
+  std::string_view get_type_name() const override { return "dentry_link";}
   void print(ostream& o) const override {
     o << "dentry_link(" << dirfrag << " " << dn << ")";
   }
@@ -70,6 +71,9 @@ public:
     encode(is_primary, payload);
     encode(bl, payload);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

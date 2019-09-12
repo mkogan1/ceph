@@ -10,7 +10,7 @@ if(${WITH_RADOSGW})
     ${EXTRALIBS}
     ${BLKID_LIBRARIES}
     ${CMAKE_DL_LIBS}
-    radostest)
+    radostest-cxx)
   install(TARGETS
     ceph_test_cls_rgw
     DESTINATION ${CMAKE_INSTALL_BINDIR})

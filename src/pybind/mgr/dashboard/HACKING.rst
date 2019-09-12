@@ -1,5 +1,7 @@
-Dashboard Developer Documentation
-====================================
+Ceph Dashboard Developer Documentation
+======================================
+
+.. contents:: Table of Contents
 
 Frontend Development
 --------------------
@@ -60,8 +62,17 @@ Build the Project
 ~~~~~~~~~~~~~~~~~
 
 Run ``npm run build`` to build the project. The build artifacts will be
-stored in the ``dist/`` directory. Use the ``-prod`` flag for a
-production build. Navigate to ``https://localhost:8443``.
+stored in the ``dist/`` directory. Use the ``--prod`` flag for a
+production build (``npm run build -- --prod``). Navigate to ``https://localhost:8443``.
+
+Build the Code Documentation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Run ``npm run doc-build`` to generate code docs in the ``documentation/``
+directory. To make them accesible locally for a web browser, run
+``npm run doc-serve`` and they will become available at ``http://localhost:8444``.
+With ``npm run compodoc -- <opts>`` you may
+`fully configure it <https://compodoc.app/guides/usage.html>`_.
 
 Code linting and formatting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -79,6 +90,34 @@ We added 2 npm scripts to help run these tools:
 - ``npm run lint``, will check frontend files against all linters
 - ``npm run fix``, will try to fix all the detected linting errors
 
+Writing Unit Tests
+~~~~~~~~~~~~~~~~~~
+
+To write unit tests most efficient we have a small collection of tools,
+we use within test suites.
+
+Those tools can be found under
+``src/pybind/mgr/dashboard/frontend/src/testing/``, especially take
+a look at ``unit-test-helper.ts``.
+
+There you will be able to find:
+
+``configureTestBed`` that replaces the initial ``TestBed``
+methods. It takes the same arguments as ``TestBed.configureTestingModule``.
+Using it will run your tests a lot faster in development, as it doesn't
+recreate everything from scratch on every test. To use the default behaviour
+pass ``true`` as the second argument.
+
+``PermissionHelper`` to help determine if
+the correct actions are shown based on the current permissions and selection
+in a list.
+
+``FormHelper`` which makes testing a form a lot easier
+with a few simple methods. It allows you to set a control or multiple
+controls, expect if a control is valid or has an error or just do both with
+one method. Additional you can expect a template element or multiple elements
+to be visible in the rendered template.
+
 Running Unit Tests
 ~~~~~~~~~~~~~~~~~~
 
@@ -90,25 +129,31 @@ Run ``npm run test`` to execute the unit tests via `Jest
 <https://facebook.github.io/jest/>`_.
 
 If you get errors on all tests, it could be because `Jest
-<https://facebook.github.io/jest/>`_ or something else was updated.
+<https://facebook.github.io/jest/>`__ or something else was updated.
 There are a few ways how you can try to resolve this:
 
 - Remove all modules with ``rm -rf dist node_modules`` and run ``npm install``
   again in order to reinstall them
 - Clear the cache of jest by running ``npx jest --clearCache``
 
-Running End-to-End Tests
-~~~~~~~~~~~~~~~~~~~~~~~~
+Running End-to-End (E2E) Tests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-We use `Protractor <http://www.protractortest.org/>`__ to run our frontend e2e
+We use `Protractor <http://www.protractortest.org/>`__ to run our frontend E2E
 tests.
 
 Our ``run-frontend-e2e-tests.sh`` script will check if Chrome or Docker is
 installed and run the tests if either is found.
 
-Start all frontend e2e tests by running::
+Start all frontend E2E tests by running::
 
   $ ./run-frontend-e2e-tests.sh
+
+Report:
+  After running the tests you can find the corresponding report as well as screenshots
+  of failed test cases by opening the following file in your browser:
+
+    src/pybind/mgr/dashboard/frontend/.protractor-report/index.html
 
 Device:
   You can force the script to use a specific device with the ``-d`` flag::
@@ -124,6 +169,168 @@ Remote:
 Note:
   When using docker, as your device, you might need to run the script with sudo
   permissions.
+
+When developing E2E tests, it is not necessary to compile the frontend code
+on each change of the test files. When your development environment is
+running (``npm start``), you can point Protractor to just use this
+environment. To attach `Protractor <http://www.protractortest.org/>`__ to
+this process, run ``npm run e2e:ci``.
+
+Note::
+
+   In case you have a somewhat particular environment, you might need to adapt
+   `protractor.conf.js` to point to the appropriate destination.
+
+Writing End-to-End Tests
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+To be used methods
+..................
+
+For clicking checkboxes, the ``clickCheckbox`` method is supposed to be used.
+Due an adaption of the ``<input type="checkbox">`` tag, the original checkbox
+is hidden and unclickable. Instead, a fancier replacement is shown. When the
+developer tries to use `ElementFinder::click()` on such a checkbox, it will
+raise an error. The ``clickCheckbox`` method prevents that by clicking the
+label of the checkbox, like a regular user would do.
+
+The PagerHelper class
+.....................
+
+The ``PageHelper`` class is supposed to be used for general purpose code that
+can be used on various pages or suites.
+
+Examples are
+
+- ``getTableCellByContent()`` - returns a table cell by its content
+- ``getTabsCount()`` - returns the amount of tabs
+- ``clickCheckbox()`` - clicks a checkbox
+
+Every method that could be useful on several pages belongs there. Also, methods
+which enhance the derived classes of the PageHelper belong there. A good
+example for such a case is the ``restrictTo()`` decorator. It ensures that a
+method implemented in a subclass of PageHelper is called on the correct page.
+It will also show a developer-friendly warning if this is not the case.
+
+Subclasses of PageHelper
+........................
+
+Helper Methods
+""""""""""""""
+
+In order to make code reusable which is specific for a particular suite, make
+sure to put it in a derived class of the ``PageHelper``. For instance, when
+talking about the pool suite, such methods would be ``create()``, ``exist()``
+and ``delete()``. These methods are specific to a pool but are useful for other
+suites.
+
+Methods that return HTML elements (for instance of type ``ElementFinder`` or
+``ElementArrayFinder``, but also ``Promise<ElementFinder>``) which can only
+be found on a specific page, should be either implemented in the helper
+methods of the subclass of PageHelper or as own methods of the subclass of
+PageHelper.
+
+Registering a new PageHelper
+""""""""""""""""""""""""""""
+
+If you have to create a new Helper class derived from the ``PageHelper``,
+please also ensure that it is instantiated in the constructor of the
+``Helper`` class. That way it can automatically be used by all other suites.
+
+.. code:: TypeScript
+
+  class Helper {
+     // ...
+     pools: PoolPageHelper;
+
+     constructor() {
+        this.pools = new PoolPageHelper();
+     }
+
+     // ...
+  }
+
+Using PageHelpers
+"""""""""""""""""
+
+In any suite, an instance of the ``Helper`` class should be used to call
+various ``PageHelper`` objects and their methods. This makes all methods of all
+PageHelpers available to all suites.
+
+.. code:: TypeScript
+
+  it('should create a pool', () => {
+    helper.pools.exist(poolName, false).then(() => {
+      helper.pools.navigateTo('create');
+      helper.pools.create(poolName).then(() => {
+        helper.pools.navigateTo();
+        helper.pools.exist(poolName, true);
+      });
+    });
+  });
+
+Code Style
+..........
+
+Please refer to the official `Protractor style-guide
+<https://www.protractortest.org/#/style-guide>`__ for a better insight on how
+to write and structure tests as well as what exactly should be covered by
+end-to-end tests.
+
+``describe()`` vs ``it()``
+""""""""""""""""""""""""""
+
+Both ``describe()`` and ``it()`` are function blocks, meaning that any executable
+code necessary for the test can be contained in either block. However, Typescript
+scoping rules still apply, therefore any variables declared in a ``describe`` are available
+to the ``it()`` blocks inside of it.
+
+``describe()`` typically are containers for tests, allowing you to break tests into
+multiple parts. Likewise, any setup that must be made before your tests are run can be
+initialized within the ``describe()`` block. Here is an example:
+
+.. code:: TypeScript
+
+  describe('create, edit & delete image test', () => {
+    const poolName = 'e2e_images_pool';
+
+    beforeAll(() => {
+      pools.navigateTo('create'); // Need pool for image testing
+      pools.create(poolName, 8, 'rbd').then(() => {
+        pools.navigateTo();
+        pools.exist(poolName, true);
+      });
+      images.navigateTo();
+    });
+
+As shown, we can initiate the variable ``poolName`` as well as run commands
+before our test suite begins (creating a pool). ``describe()`` block messages should
+include what the test suite is.
+
+``it()`` blocks typically are parts of an overarching test. They contain the functionality of
+the test suite, each performing individual roles. Here is an example:
+
+.. code:: TypeScript
+
+ describe('create, edit & delete image test', () => {
+  it('should create image', () => {
+    images.createImage(imageName, poolName, '1');
+    expect(images.getTableCell(imageName).isPresent()).toBe(true);
+  });
+  it('should edit image', () => {
+    images.editImage(imageName, poolName, newImageName, '2');
+    expect(images.getTableCell(newImageName).isPresent()).toBe(true);
+  });
+  //...
+ });
+
+As shown from the previous example, our ``describe()`` test suite is to create, edit
+and delete an image. Therefore, each ``it()`` completes one of these steps, one for creating,
+one for editing, and so on. Likewise, every ``it()`` blocks message should be in lowercase
+and written so long as "it" can be the prefix of the message. For example, ``it('edits the test image' () => ...)``
+vs. ``it('image edit test' () => ...)``. As shown, the first example makes grammatical sense with ``it()`` as the
+prefix whereas the second message does not.``it()`` should describe what the individual test is doing and
+what it expects to happen.
 
 Further Help
 ~~~~~~~~~~~~
@@ -165,7 +372,7 @@ Example:
     import { Component } from '@angular/core';
     import { Router } from '@angular/router';
 
-    import { ToastsManager } from 'ng2-toastr';
+    import { ToastrManager } from 'ngx-toastr';
 
     import { Credentials } from '../../../shared/models/credentials.model';
     import { HostService } from './services/host.service';
@@ -178,7 +385,7 @@ This components are declared on the components module:
 `src/pybind/mgr/dashboard/frontend/src/app/shared/components`.
 
 Helper
-......
+~~~~~~
 
 This component should be used to provide additional information to the user.
 
@@ -189,6 +396,218 @@ Example:
     <cd-helper>
       Some <strong>helper</strong> html text
     </cd-helper>
+
+Terminology and wording
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of using the Ceph component names, the approach
+suggested is to use the logical/generic names (Block over RBD, Filesystem over
+CephFS, Object over RGW). Nevertheless, as Ceph-Dashboard cannot completely hide
+the Ceph internals, some Ceph-specific names might remain visible.
+
+Regarding the wording for action labels and other textual elements (form titles,
+buttons, etc.), the chosen approach is to follow `these guidelines
+<https://www.patternfly.org/styles/terminology-and-wording/#terminology-and-wording-for-action-labels>`_.
+As a rule of thumb, 'Create' and 'Delete' are the proper wording for most forms,
+instead of 'Add' and 'Remove', unless some already created item is either added
+or removed to/from a set of items (e.g.: 'Add permission' to a user vs. 'Create
+(new) permission').
+
+In order to enforce the use of this wording, a service ``ActionLabelsI18n`` has
+been created, which provides translated labels for use in UI elements.
+
+Frontend branding
+~~~~~~~~~~~~~~~~~
+
+Every vendor can customize the 'Ceph dashboard' to his needs. No matter if
+logo, HTML-Template or TypeScript, every file inside the frontend folder can be
+replaced.
+
+To replace files, open ``./frontend/angular.json`` and scroll to the section
+``fileReplacements`` inside the production configuration. Here you can add the
+files you wish to brand. We recommend to place the branded version of a file in
+the same directory as the original one and to add a ``.brand`` to the file
+name, right in front of the file extension. A ``fileReplacement`` could for
+example look like this:
+
+.. code:: javascript
+
+    {
+      "replace": "src/app/core/auth/login/login.component.html",
+      "with": "src/app/core/auth/login/login.component.brand.html"
+    }
+
+To serve or build the branded user interface run:
+
+    $ npm run start -- --prod
+
+or
+
+    $ npm run build -- --prod
+
+Unfortunately it's currently not possible to use multiple configurations when
+serving or building the UI at the same time. That means a configuration just
+for the branding ``fileReplacements`` is not an option, because you want to use
+the production configuration anyway
+(https://github.com/angular/angular-cli/issues/10612).
+Furthermore it's also not possible to use glob expressions for
+``fileReplacements``. As long as the feature hasn't been implemented, you have
+to add the file replacements manually to the angular.json file
+(https://github.com/angular/angular-cli/issues/12354).
+
+Nevertheless you should stick to the suggested naming scheme because it makes
+it easier for you to use glob expressions once it's supported in the future.
+
+To change the variable defaults you can overwrite them in the file
+``./frontend/src/vendor.variables.scss``. Just reassign the variable you want
+to change, for example ``$color-primary: teal;``
+To overwrite or extend the default CSS, you can add your own styles in
+``./frontend/src/vendor.overrides.scss``.
+
+I18N
+----
+
+How to extract messages from source code?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To extract the I18N messages from the templates and the TypeScript files just
+run the following command in ``src/pybind/mgr/dashboard/frontend``::
+
+  $ npm run i18n:extract
+
+This will extract all marked messages from the HTML templates first and then
+add all marked strings from the TypeScript files to the translation template.
+Since the extraction from TypeScript files is still not supported by Angular
+itself, we are using the
+`ngx-translator <https://github.com/ngx-translate/i18n-polyfill>`_ extractor to
+parse the TypeScript files.
+
+When the command ran successfully, it should have created or updated the file
+``src/locale/messages.xlf``.
+
+The file isn't tracked by git, you can just use it to start with the
+translation offline or add/update the resource files on transifex.
+
+Supported languages
+~~~~~~~~~~~~~~~~~~~
+
+All our supported languages should be registered in both exports in
+``supported-languages.enum.ts`` and have a corresponding test in
+``language-selector.component.spec.ts``.
+
+The ``SupportedLanguages`` enum will provide the list for the default language selection.
+
+The ``languageBootstrapMapping`` variable will provide the
+`language support <https://github.com/valor-software/ngx-bootstrap/tree/development/src/chronos/i18n>`_
+for ngx-bootstrap components like the
+`date picker <https://valor-software.com/ngx-bootstrap/#/datepicker#locales>`_.
+
+Translating process
+~~~~~~~~~~~~~~~~~~~
+
+To facilitate the translation process of the dashboard we are using a web tool
+called `transifex <https://www.transifex.com/>`_.
+
+If you wish to help translating to any language just go to our `transifex
+project page <https://www.transifex.com/ceph/ceph-dashboard/>`_, join the
+project and you can start translating immediately.
+
+All translations will then be reviewed and later pushed upstream.
+
+Updating translated messages
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Any time there are new messages translated and reviewed in a specific language
+we should update the translation file upstream.
+
+To do that, check the settings in the i18n config file
+``src/pybind/mgr/dashboard/frontend/i18n.config.json``:: and make sure that the
+organization is *ceph*, the project is *ceph-dashboard* and the resource is
+the one you want to pull from and push to e.g. *Master:master*. To find a list
+of avaiable resources visit `<https://www.transifex.com/ceph/ceph-dashboard/content/>`_.
+
+After you checked the config go to the directory ``src/pybind/mgr/dashboard/frontend`` and run::
+
+  $ npm run i18n
+
+This command will extract all marked messages from the HTML templates and
+TypeScript files. Once the source file has been created it will push it to
+transifex and pull the latest translations. It will also fill all the
+untranslated strings with the source string.
+The tool will ask you for an api token, unless you added it by running:
+
+  $ npm run i18n:token
+
+To create a transifex api token visit `<https://www.transifex.com/user/settings/api/>`_.
+
+After the command ran successfully, build the UI and check if everything is
+working as expected. You also might want to run the frontend tests.
+
+Suggestions
+~~~~~~~~~~~
+
+Strings need to start and end in the same line as the element:
+
+.. code-block:: html
+
+  <!-- avoid -->
+  <span i18n>
+    Foo
+  </span>
+
+  <!-- recommended -->
+  <span i18n>Foo</span>
+
+
+  <!-- avoid -->
+  <span i18n>
+    Foo bar baz.
+    Foo bar baz.
+  </span>
+
+  <!-- recommended -->
+  <span i18n>Foo bar baz.
+    Foo bar baz.</span>
+
+Isolated interpolations should not be translated:
+
+.. code-block:: html
+
+  <!-- avoid -->
+  <span i18n>{{ foo }}</span>
+
+  <!-- recommended -->
+  <span>{{ foo }}</span>
+
+Interpolations used in a sentence should be kept in the translation:
+
+.. code-block:: html
+
+  <!-- recommended -->
+  <span i18n>There are {{ x }} OSDs.</span>
+
+Remove elements that are outside the context of the translation:
+
+.. code-block:: html
+
+  <!-- avoid -->
+  <label i18n>
+    Profile
+    <span class="required"></span>
+  </label>
+
+  <!-- recommended -->
+  <label>
+    <ng-container i18n>Profile<ng-container>
+    <span class="required"></span>
+  </label>
+
+Keep elements that affect the sentence:
+
+.. code-block:: html
+
+  <!-- recommended -->
+  <span i18n>Profile <b>foo</b> will be removed.</span>
 
 Backend Development
 -------------------
@@ -227,10 +646,30 @@ Alternatively, you can use Python's native package installation method::
   $ pip install tox
   $ pip install coverage
 
-To run the tests, run ``tox`` in the dashboard directory (where ``tox.ini``
-is located).
+To run the tests, run ``src/script/run_tox.sh`` in the dashboard directory (where
+``tox.ini`` is located)::
 
-We also collect coverage information from the backend code. You can check the
+  ## Run Python 2+3 tests+lint commands:
+  $ ../../../script/run_tox.sh --tox-env py27,py3,lint,check
+
+  ## Run Python 3 tests+lint commands:
+  $ ../../../script/run_tox.sh --tox-env py3,lint,check
+
+  ## Run Python 3 arbitrary command (e.g. 1 single test):
+  $ WITH_PYTHON2=OFF ../../../script/run_tox.sh --tox-env py3 "" tests/test_rgw_client.py::RgwClientTest::test_ssl_verify
+
+You can also run tox instead of ``run_tox.sh``::
+
+  ## Run Python 3 tests command:
+  $ tox -e py3
+
+  ## Run Python 3 arbitrary command (e.g. 1 single test):
+  $ tox -e py3 tests/test_rgw_client.py::RgwClientTest::test_ssl_verify
+
+Python files can be automatically fixed and formatted according to PEP8
+standards by using ``run_tox.sh --tox-env fix`` or ``tox -e fix``.
+
+We also collect coverage information from the backend code when you run tests. You can check the
 coverage information provided by the tox output, or by running the following
 command after tox has finished successfully::
 
@@ -239,36 +678,66 @@ command after tox has finished successfully::
 This command will create a directory ``htmlcov`` with an HTML representation of
 the code coverage of the backend.
 
-You can also run a single step of the tox script (aka tox environment), for
-instance if you only want to run the linting tools, do::
-
-  $ tox -e lint
-
 API tests based on Teuthology
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To run our API tests against a real Ceph cluster, we leverage the Teuthology framework. This
-has the advantage of catching bugs originated from changes in the internal Ceph
-code.
+How to run existing API tests:
+  To run the API tests against a real Ceph cluster, we leverage the Teuthology
+  framework. This has the advantage of catching bugs originated from changes in
+  the internal Ceph code.
 
+  Our ``run-backend-api-tests.sh`` script will start a ``vstart`` Ceph cluster
+  before running the Teuthology tests, and then it stops the cluster after the
+  tests are run. Of course this implies that you have built/compiled Ceph
+  previously.
 
-Our ``run-backend-api-tests.sh`` script will start a ``vstart`` Ceph cluster before running the
-Teuthology tests, and then it stops the cluster after the tests are run. Of
-course this implies that you have built/compiled Ceph previously.
+  Start all dashboard tests by running::
 
-Start all dashboard tests by running::
+    $ ./run-backend-api-tests.sh
 
-  $ ./run-backend-api-tests.sh
+  Or, start one or multiple specific tests by specifying the test name::
 
-Or, start one or multiple specific tests by specifying the test name::
+    $ ./run-backend-api-tests.sh tasks.mgr.dashboard.test_pool.PoolTest
 
-  $ ./run-backend-api-tests.sh tasks.mgr.dashboard.test_pool.PoolTest
+  Or, ``source`` the script and run the tests manually::
 
-Or, ``source`` the script and run the tests manually::
+    $ source run-backend-api-tests.sh
+    $ run_teuthology_tests [tests]...
+    $ cleanup_teuthology
 
-  $ source run-backend-api-tests.sh
-  $ run_teuthology_tests [tests]...
-  $ cleanup_teuthology
+How to write your own tests:
+  There are two possible ways to write your own API tests:
+
+  The first is by extending one of the existing test classes in the
+  ``qa/tasks/mgr/dashboard`` directory.
+
+  The second way is by adding your own API test module if you're creating a new
+  controller for example. To do so you'll just need to add the file containing
+  your new test class to the ``qa/tasks/mgr/dashboard`` directory and implement
+  all your tests here.
+
+  .. note:: Don't forget to add the path of the newly created module to
+    ``modules`` section in ``qa/suites/rados/mgr/tasks/dashboard.yaml``.
+
+  Short example: Let's assume you created a new controller called
+  ``my_new_controller.py`` and the related test module
+  ``test_my_new_controller.py``. You'll need to add
+  ``tasks.mgr.dashboard.test_my_new_controller`` to the ``modules`` section in
+  the ``dashboard.yaml`` file.
+
+  Also, if you're removing test modules please keep in mind to remove the
+  related section. Otherwise the Teuthology test run will fail.
+
+  Please run your API tests on your dev environment (as explained above)
+  before submitting a pull request. Also make sure that a full QA run in
+  Teuthology/sepia lab (based on your changes) has completed successfully
+  before it gets merged. You don't need to schedule the QA run yourself, just
+  add the 'needs-qa' label to your pull request as soon as you think it's ready
+  for merging (e.g. make check was successful, the pull request is approved and
+  all comments have been addressed). One of the developers who has access to
+  Teuthology/the sepia lab will take care of it and report the result back to
+  you.
+
 
 How to add a new controller?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -384,17 +853,17 @@ endpoint:
     # URL: /ping/{key}?opt1=...&opt2=...
     @Endpoint(path="/", query_params=['opt1'])
     def index(self, key, opt1, opt2=None):
-      # ...
+      """..."""
 
     # URL: /ping/{key}?opt1=...&opt2=...
     @Endpoint(query_params=['opt1'])
     def __call__(self, key, opt1, opt2=None):
-      # ...
+      """..."""
 
     # URL: /ping/post/{key1}/{key2}
     @Endpoint('POST', path_params=['key1', 'key2'])
     def post(self, key1, key2, data1, data2=None):
-      # ...
+      """..."""
 
 
 In the above example we see how the ``path`` option can be used to override the
@@ -431,7 +900,7 @@ Consider the following example:
     # URL: /ping/{node}/stats/{date}/latency?unit=...
     @Endpoint(path="/{date}/latency")
     def latency(self, node, date, unit="ms"):
-      # ...
+      """ ..."""
 
 In this example we explicitly declare a path parameter ``{node}`` in the
 controller URL path, and a path parameter ``{date}`` in the ``latency``
@@ -469,9 +938,10 @@ Example:
 
     @Proxy()
     def proxy(self, path, **params):
-      # if requested URL is "/foo/proxy/access/service?opt=1"
-      # then path is "access/service" and params is {'opt': '1'}
-      # ...
+      """
+      if requested URL is "/foo/proxy/access/service?opt=1"
+      then path is "access/service" and params is {'opt': '1'}
+      """
 
 
 How does the RESTController work?
@@ -525,6 +995,44 @@ same applies to other request types:
 +--------------+------------+----------------+-------------+
 | DELETE       | Yes        | delete         | 204         |
 +--------------+------------+----------------+-------------+
+
+How to use a custom API endpoint in a RESTController?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you don't have any access restriction you can use ``@Endpoint``. If you
+have set a permission scope to restrict access to your endpoints,
+``@Endpoint`` will fail, as it doesn't know which permission property should be
+used. To use a custom endpoint inside a restricted ``RESTController`` use
+``@RESTController.Collection`` instead. You can also choose
+``@RESTController.Resource`` if you have set a ``RESOURCE_ID`` in your
+``RESTController`` class.
+
+.. code-block:: python
+
+  import cherrypy
+  from ..tools import ApiController, RESTController
+
+  @ApiController('ping', Scope.Ping)
+  class Ping(RESTController):
+    RESOURCE_ID = 'ping'
+
+    @RESTController.Resource('GET')
+    def some_get_endpoint(self):
+      return {"msg": "Hello"}
+
+    @RESTController.Collection('POST')
+    def some_post_endpoint(self, **data):
+      return {"msg": data}
+
+Both decorators also support four parameters to customize the
+endpoint:
+
+* ``method="GET"``: the HTTP method allowed to access this endpoint.
+* ``path="/<method_name>"``: the URL path of the endpoint, excluding the
+  controller URL path prefix.
+* ``status=200``: set the HTTP status response code
+* ``query_params=[]``: list of method parameter names that correspond to URL
+  query parameters.
 
 How to restrict access to a controller?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -587,7 +1095,7 @@ If we want to write a unit test for the above ``Ping`` controller, create a
   class PingTest(ControllerTestCase):
       @classmethod
       def setup_test(cls):
-          Ping._cp_config['tools.authentication.on'] = False
+          Ping._cp_config['tools.authenticate.on'] = False
           cls.setup_controllers([Ping])
 
       def test_ping(self):
@@ -731,7 +1239,7 @@ The value of the class attribute is a pair composed by the default value for tha
 setting, and the python type of the value.
 
 By declaring the ``ADMIN_EMAIL_ADDRESS`` class attribute, when you restart the
-dashboard plugin, you will automatically gain two additional CLI commands to
+dashboard module, you will automatically gain two additional CLI commands to
 get and set that setting::
 
   $ ceph dashboard get-admin-email-address
@@ -1120,6 +1628,94 @@ Usage example:
     // ...
   }
 
+
+REST API documentation
+~~~~~~~~~~~~~~~~~~~~~~
+There is an automatically generated Swagger UI page for documentation of the REST
+API endpoints.However, by default it is not very detailed. There are two
+decorators that can be used to add more information:
+
+* ``@EndpointDoc()`` for documentation of endpoints. It has four optional arguments
+  (explained below): ``description``, ``group``, ``parameters`` and``responses``.
+* ``@ControllerDoc()`` for documentation of controller or group associated with
+  the endpoints. It only takes the two first arguments: ``description`` and``group``.
+
+
+``description``: A a string with a short (1-2 sentences) description of the object.
+
+
+``group``: By default, an endpoint is grouped together with other endpoints
+within the same controller class. ``group`` is a string that can be used to
+assign an endpoint or all endpoints in a class to another controller or a
+conceived group name.
+
+
+``parameters``: A dict used to describe path, query or request body parameters.
+By default, all parameters for an endpoint are listed on the Swagger UI page,
+including information of whether the parameter is optional/required and default
+values. However, there will be no description of the parameter and the parameter
+type will only be displayed in some cases.
+When adding information, each parameters should be described as in the example
+below. Note that the parameter type should be expressed as a built-in python
+type and not as a string. Allowed values are ``str``, ``int``, ``bool``, ``float``.
+
+.. code-block:: python
+
+ @EndpointDoc(parameters={'my_string': (str, 'Description of my_string')})
+ def method(my_string): pass
+
+For body parameters, more complex cases are possible. If the parameter is a
+dictionary, the type should be replaced with a ``dict`` containing its nested
+parameters. When describing nested parameters, the same format as other
+parameters is used. However, all nested parameters are set as required by default.
+If the nested parameter is optional this must be specified as for ``item2`` in
+the example below. If a nested parameters is set to optional, it is also
+possible to specify the default value (this will not be provided automatically
+for nested parameters).
+
+.. code-block:: python
+
+  @EndpointDoc(parameters={
+    'my_dictionary': ({
+      'item1': (str, 'Description of item1'),
+      'item2': (str, 'Description of item2', True),  # item2 is optional
+      'item3': (str, 'Description of item3', True, 'foo'),  # item3 is optional with 'foo' as default value
+  }, 'Description of my_dictionary')})
+  def method(my_dictionary): pass
+
+If the parameter is a ``list`` of primitive types, the type should be
+surrounded with square brackets.
+
+.. code-block:: python
+
+  @EndpointDoc(parameters={'my_list': ([int], 'Description of my_list')})
+  def method(my_list): pass
+
+If the parameter is a ``list`` with nested parameters, the nested parameters
+should be placed in a dictionary and surrounded with square brackets.
+
+.. code-block:: python
+
+  @EndpointDoc(parameters={
+    'my_list': ([{
+      'list_item': (str, 'Description of list_item'),
+      'list_item2': (str, 'Description of list_item2')
+  }], 'Description of my_list')})
+  def method(my_list): pass
+
+
+``responses``: A dict used for describing responses. Rules for describing
+responses are the same as for request body parameters, with one difference:
+responses also needs to be assigned to the related response code as in the
+example below:
+
+.. code-block:: python
+
+  @EndpointDoc(responses={
+    '400':{'my_response': (str, 'Description of my_response')}})
+  def method(): pass
+
+
 Error Handling in Python
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1198,3 +1794,87 @@ will end up as internal server errors in the API.
 In general, do not ``return`` error responses in the REST API. They will be
 returned by the  error handler. Instead, raise the appropriate exception.
 
+Plug-ins
+~~~~~~~~
+
+New functionality can be provided by means of a plug-in architecture. Among the
+benefits this approach brings in, loosely coupled development is one of the most
+notable. As the Ceph Dashboard grows in feature richness, its code-base becomes
+more and more complex. The hook-based nature of a plug-in architecture allows to
+extend functionality in a controlled manner, and isolate the scope of the
+changes.
+
+Ceph Dashboard relies on `Pluggy <https://pluggy.readthedocs.io>`_ to provide
+for plug-ing support. On top of pluggy, an interface-based approach has been
+implemented, with some safety checks (method override and abstract method
+checks).
+
+In order to create a new plugin, the following steps are required:
+
+#. Add a new file under ``src/pybind/mgr/dashboard/plugins``.
+#. Import the ``PLUGIN_MANAGER`` instance and the ``Interfaces``.
+#. Create a class extending the desired interfaces. The plug-in library will check if all the methods of the interfaces have been properly overridden.
+#. Register the plugin in the ``PLUGIN_MANAGER`` instance.
+#. Import the plug-in from within the Ceph Dashboard ``module.py`` (currently no dynamic loading is implemented).
+
+The available interfaces are the following:
+
+- ``CanMgr``: provides the plug-in with access to the ``mgr`` instance under ``self.mgr``.
+- ``CanLog``: provides the plug-in with access to the Ceph Dashboard logger under ``self.log``.
+- ``Setupable``: requires overriding ``setup()`` hook. This method is run in the Ceph Dashboard ``serve()`` method, right after CherryPy has been configured, but before it is started. It's a placeholder for the plug-in initialization logic.
+- ``HasOptions``: requires overriding ``get_options()`` hook by returning a list of ``Options()``. The options returned here are added to the ``MODULE_OPTIONS``.
+- ``HasCommands``: requires overriding ``register_commands()`` hook by defining the commands the plug-in can handle and decorating them with ``@CLICommand``. The commands can be optionally returned, so that they can be invoked externally (which makes unit testing easier).
+- ``HasControllers``: requires overriding ``get_controllers()`` hook by defining and returning the controllers as usual.
+- ``FilterRequest.BeforeHandler``: requires overriding ``filter_request_before_handler()`` hook. This method receives a ``cherrypy.request`` object for processing. A usual implementation of this method will allow some requests to pass or will raise a ``cherrypy.HTTPError` based on the ``request`` metadata and other conditions.
+
+New interfaces and hooks should be added as soon as they are required to
+implement new functionality. The above list only comprises the hooks needed for
+the existing plugins.
+
+A sample plugin implementation would look like this:
+
+.. code-block:: python
+
+  # src/pybind/mgr/dashboard/plugins/mute.py
+
+  from . import PLUGIN_MANAGER as PM
+  from . import interfaces as I
+
+  from mgr_module import CLICommand, Option
+  import cherrypy
+
+  @PM.add_plugin
+  class Mute(I.CanMgr, I.CanLog, I.Setupable, I.HasOptions,
+                       I.HasCommands, I.FilterRequest.BeforeHandler,
+                       I.HasControllers):
+    @PM.add_hook
+    def get_options(self):
+      return [Option('mute', default=False, type='bool')]
+
+    @PM.add_hook
+    def setup(self):
+      self.mute = self.mgr.get_module_options('mute')
+
+    @PM.add_hook
+    def register_commands(self):
+      @CLICommand("dashboard mute")
+      def _(mgr):
+        self.mute = True
+        self.mgr.set_module_options('mute', True)
+        return 0
+
+    @PM.add_hook
+    def filter_request_before_handler(self, request):
+      if self.mute:
+        raise cherrypy.HTTPError(500, "I'm muted :-x")
+
+    @PM.add_hook
+    def get_controllers(self):
+      from ..controllers import ApiController, RESTController
+
+      @ApiController('/mute')
+      class MuteController(RESTController):
+        def get(_):
+          return self.mute
+
+      return [FeatureTogglesEndpoint]

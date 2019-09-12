@@ -15,6 +15,10 @@
 
   vars:
     delegate_facts_host: True
+    dashboard_enabled: False
+
+  environment:
+    DEBIAN_FRONTEND: noninteractive
 
   pre_tasks:
     # If we can't get python2 installed before any module is used we will fail
@@ -30,6 +34,17 @@
       ignore_errors: yes
       when:
         - systempython2.stat is undefined or systempython2.stat.exists == false
+
+    # Ansible will try to auto-install python-apt, in some systems this might be
+    # python3-apt, or python-apt, and it has caused whole runs to fail because
+    # it is trying to do an interactive prompt
+    - name: install python-apt and aptitude in debian based systems
+      raw: sudo apt-get -y install "{{ item }}"
+      ignore_errors: yes
+      with_items:
+        - python3-apt
+        - python-apt
+        - aptitude
 
     - name: install python2 for fedora
       raw: sudo dnf -y install python creates=/usr/bin/python
@@ -63,9 +78,20 @@
         - ansible_distribution == 'Fedora'
         - ansible_distribution_major_version|int >= 23
 
-  roles:
-    - ceph-defaults
-    - ceph-validate
+    - name: check if it is atomic host
+      stat:
+        path: /run/ostree-booted
+      register: stat_ostree
+
+    - name: set_fact is_atomic
+      set_fact:
+        is_atomic: '{{ stat_ostree.stat.exists }}'
+
+  tasks:
+    - import_role:
+        name: ceph-defaults
+    - import_role:
+        name: ceph-validate
 
 - hosts:
   - mons
@@ -74,15 +100,21 @@
   gather_facts: false
   become: True
   any_errors_fatal: true
-  roles:
-    - role: ceph-defaults
-      tags: ['ceph_update_config']
-    - role: ceph-handler
-    - role: ceph-common
+  vars:
+    dashboard_enabled: False
   tasks:
+    - import_role:
+        name: ceph-defaults
+    - import_role:
+        name: ceph-facts
+    - import_role:
+        name: ceph-handler
+    - import_role:
+        name: ceph-common
+
     - name: rsync ceph-volume to test nodes on centos
       synchronize:
-        src: "{{ toxinidir}}/../../../../ceph_volume"
+        src: "{{ toxinidir }}/../../../../ceph_volume"
         dest: "/usr/lib/python2.7/site-packages"
         use_ssh_args: true
       when:
@@ -91,7 +123,7 @@
 
     - name: rsync ceph-volume to test nodes on ubuntu
       synchronize:
-        src: "{{ toxinidir}}/../../../../ceph_volume"
+        src: "{{ toxinidir }}/../../../../ceph_volume"
         dest: "/usr/lib/python2.7/dist-packages"
         use_ssh_args: true
       when:

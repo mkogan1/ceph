@@ -8,7 +8,7 @@ CephFS namespaces can be exported over NFS protocol using the
 Requirements
 ============
 
--  Ceph filesystem (preferably latest stable luminous or higher versions)
+-  Ceph file system (preferably latest stable luminous or higher versions)
 -  In the NFS server host machine, 'libcephfs2' (preferably latest stable
    luminous or higher), 'nfs-ganesha' and 'nfs-ganesha-ceph' packages (latest
    ganesha v2.5 stable or higher versions)
@@ -56,10 +56,10 @@ Configuration for libcephfs clients
 Required ceph.conf for libcephfs clients includes:
 
 * a [client] section with ``mon_host`` option set to let the clients connect
-  to the Ceph cluster's monitors, e.g., ::
+  to the Ceph cluster's monitors, usually generated via ``ceph config generate-minimal-conf``, e.g., ::
 
-    [client]
-            mon host = 192.168.1.7:6789, 192.168.1.8:6789, 192.168.1.9:6789
+    [global]
+            mon host = [v2:192.168.1.7:3300,v1:192.168.1.7:6789], [v2:192.168.1.8:3300,v1:192.168.1.8:6789], [v2:192.168.1.9:3300,v1:192.168.1.9:6789]
 
 Mount using NFSv4 clients
 =========================
@@ -77,5 +77,5 @@ From the command line::
 Current limitations
 ===================
 
-- Per running ganesha daemon, FSAL_CEPH can only export one Ceph filesystem
-  although multiple directories in a Ceph filesystem may be exported.
+- Per running ganesha daemon, FSAL_CEPH can only export one Ceph file system
+  although multiple directories in a Ceph file system may be exported.

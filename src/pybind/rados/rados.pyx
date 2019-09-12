@@ -23,7 +23,10 @@ import sys
 import threading
 import time
 
-from collections import Callable
+try:
+    from collections.abc import Callable
+except ImportError:
+    from collections import Callable
 from datetime import datetime
 from functools import partial, wraps
 from itertools import chain
@@ -85,9 +88,6 @@ cdef extern from "rados/librados.h" nogil:
 
     cdef uint64_t _LIBRADOS_SNAP_HEAD "LIBRADOS_SNAP_HEAD"
 
-    ctypedef void* rados_t
-    ctypedef void* rados_config_t
-    ctypedef void* rados_ioctx_t
     ctypedef void* rados_xattrs_iter_t
     ctypedef void* rados_omap_iter_t
     ctypedef void* rados_list_ctx_t
@@ -232,6 +232,8 @@ cdef extern from "rados/librados.h" nogil:
     void rados_ioctx_snap_set_read(rados_ioctx_t io, rados_snap_t snap)
     int rados_ioctx_snap_list(rados_ioctx_t io, rados_snap_t * snaps, int maxlen)
     int rados_ioctx_snap_get_stamp(rados_ioctx_t io, rados_snap_t id, time_t * t)
+    uint64_t rados_ioctx_get_id(rados_ioctx_t io)
+    int rados_ioctx_get_pool_name(rados_ioctx_t io, char *buf, unsigned maxlen)
 
     int rados_ioctx_selfmanaged_snap_create(rados_ioctx_t io,
                                             rados_snap_t *snapid)
@@ -305,6 +307,7 @@ cdef extern from "rados/librados.h" nogil:
     void rados_read_op_set_flags(rados_read_op_t read_op, int flags)
     int rados_omap_get_next(rados_omap_iter_t iter, const char * const* key, const char * const* val, size_t * len)
     void rados_omap_get_end(rados_omap_iter_t iter)
+    int rados_notify2(rados_ioctx_t io, const char * o, const char *buf, int buf_len, uint64_t timeout_ms, char **reply_buffer, size_t *reply_buffer_len)
 
 
 LIBRADOS_OP_FLAG_EXCL = _LIBRADOS_OP_FLAG_EXCL
@@ -350,7 +353,10 @@ class Error(Exception):
         return (self.__class__, (self.message, self.errno))
 
 class InvalidArgumentError(Error):
-    pass
+    def __init__(self, message, errno=None):
+        super(InvalidArgumentError, self).__init__(
+            "RADOS invalid argument (%s)" % message, errno)
+
 
 class OSError(Error):
     """ `OSError` class, derived from `Error` """
@@ -358,72 +364,114 @@ class OSError(Error):
 
 class InterruptedOrTimeoutError(OSError):
     """ `InterruptedOrTimeoutError` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(InterruptedOrTimeoutError, self).__init__(
+            "RADOS interrupted or timeout (%s)" % message, errno)
 
 
 class PermissionError(OSError):
     """ `PermissionError` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(PermissionError, self).__init__(
+            "RADOS permission error (%s)" % message, errno)
 
 
 class PermissionDeniedError(OSError):
     """ deal with EACCES related. """
-    pass
+    def __init__(self, message, errno=None):
+        super(PermissionDeniedError, self).__init__(
+                "RADOS permission denied (%s)" % message, errno)
 
 
 class ObjectNotFound(OSError):
     """ `ObjectNotFound` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(ObjectNotFound, self).__init__(
+                "RADOS object not found (%s)" % message, errno)
 
 
 class NoData(OSError):
     """ `NoData` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(NoData, self).__init__(
+                "RADOS no data (%s)" % message, errno)
 
 
 class ObjectExists(OSError):
     """ `ObjectExists` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(ObjectExists, self).__init__(
+                "RADOS object exists (%s)" % message, errno)
 
 
 class ObjectBusy(OSError):
     """ `ObjectBusy` class, derived from `IOError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(ObjectBusy, self).__init__(
+                "RADOS object busy (%s)" % message, errno)
 
 
 class IOError(OSError):
     """ `ObjectBusy` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(IOError, self).__init__(
+                "RADOS I/O error (%s)" % message, errno)
 
 
 class NoSpace(OSError):
     """ `NoSpace` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(NoSpace, self).__init__(
+                "RADOS no space (%s)" % message, errno)
 
 
 class RadosStateError(Error):
     """ `RadosStateError` class, derived from `Error` """
-    pass
+    def __init__(self, message, errno=None):
+        super(RadosStateError, self).__init__(
+                "RADOS rados state (%s)" % message, errno)
 
 
 class IoctxStateError(Error):
     """ `IoctxStateError` class, derived from `Error` """
-    pass
+    def __init__(self, message, errno=None):
+        super(IoctxStateError, self).__init__(
+                "RADOS Ioctx state error (%s)" % message, errno)
 
 
 class ObjectStateError(Error):
     """ `ObjectStateError` class, derived from `Error` """
-    pass
+    def __init__(self, message, errno=None):
+        super(ObjectStateError, self).__init__(
+                "RADOS object state error (%s)" % message, errno)
 
 
 class LogicError(Error):
     """ `` class, derived from `Error` """
-    pass
+    def __init__(self, message, errno=None):
+        super(LogicError, self).__init__(
+            "RADOS logic error (%s)" % message, errno)
 
 
 class TimedOut(OSError):
     """ `TimedOut` class, derived from `OSError` """
-    pass
+    def __init__(self, message, errno=None):
+        super(TimedOut, self).__init__(
+                "RADOS timed out (%s)" % message, errno)
+
+
+class InProgress(Error):
+    """ `InProgress` class, derived from `Error` """
+    def __init__(self, message, errno=None):
+        super(InProgress, self).__init__(
+                "RADOS in progress error (%s)" % message, errno)
+
+
+class IsConnected(Error):
+    """ `IsConnected` class, derived from `Error` """
+    def __init__(self, message, errno=None):
+        super(IsConnected, self).__init__(
+                "RADOS is connected error (%s)" % message, errno)
 
 
 IF UNAME_SYSNAME == "FreeBSD":
@@ -438,6 +486,8 @@ IF UNAME_SYSNAME == "FreeBSD":
         errno.EINTR     : InterruptedOrTimeoutError,
         errno.ETIMEDOUT : TimedOut,
         errno.EACCES    : PermissionDeniedError,
+        errno.EINPROGRESS : InProgress,
+        errno.EISCONN   : IsConnected,
         errno.EINVAL    : InvalidArgumentError,
     }
 ELSE:
@@ -452,6 +502,8 @@ ELSE:
         errno.EINTR     : InterruptedOrTimeoutError,
         errno.ETIMEDOUT : TimedOut,
         errno.EACCES    : PermissionDeniedError,
+        errno.EINPROGRESS : InProgress,
+        errno.EISCONN   : IsConnected,
         errno.EINVAL    : InvalidArgumentError,
     }
 
@@ -553,6 +605,11 @@ def decode_cstr(val, encoding="utf-8"):
         return None
 
     return val.decode(encoding)
+
+
+def flatten_dict(d, name):
+    items = chain.from_iterable(d.items())
+    return cstr(''.join(i + '\0' for i in items), name)
 
 
 cdef char* opt_str(s) except? NULL:
@@ -1159,26 +1216,23 @@ Rados object in state %s." % self.state)
         """
         self.require_state("connected")
         cdef:
-            char *ret_buf
-            size_t buf_len = 37
-            PyObject* ret_s = NULL
+            char *ret_buf = NULL
+            size_t buf_len = 64
 
-        ret_s = PyBytes_FromStringAndSize(NULL, buf_len)
         try:
-            ret_buf = PyBytes_AsString(ret_s)
-            with nogil:
-                ret = rados_cluster_fsid(self.cluster, ret_buf, buf_len)
-            if ret < 0:
-                raise make_ex(ret, "error getting cluster fsid")
-            if ret != <int>buf_len:
-                _PyBytes_Resize(&ret_s, ret)
-            return <object>ret_s
+            while True:
+                ret_buf = <char *>realloc_chk(ret_buf, buf_len)
+                with nogil:
+                    ret = rados_cluster_fsid(self.cluster, ret_buf, buf_len)
+                if ret == -errno.ERANGE:
+                    buf_len = buf_len * 2
+                elif ret < 0:
+                    raise make_ex(ret, "error getting cluster fsid")
+                else:
+                    break
+            return decode_cstr(ret_buf)
         finally:
-            # We DECREF unconditionally: the cast to object above will have
-            # INCREFed if necessary. This also takes care of exceptions,
-            # including if _PyString_Resize fails (that will free the string
-            # itself and set ret_s to NULL, hence XDECREF).
-            ref.Py_XDECREF(ret_s)
+            free(ret_buf)
 
     @requires(('ioctx_name', str_type))
     def open_ioctx(self, ioctx_name):
@@ -1235,8 +1289,23 @@ Rados object in state %s." % self.state)
 
     def mon_command(self, cmd, inbuf, timeout=0, target=None):
         """
+        Send a command to the mon.
+
         mon_command[_target](cmd, inbuf, outbuf, outbuflen, outs, outslen)
-        returns (int ret, string outbuf, string outs)
+
+        :param cmd: JSON formatted string.
+        :param inbuf: optional string.
+        :param timeout: This parameter is ignored.
+        :param target: name of a specific mon. Optional
+        :return: (int ret, string outbuf, string outs)
+
+        Example:
+
+        >>> import json
+        >>> c = Rados(conffile='/etc/ceph/ceph.conf')
+        >>> c.connect()
+        >>> cmd = json.dumps({"prefix": "osd safe-to-destroy", "ids": ["2"], "format": "json"})
+        >>> c.mon_command(cmd, b'')
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
         # timeout argument, but we keep it for backward compat with old python binding
@@ -1293,7 +1362,8 @@ Rados object in state %s." % self.state)
     def osd_command(self, osdid, cmd, inbuf, timeout=0):
         """
         osd_command(osdid, cmd, inbuf, outbuf, outbuflen, outs, outslen)
-        returns (int ret, string outbuf, string outs)
+
+        :return: (int ret, string outbuf, string outs)
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
         # timeout argument, but we keep it for backward compat with old python binding
@@ -1335,7 +1405,7 @@ Rados object in state %s." % self.state)
 
     def mgr_command(self, cmd, inbuf, timeout=0):
         """
-        returns (int ret, string outbuf, string outs)
+        :return: (int ret, string outbuf, string outs)
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
         # timeout argument, but we keep it for backward compat with old python binding
@@ -1377,7 +1447,8 @@ Rados object in state %s." % self.state)
     def pg_command(self, pgid, cmd, inbuf, timeout=0):
         """
         pg_command(pgid, cmd, inbuf, outbuf, outbuflen, outs, outslen)
-        returns (int ret, string outbuf, string outs)
+
+        :return: (int ret, string outbuf, string outs)
         """
         # NOTE(sileht): timeout is ignored because C API doesn't provide
         # timeout argument, but we keep it for backward compat with old python binding
@@ -1512,8 +1583,7 @@ Rados object in state %s." % self.state)
         """
         service = cstr(service, 'service')
         daemon = cstr(daemon, 'daemon')
-        metadata_dict = '\0'.join(chain.from_iterable(metadata.items()))
-        metadata_dict += '\0'
+        metadata_dict = flatten_dict(metadata, 'metadata')
         cdef:
             char *_service = service
             char *_daemon = daemon
@@ -1526,8 +1596,7 @@ Rados object in state %s." % self.state)
 
     @requires(('metadata', dict))
     def service_daemon_update(self, status):
-        status_dict = '\0'.join(chain.from_iterable(status.items()))
-        status_dict += '\0'
+        status_dict = flatten_dict(status, 'status')
         cdef:
             char *_status = status_dict
 
@@ -3073,6 +3142,40 @@ returned %d, but should return zero on success." % (self.name, ret))
                           (key, xattr_name))
         return True
 
+    @requires(('obj', str_type), ('msg', str_type), ('timeout_ms', int))
+    def notify(self, obj, msg='', timeout_ms=5000):
+        """
+        Send a rados notification to an object.
+
+        :param obj: the name of the object to notify
+        :type obj: str
+        :param msg: optional message to send in the notification
+        :type msg: str
+        :param timeout_ms: notify timeout (in ms)
+        :type timeout_ms: int
+
+        :raises: :class:`TypeError`
+        :raises: :class:`Error`
+        :returns: bool - True on success, otherwise raise an error
+        """
+        self.require_ioctx_open()
+
+        msglen = len(msg)
+        obj = cstr(obj, 'obj')
+        msg = cstr(msg, 'msg')
+        cdef:
+            char *_obj = obj
+            char *_msg = msg
+            int _msglen = msglen
+            uint64_t _timeout_ms = timeout_ms
+
+        with nogil:
+            ret = rados_notify2(self.io, _obj, _msg, _msglen, _timeout_ms,
+                                NULL, NULL)
+        if ret < 0:
+            raise make_ex(ret, "Failed to notify %r" % (obj))
+        return True
+
     def list_objects(self):
         """
         Get ObjectIterator on rados.Ioctx object.
@@ -3090,6 +3193,43 @@ returned %d, but should return zero on success." % (self.name, ret))
         """
         self.require_ioctx_open()
         return SnapIterator(self)
+
+    def get_pool_id(self):
+        """
+        Get pool id
+
+        :returns: int - pool id
+        """
+        with nogil:
+            ret = rados_ioctx_get_id(self.io)
+        return ret;
+
+    def get_pool_name(self):
+        """
+        Get pool name
+
+        :returns: str - pool name
+        """
+        cdef:
+            int name_len = 10
+            char *name = NULL
+
+        try:
+            while True:
+                name = <char *>realloc_chk(name, name_len)
+                with nogil:
+                    ret = rados_ioctx_get_pool_name(self.io, name, name_len)
+                if ret > 0:
+                    break
+                elif ret != -errno.ERANGE:
+                    raise make_ex(ret, "get pool name error")
+                else:
+                    name_len = name_len * 2
+
+            return decode_cstr(name)
+        finally:
+            free(name)
+
 
     @requires(('snap_name', str_type))
     def create_snap(self, snap_name):
@@ -3333,12 +3473,14 @@ returned %d, but should return zero on success." % (self.name, ret))
             raise Error("Rados(): keys and values must have the same number of items")
 
         keys = cstr_list(keys, 'keys')
+        values = cstr_list(values, 'values')
+        lens = [len(v) for v in values]
         cdef:
             WriteOp _write_op = write_op
             size_t key_num = len(keys)
             char **_keys = to_bytes_array(keys)
             char **_values = to_bytes_array(values)
-            size_t *_lens = to_csize_t_array([len(v) for v in values])
+            size_t *_lens = to_csize_t_array(lens)
 
         try:
             with nogil:
@@ -3870,10 +4012,10 @@ returned %d, but should return zero on success." % (self.name, ret))
                                                           c_vals, &val_length)
                 if ret == 0:
                     keys = [decode_cstr(key) for key in
-                                c_keys[:key_length].split(b'\0') if key]
+                                c_keys[:key_length].split(b'\0')]
                     vals = [decode_cstr(val) for val in
-                                c_vals[:val_length].split(b'\0') if val]
-                    return zip(keys, vals)
+                                c_vals[:val_length].split(b'\0')]
+                    return zip(keys, vals)[:-1]
                 elif ret == -errno.ERANGE:
                     pass
                 else:

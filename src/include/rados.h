@@ -7,7 +7,16 @@
  */
 
 #include <string.h>
+#include <stdbool.h>
 #include "msgr.h"
+
+/* See comment in ceph_fs.h.  */
+#ifndef __KERNEL__
+#include "byteorder.h"
+#define __le16 ceph_le16
+#define __le32 ceph_le32
+#define __le64 ceph_le64
+#endif
 
 /*
  * fs id
@@ -123,6 +132,7 @@ struct ceph_eversion {
 #define CEPH_OSD_NODOWN       (1<<9)  /* osd can not be marked down */
 #define CEPH_OSD_NOIN         (1<<10) /* osd can not be marked in */
 #define CEPH_OSD_NOOUT        (1<<11) /* osd can not be marked out */
+#define CEPH_OSD_STOP         (1<<12) /* osd has been stopped by admin */
 
 extern const char *ceph_osd_state_name(int s);
 
@@ -159,6 +169,7 @@ extern const char *ceph_osd_state_name(int s);
 #define CEPH_OSDMAP_RECOVERY_DELETES (1<<19) /* deletes performed during recovery instead of peering */
 #define CEPH_OSDMAP_PURGED_SNAPDIRS  (1<<20) /* osds have converted snapsets */
 #define CEPH_OSDMAP_NOSNAPTRIM       (1<<21) /* disable snap trimming */
+#define CEPH_OSDMAP_PGLOG_HARDLIMIT  (1<<22) /* put a hard limit on pg log length */
 
 /* these are hidden in 'ceph status' view */
 #define CEPH_OSDMAP_SEMIHIDDEN_FLAGS (CEPH_OSDMAP_REQUIRE_JEWEL|	\
@@ -166,7 +177,8 @@ extern const char *ceph_osd_state_name(int s);
 				      CEPH_OSDMAP_REQUIRE_LUMINOUS |	\
 				      CEPH_OSDMAP_RECOVERY_DELETES |	\
 				      CEPH_OSDMAP_SORTBITWISE |		\
-				      CEPH_OSDMAP_PURGED_SNAPDIRS)
+				      CEPH_OSDMAP_PURGED_SNAPDIRS |     \
+                                      CEPH_OSDMAP_PGLOG_HARDLIMIT)
 #define CEPH_OSDMAP_LEGACY_REQUIRE_FLAGS (CEPH_OSDMAP_REQUIRE_JEWEL |	\
 					  CEPH_OSDMAP_REQUIRE_KRAKEN |	\
 					  CEPH_OSDMAP_REQUIRE_LUMINOUS)
@@ -188,12 +200,8 @@ extern const char *ceph_osd_state_name(int s);
 #define CEPH_RELEASE_LUMINOUS   12
 #define CEPH_RELEASE_MIMIC      13
 #define CEPH_RELEASE_NAUTILUS   14
-#define CEPH_RELEASE_MAX        15  /* highest + 1 */
-
-extern const char *ceph_release_name(int r);
-extern int ceph_release_from_name(const char *s);
-extern uint64_t ceph_release_features(int r);
-extern int ceph_release_from_features(uint64_t features);
+#define CEPH_RELEASE_OCTOPUS    15
+#define CEPH_RELEASE_MAX        16  /* highest + 1 */
 
 /*
  * The error code to return when an OSD can't handle a write
@@ -284,6 +292,7 @@ extern int ceph_release_from_features(uint64_t features);
 	f(OMAPSETHEADER, __CEPH_OSD_OP(WR, DATA, 22),	"omap-set-header")  \
 	f(OMAPCLEAR,	__CEPH_OSD_OP(WR, DATA, 23),	"omap-clear")	    \
 	f(OMAPRMKEYS,	__CEPH_OSD_OP(WR, DATA, 24),	"omap-rm-keys")	    \
+	f(OMAPRMKEYRANGE, __CEPH_OSD_OP(WR, DATA, 44),	"omap-rm-key-range") \
 	f(OMAP_CMP,	__CEPH_OSD_OP(RD, DATA, 25),	"omap-cmp")	    \
 									    \
 	/* tiering */							    \
@@ -315,6 +324,7 @@ extern int ceph_release_from_features(uint64_t features);
 	f(SET_CHUNK,	__CEPH_OSD_OP(WR, DATA, 40),	"set-chunk")	    \
 	f(TIER_PROMOTE,	__CEPH_OSD_OP(WR, DATA, 41),	"tier-promote")	    \
 	f(UNSET_MANIFEST, __CEPH_OSD_OP(WR, DATA, 42),	"unset-manifest")   \
+	f(TIER_FLUSH, __CEPH_OSD_OP(WR, DATA, 43),	"tier-flush")	    \
 									    \
 	/** attrs **/							    \
 	/* read */							    \
@@ -392,7 +402,7 @@ static inline int ceph_osd_op_mode_cache(int op)
 {
 	return op & CEPH_OSD_OP_MODE_CACHE;
 }
-static inline int ceph_osd_op_uses_extent(int op)
+static inline bool ceph_osd_op_uses_extent(int op)
 {
 	switch(op) {
 	case CEPH_OSD_OP_READ:
@@ -661,5 +671,10 @@ struct ceph_osd_reply_head {
 	struct ceph_osd_op ops[0];  /* ops[], object */
 } __attribute__ ((packed));
 
+#ifndef __KERNEL__
+#undef __le16
+#undef __le32
+#undef __le64
+#endif
 
 #endif

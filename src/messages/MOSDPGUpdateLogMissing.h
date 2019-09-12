@@ -18,13 +18,10 @@
 
 #include "MOSDFastDispatchOp.h"
 
-class MOSDPGUpdateLogMissing : public MessageInstance<MOSDPGUpdateLogMissing, MOSDFastDispatchOp> {
-public:
-  friend factory;
+class MOSDPGUpdateLogMissing : public MOSDFastDispatchOp {
 private:
   static constexpr int HEAD_VERSION = 3;
   static constexpr int COMPAT_VERSION = 1;
-
 
 public:
   epoch_t map_epoch = 0, min_epoch = 0;
@@ -52,8 +49,8 @@ public:
   }
 
   MOSDPGUpdateLogMissing()
-    : MessageInstance(MSG_OSD_PG_UPDATE_LOG_MISSING, HEAD_VERSION,
-			 COMPAT_VERSION) { }
+    : MOSDFastDispatchOp{MSG_OSD_PG_UPDATE_LOG_MISSING, HEAD_VERSION,
+			 COMPAT_VERSION} {}
   MOSDPGUpdateLogMissing(
     const mempool::osd_pglog::list<pg_log_entry_t> &entries,
     spg_t pgid,
@@ -63,8 +60,8 @@ public:
     ceph_tid_t rep_tid,
     eversion_t pg_trim_to,
     eversion_t pg_roll_forward_to)
-    : MessageInstance(MSG_OSD_PG_UPDATE_LOG_MISSING, HEAD_VERSION,
-			 COMPAT_VERSION),
+    : MOSDFastDispatchOp{MSG_OSD_PG_UPDATE_LOG_MISSING, HEAD_VERSION,
+			 COMPAT_VERSION},
       map_epoch(epoch),
       min_epoch(min_epoch),
       pgid(pgid),
@@ -79,7 +76,7 @@ private:
   ~MOSDPGUpdateLogMissing() override {}
 
 public:
-  const char *get_type_name() const override { return "PGUpdateLogMissing"; }
+  std::string_view get_type_name() const override { return "PGUpdateLogMissing"; }
   void print(ostream& out) const override {
     out << "pg_update_log_missing(" << pgid << " epoch " << map_epoch
 	<< "/" << min_epoch
@@ -118,6 +115,9 @@ public:
       decode(pg_roll_forward_to, p);
     }
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

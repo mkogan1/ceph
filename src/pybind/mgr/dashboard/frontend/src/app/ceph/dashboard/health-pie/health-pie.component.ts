@@ -10,9 +10,12 @@ import {
 } from '@angular/core';
 
 import * as Chart from 'chart.js';
+import * as _ from 'lodash';
 
 import { ChartTooltip } from '../../../shared/models/chart-tooltip';
 import { DimlessBinaryPipe } from '../../../shared/pipes/dimless-binary.pipe';
+import { DimlessPipe } from '../../../shared/pipes/dimless.pipe';
+import { HealthPieColor } from './health-pie-color.enum';
 
 @Component({
   selector: 'cd-health-pie',
@@ -20,25 +23,26 @@ import { DimlessBinaryPipe } from '../../../shared/pipes/dimless-binary.pipe';
   styleUrls: ['./health-pie.component.scss']
 })
 export class HealthPieComponent implements OnChanges, OnInit {
-  @ViewChild('chartCanvas')
+  @ViewChild('chartCanvas', { static: true })
   chartCanvasRef: ElementRef;
-  @ViewChild('chartTooltip')
+  @ViewChild('chartTooltip', { static: true })
   chartTooltipRef: ElementRef;
 
   @Input()
   data: any;
   @Input()
-  chartType: string;
+  config = {};
   @Input()
   isBytesData = false;
   @Input()
-  displayLegend = false;
-  @Input()
   tooltipFn: any;
+  @Input()
+  showLabelAsTooltip = false;
   @Output()
   prepareFn = new EventEmitter();
 
-  chart: any = {
+  chartConfig: any = {
+    chartType: 'pie',
     dataset: [
       {
         label: null,
@@ -47,30 +51,31 @@ export class HealthPieComponent implements OnChanges, OnInit {
     ],
     options: {
       legend: {
-        display: false,
+        display: true,
         position: 'right',
-        labels: { usePointStyle: true }
+        labels: { usePointStyle: true },
+        onClick: (event, legendItem) => {
+          this.onLegendClick(event, legendItem);
+        }
       },
       animation: { duration: 0 },
-
       tooltips: {
         enabled: false
+      },
+      title: {
+        display: false
       }
-    },
-    colors: [
-      {
-        borderColor: 'transparent'
-      }
-    ]
+    }
   };
+  private hiddenSlices = [];
 
-  constructor(private dimlessBinary: DimlessBinaryPipe) {}
+  constructor(private dimlessBinary: DimlessBinaryPipe, private dimless: DimlessPipe) {}
 
   ngOnInit() {
     // An extension to Chart.js to enable rendering some
     // text in the middle of a doughnut
     Chart.pluginService.register({
-      beforeDraw: function(chart) {
+      beforeDraw: function(chart: any) {
         if (!chart.options.center_text) {
           return;
         }
@@ -114,49 +119,69 @@ export class HealthPieComponent implements OnChanges, OnInit {
 
     chartTooltip.getBody = getBody;
 
-    this.chart.options.tooltips.custom = (tooltip) => {
+    this.chartConfig.options.tooltips.custom = (tooltip) => {
       chartTooltip.customTooltips(tooltip);
     };
 
-    this.setChartType();
-
-    this.chart.options.legend.display = this.displayLegend;
-
-    const redColor = '#FF6384';
-    const blueColor = '#36A2EB';
-    const yellowColor = '#FFCD56';
-    const greenColor = '#4BC0C0';
-    this.chart.colors = [
+    this.chartConfig.colors = [
       {
-        backgroundColor: [redColor, blueColor, yellowColor, greenColor]
+        backgroundColor: [
+          HealthPieColor.DEFAULT_RED,
+          HealthPieColor.DEFAULT_BLUE,
+          HealthPieColor.DEFAULT_ORANGE,
+          HealthPieColor.DEFAULT_GREEN,
+          HealthPieColor.DEFAULT_MAGENTA
+        ]
       }
     ];
 
-    this.prepareFn.emit([this.chart, this.data]);
+    _.merge(this.chartConfig, this.config);
+
+    this.prepareFn.emit([this.chartConfig, this.data]);
   }
 
   ngOnChanges() {
-    this.prepareFn.emit([this.chart, this.data]);
+    this.prepareFn.emit([this.chartConfig, this.data]);
+    this.hideSlices();
+    this.setChartSliceBorderWidth();
   }
 
   private getChartTooltipBody(body) {
     const bodySplit = body[0].split(': ');
 
-    if (this.isBytesData) {
-      bodySplit[1] = this.dimlessBinary.transform(bodySplit[1]);
+    if (this.showLabelAsTooltip) {
+      return bodySplit[0];
     }
+
+    bodySplit[1] = this.isBytesData
+      ? this.dimlessBinary.transform(bodySplit[1])
+      : this.dimless.transform(bodySplit[1]);
 
     return bodySplit.join(': ');
   }
 
-  private setChartType() {
-    const chartTypes = ['doughnut', 'pie'];
-    const selectedChartType = chartTypes.find((chartType) => chartType === this.chartType);
+  private setChartSliceBorderWidth() {
+    let nonZeroValueSlices = 0;
+    _.forEach(this.chartConfig.dataset[0].data, function(slice) {
+      if (slice > 0) {
+        nonZeroValueSlices += 1;
+      }
+    });
 
-    if (selectedChartType !== undefined) {
-      this.chart.chartType = selectedChartType;
-    } else {
-      this.chart.chartType = chartTypes[0];
-    }
+    this.chartConfig.dataset[0].borderWidth = nonZeroValueSlices > 1 ? 1 : 0;
+  }
+
+  private onLegendClick(event, legendItem) {
+    event.stopPropagation();
+    this.hiddenSlices[legendItem.index] = !legendItem.hidden;
+    this.ngOnChanges();
+  }
+
+  private hideSlices() {
+    _.forEach(this.chartConfig.dataset[0].data, (_slice, sliceIndex) => {
+      if (this.hiddenSlices[sliceIndex]) {
+        this.chartConfig.dataset[0].data[sliceIndex] = undefined;
+      }
+    });
   }
 }

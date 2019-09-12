@@ -33,7 +33,7 @@ namespace ceph {
 /// label for block device
 struct bluestore_bdev_label_t {
   uuid_d osd_uuid;     ///< osd uuid
-  uint64_t size;       ///< device size
+  uint64_t size = 0;   ///< device size
   utime_t btime;       ///< birth time
   string description;  ///< device description
 
@@ -66,17 +66,16 @@ WRITE_CLASS_DENC(bluestore_cnode_t)
 
 ostream& operator<<(ostream& out, const bluestore_cnode_t& l);
 
-/// pextent: physical extent
-struct bluestore_pextent_t {
+template <typename OFFS_TYPE, typename LEN_TYPE>
+struct bluestore_interval_t
+{
   static const uint64_t INVALID_OFFSET = ~0ull;
 
-  uint64_t offset = 0;
-  uint32_t length = 0;
+  OFFS_TYPE offset = 0;
+  LEN_TYPE length = 0;
 
-  bluestore_pextent_t() {}
-  bluestore_pextent_t(uint64_t o, uint64_t l) : offset(o), length(l) {}
-  bluestore_pextent_t(const bluestore_pextent_t &ext) :
-    offset(ext.offset), length(ext.length) {}
+  bluestore_interval_t(){}
+  bluestore_interval_t(uint64_t o, uint64_t l) : offset(o), length(l) {}
 
   bool is_valid() const {
     return offset != INVALID_OFFSET;
@@ -85,9 +84,19 @@ struct bluestore_pextent_t {
     return offset != INVALID_OFFSET ? offset + length : INVALID_OFFSET;
   }
 
-  bool operator==(const bluestore_pextent_t& other) const {
+  bool operator==(const bluestore_interval_t& other) const {
     return offset == other.offset && length == other.length;
   }
+
+};
+
+/// pextent: physical extent
+struct bluestore_pextent_t : public bluestore_interval_t<uint64_t, uint32_t> 
+{
+  bluestore_pextent_t() {}
+  bluestore_pextent_t(uint64_t o, uint64_t l) : bluestore_interval_t(o, l) {}
+  bluestore_pextent_t(const bluestore_interval_t &ext) :
+    bluestore_interval_t(ext.offset, ext.length) {}
 
   DENC(bluestore_pextent_t, v, p) {
     denc_lba(v.offset, p);
@@ -248,6 +257,8 @@ struct bluestore_blob_use_tracker_t {
   bluestore_blob_use_tracker_t()
     : au_size(0), num_au(0), bytes_per_au(nullptr) {
   }
+  bluestore_blob_use_tracker_t(const bluestore_blob_use_tracker_t& tracker);
+  bluestore_blob_use_tracker_t& operator=(const bluestore_blob_use_tracker_t& rhs);
   ~bluestore_blob_use_tracker_t() {
     clear();
   }
@@ -747,11 +758,11 @@ public:
     case 1:
       return reinterpret_cast<const uint8_t*>(p)[i];
     case 2:
-      return reinterpret_cast<const __le16*>(p)[i];
+      return reinterpret_cast<const ceph_le16*>(p)[i];
     case 4:
-      return reinterpret_cast<const __le32*>(p)[i];
+      return reinterpret_cast<const ceph_le32*>(p)[i];
     case 8:
-      return reinterpret_cast<const __le64*>(p)[i];
+      return reinterpret_cast<const ceph_le64*>(p)[i];
     default:
       ceph_abort_msg("unrecognized csum word size");
     }
@@ -904,12 +915,19 @@ struct bluestore_onode_t {
   enum {
     FLAG_OMAP = 1,       ///< object may have omap data
     FLAG_PGMETA_OMAP = 2,  ///< omap data is in meta omap prefix
+    FLAG_PERPOOL_OMAP = 4, ///< omap data is in per-pool prefix; per-pool keys
   };
 
   string get_flags_string() const {
     string s;
     if (flags & FLAG_OMAP) {
       s = "omap";
+    }
+    if (flags & FLAG_PGMETA_OMAP) {
+      s += "+pgmeta_omap";
+    }
+    if (flags & FLAG_PERPOOL_OMAP) {
+      s += "+perpool_omap";
     }
     return s;
   }
@@ -932,9 +950,15 @@ struct bluestore_onode_t {
   bool is_pgmeta_omap() const {
     return has_flag(FLAG_PGMETA_OMAP);
   }
+  bool is_perpool_omap() const {
+    return has_flag(FLAG_PERPOOL_OMAP);
+  }
 
-  void set_omap_flag() {
-    set_flag(FLAG_OMAP);
+  void set_omap_flags() {
+    set_flag(FLAG_OMAP | FLAG_PERPOOL_OMAP);
+  }
+  void set_omap_flags_pgmeta() {
+    set_flag(FLAG_OMAP | FLAG_PGMETA_OMAP);
   }
 
   void clear_omap_flag() {

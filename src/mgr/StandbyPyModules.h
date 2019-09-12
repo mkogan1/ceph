@@ -19,19 +19,21 @@
 #include <map>
 
 #include "common/Thread.h"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 
 #include "mgr/Gil.h"
 #include "mon/MonClient.h"
 #include "mon/MgrMap.h"
 #include "mgr/PyModuleRunner.h"
 
+class Finisher;
+
 /**
  * State that is read by all modules running in standby mode
  */
 class StandbyPyModuleState
 {
-  mutable Mutex lock{"StandbyPyModuleState::lock"};
+  mutable ceph::mutex lock = ceph::make_mutex("StandbyPyModuleState::lock");
 
   MgrMap mgr_map;
   PyModuleConfig &module_config;
@@ -98,12 +100,14 @@ class StandbyPyModule : public PyModuleRunner
 class StandbyPyModules
 {
 private:
-  mutable Mutex lock{"StandbyPyModules::lock"};
+  mutable ceph::mutex lock = ceph::make_mutex("StandbyPyModules::lock");
   std::map<std::string, std::unique_ptr<StandbyPyModule>> modules;
 
   StandbyPyModuleState state;
 
   LogChannelRef clog;
+
+  Finisher &finisher;
 
 public:
 
@@ -111,9 +115,10 @@ public:
       const MgrMap &mgr_map_,
       PyModuleConfig &module_config,
       LogChannelRef clog_,
-      MonClient &monc);
+      MonClient &monc,
+      Finisher &f);
 
-  int start_one(PyModuleRef py_module);
+  void start_one(PyModuleRef py_module);
 
   void shutdown();
 

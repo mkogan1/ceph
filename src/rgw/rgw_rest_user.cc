@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "common/ceph_json.h"
 
@@ -11,6 +11,34 @@
 #include "include/ceph_assert.h"
 
 #define dout_subsys ceph_subsys_rgw
+
+class RGWOp_User_List : public RGWRESTOp {
+
+public:
+  RGWOp_User_List() {}
+
+  int check_caps(RGWUserCaps& caps) override {
+    return caps.check_cap("users", RGW_CAP_READ);
+  }
+
+  void execute() override;
+
+  const char* name() const override { return "list_user"; }
+};
+
+void RGWOp_User_List::execute()
+{
+  RGWUserAdminOpState op_state;
+
+  uint32_t max_entries;
+  std::string marker;
+  RESTArgs::get_uint32(s, "max-entries", 1000, &max_entries);
+  RESTArgs::get_string(s, "marker", marker, &marker);
+
+  op_state.max_entries = max_entries;
+  op_state.marker = marker;
+  http_ret = RGWUserAdminOp_User::list(store, op_state, flusher);
+}
 
 class RGWOp_User_Info : public RGWRESTOp {
 
@@ -83,6 +111,7 @@ void RGWOp_User_Create::execute()
   std::string key_type_str;
   std::string caps;
   std::string tenant_name;
+  std::string op_mask_str;
 
   bool gen_key;
   bool suspended;
@@ -109,6 +138,7 @@ void RGWOp_User_Create::execute()
   RESTArgs::get_int32(s, "max-buckets", default_max_buckets, &max_buckets);
   RESTArgs::get_bool(s, "system", false, &system);
   RESTArgs::get_bool(s, "exclusive", false, &exclusive);
+  RESTArgs::get_string(s, "op-mask", op_mask_str, &op_mask_str);
 
   if (!s->user->system && system) {
     ldout(s->cct, 0) << "cannot set system flag by non-system user" << dendl;
@@ -127,6 +157,17 @@ void RGWOp_User_Create::execute()
   op_state.set_caps(caps);
   op_state.set_access_key(access_key);
   op_state.set_secret_key(secret_key);
+
+  if (!op_mask_str.empty()) {
+    uint32_t op_mask;
+    int ret = rgw_parse_op_type_list(op_mask_str, &op_mask);
+    if (ret < 0) {
+      ldout(s->cct, 0) << "failed to parse op_mask: " << ret << dendl;
+      http_ret = -EINVAL;
+      return;
+    }
+    op_state.set_op_mask(op_mask);
+  }
 
   if (!key_type_str.empty()) {
     int32_t key_type = KEY_TYPE_UNDEFINED;
@@ -179,6 +220,7 @@ void RGWOp_User_Modify::execute()
   std::string secret_key;
   std::string key_type_str;
   std::string caps;
+  std::string op_mask_str;
 
   bool gen_key;
   bool suspended;
@@ -203,6 +245,7 @@ void RGWOp_User_Modify::execute()
   RESTArgs::get_string(s, "key-type", key_type_str, &key_type_str);
 
   RESTArgs::get_bool(s, "system", false, &system);
+  RESTArgs::get_string(s, "op-mask", op_mask_str, &op_mask_str);
 
   if (!s->user->system && system) {
     ldout(s->cct, 0) << "cannot set system flag by non-system user" << dendl;
@@ -236,11 +279,32 @@ void RGWOp_User_Modify::execute()
     op_state.set_key_type(key_type);
   }
 
+  if (!op_mask_str.empty()) {
+    uint32_t op_mask;
+    if (rgw_parse_op_type_list(op_mask_str, &op_mask) < 0) {
+        ldout(s->cct, 0) << "failed to parse op_mask" << dendl;
+        http_ret = -EINVAL;
+        return;
+    }   
+    op_state.set_op_mask(op_mask);
+  }
+
   if (s->info.args.exists("suspended"))
     op_state.set_suspension(suspended);
 
   if (s->info.args.exists("system"))
     op_state.set_system(system);
+
+  if (!op_mask_str.empty()) {
+    uint32_t op_mask;
+    int ret = rgw_parse_op_type_list(op_mask_str, &op_mask);
+    if (ret < 0) {
+      ldout(s->cct, 0) << "failed to parse op_mask: " << ret << dendl;
+      http_ret = -EINVAL;
+      return;
+    }
+    op_state.set_op_mask(op_mask);
+  }
 
   http_ret = RGWUserAdminOp_User::modify(store, op_state, flusher);
 }
@@ -277,7 +341,7 @@ void RGWOp_User_Remove::execute()
 
   op_state.set_purge_data(purge_data);
 
-  http_ret = RGWUserAdminOp_User::remove(store, op_state, flusher);
+  http_ret = RGWUserAdminOp_User::remove(store, op_state, flusher, s->yield);
 }
 
 class RGWOp_Subuser_Create : public RGWRESTOp {
@@ -896,6 +960,9 @@ RGWOp *RGWHandler_User::op_get()
 {
   if (s->info.args.sub_resource_exists("quota"))
     return new RGWOp_Quota_Info;
+
+  if (s->info.args.sub_resource_exists("list"))
+    return new RGWOp_User_List;
 
   return new RGWOp_User_Info;
 }

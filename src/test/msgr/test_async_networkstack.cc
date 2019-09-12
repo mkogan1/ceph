@@ -31,8 +31,6 @@
 #include "msg/async/Stack.h"
 
 
-#if GTEST_HAS_PARAM_TEST
-
 class NoopConfigObserver : public md_config_obs_t {
   std::list<std::string> options;
   const char **ptrs = 0;
@@ -185,7 +183,7 @@ TEST_P(NetworkWorkerTest, SimpleTest) {
     EventCenter *center = &worker->center;
     ssize_t r = 0;
     if (stack->support_local_listen_table() || worker->id == 0)
-      r = worker->listen(bind_addr, options, &bind_socket);
+      r = worker->listen(bind_addr, 0, options, &bind_socket);
     ASSERT_EQ(0, r);
 
     ConnectedSocket cli_socket, srv_socket;
@@ -287,7 +285,7 @@ TEST_P(NetworkWorkerTest, ConnectFailedTest) {
     ServerSocket bind_socket;
     int r = 0;
     if (stack->support_local_listen_table() || worker->id == 0)
-      r = worker->listen(bind_addr, options, &bind_socket);
+      r = worker->listen(bind_addr, 0, options, &bind_socket);
     ASSERT_EQ(0, r);
 
     ConnectedSocket cli_socket1, cli_socket2;
@@ -328,10 +326,10 @@ TEST_P(NetworkWorkerTest, ListenTest) {
   ASSERT_TRUE(bind_addr.parse(get_addr().c_str()));
   SocketOptions options;
   ServerSocket bind_socket1, bind_socket2;
-  int r = worker->listen(bind_addr, options, &bind_socket1);
+  int r = worker->listen(bind_addr, 0, options, &bind_socket1);
   ASSERT_EQ(0, r);
 
-  r = worker->listen(bind_addr, options, &bind_socket2);
+  r = worker->listen(bind_addr, 0, options, &bind_socket2);
   ASSERT_EQ(-EADDRINUSE, r);
 }
 
@@ -350,7 +348,7 @@ TEST_P(NetworkWorkerTest, AcceptAndCloseTest) {
     {
       ServerSocket bind_socket;
       if (stack->support_local_listen_table() || worker->id == 0)
-        r = worker->listen(bind_addr, options, &bind_socket);
+        r = worker->listen(bind_addr, 0, options, &bind_socket);
       ASSERT_EQ(0, r);
 
       ConnectedSocket srv_socket, cli_socket;
@@ -457,7 +455,7 @@ TEST_P(NetworkWorkerTest, ComplexTest) {
     ServerSocket bind_socket;
     int r = 0;
     if (stack->support_local_listen_table() || worker->id == 0) {
-      r = worker->listen(bind_addr, options, &bind_socket);
+      r = worker->listen(bind_addr, 0, options, &bind_socket);
       ASSERT_EQ(0, r);
       *listen_p = true;
     }
@@ -978,8 +976,8 @@ class StressFactory {
   }
 
   void add_client(ThreadData *t_data) {
-    static Mutex lock("add_client_lock");
-    Mutex::Locker l(lock);
+    static ceph::mutex lock = ceph::make_mutex("add_client_lock");
+    std::lock_guard l{lock};
     ConnectedSocket sock;
     int r = t_data->worker->connect(bind_addr, options, &sock);
     std::default_random_engine rng(rd());
@@ -1010,7 +1008,7 @@ class StressFactory {
     t_data.worker = worker;
     ServerSocket bind_socket;
     if (stack->support_local_listen_table() || worker->id == 0) {
-      r = worker->listen(bind_addr, options, &bind_socket);
+      r = worker->listen(bind_addr, 0, options, &bind_socket);
       ASSERT_EQ(0, r);
       already_bind = true;
     }
@@ -1066,7 +1064,7 @@ TEST_P(NetworkWorkerTest, StressTest) {
 }
 
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
   NetworkStack,
   NetworkWorkerTest,
   ::testing::Values(
@@ -1076,19 +1074,6 @@ INSTANTIATE_TEST_CASE_P(
     "posix"
   )
 );
-
-#else
-
-// Google Test may not support value-parameterized tests with some
-// compilers. If we use conditional compilation to compile out all
-// code referring to the gtest_main library, MSVC linker will not link
-// that library at all and consequently complain about missing entry
-// point defined in that library (fatal error LNK1561: entry point
-// must be defined). This dummy test keeps gtest_main linked in.
-TEST(DummyTest, ValueParameterizedTestsAreNotSupportedOnThisPlatform) {}
-
-#endif
-
 
 /*
  * Local Variables:

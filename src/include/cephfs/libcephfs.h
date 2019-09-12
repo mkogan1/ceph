@@ -279,6 +279,15 @@ int ceph_select_filesystem(struct ceph_mount_info *cmount, const char *fs_name);
 int ceph_mount(struct ceph_mount_info *cmount, const char *root);
 
 /**
+ * Return cluster ID for a mounted ceph filesystem
+ *
+ * Every ceph filesystem has a filesystem ID associated with it. This
+ * function returns that value. If the ceph_mount_info does not refer to a
+ * mounted filesystem, this returns a negative error code.
+ */
+int64_t ceph_get_fs_cid(struct ceph_mount_info *cmount);
+
+/**
  * Execute a management command remotely on an MDS.
  *
  * Must have called ceph_init or ceph_mount before calling this.
@@ -736,6 +745,37 @@ int ceph_fstatx(struct ceph_mount_info *cmount, int fd, struct ceph_statx *stx,
  */
 int ceph_statx(struct ceph_mount_info *cmount, const char *path, struct ceph_statx *stx,
 	       unsigned int want, unsigned int flags);
+
+/**
+ * Get a file's statistics and attributes.
+ *
+ * @param cmount the ceph mount handle to use for performing the stat.
+ * @param path the file or directory to get the statistics of.
+ * @param stbuf the stat struct that will be filled in with the file's statistics.
+ * @returns 0 on success or negative error code on failure.
+ */
+int ceph_stat(struct ceph_mount_info *cmount, const char *path, struct stat *stbuf);
+
+/**
+ * Get a file's statistics and attributes, without following symlinks.
+ *
+ * @param cmount the ceph mount handle to use for performing the stat.
+ * @param path the file or directory to get the statistics of.
+ * @param stbuf the stat struct that will be filled in with the file's statistics.
+ * @returns 0 on success or negative error code on failure.
+ */
+int ceph_lstat(struct ceph_mount_info *cmount, const char *path, struct stat *stbuf);
+
+/**
+ * Get the open file's statistics.
+ *
+ * @param cmount the ceph mount handle to use for performing the fstat.
+ * @param fd the file descriptor of the file to get statistics of.
+ * @param stbuf the stat struct of the file's statistics, filled in by the
+ *    function.
+ * @returns 0 on success or a negative error code on failure
+ */
+int ceph_fstat(struct ceph_mount_info *cmount, int fd, struct stat *stbuf);
 
 /**
  * Set a file's attributes.

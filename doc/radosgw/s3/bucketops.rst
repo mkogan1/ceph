@@ -7,15 +7,18 @@ PUT Bucket
 Creates a new bucket. To create a bucket, you must have a user ID and a valid AWS Access Key ID to authenticate requests. You may not
 create buckets as an anonymous user.
 
-.. note:: We do not support request entities for ``PUT /{bucket}`` in this release.
-
 Constraints
 ~~~~~~~~~~~
 In general, bucket names should follow domain name constraints.
 
 - Bucket names must be unique.
-- Bucket names must begin and end with a lowercase letter.
-- Bucket names may contain a dash (-).
+- Bucket names cannot be formatted as IP address.
+- Bucket names can be between 3 and 63 characters long.
+- Bucket names must not contain uppercase characters or underscores.
+- Bucket names must start with a lowercase letter or number.
+- Bucket names must be a series of one or more labels. Adjacent labels are separated by a single period (.). Bucket names can contain lowercase letters, numbers, and hyphens. Each label must start and end with a lowercase letter or a number.
+
+.. note:: The above constraints are relaxed if the option 'rgw_relaxed_s3_bucket_names' is set to true except that the bucket names must still be unique, cannot be formatted as IP address and can contain letters, numbers, periods, dashes and underscores for up to 255 characters long.
 
 Syntax
 ~~~~~~
@@ -31,12 +34,25 @@ Syntax
 Parameters
 ~~~~~~~~~~
 
+
 +---------------+----------------------+-----------------------------------------------------------------------------+------------+
 | Name          | Description          | Valid Values                                                                | Required   |
 +===============+======================+=============================================================================+============+
 | ``x-amz-acl`` | Canned ACLs.         | ``private``, ``public-read``, ``public-read-write``, ``authenticated-read`` | No         |
 +---------------+----------------------+-----------------------------------------------------------------------------+------------+
+| ``x-amz-bucket-object-lock-enabled`` | Enable object lock on bucket. | ``true``, ``false``                         | No         |
++--------------------------------------+-------------------------------+---------------------------------------------+------------+
 
+Request Entities
+~~~~~~~~~~~~~~~~
+
++-------------------------------+-----------+----------------------------------------------------------------+
+| Name                          | Type      | Description                                                    |
++===============================+===========+================================================================+
+| ``CreateBucketConfiguration`` | Container | A container for the bucket configuration.                      |
++-------------------------------+-----------+----------------------------------------------------------------+
+| ``LocationConstraint``        | String    | A zonegroup api name, with optional :ref:`s3_bucket_placement` |
++-------------------------------+-----------+----------------------------------------------------------------+
 
 
 HTTP Response
@@ -156,6 +172,8 @@ The ``ListBucketResult`` contains objects, where each object is within a ``Conte
 | ``Size``               | Integer   | The object's size.                       |
 +------------------------+-----------+------------------------------------------+
 | ``StorageClass``       | String    | Should always return ``STANDARD``.       |
++------------------------+-----------+------------------------------------------+
+| ``Type``               | String    | ``Appendable`` or ``Normal``.            |
 +------------------------+-----------+------------------------------------------+
 
 Get Bucket Location
@@ -376,3 +394,86 @@ REQUEST ENTITIES
 +-----------------------------+-----------+---------------------------------------------------------------------------+
 | ``Status``                  | String    | Sets the versioning state of the bucket.  Valid Values: Suspended/Enabled |
 +-----------------------------+-----------+---------------------------------------------------------------------------+
+
+PUT BUCKET OBJECT LOCK
+--------------------------------
+
+Places an Object Lock configuration on the specified bucket. The rule specified in the Object Lock configuration will be
+applied by default to every new object placed in the specified bucket.
+
+Syntax
+~~~~~~
+
+::
+
+    PUT /{bucket}?object-lock HTTP/1.1
+
+Request Entities
+~~~~~~~~~~~~~~~~
+
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| Name                        | Type        | Description                                                                            | Required |
++=============================+=============+========================================================================================+==========+
+| ``ObjectLockConfiguration`` | Container   | A container for the request.                                                           |   Yes    |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``ObjectLockEnabled``       | String      | Indicates whether this bucket has an Object Lock configuration enabled.                |   Yes    |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Rule``                    | Container   | The Object Lock rule in place for the specified bucket.                                |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``DefaultRetention``        | Container   | The default retention period applied to new objects placed in the specified bucket.    |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Mode``                    | String      | The default Object Lock retention mode. Valid Values:  GOVERNANCE/COMPLIANCE           |   Yes    |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Days``                    | Integer     | The number of days specified for the default retention period.                         |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Years``                   | Integer     | The number of years specified for the default retention period.                        |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+
+HTTP Response
+~~~~~~~~~~~~~
+
+If the bucket object lock is not enabled when creating the bucket, the operation will fail.
+
++---------------+-----------------------+----------------------------------------------------------+
+| HTTP Status   | Status Code           | Description                                              |
++===============+=======================+==========================================================+
+| ``400``       | MalformedXML          | The XML is not well-formed                               |
++---------------+-----------------------+----------------------------------------------------------+
+| ``409``       | InvalidBucketState    | The bucket object lock is not enabled                    |
++---------------+-----------------------+----------------------------------------------------------+
+
+GET BUCKET OBJECT LOCK
+--------------------------------
+
+Gets the Object Lock configuration for a bucket. The rule specified in the Object Lock configuration will be applied by
+default to every new object placed in the specified bucket.
+
+Syntax
+~~~~~~
+
+::
+
+    GET /{bucket}?object-lock HTTP/1.1
+
+
+Response Entities
+~~~~~~~~~~~~~~~~~
+
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| Name                        | Type        | Description                                                                            | Required |
++=============================+=============+========================================================================================+==========+
+| ``ObjectLockConfiguration`` | Container   | A container for the request.                                                           |   Yes    |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``ObjectLockEnabled``       | String      | Indicates whether this bucket has an Object Lock configuration enabled.                |   Yes    |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Rule``                    | Container   | The Object Lock rule in place for the specified bucket.                                |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``DefaultRetention``        | Container   | The default retention period applied to new objects placed in the specified bucket.    |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Mode``                    | String      | The default Object Lock retention mode. Valid Values:  GOVERNANCE/COMPLIANCE           |   Yes    |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Days``                    | Integer     | The number of days specified for the default retention period.                         |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+| ``Years``                   | Integer     | The number of years specified for the default retention period.                        |   No     |
++-----------------------------+-------------+----------------------------------------------------------------------------------------+----------+
+

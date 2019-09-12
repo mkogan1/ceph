@@ -38,7 +38,7 @@
 class PyModuleRegistry
 {
 private:
-  mutable Mutex lock{"PyModuleRegistry::lock"};
+  mutable ceph::mutex lock = ceph::make_mutex("PyModuleRegistry::lock");
   LogChannelRef clog;
 
   std::map<std::string, PyModuleRef> modules;
@@ -55,12 +55,13 @@ private:
   /**
    * Discover python modules from local disk
    */
-  std::set<std::string> probe_modules() const;
+  std::set<std::string> probe_modules(const std::string &path) const;
 
   PyModuleConfig module_config;
 
 public:
   void handle_config(const std::string &k, const std::string &v);
+  void handle_config_notify();
 
   /**
    * Get references to all modules (whether they have loaded and/or
@@ -98,7 +99,7 @@ public:
                 MonClient &mc, LogChannelRef clog_, LogChannelRef audit_clog_,
                 Objecter &objecter_, Client &client_, Finisher &f,
                 DaemonServer &server);
-  void standby_start(MonClient &mc);
+  void standby_start(MonClient &mc, Finisher &f);
 
   bool is_standby_running() const
   {
@@ -112,13 +113,19 @@ public:
   std::vector<ModuleCommand> get_py_commands() const;
 
   /**
-   * module_name **must** exist, but does not have to be loaded
-   * or runnable.
+   * Get the specified module. The module does not have to be
+   * loaded or runnable.
+   *
+   * Returns an empty reference if it does not exist.
    */
   PyModuleRef get_module(const std::string &module_name)
   {
     std::lock_guard l(lock);
-    return modules.at(module_name);
+    auto module_iter = modules.find(module_name);
+    if (module_iter == modules.end()) {
+        return {};
+    }
+    return module_iter->second;
   }
 
   /**
@@ -142,6 +149,12 @@ public:
    * modules that have failed (i.e. unhandled exceptions in serve())
    */
   void get_health_checks(health_check_map_t *checks);
+
+  void get_progress_events(map<std::string,ProgressEvent> *events) {
+    if (active_modules) {
+      active_modules->get_progress_events(events);
+    }
+  }
 
   // FIXME: breaking interface so that I don't have to go rewrite all
   // the places that call into these (for now)

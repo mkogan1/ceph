@@ -10,7 +10,7 @@ target_link_libraries(ceph_test_cls_lock
   ${CMAKE_DL_LIBS}
   ${CRYPTO_LIBS}
   ${EXTRALIBS}
-  radostest
+  radostest-cxx
   )
 install(TARGETS
   ceph_test_cls_lock

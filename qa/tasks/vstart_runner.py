@@ -23,6 +23,11 @@ Alternative usage:
     # If you wish to run a named test case, pass it as an argument:
     python ~/git/ceph/qa/tasks/vstart_runner.py tasks.cephfs.test_data_scan
 
+    # Also, you can create the cluster once and then run named test cases against it:
+    python ~/git/ceph/qa/tasks/vstart_runner.py --create-cluster-only
+    python ~/git/ceph/qa/tasks/vstart_runner.py tasks.mgr.dashboard.test_health
+    python ~/git/ceph/qa/tasks/vstart_runner.py tasks.mgr.dashboard.test_rgw
+
 """
 
 from StringIO import StringIO
@@ -104,7 +109,7 @@ if os.path.exists("./CMakeCache.txt") and os.path.exists("./bin"):
                 python_paths.append(g_exp)
 
     ld_path = os.path.join(os.getcwd(), "lib/")
-    print "Using guessed paths {0} {1}".format(ld_path, python_paths)
+    print("Using guessed paths {0} {1}".format(ld_path, python_paths))
     respawn_in_path(ld_path, python_paths)
 
 
@@ -226,15 +231,71 @@ class LocalRemote(object):
         shutil.copy(path, tmpfile)
         return tmpfile
 
+    # XXX: This method ignores the error raised when src and dst are
+    # holding same path. For teuthology, same path still represents
+    # different locations as they lie on different machines.
     def put_file(self, src, dst, sudo=False):
-        shutil.copy(src, dst)
+        if sys.version_info.major < 3:
+            exception = shutil.Error
+        elif sys.version_info.major >= 3:
+            exception = shutil.SameFileError
+
+        try:
+            shutil.copy(src, dst)
+        except exception as e:
+            if sys.version_info.major < 3 and e.message.find('are the same '
+               'file') != -1:
+                return
+            raise e
+
+    def _perform_checks_and_return_list_of_args(self, args, omit_sudo):
+        # Since Python's shell simulation can only work when commands are
+        # provided as a list of argumensts...
+        if isinstance(args, str) or isinstance(args, unicode):
+            args = args.split()
+
+        # We'll let sudo be a part of command even omit flag says otherwise in
+        # cases of commands which can normally be ran only by root.
+        try:
+            if args[args.index('sudo') + 1] in ['-u', 'passwd', 'chown']:
+                omit_sudo = False
+        except ValueError:
+            pass
+
+        # Quotes wrapping a command argument don't work fine in Python's shell
+        # simulation if the arguments contains spaces too. E.g. '"ls"' is OK
+        # but "ls /" isn't.
+        errmsg = "Don't surround arguments commands by quotes if it " + \
+                 "contains spaces.\nargs - %s" % (args)
+        for arg in args:
+            if isinstance(arg, Raw):
+                continue
+
+            if arg and (arg[0] in ['"', "'"] or arg[-1] in ['"', "'"]) and \
+               (arg.find(' ') != -1 and 0 < arg.find(' ') < len(arg) - 1):
+                raise RuntimeError(errmsg)
+
+        # ['sudo', '-u', 'user', '-s', 'path-to-shell', '-c', 'ls', 'a']
+        # and ['sudo', '-u', user, '-s', path_to_shell, '-c', 'ls a'] are
+        # treated differently by Python's shell simulation. Only latter has
+        # the desired effect.
+        errmsg = 'The entire command to executed as other user should be a ' +\
+                 'single argument.\nargs - %s' % (args)
+        if 'sudo' in args and '-u' in args and '-c' in args and \
+           args.count('-c') == 1:
+            if args.index('-c') != len(args) - 2 and \
+               args[args.index('-c') + 2].find('-') == -1:
+                raise RuntimeError(errmsg)
+
+        if omit_sudo:
+            args = [a for a in args if a != "sudo"]
+
+        return args
 
     def run(self, args, check_status=True, wait=True,
             stdout=None, stderr=None, cwd=None, stdin=None,
-            logger=None, label=None, env=None):
-
-        # We don't need no stinkin' sudo
-        args = [a for a in args if a != "sudo"]
+            logger=None, label=None, env=None, timeout=None, omit_sudo=True):
+        args = self._perform_checks_and_return_list_of_args(args, omit_sudo)
 
         # We have to use shell=True if any run.Raw was present, e.g. &&
         shell = any([a for a in args if isinstance(a, Raw)])
@@ -349,7 +410,7 @@ class LocalDaemon(object):
 
         pid = self._get_pid()
         log.info("Killing PID {0} for {1}.{2}".format(pid, self.daemon_type, self.daemon_id))
-        os.kill(pid, signal.SIGKILL)
+        os.kill(pid, signal.SIGTERM)
 
         waited = 0
         while pid is not None:
@@ -357,7 +418,7 @@ class LocalDaemon(object):
             if new_pid is not None and new_pid != pid:
                 log.info("Killing new PID {0}".format(new_pid))
                 pid = new_pid
-                os.kill(pid, signal.SIGKILL)
+                os.kill(pid, signal.SIGTERM)
 
             if new_pid is None:
                 break
@@ -413,13 +474,65 @@ class LocalFuseMount(FuseMount):
         # to avoid assumptions about daemons' pwd
         return os.path.abspath("./client.{0}.keyring".format(self.client_id))
 
-    def run_shell(self, args, wait=True):
+    def run_shell(self, args, wait=True, stdin=None, check_status=True, omit_sudo=True):
         # FIXME maybe should add a pwd arg to teuthology.orchestra so that
         # the "cd foo && bar" shenanigans isn't needed to begin with and
         # then we wouldn't have to special case this
-        return self.client_remote.run(
-            args, wait=wait, cwd=self.mountpoint
-        )
+        return self.client_remote.run(args, wait=wait, cwd=self.mountpoint,
+                                      stdin=stdin, check_status=check_status,
+                                      omit_sudo=omit_sudo)
+
+    def run_as_user(self, args, user, wait=True, stdin=None, check_status=True):
+        # FIXME maybe should add a pwd arg to teuthology.orchestra so that
+        # the "cd foo && bar" shenanigans isn't needed to begin with and
+        # then we wouldn't have to special case this
+        if isinstance(args, str):
+            args = 'sudo -u %s -s /bin/bash -c %s' % (user, args)
+        elif isinstance(args, list):
+            cmdlist = args
+            cmd = ''
+            for i in cmdlist:
+                cmd = cmd + i + ' '
+            args = ['sudo', '-u', user, '-s', '/bin/bash', '-c']
+            args.append(cmd)
+
+        return self.client_remote.run(args, wait=wait, cwd=self.mountpoint,
+                                      check_status=check_status, stdin=stdin,
+                                      omit_sudo=False)
+
+    def run_as_root(self, args, wait=True, stdin=None, check_status=True):
+        # FIXME maybe should add a pwd arg to teuthology.orchestra so that
+        # the "cd foo && bar" shenanigans isn't needed to begin with and
+        # then we wouldn't have to special case this
+        if isinstance(args, str):
+            args = 'sudo ' + args
+        if isinstance(args, list):
+            args.insert(0, 'sudo')
+
+        return self.client_remote.run(args, wait=wait, cwd=self.mountpoint,
+                                      check_status=check_status,
+                                      omit_sudo=False)
+
+    def testcmd(self, args, wait=True, stdin=None, omit_sudo=True):
+        # FIXME maybe should add a pwd arg to teuthology.orchestra so that
+        # the "cd foo && bar" shenanigans isn't needed to begin with and
+        # then we wouldn't have to special case this
+        return self.run_shell(args, wait=wait, stdin=stdin, check_status=False,
+                              omit_sudo=omit_sudo)
+
+    def testcmd_as_user(self, args, user, wait=True, stdin=None):
+        # FIXME maybe should add a pwd arg to teuthology.orchestra so that
+        # the "cd foo && bar" shenanigans isn't needed to begin with and
+        # then we wouldn't have to special case this
+        return self.run_as_user(args, user=user, wait=wait, stdin=stdin,
+                                check_status=False)
+
+    def testcmd_as_root(self, args, wait=True, stdin=None):
+        # FIXME maybe should add a pwd arg to teuthology.orchestra so that
+        # the "cd foo && bar" shenanigans isn't needed to begin with and
+        # then we wouldn't have to special case this
+        return self.run_as_root(args, wait=wait, stdin=stdin,
+                                check_status=False)
 
     def setupfs(self, name=None):
         if name is None and self.fs is not None:
@@ -606,9 +719,11 @@ class LocalCephManager(CephManager):
         proc = self.controller.run([os.path.join(BIN_PREFIX, "ceph")] + list(args), **kwargs)
         return proc.exitstatus
 
-    def admin_socket(self, daemon_type, daemon_id, command, check_status=True):
+    def admin_socket(self, daemon_type, daemon_id, command, check_status=True, timeout=None):
         return self.controller.run(
-            args=[os.path.join(BIN_PREFIX, "ceph"), "daemon", "{0}.{1}".format(daemon_type, daemon_id)] + command, check_status=check_status
+            args=[os.path.join(BIN_PREFIX, "ceph"), "daemon", "{0}.{1}".format(daemon_type, daemon_id)] + command,
+            check_status=check_status,
+            timeout=timeout
         )
 
 
@@ -823,6 +938,7 @@ def scan_tests(modules):
     max_required_mds = 0
     max_required_clients = 0
     max_required_mgr = 0
+    require_memstore = False
 
     for suite, case in enumerate_methods(overall_suite):
         max_required_mds = max(max_required_mds,
@@ -831,8 +947,11 @@ def scan_tests(modules):
                                getattr(case, "CLIENTS_REQUIRED", 0))
         max_required_mgr = max(max_required_mgr,
                                getattr(case, "MGRS_REQUIRED", 0))
+        require_memstore = getattr(case, "REQUIRE_MEMSTORE", False) \
+                               or require_memstore
 
-    return max_required_mds, max_required_clients, max_required_mgr
+    return max_required_mds, max_required_clients, \
+            max_required_mgr, require_memstore
 
 
 class LocalCluster(object):
@@ -872,6 +991,8 @@ def exec_test():
     # Parse arguments
     interactive_on_error = False
     create_cluster = False
+    create_cluster_only = False
+    ignore_missing_binaries = False
 
     args = sys.argv[1:]
     flags = [a for a in args if a.startswith("-")]
@@ -881,6 +1002,10 @@ def exec_test():
             interactive_on_error = True
         elif f == "--create":
             create_cluster = True
+        elif f == "--create-cluster-only":
+            create_cluster_only = True
+        elif f == "--ignore-missing-binaries":
+            ignore_missing_binaries = True
         else:
             log.error("Unknown option '{0}'".format(f))
             sys.exit(-1)
@@ -890,11 +1015,12 @@ def exec_test():
     require_binaries = ["ceph-dencoder", "cephfs-journal-tool", "cephfs-data-scan",
                         "cephfs-table-tool", "ceph-fuse", "rados"]
     missing_binaries = [b for b in require_binaries if not os.path.exists(os.path.join(BIN_PREFIX, b))]
-    if missing_binaries:
+    if missing_binaries and not ignore_missing_binaries:
         log.error("Some ceph binaries missing, please build them: {0}".format(" ".join(missing_binaries)))
         sys.exit(-1)
 
-    max_required_mds, max_required_clients, max_required_mgr = scan_tests(modules)
+    max_required_mds, max_required_clients, \
+            max_required_mgr, require_memstore = scan_tests(modules)
 
     remote = LocalRemote()
 
@@ -910,7 +1036,7 @@ def exec_test():
             os.kill(pid, signal.SIGKILL)
 
     # Fire up the Ceph cluster if the user requested it
-    if create_cluster:
+    if create_cluster or create_cluster_only:
         log.info("Creating cluster with {0} MDS daemons".format(
             max_required_mds))
         remote.run([os.path.join(SRC_PREFIX, "stop.sh")], check_status=False)
@@ -922,12 +1048,19 @@ def exec_test():
         vstart_env["OSD"] = "4"
         vstart_env["MGR"] = max(max_required_mgr, 1).__str__()
 
-        remote.run([os.path.join(SRC_PREFIX, "vstart.sh"), "-n", "-d", "--nolockdep"],
-                   env=vstart_env)
+        args = [os.path.join(SRC_PREFIX, "vstart.sh"), "-n", "-d",
+                    "--nolockdep"]
+        if require_memstore:
+            args.append("--memstore")
+
+        remote.run(args, env=vstart_env)
 
         # Wait for OSD to come up so that subsequent injectargs etc will
         # definitely succeed
         LocalCephCluster(LocalContext()).mon_manager.wait_for_all_osds_up(timeout=30)
+
+    if create_cluster_only:
+        return
 
     # List of client mounts, sufficient to run the selected tests
     clients = [i.__str__() for i in range(0, max_required_clients)]

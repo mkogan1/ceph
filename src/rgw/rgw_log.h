@@ -1,11 +1,11 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #ifndef CEPH_RGW_LOG_H
 #define CEPH_RGW_LOG_H
+
 #include <boost/container/flat_map.hpp>
 #include "rgw_common.h"
-#include "common/Formatter.h"
 #include "common/OutputDataSocket.h"
 
 class RGWRados;
@@ -29,7 +29,7 @@ struct rgw_log_entry {
   uint64_t bytes_sent;
   uint64_t bytes_received;
   uint64_t obj_size;
-  Clock::duration total_time;
+  Clock::duration total_time{};
   string user_agent;
   string referrer;
   string bucket_id;
@@ -110,14 +110,14 @@ struct rgw_log_entry {
     }
     DECODE_FINISH(p);
   }
-  void dump(Formatter *f) const;
+  void dump(ceph::Formatter *f) const;
   static void generate_test_instances(list<rgw_log_entry*>& o);
 };
 WRITE_CLASS_ENCODER(rgw_log_entry)
 
 class OpsLogSocket : public OutputDataSocket {
-  Formatter *formatter;
-  Mutex lock;
+  ceph::Formatter *formatter;
+  ceph::mutex lock = ceph::make_mutex("OpsLogSocket");
 
   void formatter_to_bl(bufferlist& bl);
 
@@ -138,7 +138,7 @@ int rgw_log_op(RGWRados *store, RGWREST* const rest, struct req_state *s,
 void rgw_log_usage_init(CephContext *cct, RGWRados *store);
 void rgw_log_usage_finalize();
 void rgw_format_ops_log_entry(struct rgw_log_entry& entry,
-			      Formatter *formatter);
+			      ceph::Formatter *formatter);
 
 #endif /* CEPH_RGW_LOG_H */
 

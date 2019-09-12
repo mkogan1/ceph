@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "common/errno.h"
 #include "common/Throttle.h"
@@ -125,7 +125,8 @@ void RGWFCGXProcess::handle_request(RGWRequest* r)
 
  
   int ret = process_request(store, rest, req, uri_prefix,
-                            *auth_registry, &client_io, olog);
+                            *auth_registry, &client_io, olog,
+                            null_yield, nullptr);
   if (ret < 0) {
     /* we don't really care about return code */
     dout(20) << "process_request() returned " << ret << dendl;

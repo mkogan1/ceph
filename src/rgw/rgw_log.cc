@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "common/Clock.h"
 #include "common/Timer.h"
@@ -13,6 +13,9 @@
 #include "rgw_rados.h"
 #include "rgw_client_io.h"
 #include "rgw_rest.h"
+#include "rgw_zone.h"
+
+#include "services/svc_zone.h"
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -88,9 +91,9 @@ class UsageLogger {
   CephContext *cct;
   RGWRados *store;
   map<rgw_user_bucket, RGWUsageBatch> usage_map;
-  Mutex lock;
+  ceph::mutex lock = ceph::make_mutex("UsageLogger");
   int32_t num_entries;
-  Mutex timer_lock;
+  ceph::mutex timer_lock = ceph::make_mutex("UsageLogger::timer_lock");
   SafeTimer timer;
   utime_t round_timestamp;
 
@@ -109,16 +112,16 @@ class UsageLogger {
   }
 public:
 
-  UsageLogger(CephContext *_cct, RGWRados *_store) : cct(_cct), store(_store), lock("UsageLogger"), num_entries(0), timer_lock("UsageLogger::timer_lock"), timer(cct, timer_lock) {
+  UsageLogger(CephContext *_cct, RGWRados *_store) : cct(_cct), store(_store), num_entries(0), timer(cct, timer_lock) {
     timer.init();
-    Mutex::Locker l(timer_lock);
+    std::lock_guard l{timer_lock};
     set_timer();
     utime_t ts = ceph_clock_now();
     recalc_round_timestamp(ts);
   }
 
   ~UsageLogger() {
-    Mutex::Locker l(timer_lock);
+    std::lock_guard l{timer_lock};
     flush();
     timer.cancel_all_events();
     timer.shutdown();
@@ -129,7 +132,7 @@ public:
   }
 
   void insert_user(utime_t& timestamp, const rgw_user& user, rgw_usage_log_entry& entry) {
-    lock.Lock();
+    lock.lock();
     if (timestamp.sec() > round_timestamp + 3600)
       recalc_round_timestamp(timestamp);
     entry.epoch = round_timestamp.sec();
@@ -141,9 +144,9 @@ public:
     if (account)
       num_entries++;
     bool need_flush = (num_entries > cct->_conf->rgw_usage_log_flush_threshold);
-    lock.Unlock();
+    lock.unlock();
     if (need_flush) {
-      Mutex::Locker l(timer_lock);
+      std::lock_guard l{timer_lock};
       flush();
     }
   }
@@ -158,10 +161,10 @@ public:
 
   void flush() {
     map<rgw_user_bucket, RGWUsageBatch> old_map;
-    lock.Lock();
+    lock.lock();
     old_map.swap(usage_map);
     num_entries = 0;
-    lock.Unlock();
+    lock.unlock();
 
     store->log_usage(old_map);
   }
@@ -287,7 +290,7 @@ void OpsLogSocket::init_connection(bufferlist& bl)
   bl.append("[");
 }
 
-OpsLogSocket::OpsLogSocket(CephContext *cct, uint64_t _backlog) : OutputDataSocket(cct, _backlog), lock("OpsLogSocket")
+OpsLogSocket::OpsLogSocket(CephContext *cct, uint64_t _backlog) : OutputDataSocket(cct, _backlog)
 {
   formatter = new JSONFormatter;
   delim.append(",\n");
@@ -302,10 +305,10 @@ void OpsLogSocket::log(struct rgw_log_entry& entry)
 {
   bufferlist bl;
 
-  lock.Lock();
+  lock.lock();
   rgw_format_ops_log_entry(entry, formatter);
   formatter_to_bl(bl);
-  lock.Unlock();
+  lock.unlock();
 
   append_output(bl);
 }
@@ -440,11 +443,11 @@ int rgw_log_op(RGWRados *store, RGWREST* const rest, struct req_state *s,
     string oid = render_log_object_name(s->cct->_conf->rgw_log_object_name, &bdt,
 				        s->bucket.bucket_id, entry.bucket);
 
-    rgw_raw_obj obj(store->get_zone_params().log_pool, oid);
+    rgw_raw_obj obj(store->svc.zone->get_zone_params().log_pool, oid);
 
     ret = store->append_async(obj, bl.length(), bl);
     if (ret == -ENOENT) {
-      ret = store->create_pool(store->get_zone_params().log_pool);
+      ret = store->create_pool(store->svc.zone->get_zone_params().log_pool);
       if (ret < 0)
         goto done;
       // retry

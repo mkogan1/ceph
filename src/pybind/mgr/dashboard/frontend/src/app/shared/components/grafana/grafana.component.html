@@ -1,45 +1,59 @@
 <!-- Embed dashboard -->
 <cd-loading-panel *ngIf="loading && grafanaExist"
-                  i18n>
-  Loading panel data...
-</cd-loading-panel>
-<cd-info-panel *ngIf="!grafanaExist">
-  <ng-container i18n>
-    Please consult the
-    <a href="{{ docsUrl }}"
-       target="_blank">documentation
-    </a> on how to configure and enable the monitoring functionality.
-  </ng-container>
-</cd-info-panel>
-<div class="row" *ngIf="grafanaExist">
-  <div class="col-md-12">
-    <div dropdown>
-      <button dropdownToggle
-              class="btn btn-sm dropdown-toggle"
-              data-toggle="dropdown"
-              title="Advanced Settings">
-        <i class="fa fa-cog"></i>
-        <span class="caret"></span>
-      </button>
-      <ul *dropdownMenu
-          class="dropdown-menu">
-        <li>
-          <a i18n
-             class="dropdown-item"
-             (click)="timePickerToggle()">{{ modeText }}
-          </a>
-        </li>
-      </ul>
-    </div>
-    <div class="grafana-container">
-      <iframe #iframe
-              id="iframe"
-              [src]="grafanaSrc"
-              class="grafana"
-              [ngClass]="panelStyle"
-              frameborder="0"
-              scrolling="no">
-      </iframe>
+                  i18n>Loading panel data...</cd-loading-panel>
+
+<cd-info-panel *ngIf="!grafanaExist"
+               i18n>Please consult the
+  <a href="{{ docsUrl }}"
+     target="_blank">documentation</a> on how to
+  configure and enable the monitoring functionality.</cd-info-panel>
+
+<cd-info-panel *ngIf="!dashboardExist"
+               i18n>Grafana Dashboard doesn't exist. Please refer to
+  <a href="{{ docsUrl }}"
+     target="_blank">documentation</a> on how to
+  add dashboards to Grafana.</cd-info-panel>
+
+<ng-container *ngIf="grafanaExist && dashboardExist">
+  <div class="row">
+    <div class="col-12">
+      <div class="form-inline timepicker">
+        <label for="timepicker"
+               class="ml-1 my-1 col-form-label"
+               i18n>Grafana Time Picker</label>
+
+        <select id="timepicker"
+                name="timepicker"
+                class="custom-select my-1 mx-3"
+                [(ngModel)]="time"
+                (ngModelChange)="onTimepickerChange($event)">
+          <option *ngFor="let key of grafanaTimes"
+                  [ngValue]="key.value">{{ key.name }}
+          </option>
+        </select>
+
+        <button class="btn btn-light my-1"
+                i18n-title
+                title="Reset Settings"
+                (click)="reset()">
+          <i [ngClass]="[icons.undo]"></i>
+        </button>
+      </div>
     </div>
   </div>
-</div>
+
+  <div class="row">
+    <div class="col-12">
+      <div class="grafana-container">
+        <iframe #iframe
+                id="iframe"
+                [src]="grafanaSrc"
+                class="grafana"
+                [ngClass]="panelStyle"
+                frameborder="0"
+                scrolling="no">
+        </iframe>
+      </div>
+    </div>
+  </div>
+</ng-container>

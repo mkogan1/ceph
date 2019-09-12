@@ -47,9 +47,16 @@ class ConfigProxy : public seastar::peering_sharded_service<ConfigProxy>
 
       // always apply the new settings synchronously on the owner shard, to
       // avoid racings with other do_change() calls in parallel.
+      ObserverMgr<ConfigObserver>::rev_obs_map rev_obs;
       owner.values.reset(new_values);
-      owner.obs_mgr.apply_changes(owner.values->changed,
-                                  owner, nullptr);
+      owner.obs_mgr.for_each_change(owner.values->changed, owner,
+                                    [&rev_obs](ConfigObserver *obs,
+                                               const std::string &key) {
+                                      rev_obs[obs].insert(key);
+                                    }, nullptr);
+      for (auto& [obs, keys] : rev_obs) {
+        obs->handle_conf_change(owner, keys);
+      }
 
       return seastar::parallel_for_each(boost::irange(1u, seastar::smp::count),
                                         [&owner, new_values] (auto cpu) {
@@ -57,8 +64,16 @@ class ConfigProxy : public seastar::peering_sharded_service<ConfigProxy>
           [foreign_values = seastar::make_foreign(new_values)](ConfigProxy& proxy) mutable {
             proxy.values.reset();
             proxy.values = std::move(foreign_values);
-            proxy.obs_mgr.apply_changes(proxy.values->changed,
-                                        proxy, nullptr);
+
+            ObserverMgr<ConfigObserver>::rev_obs_map rev_obs;
+            proxy.obs_mgr.for_each_change(proxy.values->changed, proxy,
+                                          [&rev_obs](md_config_obs_t *obs,
+                                                     const std::string &key) {
+                                            rev_obs[obs].insert(key);
+                                          }, nullptr);
+            for (auto& obs_keys : rev_obs) {
+              obs_keys.first->handle_conf_change(proxy, obs_keys.second);
+            }
           });
         }).finally([new_values] {
           new_values->changed.clear();
@@ -66,7 +81,7 @@ class ConfigProxy : public seastar::peering_sharded_service<ConfigProxy>
       });
   }
 public:
-  ConfigProxy();
+  ConfigProxy(const EntityName& name, std::string_view cluster);
   const ConfigValues* operator->() const noexcept {
     return values.get();
   }
@@ -122,13 +137,28 @@ public:
 					       out, expand_meta);
   }
 
-  unsigned get_osd_pool_default_min_size() const {
-    return get_config().get_osd_pool_default_min_size(*values);
+  unsigned get_osd_pool_default_min_size(uint8_t size) const {
+    return get_config().get_osd_pool_default_min_size(*values, size);
   }
 
-  seastar::future<> set_mon_vals(const std::map<std::string,std::string>& kv) {
+  seastar::future<>
+  set_mon_vals(const std::map<std::string,std::string,std::less<>>& kv) {
     return do_change([kv, this](ConfigValues& values) {
       get_config().set_mon_vals(nullptr, values, obs_mgr, kv, nullptr);
+    });
+  }
+
+  seastar::future<> parse_argv(std::vector<const char*>& argv) {
+    // we could pass whatever is unparsed to seastar, but seastar::app_template
+    // is used for driving the seastar application, and
+    // ceph::common::ConfigProxy is not available until seastar engine is up
+    // and running, so we have to feed the command line args to app_template
+    // first, then pass them to ConfigProxy.
+    return do_change([&argv, this](ConfigValues& values) {
+      get_config().parse_argv(values,
+			      obs_mgr,
+			      argv,
+			      CONF_CMDLINE);
     });
   }
 

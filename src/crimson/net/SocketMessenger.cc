@@ -15,140 +15,202 @@
 #include "SocketMessenger.h"
 
 #include <tuple>
+#include <boost/functional/hash.hpp>
 
 #include "auth/Auth.h"
 #include "Errors.h"
 #include "Dispatcher.h"
+#include "Socket.h"
 
 using namespace ceph::net;
 
-SocketMessenger::SocketMessenger(const entity_name_t& myname)
-  : Messenger{myname}
+namespace {
+  seastar::logger& logger() {
+    return ceph::get_logger(ceph_subsys_ms);
+  }
+}
+
+SocketMessenger::SocketMessenger(const entity_name_t& myname,
+                                 const std::string& logic_name,
+                                 uint32_t nonce,
+                                 int master_sid)
+  : Messenger{myname},
+    master_sid{master_sid},
+    sid{seastar::engine().cpu_id()},
+    logic_name{logic_name},
+    nonce{nonce}
 {}
 
-void SocketMessenger::bind(const entity_addr_t& addr)
+seastar::future<> SocketMessenger::set_myaddrs(const entity_addrvec_t& addrs)
 {
-  if (addr.get_family() != AF_INET) {
-    throw std::system_error(EAFNOSUPPORT, std::generic_category());
+  auto my_addrs = addrs;
+  for (auto& addr : my_addrs.v) {
+    addr.nonce = nonce;
   }
+  return container().invoke_on_all([my_addrs](auto& msgr) {
+      return msgr.Messenger::set_myaddrs(my_addrs);
+    });
+}
 
-  set_myaddr(addr);
+seastar::future<> SocketMessenger::bind(const entity_addrvec_t& addrs)
+{
+  ceph_assert(addrs.front().get_family() == AF_INET);
+  auto my_addrs = addrs;
+  for (auto& addr : my_addrs.v) {
+    addr.nonce = nonce;
+  }
+  logger().info("{} listening on {}", *this, my_addrs.front().in4_addr());
+  return container().invoke_on_all([my_addrs](auto& msgr) {
+    msgr.do_bind(my_addrs);
+  }).handle_exception_type([this] (const std::system_error& e) {
+    if (e.code() == error::address_in_use) {
+      throw e;
+    } else {
+      logger().error("{} bind: unexpected error {}", *this, e);
+      ceph_abort();
+    }
+  });
+}
 
-  seastar::socket_address address(addr.in4_addr());
+seastar::future<>
+SocketMessenger::try_bind(const entity_addrvec_t& addrs,
+                          uint32_t min_port, uint32_t max_port)
+{
+  auto addr = addrs.front();
+  if (addr.get_port() != 0) {
+    return bind(addrs);
+  }
+  ceph_assert(min_port <= max_port);
+  return seastar::do_with(uint32_t(min_port),
+    [this, max_port, addr] (auto& port) {
+      return seastar::repeat([this, max_port, addr, &port] {
+          auto to_bind = addr;
+          to_bind.set_port(port);
+          return bind(entity_addrvec_t{to_bind})
+            .then([this] {
+              logger().info("{}: try_bind: done", *this);
+              return stop_t::yes;
+            }).handle_exception_type([this, max_port, &port] (const std::system_error& e) {
+              ceph_assert(e.code() == error::address_in_use);
+              logger().trace("{}: try_bind: {} already used", *this, port);
+              if (port == max_port) {
+                throw e;
+              }
+              ++port;
+              return stop_t::no;
+            });
+        });
+    });
+}
+
+seastar::future<> SocketMessenger::start(Dispatcher *disp) {
+  return container().invoke_on_all([disp](auto& msgr) {
+      return msgr.do_start(disp->get_local_shard());
+    });
+}
+
+seastar::future<ceph::net::ConnectionXRef>
+SocketMessenger::connect(const entity_addr_t& peer_addr, const entity_type_t& peer_type)
+{
+  // make sure we connect to a valid peer_addr
+  ceph_assert(peer_addr.is_legacy() || peer_addr.is_msgr2());
+  ceph_assert(peer_addr.get_port() > 0);
+
+  auto shard = locate_shard(peer_addr);
+  return container().invoke_on(shard, [peer_addr, peer_type](auto& msgr) {
+      return msgr.do_connect(peer_addr, peer_type);
+    }).then([](seastar::foreign_ptr<ConnectionRef>&& conn) {
+      return seastar::make_lw_shared<seastar::foreign_ptr<ConnectionRef>>(std::move(conn));
+    });
+}
+
+seastar::future<> SocketMessenger::stop()
+{
+  return do_shutdown();
+}
+
+seastar::future<> SocketMessenger::shutdown()
+{
+  return container().invoke_on_all([](auto& msgr) {
+      return msgr.do_shutdown();
+    }).finally([this] {
+      return container().invoke_on_all([](auto& msgr) {
+          msgr.shutdown_promise.set_value();
+        });
+    });
+}
+
+void SocketMessenger::do_bind(const entity_addrvec_t& addrs)
+{
+  Messenger::set_myaddrs(addrs);
+
+  // TODO: v2: listen on multiple addresses
+  seastar::socket_address address(addrs.front().in4_addr());
   seastar::listen_options lo;
   lo.reuse_address = true;
   listener = seastar::listen(address, lo);
 }
 
-seastar::future<> SocketMessenger::dispatch(SocketConnectionRef conn)
-{
-  return seastar::keep_doing([=] {
-      return conn->read_message()
-        .then([=] (MessageRef msg) {
-          // start dispatch, ignoring exceptions from the application layer
-          seastar::with_gate(pending_dispatch, [=, msg = std::move(msg)] {
-              return dispatcher->ms_dispatch(conn, std::move(msg))
-                .handle_exception([] (std::exception_ptr eptr) {});
-            });
-          // return immediately to start on the next message
-          return seastar::now();
-        });
-    }).handle_exception_type([=] (const std::system_error& e) {
-      if (e.code() == error::connection_aborted ||
-          e.code() == error::connection_reset) {
-        return seastar::with_gate(pending_dispatch, [=] {
-            return dispatcher->ms_handle_reset(conn);
-          });
-      } else if (e.code() == error::read_eof) {
-        return seastar::with_gate(pending_dispatch, [=] {
-            return dispatcher->ms_handle_remote_reset(conn);
-          });
-      } else {
-        throw e;
-      }
-    });
-}
-
-seastar::future<> SocketMessenger::accept(seastar::connected_socket socket,
-                                          seastar::socket_address paddr)
-{
-  // allocate the connection
-  entity_addr_t peer_addr;
-  peer_addr.set_type(entity_addr_t::TYPE_DEFAULT);
-  peer_addr.set_sockaddr(&paddr.as_posix_sockaddr());
-  SocketConnectionRef conn = new SocketConnection(*this, get_myaddr());
-  // initiate the handshake
-  return conn->start_accept(std::move(socket), peer_addr)
-    .then([this, conn] {
-      // notify the dispatcher and allow them to reject the connection
-      return seastar::with_gate(pending_dispatch, [=] {
-          return dispatcher->ms_handle_accept(conn);
-        });
-    }).handle_exception([conn] (std::exception_ptr eptr) {
-      // close the connection before returning errors
-      return seastar::make_exception_future<>(eptr)
-        .finally([conn] { return conn->close(); });
-    }).then([this, conn] {
-      // dispatch messages until the connection closes or the dispatch
-      // queue shuts down
-      return dispatch(std::move(conn));
-    });
-}
-
-seastar::future<> SocketMessenger::start(Dispatcher *disp)
+seastar::future<> SocketMessenger::do_start(Dispatcher *disp)
 {
   dispatcher = disp;
+  started = true;
 
   // start listening if bind() was called
   if (listener) {
+    // make sure we have already bound to a valid address
+    ceph_assert(get_myaddr().is_legacy() || get_myaddr().is_msgr2());
+    ceph_assert(get_myaddr().get_port() > 0);
+
     seastar::keep_doing([this] {
-        return listener->accept()
-          .then([this] (seastar::connected_socket socket,
-                        seastar::socket_address paddr) {
-            // start processing the connection
-            accept(std::move(socket), paddr)
-              .handle_exception([] (std::exception_ptr eptr) {});
+        return Socket::accept(*listener)
+          .then([this] (SocketFRef socket,
+                        entity_addr_t peer_addr) {
+            auto shard = locate_shard(peer_addr);
             // don't wait before accepting another
+#warning fixme
+            // we currently do dangerous i/o from a Connection core, different from the Socket core.
+            container().invoke_on(shard, [sock = std::move(socket), peer_addr, this](auto& msgr) mutable {
+                SocketConnectionRef conn = seastar::make_shared<SocketConnection>(
+                    msgr, *msgr.dispatcher, get_myaddr().is_msgr2());
+                conn->start_accept(std::move(sock), peer_addr);
+              });
           });
       }).handle_exception_type([this] (const std::system_error& e) {
-        // stop gracefully on connection_aborted
-        if (e.code() != error::connection_aborted) {
-          throw e;
+        // stop gracefully on connection_aborted and invalid_argument
+        if (e.code() != error::connection_aborted &&
+            e.code() != error::invalid_argument) {
+          logger().error("{} unexpected error during accept: {}", *this, e);
+          ceph_abort();
         }
-      });
+      }).handle_exception([this] (auto eptr) {
+        logger().error("{} unexpected exception during accept: {}", *this, eptr);
+        ceph_abort();
+      }).then([this] () { return accepting_complete.set_value(); });
+  } else {
+    accepting_complete.set_value();
   }
-
   return seastar::now();
 }
 
-ceph::net::ConnectionRef
-SocketMessenger::connect(const entity_addr_t& peer_addr, const entity_type_t& peer_type)
+seastar::foreign_ptr<ceph::net::ConnectionRef>
+SocketMessenger::do_connect(const entity_addr_t& peer_addr, const entity_type_t& peer_type)
 {
   if (auto found = lookup_conn(peer_addr); found) {
-    return found;
+    return seastar::make_foreign(found->shared_from_this());
   }
-  SocketConnectionRef conn = new SocketConnection(*this, get_myaddr());
-  conn->start_connect(peer_addr, peer_type)
-    .then([this, conn] {
-      // notify the dispatcher and allow them to reject the connection
-      return seastar::with_gate(pending_dispatch, [this, conn] {
-        return dispatcher->ms_handle_connect(conn);
-      });
-    }).handle_exception([conn] (std::exception_ptr eptr) {
-      // close the connection before returning errors
-      return seastar::make_exception_future<>(eptr)
-        .finally([conn] { return conn->close(); });
-      // TODO: retry on fault
-    }).then([this, conn] {
-      // dispatch replies on this connection
-      dispatch(conn)
-        .handle_exception([] (std::exception_ptr eptr) {});
-    });
-  return conn;
+  SocketConnectionRef conn = seastar::make_shared<SocketConnection>(
+      *this, *dispatcher, peer_addr.is_msgr2());
+  conn->start_connect(peer_addr, peer_type);
+  return seastar::make_foreign(conn->shared_from_this());
 }
 
-seastar::future<> SocketMessenger::shutdown()
+seastar::future<> SocketMessenger::do_shutdown()
 {
+  if (!started) {
+    return seastar::now();
+  }
+
   if (listener) {
     listener->abort_accept();
   }
@@ -160,12 +222,85 @@ seastar::future<> SocketMessenger::shutdown()
       return seastar::parallel_for_each(connections, [] (auto conn) {
           return conn.second->close();
         });
+    }).then([this] {
+      return accepting_complete.get_shared_future();
     }).finally([this] {
       ceph_assert(connections.empty());
-      // closing connections will unblock any dispatchers that were waiting to
-      // send(). wait for any pending calls to finish
-      return pending_dispatch.close();
     });
+}
+
+seastar::future<> SocketMessenger::learned_addr(const entity_addr_t &peer_addr_for_me, const SocketConnection& conn)
+{
+  // make sure we there's no racing to learn address from peer
+  return container().invoke_on(0, [peer_addr_for_me, &conn] (auto& msgr) {
+    if (!msgr.need_addr) {
+      if ((!msgr.get_myaddr().is_any() &&
+           msgr.get_myaddr().get_type() != peer_addr_for_me.get_type()) ||
+          msgr.get_myaddr().get_family() != peer_addr_for_me.get_family() ||
+          !msgr.get_myaddr().is_same_host(peer_addr_for_me)) {
+        logger().warn("{} peer_addr_for_me {} type/family/IP doesn't match myaddr {}",
+                      conn, peer_addr_for_me, msgr.get_myaddr());
+        throw std::system_error(
+            make_error_code(ceph::net::error::bad_peer_address));
+      }
+      return seastar::now();
+    }
+    msgr.need_addr = false;
+
+    if (msgr.get_myaddr().get_type() == entity_addr_t::TYPE_NONE) {
+      // Not bound
+      entity_addr_t addr = peer_addr_for_me;
+      addr.set_type(entity_addr_t::TYPE_ANY);
+      addr.set_port(0);
+      return msgr.set_myaddrs(entity_addrvec_t{addr}
+      ).then([&msgr, &conn, peer_addr_for_me] {
+        logger().info("{} learned myaddr={} (unbound) from {}",
+                      conn, msgr.get_myaddr(), peer_addr_for_me);
+      });
+    } else {
+      // Already bound
+      if (!msgr.get_myaddr().is_any() &&
+          msgr.get_myaddr().get_type() != peer_addr_for_me.get_type()) {
+        logger().warn("{} peer_addr_for_me {} type doesn't match myaddr {}",
+                      conn, peer_addr_for_me, msgr.get_myaddr());
+        throw std::system_error(
+            make_error_code(ceph::net::error::bad_peer_address));
+      }
+      if (msgr.get_myaddr().get_family() != peer_addr_for_me.get_family()) {
+        logger().warn("{} peer_addr_for_me {} family doesn't match myaddr {}",
+                      conn, peer_addr_for_me, msgr.get_myaddr());
+        throw std::system_error(
+            make_error_code(ceph::net::error::bad_peer_address));
+      }
+      if (msgr.get_myaddr().is_blank_ip()) {
+        entity_addr_t addr = peer_addr_for_me;
+        addr.set_type(msgr.get_myaddr().get_type());
+        addr.set_port(msgr.get_myaddr().get_port());
+        return msgr.set_myaddrs(entity_addrvec_t{addr}
+        ).then([&msgr, &conn, peer_addr_for_me] {
+          logger().info("{} learned myaddr={} (blank IP) from {}",
+                        conn, msgr.get_myaddr(), peer_addr_for_me);
+        });
+      } else if (!msgr.get_myaddr().is_same_host(peer_addr_for_me)) {
+        logger().warn("{} peer_addr_for_me {} IP doesn't match myaddr {}",
+                      conn, peer_addr_for_me, msgr.get_myaddr());
+        throw std::system_error(
+            make_error_code(ceph::net::error::bad_peer_address));
+      } else {
+        return seastar::now();
+      }
+    }
+  });
+}
+
+SocketPolicy SocketMessenger::get_policy(entity_type_t peer_type) const
+{
+  return policy_set.get(peer_type);
+}
+
+SocketPolicy SocketMessenger::get_default_policy() const
+{
+  return policy_set.get_default();
 }
 
 void SocketMessenger::set_default_policy(const SocketPolicy& p)
@@ -184,6 +319,19 @@ void SocketMessenger::set_policy_throttler(entity_type_t peer_type,
 {
   // only byte throttler is used in OSD
   policy_set.set_throttlers(peer_type, throttle, nullptr);
+}
+
+seastar::shard_id SocketMessenger::locate_shard(const entity_addr_t& addr)
+{
+  ceph_assert(addr.get_family() == AF_INET);
+  if (master_sid >= 0) {
+    return master_sid;
+  }
+  std::size_t seed = 0;
+  boost::hash_combine(seed, addr.u.sin.sin_addr.s_addr);
+  //boost::hash_combine(seed, addr.u.sin.sin_port);
+  //boost::hash_combine(seed, addr.nonce);
+  return seed % seastar::smp::count;
 }
 
 ceph::net::SocketConnectionRef SocketMessenger::lookup_conn(const entity_addr_t& addr)
@@ -208,6 +356,9 @@ void SocketMessenger::unaccept_conn(SocketConnectionRef conn)
 
 void SocketMessenger::register_conn(SocketConnectionRef conn)
 {
+  if (master_sid >= 0) {
+    ceph_assert(static_cast<int>(sid) == master_sid);
+  }
   auto [i, added] = connections.emplace(conn->get_peer_addr(), conn);
   std::ignore = i;
   ceph_assert(added);
@@ -222,20 +373,13 @@ void SocketMessenger::unregister_conn(SocketConnectionRef conn)
   connections.erase(found);
 }
 
-seastar::future<msgr_tag_t, bufferlist>
-SocketMessenger::verify_authorizer(peer_type_t peer_type,
-				   auth_proto_t protocol,
-				   bufferlist& auth)
+seastar::future<uint32_t>
+SocketMessenger::get_global_seq(uint32_t old)
 {
-  return seastar::with_gate(pending_dispatch, [=, &auth] {
-      return dispatcher->ms_verify_authorizer(peer_type, protocol, auth);
-    });
-}
-
-seastar::future<std::unique_ptr<AuthAuthorizer>>
-SocketMessenger::get_authorizer(peer_type_t peer_type, bool force_new)
-{
-  return seastar::with_gate(pending_dispatch, [=] {
-      return dispatcher->ms_get_authorizer(peer_type, force_new);
-    });
+  return container().invoke_on(0, [old] (auto& msgr) {
+    if (old > msgr.global_seq) {
+      msgr.global_seq = old;
+    }
+    return ++msgr.global_seq;
+  });
 }

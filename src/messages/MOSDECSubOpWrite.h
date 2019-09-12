@@ -18,9 +18,7 @@
 #include "MOSDFastDispatchOp.h"
 #include "osd/ECMsgTypes.h"
 
-class MOSDECSubOpWrite : public MessageInstance<MOSDECSubOpWrite, MOSDFastDispatchOp> {
-public:
-  friend factory;
+class MOSDECSubOpWrite : public MOSDFastDispatchOp {
 private:
   static constexpr int HEAD_VERSION = 2;
   static constexpr int COMPAT_VERSION = 1;
@@ -44,10 +42,10 @@ public:
   }
 
   MOSDECSubOpWrite()
-    : MessageInstance(MSG_OSD_EC_WRITE, HEAD_VERSION, COMPAT_VERSION)
+    : MOSDFastDispatchOp{MSG_OSD_EC_WRITE, HEAD_VERSION, COMPAT_VERSION}
     {}
   MOSDECSubOpWrite(ECSubWrite &in_op)
-    : MessageInstance(MSG_OSD_EC_WRITE, HEAD_VERSION, COMPAT_VERSION) {
+    : MOSDFastDispatchOp{MSG_OSD_EC_WRITE, HEAD_VERSION, COMPAT_VERSION} {
     op.claim(in_op);
   }
 
@@ -73,7 +71,7 @@ public:
     encode_trace(payload, features);
   }
 
-  const char *get_type_name() const override { return "MOSDECSubOpWrite"; }
+  std::string_view get_type_name() const override { return "MOSDECSubOpWrite"; }
 
   void print(ostream& out) const override {
     out << "MOSDECSubOpWrite(" << pgid
@@ -86,6 +84,9 @@ public:
     op.t = ObjectStore::Transaction();
     op.log_entries.clear();
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

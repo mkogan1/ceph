@@ -1,9 +1,11 @@
 import { Component, Input, OnChanges, OnInit, TemplateRef, ViewChild } from '@angular/core';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
 import * as _ from 'lodash';
-import { BsModalService } from 'ngx-bootstrap';
+import { BsModalService } from 'ngx-bootstrap/modal';
 
 import { RgwUserService } from '../../../shared/api/rgw-user.service';
+import { Icons } from '../../../shared/enum/icons.enum';
 import { CdTableColumn } from '../../../shared/models/cd-table-column';
 import { CdTableSelection } from '../../../shared/models/cd-table-selection';
 import { RgwUserS3Key } from '../models/rgw-user-s3-key';
@@ -17,9 +19,9 @@ import { RgwUserSwiftKeyModalComponent } from '../rgw-user-swift-key-modal/rgw-u
   styleUrls: ['./rgw-user-details.component.scss']
 })
 export class RgwUserDetailsComponent implements OnChanges, OnInit {
-  @ViewChild('accessKeyTpl')
+  @ViewChild('accessKeyTpl', { static: false })
   public accessKeyTpl: TemplateRef<any>;
-  @ViewChild('secretKeyTpl')
+  @ViewChild('secretKeyTpl', { static: false })
   public secretKeyTpl: TemplateRef<any>;
 
   @Input()
@@ -33,17 +35,23 @@ export class RgwUserDetailsComponent implements OnChanges, OnInit {
   keysColumns: CdTableColumn[] = [];
   keysSelection: CdTableSelection = new CdTableSelection();
 
-  constructor(private rgwUserService: RgwUserService, private bsModalService: BsModalService) {}
+  icons = Icons;
+
+  constructor(
+    private rgwUserService: RgwUserService,
+    private bsModalService: BsModalService,
+    private i18n: I18n
+  ) {}
 
   ngOnInit() {
     this.keysColumns = [
       {
-        name: 'Username',
+        name: this.i18n('Username'),
         prop: 'username',
         flexGrow: 1
       },
       {
-        name: 'Type',
+        name: this.i18n('Type'),
         prop: 'type',
         flexGrow: 1
       }
@@ -59,11 +67,9 @@ export class RgwUserDetailsComponent implements OnChanges, OnInit {
       this.user.caps = _.sortBy(this.user.caps, 'type');
 
       // Load the user/bucket quota of the selected user.
-      if (this.user.tenant === '') {
-        this.rgwUserService.getQuota(this.user.user_id).subscribe((resp: object) => {
-          _.extend(this.user, resp);
-        });
-      }
+      this.rgwUserService.getQuota(this.user.uid).subscribe((resp: object) => {
+        _.extend(this.user, resp);
+      });
 
       // Process the keys.
       this.keys = [];

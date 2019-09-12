@@ -1,24 +1,22 @@
 <div class="modal-header">
-  <h4 class="modal-title pull-left"
-      i18n>Swift key
-  </h4>
+  <h4 i18n="form title|Example: Create Pool@@formTitle"
+      class="modal-title float-left">{{ action | titlecase }} {{ resource | upperFirst }}</h4>
+
   <button type="button"
-          class="close pull-right"
+          class="close float-right"
           aria-label="Close"
           (click)="bsModalRef.hide()">
     <span aria-hidden="true">&times;</span>
   </button>
 </div>
 <div class="modal-body">
-  <form class="form-horizontal"
-        novalidate>
+  <form novalidate>
 
     <!-- Username -->
-    <div class="form-group">
-      <label class="control-label col-sm-3"
+    <div class="form-group row">
+      <label class="col-form-label col-sm-3"
              for="user"
-             i18n>Username
-      </label>
+             i18n>Username</label>
       <div class="col-sm-9">
         <input id="user"
                name="user"
@@ -30,11 +28,10 @@
     </div>
 
     <!-- Secret key -->
-    <div class="form-group">
-      <label class="control-label col-sm-3"
+    <div class="form-group row">
+      <label class="col-form-label col-sm-3"
              for="secret_key"
-             i18n>Secret key
-      </label>
+             i18n>Secret key</label>
       <div class="col-sm-9">
         <div class="input-group">
           <input id="secret_key"
@@ -43,13 +40,13 @@
                  type="password"
                  [(ngModel)]="secret_key"
                  [readonly]="true">
-          <span class="input-group-btn">
+          <span class="input-group-append">
             <button type="button"
-                    class="btn btn-default"
+                    class="btn btn-light"
                     cdPasswordButton="secret_key">
             </button>
             <button type="button"
-                    class="btn btn-default"
+                    class="btn btn-light"
                     cdCopy2ClipboardButton="secret_key">
             </button>
           </span>
@@ -60,9 +57,5 @@
   </form>
 </div>
 <div class="modal-footer">
-  <button class="btn btn-sm btn-default"
-          type="button"
-          (click)="bsModalRef.hide()"
-          i18n>Close
-  </button>
+  <cd-back-button [back]="bsModalRef.hide"></cd-back-button>
 </div>

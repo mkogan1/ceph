@@ -1,11 +1,12 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <atomic>
 #include <thread>
 #include <vector>
 
 #include <boost/asio.hpp>
+#define BOOST_COROUTINES_NO_DEPRECATION_WARNING
 #include <boost/asio/spawn.hpp>
 #include <boost/intrusive/list.hpp>
 
@@ -19,34 +20,42 @@
 #include <boost/asio/ssl.hpp>
 #endif
 
+#include "rgw_dmclock_async_scheduler.h"
+
 #define dout_subsys ceph_subsys_rgw
 
 namespace {
 
 using tcp = boost::asio::ip::tcp;
-namespace beast = boost::beast;
+namespace http = boost::beast::http;
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
 namespace ssl = boost::asio::ssl;
 #endif
 
+using parse_buffer = boost::beast::flat_static_buffer<65536>;
+
 template <typename Stream>
 class StreamIO : public rgw::asio::ClientIO {
+  CephContext* const cct;
   Stream& stream;
-  beast::flat_buffer& buffer;
+  boost::asio::yield_context yield;
+  parse_buffer& buffer;
  public:
-  StreamIO(Stream& stream, rgw::asio::parser_type& parser,
-           beast::flat_buffer& buffer, bool is_ssl,
+  StreamIO(CephContext *cct, Stream& stream, rgw::asio::parser_type& parser,
+           boost::asio::yield_context yield,
+           parse_buffer& buffer, bool is_ssl,
            const tcp::endpoint& local_endpoint,
            const tcp::endpoint& remote_endpoint)
       : ClientIO(parser, is_ssl, local_endpoint, remote_endpoint),
-        stream(stream), buffer(buffer)
+        cct(cct), stream(stream), yield(yield), buffer(buffer)
   {}
 
   size_t write_data(const char* buf, size_t len) override {
     boost::system::error_code ec;
-    auto bytes = boost::asio::write(stream, boost::asio::buffer(buf, len), ec);
+    auto bytes = boost::asio::async_write(stream, boost::asio::buffer(buf, len),
+                                          yield[ec]);
     if (ec) {
-      derr << "write_data failed: " << ec.message() << dendl;
+      ldout(cct, 4) << "write_data failed: " << ec.message() << dendl;
       throw rgw::io::Exception(ec.value(), std::system_category());
     }
     return bytes;
@@ -60,13 +69,13 @@ class StreamIO : public rgw::asio::ClientIO {
 
     while (body_remaining.size && !parser.is_done()) {
       boost::system::error_code ec;
-      beast::http::read_some(stream, buffer, parser, ec);
-      if (ec == beast::http::error::partial_message ||
-          ec == beast::http::error::need_buffer) {
+      http::async_read_some(stream, buffer, parser, yield[ec]);
+      if (ec == http::error::partial_message ||
+          ec == http::error::need_buffer) {
         break;
       }
       if (ec) {
-        derr << "failed to read body: " << ec.message() << dendl;
+        ldout(cct, 4) << "failed to read body: " << ec.message() << dendl;
         throw rgw::io::Exception(ec.value(), std::system_category());
       }
     }
@@ -77,9 +86,11 @@ class StreamIO : public rgw::asio::ClientIO {
 using SharedMutex = ceph::async::SharedMutex<boost::asio::io_context::executor_type>;
 
 template <typename Stream>
-void handle_connection(RGWProcessEnv& env, Stream& stream,
-                       beast::flat_buffer& buffer, bool is_ssl,
+void handle_connection(boost::asio::io_context& context,
+                       RGWProcessEnv& env, Stream& stream,
+                       parse_buffer& buffer, bool is_ssl,
                        SharedMutex& pause_mutex,
+                       rgw::dmclock::Scheduler *scheduler,
                        boost::system::error_code& ec,
                        boost::asio::yield_context yield)
 {
@@ -98,25 +109,25 @@ void handle_connection(RGWProcessEnv& env, Stream& stream,
     parser.body_limit(body_limit);
 
     // parse the header
-    beast::http::async_read_header(stream, buffer, parser, yield[ec]);
+    http::async_read_header(stream, buffer, parser, yield[ec]);
     if (ec == boost::asio::error::connection_reset ||
         ec == boost::asio::error::bad_descriptor ||
         ec == boost::asio::error::operation_aborted ||
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
         ec == ssl::error::stream_truncated ||
 #endif
-        ec == beast::http::error::end_of_stream) {
+        ec == http::error::end_of_stream) {
       ldout(cct, 20) << "failed to read header: " << ec.message() << dendl;
       return;
     }
     if (ec) {
       ldout(cct, 1) << "failed to read header: " << ec.message() << dendl;
       auto& message = parser.get();
-      beast::http::response<beast::http::empty_body> response;
-      response.result(beast::http::status::bad_request);
+      http::response<http::empty_body> response;
+      response.result(http::status::bad_request);
       response.version(message.version() == 10 ? 10 : 11);
       response.prepare_payload();
-      beast::http::async_write(stream, response, yield[ec]);
+      http::async_write(stream, response, yield[ec]);
       if (ec) {
         ldout(cct, 5) << "failed to write response: " << ec.message() << dendl;
       }
@@ -134,12 +145,18 @@ void handle_connection(RGWProcessEnv& env, Stream& stream,
       }
 
       // process the request
-      RGWRequest req{env.store->get_new_req_id()};
+      RGWRequest req{env.store->getRados()->get_new_req_id()};
 
       auto& socket = stream.lowest_layer();
-      StreamIO real_client{stream, parser, buffer, is_ssl,
+      const auto& remote_endpoint = socket.remote_endpoint(ec);
+      if (ec) {
+        ldout(cct, 1) << "failed to connect client: " << ec.message() << dendl;
+        return;
+      }
+
+      StreamIO real_client{cct, stream, parser, yield, buffer, is_ssl,
                            socket.local_endpoint(),
-                           socket.remote_endpoint()};
+                           remote_endpoint};
 
       auto real_client_io = rgw::io::add_reordering(
                               rgw::io::add_buffering(cct,
@@ -147,8 +164,9 @@ void handle_connection(RGWProcessEnv& env, Stream& stream,
                                   rgw::io::add_conlen_controlling(
                                     &real_client))));
       RGWRestfulIO client(cct, &real_client_io);
+      auto y = optional_yield{context, yield};
       process_request(env.store, env.rest, &req, env.uri_prefix,
-                      *env.auth_registry, &client, env.olog);
+                      *env.auth_registry, &client, env.olog, y, scheduler);
     }
 
     if (!parser.keep_alive()) {
@@ -164,7 +182,10 @@ void handle_connection(RGWProcessEnv& env, Stream& stream,
       body.size = discard_buffer.size();
       body.data = discard_buffer.data();
 
-      beast::http::async_read_some(stream, buffer, parser, yield[ec]);
+      http::async_read_some(stream, buffer, parser, yield[ec]);
+      if (ec == http::error::need_buffer) {
+        continue;
+      }
       if (ec == boost::asio::error::connection_reset) {
         return;
       }
@@ -215,6 +236,7 @@ class ConnectionList {
   }
 };
 
+namespace dmc = rgw::dmclock;
 class AsioFrontend {
   RGWProcessEnv env;
   RGWFrontendConfig* conf;
@@ -224,12 +246,14 @@ class AsioFrontend {
   int init_ssl();
 #endif
   SharedMutex pause_mutex;
+  std::unique_ptr<rgw::dmclock::Scheduler> scheduler;
 
   struct Listener {
     tcp::endpoint endpoint;
     tcp::acceptor acceptor;
     tcp::socket socket;
     bool use_ssl = false;
+    bool use_nodelay = false;
 
     explicit Listener(boost::asio::io_context& context)
       : acceptor(context), socket(context) {}
@@ -246,21 +270,40 @@ class AsioFrontend {
   std::atomic<bool> going_down{false};
 
   CephContext* ctx() const { return env.store->ctx(); }
-
+  std::optional<dmc::ClientCounters> client_counters;
+  std::unique_ptr<dmc::ClientConfig> client_config;
   void accept(Listener& listener, boost::system::error_code ec);
 
  public:
-  AsioFrontend(const RGWProcessEnv& env, RGWFrontendConfig* conf)
-    : env(env), conf(conf),
-      pause_mutex(context.get_executor())
-  {}
+  AsioFrontend(const RGWProcessEnv& env, RGWFrontendConfig* conf,
+	       dmc::SchedulerCtx& sched_ctx)
+    : env(env), conf(conf), pause_mutex(context.get_executor())
+  {
+    auto sched_t = dmc::get_scheduler_t(ctx());
+    switch(sched_t){
+    case dmc::scheduler_t::dmclock:
+      scheduler.reset(new dmc::AsyncScheduler(ctx(),
+                                              context,
+                                              std::ref(sched_ctx.get_dmc_client_counters()),
+                                              sched_ctx.get_dmc_client_config(),
+                                              *sched_ctx.get_dmc_client_config(),
+                                              dmc::AtLimit::Reject));
+      break;
+    case dmc::scheduler_t::none:
+      lderr(ctx()) << "Got invalid scheduler type for beast, defaulting to throttler" << dendl;
+      [[fallthrough]];
+    case dmc::scheduler_t::throttler:
+      scheduler.reset(new dmc::SimpleThrottler(ctx()));
+
+    }
+  }
 
   int init();
   int run();
   void stop();
   void join();
   void pause();
-  void unpause(RGWRados* store, rgw_auth_registry_ptr_t);
+  void unpause(rgw::sal::RGWRadosStore* store, rgw_auth_registry_ptr_t);
 };
 
 unsigned short parse_port(const char *input, boost::system::error_code& ec)
@@ -274,22 +317,52 @@ unsigned short parse_port(const char *input, boost::system::error_code& ec)
   }
   return port;
 }
-
+	
 tcp::endpoint parse_endpoint(boost::asio::string_view input,
+                             unsigned short default_port,
                              boost::system::error_code& ec)
 {
   tcp::endpoint endpoint;
 
-  auto colon = input.find(':');
-  if (colon != input.npos) {
-    auto port_str = input.substr(colon + 1);
-    endpoint.port(parse_port(port_str.data(), ec));
-  } else {
-    endpoint.port(80);
+  if (input.empty()) {
+    ec = boost::asio::error::invalid_argument;
+    return endpoint;
   }
-  if (!ec) {
+
+  if (input[0] == '[') { // ipv6
+    const size_t addr_begin = 1;
+    const size_t addr_end = input.find(']');
+    if (addr_end == input.npos) { // no matching ]
+      ec = boost::asio::error::invalid_argument;
+      return endpoint;
+    }
+    if (addr_end + 1 < input.size()) {
+      // :port must must follow [ipv6]
+      if (input[addr_end + 1] != ':') {
+        ec = boost::asio::error::invalid_argument;
+        return endpoint;
+      } else {
+        auto port_str = input.substr(addr_end + 2);
+        endpoint.port(parse_port(port_str.data(), ec));
+      }
+    } else {
+      endpoint.port(default_port);
+    }
+    auto addr = input.substr(addr_begin, addr_end - addr_begin);
+    endpoint.address(boost::asio::ip::make_address_v6(addr, ec));
+  } else { // ipv4
+    auto colon = input.find(':');
+    if (colon != input.npos) {
+      auto port_str = input.substr(colon + 1);
+      endpoint.port(parse_port(port_str.data(), ec));
+      if (ec) {
+        return endpoint;
+      }
+    } else {
+      endpoint.port(default_port);
+    }
     auto addr = input.substr(0, colon);
-    endpoint.address(boost::asio::ip::make_address(addr, ec));
+    endpoint.address(boost::asio::ip::make_address_v4(addr, ec));
   }
   return endpoint;
 }
@@ -339,11 +412,14 @@ int AsioFrontend::init()
     }
     listeners.emplace_back(context);
     listeners.back().endpoint.port(port);
+
+    listeners.emplace_back(context);
+    listeners.back().endpoint = tcp::endpoint(tcp::v6(), port);
   }
 
   auto endpoints = config.equal_range("endpoint");
   for (auto i = endpoints.first; i != endpoints.second; ++i) {
-    auto endpoint = parse_endpoint(i->second, ec);
+    auto endpoint = parse_endpoint(i->second, 80, ec);
     if (ec) {
       lderr(ctx()) << "failed to parse endpoint=" << i->second << dendl;
       return -ec.value();
@@ -351,14 +427,39 @@ int AsioFrontend::init()
     listeners.emplace_back(context);
     listeners.back().endpoint = endpoint;
   }
+  // parse tcp nodelay
+  auto nodelay = config.find("tcp_nodelay");
+  if (nodelay != config.end()) {
+    for (auto& l : listeners) {
+      l.use_nodelay = (nodelay->second == "1");
+    }
+  }
+  
 
+  bool socket_bound = false;
   // start listeners
   for (auto& l : listeners) {
     l.acceptor.open(l.endpoint.protocol(), ec);
     if (ec) {
+      if (ec == boost::asio::error::address_family_not_supported) {
+	ldout(ctx(), 0) << "WARNING: cannot open socket for endpoint=" << l.endpoint
+			<< ", " << ec.message() << dendl;
+	continue;
+      }
+
       lderr(ctx()) << "failed to open socket: " << ec.message() << dendl;
       return -ec.value();
     }
+
+    if (l.endpoint.protocol() == tcp::v6()) {
+      l.acceptor.set_option(boost::asio::ip::v6_only(true), ec);
+      if (ec) {
+        lderr(ctx()) << "failed to set v6_only socket option: "
+		     << ec.message() << dendl;
+	return -ec.value();
+      }
+    }
+
     l.acceptor.set_option(tcp::acceptor::reuse_address(true));
     l.acceptor.bind(l.endpoint, ec);
     if (ec) {
@@ -366,6 +467,7 @@ int AsioFrontend::init()
           << ": " << ec.message() << dendl;
       return -ec.value();
     }
+
     l.acceptor.listen(boost::asio::socket_base::max_connections);
     l.acceptor.async_accept(l.socket,
                             [this, &l] (boost::system::error_code ec) {
@@ -373,7 +475,13 @@ int AsioFrontend::init()
                             });
 
     ldout(ctx(), 4) << "frontend listening on " << l.endpoint << dendl;
+    socket_bound = true;
   }
+  if (!socket_bound) {
+    lderr(ctx()) << "Unable to listen at any endpoints" << dendl;
+    return -EINVAL;
+  }
+
   return drop_privileges(ctx());
 }
 
@@ -438,6 +546,10 @@ int AsioFrontend::init_ssl()
     listeners.emplace_back(context);
     listeners.back().endpoint.port(port);
     listeners.back().use_ssl = true;
+
+    listeners.emplace_back(context);
+    listeners.back().endpoint = tcp::endpoint(tcp::v6(), port);
+    listeners.back().use_ssl = true;
   }
 
   auto endpoints = config.equal_range("ssl_endpoint");
@@ -446,7 +558,7 @@ int AsioFrontend::init_ssl()
       lderr(ctx()) << "no ssl_certificate configured for ssl_endpoint" << dendl;
       return -EINVAL;
     }
-    auto endpoint = parse_endpoint(i->second, ec);
+    auto endpoint = parse_endpoint(i->second, 443, ec);
     if (ec) {
       lderr(ctx()) << "failed to parse ssl_endpoint=" << i->second << dendl;
       return -ec.value();
@@ -466,9 +578,12 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
   } else if (ec == boost::asio::error::operation_aborted) {
     return;
   } else if (ec) {
-    throw ec;
+    ldout(ctx(), 1) << "accept failed: " << ec.message() << dendl;
+    return;
   }
   auto socket = std::move(l.socket);
+  tcp::no_delay options(l.use_nodelay);
+  socket.set_option(options,ec);
   l.acceptor.async_accept(l.socket,
                           [this, &l] (boost::system::error_code ec) {
                             accept(l, ec);
@@ -483,17 +598,18 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         auto c = connections.add(conn);
         // wrap the socket in an ssl stream
         ssl::stream<tcp::socket&> stream{s, *ssl_context};
-        beast::flat_buffer buffer;
+        auto buffer = std::make_unique<parse_buffer>();
         // do ssl handshake
         boost::system::error_code ec;
         auto bytes = stream.async_handshake(ssl::stream_base::server,
-                                            buffer.data(), yield[ec]);
+                                            buffer->data(), yield[ec]);
         if (ec) {
           ldout(ctx(), 1) << "ssl handshake failed: " << ec.message() << dendl;
           return;
         }
-        buffer.consume(bytes);
-        handle_connection(env, stream, buffer, true, pause_mutex, ec, yield);
+        buffer->consume(bytes);
+        handle_connection(context, env, stream, *buffer, true, pause_mutex,
+                          scheduler.get(), ec, yield);
         if (!ec) {
           // ssl shutdown (ignoring errors)
           stream.async_shutdown(yield[ec]);
@@ -508,9 +624,10 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
       [this, s=std::move(socket)] (boost::asio::yield_context yield) mutable {
         Connection conn{s};
         auto c = connections.add(conn);
-        beast::flat_buffer buffer;
+        auto buffer = std::make_unique<parse_buffer>();
         boost::system::error_code ec;
-        handle_connection(env, s, buffer, false, pause_mutex, ec, yield);
+        handle_connection(context, env, s, *buffer, false, pause_mutex,
+                          scheduler.get(), ec, yield);
         s.shutdown(tcp::socket::shutdown_both, ec);
       });
   }
@@ -530,6 +647,8 @@ int AsioFrontend::run()
 
   for (int i = 0; i < thread_count; i++) {
     threads.emplace_back([=] {
+      // request warnings on synchronous librados calls in this thread
+      is_asio_thread = true;
       boost::system::error_code ec;
       context.run(ec);
     });
@@ -587,7 +706,7 @@ void AsioFrontend::pause()
   }
 }
 
-void AsioFrontend::unpause(RGWRados* const store,
+void AsioFrontend::unpause(rgw::sal::RGWRadosStore* const store,
                            rgw_auth_registry_ptr_t auth_registry)
 {
   env.store = store;
@@ -611,12 +730,15 @@ void AsioFrontend::unpause(RGWRados* const store,
 
 class RGWAsioFrontend::Impl : public AsioFrontend {
  public:
-  Impl(const RGWProcessEnv& env, RGWFrontendConfig* conf) : AsioFrontend(env, conf) {}
+  Impl(const RGWProcessEnv& env, RGWFrontendConfig* conf,
+       rgw::dmclock::SchedulerCtx& sched_ctx)
+    : AsioFrontend(env, conf, sched_ctx) {}
 };
 
 RGWAsioFrontend::RGWAsioFrontend(const RGWProcessEnv& env,
-                                 RGWFrontendConfig* conf)
-  : impl(new Impl(env, conf))
+                                 RGWFrontendConfig* conf,
+				 rgw::dmclock::SchedulerCtx& sched_ctx)
+  : impl(new Impl(env, conf, sched_ctx))
 {
 }
 
@@ -648,7 +770,7 @@ void RGWAsioFrontend::pause_for_new_config()
 }
 
 void RGWAsioFrontend::unpause_with_new_config(
-  RGWRados* const store,
+  rgw::sal::RGWRadosStore* const store,
   rgw_auth_registry_ptr_t auth_registry
 ) {
   impl->unpause(store, std::move(auth_registry));

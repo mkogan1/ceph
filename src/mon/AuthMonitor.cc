@@ -71,10 +71,37 @@ void AuthMonitor::tick()
 
   dout(10) << *this << dendl;
 
-  if (!mon->is_leader()) return;
+  // increase global_id?
+  bool propose = false;
+  bool increase;
+  {
+    std::lock_guard l(mon->auth_lock);
+    increase = _should_increase_max_global_id();
+  }
+  if (increase) {
+    if (mon->is_leader()) {
+      increase_max_global_id();
+      propose = true;
+    } else {
+      dout(10) << __func__ << "requesting more ids from leader" << dendl;
+      int leader = mon->get_leader();
+      MMonGlobalID *req = new MMonGlobalID();
+      req->old_max_id = max_global_id;
+      mon->send_mon_message(req, leader);
+    }
+  }
 
-  if (check_rotate())
+  if (!mon->is_leader()) {
+    return;
+  }
+
+  if (check_rotate()) {
+    propose = true;
+  }
+
+  if (propose) {
     propose_pending();
+  }
 }
 
 void AuthMonitor::on_active()
@@ -84,6 +111,16 @@ void AuthMonitor::on_active()
   if (!mon->is_leader())
     return;
   mon->key_server.start_server();
+
+  bool increase;
+  {
+    std::lock_guard l(mon->auth_lock);
+    increase = _should_increase_max_global_id();
+  }
+  if (is_writeable() && increase) {
+    increase_max_global_id();
+    propose_pending();
+  }
 }
 
 bufferlist _encode_cap(const string& cap)
@@ -174,6 +211,7 @@ void AuthMonitor::create_initial()
   dout(10) << "create_initial -- creating initial map" << dendl;
 
   // initialize rotating keys
+  mon->key_server.clear_secrets();
   last_rotating_ver = 0;
   check_rotate();
   ceph_assert(pending_auth.size() == 1);
@@ -280,24 +318,39 @@ void AuthMonitor::update_from_paxos(bool *need_bootstrap)
     }
   }
 
-  if (last_allocated_id == 0)
-    last_allocated_id = max_global_id;
+  {
+    std::lock_guard l(mon->auth_lock);
+    if (last_allocated_id == 0) {
+      last_allocated_id = max_global_id;
+      dout(10) << __func__ << " last_allocated_id initialized to "
+	       << max_global_id << dendl;
+    }
+  }
 
-  dout(10) << "update_from_paxos() last_allocated_id=" << last_allocated_id
-	   << " max_global_id=" << max_global_id
+  dout(10) << __func__ << " max_global_id=" << max_global_id
 	   << " format_version " << format_version
 	   << dendl;
+}
+
+bool AuthMonitor::_should_increase_max_global_id()
+{
+  ceph_assert(ceph_mutex_is_locked(mon->auth_lock));
+  auto num_prealloc = g_conf()->mon_globalid_prealloc;
+  if (max_global_id < num_prealloc ||
+      (last_allocated_id + 1) >= max_global_id - num_prealloc / 2) {
+    return true;
+  }
+  return false;
 }
 
 void AuthMonitor::increase_max_global_id()
 {
   ceph_assert(mon->is_leader());
 
-  max_global_id += g_conf()->mon_globalid_prealloc;
-  dout(10) << "increasing max_global_id to " << max_global_id << dendl;
   Incremental inc;
   inc.inc_type = GLOBAL_ID;
-  inc.max_global_id = max_global_id;
+  inc.max_global_id = max_global_id + g_conf()->mon_globalid_prealloc;
+  dout(10) << "increasing max_global_id to " << inc.max_global_id << dendl;
   pending_auth.push_back(inc);
 }
 
@@ -365,7 +418,8 @@ void AuthMonitor::encode_pending(MonitorDBStore::TransactionRef t)
   if (bad_detail.size()) {
     ostringstream ss;
     ss << bad_detail.size() << " auth entities have invalid capabilities";
-    health_check_t *check = &next.add("AUTH_BAD_CAPS", HEALTH_ERR, ss.str());
+    health_check_t *check = &next.add("AUTH_BAD_CAPS", HEALTH_ERR, ss.str(),
+				      bad_detail.size());
     for (auto& i : bad_detail) {
       for (auto& j : i.second) {
 	check->detail.push_back(j);
@@ -410,7 +464,7 @@ version_t AuthMonitor::get_trim_to() const
 
 bool AuthMonitor::preprocess_query(MonOpRequestRef op)
 {
-  PaxosServiceMessage *m = static_cast<PaxosServiceMessage*>(op->get_req());
+  auto m = op->get_req<PaxosServiceMessage>();
   dout(10) << "preprocess_query " << *m << " from " << m->get_orig_source_inst() << dendl;
   switch (m->get_type()) {
   case MSG_MON_COMMAND:
@@ -436,7 +490,7 @@ bool AuthMonitor::preprocess_query(MonOpRequestRef op)
 
 bool AuthMonitor::prepare_update(MonOpRequestRef op)
 {
-  PaxosServiceMessage *m = static_cast<PaxosServiceMessage*>(op->get_req());
+  auto m = op->get_req<PaxosServiceMessage>();
   dout(10) << "prepare_update " << *m << " from " << m->get_orig_source_inst() << dendl;
   switch (m->get_type()) {
   case MSG_MON_COMMAND:
@@ -457,48 +511,65 @@ bool AuthMonitor::prepare_update(MonOpRequestRef op)
   }
 }
 
-uint64_t AuthMonitor::assign_global_id(MonOpRequestRef op, bool should_increase_max)
+void AuthMonitor::_set_mon_num_rank(int num, int rank)
 {
-  MAuth *m = static_cast<MAuth*>(op->get_req());
-  int total_mon = mon->monmap->size();
-  dout(10) << "AuthMonitor::assign_global_id m=" << *m << " mon=" << mon->rank << "/" << total_mon
-	   << " last_allocated=" << last_allocated_id << " max_global_id=" <<  max_global_id << dendl;
-
-  uint64_t next_global_id = last_allocated_id + 1;
-  int remainder = next_global_id % total_mon;
-  if (remainder)
-    remainder = total_mon - remainder;
-  next_global_id += remainder + mon->rank;
-  dout(10) << "next_global_id should be " << next_global_id << dendl;
-
-  // if we can't bump the max, bail out now on an out-of-bounds gid
-  if (next_global_id > max_global_id &&
-      (!mon->is_leader() || !should_increase_max)) {
-    return 0;
-  }
-
-  // can we return a gid?
-  bool return_next = (next_global_id <= max_global_id);
-
-  // bump the max?
-  while (mon->is_leader() &&
-	 (max_global_id < g_conf()->mon_globalid_prealloc ||
-	  next_global_id >= max_global_id - g_conf()->mon_globalid_prealloc / 2)) {
-    increase_max_global_id();
-  }
-
-  if (return_next) {
-    last_allocated_id = next_global_id;
-    return next_global_id;
-  } else {
-    return 0;
-  }
+  dout(10) << __func__ << " num " << num << " rank " << rank << dendl;
+  ceph_assert(ceph_mutex_is_locked(mon->auth_lock));
+  mon_num = num;
+  mon_rank = rank;
 }
 
+uint64_t AuthMonitor::_assign_global_id()
+{
+  ceph_assert(ceph_mutex_is_locked(mon->auth_lock));
+  if (mon_num < 1 || mon_rank < 0) {
+    dout(10) << __func__ << " inactive (num_mon " << mon_num
+	     << " rank " << mon_rank << ")" << dendl;
+    return 0;
+  }
+  if (!last_allocated_id) {
+    dout(10) << __func__ << " last_allocated_id == 0" << dendl;
+    return 0;
+  }
+
+  uint64_t id = last_allocated_id + 1;
+  int remainder = id % mon_num;
+  if (remainder) {
+    remainder = mon_num - remainder;
+  }
+  id += remainder + mon_rank;
+
+  if (id >= max_global_id) {
+    dout(10) << __func__ << " failed (max " << max_global_id << ")" << dendl;
+    return 0;
+  }
+
+  last_allocated_id = id;
+  dout(10) << __func__ << " " << id << " (max " << max_global_id << ")"
+	   << dendl;
+  return id;
+}
+
+uint64_t AuthMonitor::assign_global_id(bool should_increase_max)
+{
+  uint64_t id;
+  {
+    std::lock_guard l(mon->auth_lock);
+    id =_assign_global_id();
+    if (should_increase_max) {
+      should_increase_max = _should_increase_max_global_id();
+    }
+  }
+  if (mon->is_leader() &&
+      should_increase_max) {
+    increase_max_global_id();
+  }
+  return id;
+}
 
 bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
 {
-  MAuth *m = static_cast<MAuth*>(op->get_req());
+  auto m = op->get_req<MAuth>();
   dout(10) << "prep_auth() blob_size=" << m->get_auth_payload().length() << dendl;
 
   MonSession *s = op->get_session();
@@ -598,6 +669,7 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
       goto reply;
     }
     start = true;
+    proto = type;
   } else if (!s->auth_handler) {
       dout(10) << "protocol specified but no s->auth_handler" << dendl;
       ret = -EINVAL;
@@ -608,7 +680,7 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
      request. If a client tries to send it later, it'll screw up its auth
      session */
   if (!s->con->peer_global_id) {
-    s->con->peer_global_id = assign_global_id(op, paxos_writable);
+    s->con->peer_global_id = assign_global_id(paxos_writable);
     if (!s->con->peer_global_id) {
 
       delete s->auth_handler;
@@ -638,23 +710,31 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
   try {
     if (start) {
       // new session
-      proto = s->auth_handler->start_session(entity_name, indata, response_bl,
-					     s->con->peer_caps_info);
-      ret = 0;
+      ret = s->auth_handler->start_session(entity_name,
+					   0, // no connection_secret needed
+					   &response_bl,
+					   &s->con->peer_caps_info,
+					   nullptr, nullptr);
     } else {
       // request
       ret = s->auth_handler->handle_request(
 	indata,
-	response_bl,
-	s->con->peer_global_id,
-	s->con->peer_caps_info);
+	0, // no connection_secret needed
+	&response_bl,
+	&s->con->peer_global_id,
+	&s->con->peer_caps_info,
+	nullptr, nullptr);
     }
     if (ret == -EIO) {
       wait_for_active(op, new C_RetryMessage(this,op));
       goto done;
     }
-    if (mon->ms_handle_authentication(s->con.get()) > 0) {
-      finished = true;
+    if (ret > 0) {
+      if (!s->authenticated &&
+	  mon->ms_handle_authentication(s->con.get()) > 0) {
+	finished = true;
+      }
+      ret = 0;
     }
   } catch (const buffer::error &err) {
     ret = -EINVAL;
@@ -677,7 +757,7 @@ done:
 
 bool AuthMonitor::preprocess_command(MonOpRequestRef op)
 {
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   int r = -1;
   bufferlist rdata;
   stringstream ss, ds;
@@ -1202,7 +1282,7 @@ bool AuthMonitor::valid_caps(const vector<string>& caps, ostream *out)
 
 bool AuthMonitor::prepare_command(MonOpRequestRef op)
 {
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   stringstream ss, ds;
   bufferlist rdata;
   string rs;
@@ -1687,7 +1767,7 @@ bool AuthMonitor::_upgrade_format_to_dumpling()
     // set daemon profiles
     if ((p->first.is_osd() || p->first.is_mds()) &&
         mon_caps == "allow rwx") {
-      new_caps = string("allow profile ") + string(p->first.get_type_name());
+      new_caps = string("allow profile ") + p->first.get_type_name();
     }
 
     // update bootstrap keys

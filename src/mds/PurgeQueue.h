@@ -76,7 +76,7 @@ public:
     f->close_section();
   }
 
-  std::string get_type_str() const;
+  std::string_view get_type_str() const;
 private:
   static const std::map<std::string, PurgeItem::Action> actions;
 };
@@ -89,6 +89,7 @@ enum {
   l_pq_executing_ops,
   l_pq_executing,
   l_pq_executed,
+  l_pq_item_in_journal,
   l_pq_last
 };
 
@@ -105,7 +106,8 @@ class PurgeQueue
 protected:
   CephContext *cct;
   const mds_rank_t rank;
-  Mutex lock;
+  ceph::mutex lock = ceph::make_mutex("PurgeQueue");
+  bool readonly = false;
 
   int64_t metadata_pool;
 
@@ -134,7 +136,7 @@ protected:
 
   uint32_t _calculate_ops(const PurgeItem &item) const;
 
-  bool can_consume();
+  bool _can_consume();
 
   // How many bytes were remaining when drain() was first called,
   // used for indicating progress.
@@ -162,7 +164,11 @@ protected:
       uint64_t expire_to);
 
   bool recovered;
-  std::list<Context*> waiting_for_recovery;
+  std::vector<Context*> waiting_for_recovery;
+
+  void _go_readonly(int r);
+
+  size_t purge_item_journal_size;
 
 public:
   void init();
@@ -205,9 +211,7 @@ public:
 
   void update_op_limit(const MDSMap &mds_map);
 
-  void handle_conf_change(const ConfigProxy& conf,
-                          const std::set <std::string> &changed,
-                          const MDSMap &mds_map);
+  void handle_conf_change(const std::set<std::string>& changed, const MDSMap& mds_map);
 
   PurgeQueue(
       CephContext *cct_,

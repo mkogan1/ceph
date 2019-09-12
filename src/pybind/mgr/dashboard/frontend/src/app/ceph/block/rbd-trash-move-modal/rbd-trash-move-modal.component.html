@@ -9,17 +9,12 @@
           [formGroup]="moveForm"
           novalidate>
       <div class="modal-body">
-        <p>
-          <ng-container i18n>To move</ng-container>&nbsp;
-          <kbd>{{ poolName }}/{{ imageName }}</kbd>&nbsp;
-          <ng-container i18n>to trash, click</ng-container>&nbsp;
-          <kbd i18n>Move Image</kbd>.&nbsp;
-          <ng-container i18n>Optionally, you can pick an expiration date.</ng-container>
-        </p>
+        <p i18n>To move <kbd>{{ poolName }}/{{ imageName }}</kbd> to trash,
+          click <kbd>Move Image</kbd>. Optionally, you can pick an expiration date.</p>
 
-        <div class="form-group"
-             [ngClass]="{'has-error': moveForm.showError('expiresAt', formDir)}">
-          <label for="expires"
+        <div class="form-group">
+          <label class="col-form-label"
+                 for="expires"
                  i18n>Protection expires at</label>
           <input type="text"
                  placeholder="NOT PROTECTED"
@@ -29,16 +24,12 @@
                  [bsConfig]="bsConfig"
                  formControlName="expiresAt"
                  bsDatepicker>
-          <span i18n
-                class="help-block"
-                *ngIf="moveForm.showError('expiresAt', formDir, 'format')">
-            Wrong date format. Please use "YYYY-MM-DD HH:mm:ss".
-          </span>
-          <span i18n
-                class="help-block"
-                *ngIf="moveForm.showError('expiresAt', formDir, 'expired')">
-            Protection has already expired. Please pick a future date or leave it empty.
-          </span>
+          <span class="invalid-feedback"
+                *ngIf="moveForm.showError('expiresAt', formDir, 'format')"
+                i18n>Wrong date format. Please use "YYYY-MM-DD HH:mm:ss".</span>
+          <span class="invalid-feedback"
+                *ngIf="moveForm.showError('expiresAt', formDir, 'expired')"
+                i18n>Protection has already expired. Please pick a future date or leave it empty.</span>
         </div>
       </div>
 
@@ -46,13 +37,11 @@
         <div class="button-group text-right">
           <cd-submit-button i18n
                             [form]="moveForm"
-                            (submitAction)="moveImage()">
-            Move Image
-          </cd-submit-button>
-          <button i18n
-                  type="button"
-                  class="btn btn-sm btn-default"
-                  (click)="modalRef.hide()">Cancel</button>
+                            (submitAction)="moveImage()">Move Image</cd-submit-button>
+          <cd-back-button [back]="modalRef.hide"
+                          name="Cancel"
+                          i18n-name>
+          </cd-back-button>
         </div>
       </div>
     </form>

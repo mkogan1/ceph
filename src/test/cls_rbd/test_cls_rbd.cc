@@ -5,6 +5,7 @@
 #include "common/config.h"
 #include "common/snap_types.h"
 #include "common/Clock.h"
+#include "common/bit_vector.hpp"
 #include "include/encoding.h"
 #include "include/types.h"
 #include "include/rados/librados.h"
@@ -17,7 +18,7 @@
 #include "librbd/Types.h"
 
 #include "gtest/gtest.h"
-#include "test/librados/test.h"
+#include "test/librados/test_cxx.h"
 
 #include <errno.h>
 #include <string>
@@ -63,6 +64,28 @@ static char *random_buf(size_t len)
   for (size_t i = 0; i < len; i++)
     b[i] = (rand() % (128 - 32)) + 32;
   return b;
+}
+
+static bool is_sparse_read_supported(librados::IoCtx &ioctx,
+                                     const std::string &oid) {
+  EXPECT_EQ(0, ioctx.create(oid, true));
+  bufferlist inbl;
+  inbl.append(std::string(1, 'X'));
+  EXPECT_EQ(0, ioctx.write(oid, inbl, inbl.length(), 1));
+  EXPECT_EQ(0, ioctx.write(oid, inbl, inbl.length(), 3));
+
+  std::map<uint64_t, uint64_t> m;
+  bufferlist outbl;
+  int r = ioctx.sparse_read(oid, m, outbl, 4, 0);
+  ioctx.remove(oid);
+
+  int expected_r = 2;
+  std::map<uint64_t, uint64_t> expected_m = {{1, 1}, {3, 1}};
+  bufferlist expected_outbl;
+  expected_outbl.append(std::string(2, 'X'));
+
+  return (r == expected_r && m == expected_m &&
+          outbl.contents_equal(expected_outbl));
 }
 
 class TestClsRbd : public ::testing::Test {
@@ -151,6 +174,74 @@ TEST_F(TestClsRbd, copyup)
   // but contents should not have changed
   ASSERT_FALSE(outbl.contents_equal(inbl2));
   ASSERT_TRUE(outbl.contents_equal(inbl));
+
+  ASSERT_EQ(0, ioctx.remove(oid));
+  ioctx.close();
+}
+
+TEST_F(TestClsRbd, sparse_copyup)
+{
+  librados::IoCtx ioctx;
+  ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), ioctx));
+
+  string oid = get_temp_image_name();
+  ioctx.remove(oid);
+
+  bool sparse_read_supported = is_sparse_read_supported(ioctx, oid);
+
+  // copyup of 0-len nonexistent object should create new 0-len object
+  uint64_t size;
+  ASSERT_EQ(-ENOENT, ioctx.stat(oid, &size, nullptr));
+  std::map<uint64_t, uint64_t> m;
+  bufferlist inbl;
+  ASSERT_EQ(0, sparse_copyup(&ioctx, oid, m, inbl));
+  ASSERT_EQ(0, ioctx.stat(oid, &size, nullptr));
+  ASSERT_EQ(0U, size);
+
+  // create some data to write
+  inbl.append(std::string(4096, '1'));
+  inbl.append(std::string(4096, '2'));
+  m = {{1024, 4096}, {8192, 4096}};
+
+  // copyup to nonexistent object should create new object
+  ioctx.remove(oid);
+  ASSERT_EQ(-ENOENT, ioctx.remove(oid));
+  ASSERT_EQ(0, sparse_copyup(&ioctx, oid, m, inbl));
+  // and its contents should match
+  bufferlist outbl;
+  bufferlist expected_outbl;
+  expected_outbl.append(std::string(1024, '\0'));
+  expected_outbl.append(std::string(4096, '1'));
+  expected_outbl.append(std::string(8192 - 4096 - 1024, '\0'));
+  expected_outbl.append(std::string(4096, '2'));
+  ASSERT_EQ((int)expected_outbl.length(),
+            ioctx.read(oid, outbl, expected_outbl.length() + 1, 0));
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
+  std::map<uint64_t, uint64_t> expected_m;
+  if (sparse_read_supported) {
+    expected_m = m;
+    expected_outbl = inbl;
+  } else {
+    expected_m = {{0, expected_outbl.length()}};
+  }
+  m.clear();
+  outbl.clear();
+  ASSERT_EQ((int)expected_m.size(), ioctx.sparse_read(oid, m, outbl, 65536, 0));
+  ASSERT_EQ(m, expected_m);
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
+
+  // now send different data, but with a preexisting object
+  bufferlist inbl2;
+  inbl2.append(std::string(1024, 'X'));
+
+  // should still succeed
+  ASSERT_EQ(0, sparse_copyup(&ioctx, oid, {{0, 1024}}, inbl2));
+  // but contents should not have changed
+  m.clear();
+  outbl.clear();
+  ASSERT_EQ((int)expected_m.size(), ioctx.sparse_read(oid, m, outbl, 65536, 0));
+  ASSERT_EQ(m, expected_m);
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
 
   ASSERT_EQ(0, ioctx.remove(oid));
   ioctx.close();
@@ -833,7 +924,8 @@ TEST_F(TestClsRbd, parents_v2)
   ASSERT_EQ(-ENOENT, parent_get(&ioctx, oid, &parent_image_spec));
   ASSERT_EQ(-ENOENT, parent_overlap_get(&ioctx, oid, CEPH_NOSNAP,
                                         &parent_overlap));
-  ASSERT_EQ(-ENOENT, parent_attach(&ioctx, oid, parent_image_spec, 0ULL));
+  ASSERT_EQ(-ENOENT, parent_attach(&ioctx, oid, parent_image_spec, 0ULL,
+                                   false));
   ASSERT_EQ(-ENOENT, parent_detach(&ioctx, oid));
 
   // no layering support should fail
@@ -843,7 +935,7 @@ TEST_F(TestClsRbd, parents_v2)
   ASSERT_FALSE(parent_image_spec.exists());
   ASSERT_EQ(0, parent_overlap_get(&ioctx, oid, CEPH_NOSNAP, &parent_overlap));
   ASSERT_EQ(std::nullopt, parent_overlap);
-  ASSERT_EQ(-ENOEXEC, parent_attach(&ioctx, oid, parent_image_spec, 0ULL));
+  ASSERT_EQ(-ENOEXEC, parent_attach(&ioctx, oid, parent_image_spec, 0ULL, false));
   ASSERT_EQ(-ENOEXEC, parent_detach(&ioctx, oid));
 
   // layering support available -- no pool namespaces
@@ -855,14 +947,17 @@ TEST_F(TestClsRbd, parents_v2)
   ASSERT_FALSE(parent_image_spec.exists());
   ASSERT_EQ(0, parent_overlap_get(&ioctx, oid, CEPH_NOSNAP, &parent_overlap));
   ASSERT_EQ(std::nullopt, parent_overlap);
-  ASSERT_EQ(-EINVAL, parent_attach(&ioctx, oid, parent_image_spec, 0ULL));
+  ASSERT_EQ(-EINVAL, parent_attach(&ioctx, oid, parent_image_spec, 0ULL, false));
   ASSERT_EQ(-ENOENT, parent_detach(&ioctx, oid));
 
   parent_image_spec = {1, "", "parent", 2};
   parent_overlap = (33 << 20) + 1;
-  ASSERT_EQ(0, parent_attach(&ioctx, oid, parent_image_spec, *parent_overlap));
+  ASSERT_EQ(0, parent_attach(&ioctx, oid, parent_image_spec, *parent_overlap,
+                             false));
   ASSERT_EQ(-EEXIST, parent_attach(&ioctx, oid, parent_image_spec,
-                                   *parent_overlap));
+                                   *parent_overlap, false));
+  ASSERT_EQ(0, parent_attach(&ioctx, oid, parent_image_spec, *parent_overlap,
+                             true));
   --(*parent_overlap);
 
   cls::rbd::ParentImageSpec on_disk_parent_image_spec;
@@ -903,9 +998,12 @@ TEST_F(TestClsRbd, parents_v2)
   // clone across pool namespaces
   parent_image_spec.pool_namespace = "ns";
   parent_overlap = 31 << 20;
-  ASSERT_EQ(0, parent_attach(&ioctx, oid, parent_image_spec, *parent_overlap));
+  ASSERT_EQ(0, parent_attach(&ioctx, oid, parent_image_spec, *parent_overlap,
+                             false));
   ASSERT_EQ(-EEXIST, parent_attach(&ioctx, oid, parent_image_spec,
-                                   *parent_overlap));
+                                   *parent_overlap, false));
+  ASSERT_EQ(0, parent_attach(&ioctx, oid, parent_image_spec, *parent_overlap,
+                             true));
 
   ASSERT_EQ(0, parent_get(&ioctx, oid, &on_disk_parent_image_spec));
   ASSERT_EQ(parent_image_spec, on_disk_parent_image_spec);
@@ -1638,7 +1736,7 @@ TEST_F(TestClsRbd, mirror_image_status) {
 
     explicit WatchCtx(librados::IoCtx *ioctx) : m_ioctx(ioctx) {}
     void handle_notify(uint64_t notify_id, uint64_t cookie,
-			     uint64_t notifier_id, bufferlist& bl_) override {
+                       uint64_t notifier_id, bufferlist& bl_) override {
       bufferlist bl;
       m_ioctx->notify_ack(RBD_MIRRORING, notify_id, cookie, bl);
     }
@@ -1648,12 +1746,16 @@ TEST_F(TestClsRbd, mirror_image_status) {
   map<std::string, cls::rbd::MirrorImage> images;
   map<std::string, cls::rbd::MirrorImageStatus> statuses;
   std::map<cls::rbd::MirrorImageStatusState, int> states;
+  std::map<std::string, entity_inst_t> instances;
   cls::rbd::MirrorImageStatus read_status;
+  entity_inst_t read_instance;
   uint64_t watch_handle;
   librados::IoCtx ioctx;
 
   ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), ioctx));
   ioctx.remove(RBD_MIRRORING);
+
+  int64_t instance_id = librados::Rados(ioctx).get_instance_id();
 
   // Test list fails on nonexistent RBD_MIRRORING object
 
@@ -1694,10 +1796,18 @@ TEST_F(TestClsRbd, mirror_image_status) {
   ASSERT_EQ(1U, states.size());
   ASSERT_EQ(3, states[cls::rbd::MIRROR_IMAGE_STATUS_STATE_UNKNOWN]);
 
+  // Test get instance return -ESTALE due to down.
+
+  ASSERT_EQ(-ESTALE, mirror_image_instance_get(&ioctx, "uuid1", &read_instance));
+  instances.clear();
+  ASSERT_EQ(0, mirror_image_instance_list(&ioctx, "", 1024, &instances));
+  ASSERT_TRUE(instances.empty());
+
   // Test remove_down removes stale statuses
 
   ASSERT_EQ(0, mirror_image_status_remove_down(&ioctx));
   ASSERT_EQ(-ENOENT, mirror_image_status_get(&ioctx, "uuid1", &read_status));
+  ASSERT_EQ(-ENOENT, mirror_image_instance_get(&ioctx, "uuid1", &read_instance));
   ASSERT_EQ(0, mirror_image_status_list(&ioctx, "", 1024, &images, &statuses));
   ASSERT_EQ(3U, images.size());
   ASSERT_TRUE(statuses.empty());
@@ -1733,6 +1843,16 @@ TEST_F(TestClsRbd, mirror_image_status) {
   ASSERT_EQ(statuses["image_id1"], status1);
   ASSERT_EQ(statuses["image_id2"], status2);
   ASSERT_EQ(statuses["image_id3"], status3);
+
+  read_instance = {};
+  ASSERT_EQ(0, mirror_image_instance_get(&ioctx, "uuid1", &read_instance));
+  ASSERT_EQ(read_instance.name.num(), instance_id);
+  instances.clear();
+  ASSERT_EQ(0, mirror_image_instance_list(&ioctx, "", 1024, &instances));
+  ASSERT_EQ(3U, instances.size());
+  ASSERT_EQ(instances["image_id1"].name.num(), instance_id);
+  ASSERT_EQ(instances["image_id2"].name.num(), instance_id);
+  ASSERT_EQ(instances["image_id3"].name.num(), instance_id);
 
   ASSERT_EQ(0, mirror_image_status_remove_down(&ioctx));
   ASSERT_EQ(0, mirror_image_status_get(&ioctx, "uuid1", &read_status));
@@ -1818,6 +1938,11 @@ TEST_F(TestClsRbd, mirror_image_status) {
   ASSERT_EQ(0, mirror_image_status_get_summary(&ioctx, &states));
   ASSERT_EQ(1U, states.size());
   ASSERT_EQ(3, states[cls::rbd::MIRROR_IMAGE_STATUS_STATE_UNKNOWN]);
+
+  ASSERT_EQ(-ESTALE, mirror_image_instance_get(&ioctx, "uuid1", &read_instance));
+  instances.clear();
+  ASSERT_EQ(0, mirror_image_instance_list(&ioctx, "", 1024, &instances));
+  ASSERT_TRUE(instances.empty());
 
   ASSERT_EQ(0, mirror_image_status_remove_down(&ioctx));
   ASSERT_EQ(-ENOENT, mirror_image_status_get(&ioctx, "uuid1", &read_status));
@@ -2810,7 +2935,8 @@ TEST_F(TestClsRbd, migration)
   ASSERT_EQ(0, create_image(&ioctx, oid, 0, 22, 0, oid, -1));
 
   cls::rbd::MigrationSpec migration_spec(cls::rbd::MIGRATION_HEADER_TYPE_DST, 1,
-                                         "name", "id", {}, 0, false, false,
+                                         "name", "ns", "id", {}, 0, false,
+                                         false,
                                          cls::rbd::MIGRATION_STATE_PREPARING,
                                          "123");
   cls::rbd::MigrationSpec read_migration_spec;
@@ -2879,7 +3005,8 @@ TEST_F(TestClsRbd, migration_v1)
   ASSERT_EQ(0, ioctx.write(oid, header, header.length(), 0));
 
   cls::rbd::MigrationSpec migration_spec(cls::rbd::MIGRATION_HEADER_TYPE_DST, 1,
-                                         "name", "id", {}, 0, false, false,
+                                         "name", "ns", "id", {}, 0, false,
+                                         false,
                                          cls::rbd::MIGRATION_STATE_PREPARING,
                                          "123");
   cls::rbd::MigrationSpec read_migration_spec;
@@ -2979,4 +3106,118 @@ TEST_F(TestClsRbd, assert_snapc_seq)
                              cls::rbd::ASSERT_SNAPC_SEQ_LE_SNAPSET_SEQ));
 
   ASSERT_EQ(0, ioctx.selfmanaged_snap_remove(snapc_seq));
+}
+
+TEST_F(TestClsRbd, sparsify)
+{
+  librados::IoCtx ioctx;
+  ASSERT_EQ(0, _rados.ioctx_create(_pool_name.c_str(), ioctx));
+
+  string oid = get_temp_image_name();
+  ioctx.remove(oid);
+
+  bool sparse_read_supported = is_sparse_read_supported(ioctx, oid);
+
+  // test sparsify on a non-existent object
+
+  ASSERT_EQ(-ENOENT, sparsify(&ioctx, oid, 16, false));
+  uint64_t size;
+  ASSERT_EQ(-ENOENT, ioctx.stat(oid, &size, NULL));
+  ASSERT_EQ(-ENOENT, sparsify(&ioctx, oid, 16, true));
+  ASSERT_EQ(-ENOENT, ioctx.stat(oid, &size, NULL));
+
+  // test sparsify on an empty object
+
+  ASSERT_EQ(0, ioctx.create(oid, true));
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, false));
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, true));
+  ASSERT_EQ(-ENOENT, sparsify(&ioctx, oid, 16, false));
+
+  // test sparsify on a zeroed object
+
+  bufferlist inbl;
+  inbl.append(std::string(4096, '\0'));
+  ASSERT_EQ(0, ioctx.write(oid, inbl, inbl.length(), 0));
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, false));
+  std::map<uint64_t, uint64_t> m;
+  bufferlist outbl;
+  std::map<uint64_t, uint64_t> expected_m;
+  bufferlist expected_outbl;
+  switch (int r = ioctx.sparse_read(oid, m, outbl, inbl.length(), 0); r) {
+  case 0:
+    expected_m = {};
+    ASSERT_EQ(expected_m, m);
+    break;
+  case 1:
+    expected_m = {{0, 0}};
+    ASSERT_EQ(expected_m, m);
+    break;
+  default:
+    FAIL() << r << " is odd";
+  }
+  ASSERT_EQ(m, expected_m);
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, true));
+  ASSERT_EQ(-ENOENT, sparsify(&ioctx, oid, 16, true));
+  ASSERT_EQ(0, ioctx.write(oid, inbl, inbl.length(), 0));
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, true));
+  ASSERT_EQ(-ENOENT, sparsify(&ioctx, oid, 16, true));
+
+  // test sparsify on an object with zeroes
+
+  inbl.append(std::string(4096, '1'));
+  inbl.append(std::string(4096, '\0'));
+  inbl.append(std::string(4096, '2'));
+  inbl.append(std::string(4096, '\0'));
+  ASSERT_EQ(0, ioctx.write(oid, inbl, inbl.length(), 0));
+
+  // try to sparsify with sparse_size too large
+
+  ASSERT_EQ(0, sparsify(&ioctx, oid, inbl.length(), true));
+  expected_m = {{0, inbl.length()}};
+  expected_outbl = inbl;
+  ASSERT_EQ((int)expected_m.size(),
+            ioctx.sparse_read(oid, m, outbl, inbl.length(), 0));
+  ASSERT_EQ(m, expected_m);
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
+
+  // sparsify with small sparse_size
+
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, true));
+  outbl.clear();
+  ASSERT_EQ((int)(inbl.length() - 4096),
+            ioctx.read(oid, outbl, inbl.length(), 0));
+  outbl.append(std::string(4096, '\0'));
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
+  if (sparse_read_supported) {
+    expected_m = {{4096 * 1, 4096}, {4096 * 3, 4096}};
+    expected_outbl.clear();
+    expected_outbl.append(std::string(4096, '1'));
+    expected_outbl.append(std::string(4096, '2'));
+  } else {
+    expected_m = {{0, 4 * 4096}};
+    expected_outbl.clear();
+    expected_outbl.append(std::string(4096, '\0'));
+    expected_outbl.append(std::string(4096, '1'));
+    expected_outbl.append(std::string(4096, '\0'));
+    expected_outbl.append(std::string(4096, '2'));
+  }
+  m.clear();
+  outbl.clear();
+  ASSERT_EQ((int)expected_m.size(),
+            ioctx.sparse_read(oid, m, outbl, inbl.length(), 0));
+  ASSERT_EQ(m, expected_m);
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
+
+  // test it is the same after yet another sparsify
+
+  ASSERT_EQ(0, sparsify(&ioctx, oid, 16, true));
+  m.clear();
+  outbl.clear();
+  ASSERT_EQ((int)expected_m.size(),
+            ioctx.sparse_read(oid, m, outbl, inbl.length(), 0));
+  ASSERT_EQ(m, expected_m);
+  ASSERT_TRUE(outbl.contents_equal(expected_outbl));
+
+  ASSERT_EQ(0, ioctx.remove(oid));
+  ioctx.close();
 }

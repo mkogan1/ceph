@@ -202,6 +202,30 @@ def task(ctx, config):
 
     assert ret == 200
 
+    # TESTCASE 'list-no-user','user','list','list user keys','user list object'
+    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'list'], {'list' : '', 'max-entries' : 0})
+    assert ret == 200
+    assert out['count'] == 0
+    assert out['truncated'] == True
+    assert len(out['keys']) == 0
+    assert len(out['marker']) > 0
+
+    # TESTCASE 'list-user-without-marker','user','list','list user keys','user list object'
+    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'list'], {'list' : '', 'max-entries' : 1})
+    assert ret == 200
+    assert out['count'] == 1
+    assert out['truncated'] == True
+    assert len(out['keys']) == 1
+    assert len(out['marker']) > 0
+    marker = out['marker']
+
+    # TESTCASE 'list-user-with-marker','user','list','list user keys','user list object'
+    (ret, out) = rgwadmin_rest(admin_conn, ['user', 'list'], {'list' : '', 'max-entries' : 1, 'marker': marker})
+    assert ret == 200
+    assert out['count'] == 1
+    assert out['truncated'] == False
+    assert len(out['keys']) == 1
+
     # TESTCASE 'info-existing','user','info','existing user','returns correct info'
     (ret, out) = rgwadmin_rest(admin_conn, ['user', 'info'], {'uid' : user1})
 
@@ -212,7 +236,26 @@ def task(ctx, config):
     assert out['keys'][0]['access_key'] == access_key
     assert out['keys'][0]['secret_key'] == secret_key
     assert not out['suspended']
-
+    assert out['tenant'] == ''
+    assert out['max_buckets'] == 4
+    assert out['caps'] == []
+    assert out['op_mask'] == 'read, write, delete'
+    assert out['default_placement'] == ''
+    assert out['default_storage_class'] == ''
+    assert out['placement_tags'] == []
+    assert not out['bucket_quota']['enabled']
+    assert not out['bucket_quota']['check_on_raw']
+    assert out['bucket_quota']['max_size'] == -1
+    assert out['bucket_quota']['max_size_kb'] == 0
+    assert out['bucket_quota']['max_objects'] == -1
+    assert not out['user_quota']['enabled']
+    assert not out['user_quota']['check_on_raw']
+    assert out['user_quota']['max_size'] == -1
+    assert out['user_quota']['max_size_kb'] == 0
+    assert out['user_quota']['max_objects'] == -1
+    assert out['temp_url_keys'] == []
+    assert out['type'] == 'rgw'
+    assert out['mfa_ids'] == []
     # TESTCASE 'info-existing','user','info','existing user query with wrong uid but correct access key','returns correct info'
     (ret, out) = rgwadmin_rest(admin_conn, ['user', 'info'], {'access-key' : access_key, 'uid': 'uid_not_exist'})
 
@@ -223,6 +266,26 @@ def task(ctx, config):
     assert out['keys'][0]['access_key'] == access_key
     assert out['keys'][0]['secret_key'] == secret_key
     assert not out['suspended']
+    assert out['tenant'] == ''
+    assert out['max_buckets'] == 4
+    assert out['caps'] == []
+    assert out['op_mask'] == "read, write, delete"
+    assert out['default_placement'] == ''
+    assert out['default_storage_class'] == ''
+    assert out['placement_tags'] == []
+    assert not out['bucket_quota']['enabled']
+    assert not out['bucket_quota']['check_on_raw']
+    assert out ['bucket_quota']['max_size'] == -1
+    assert out ['bucket_quota']['max_size_kb'] == 0
+    assert out ['bucket_quota']['max_objects'] == -1
+    assert not out['user_quota']['enabled']
+    assert not out['user_quota']['check_on_raw']
+    assert out['user_quota']['max_size'] == -1
+    assert out['user_quota']['max_size_kb'] == 0
+    assert out['user_quota']['max_objects'] == -1
+    assert out['temp_url_keys'] == []
+    assert out['type'] == 'rgw'
+    assert out['mfa_ids'] == []
 
     # TESTCASE 'suspend-ok','user','suspend','active user','succeeds'
     (ret, out) = rgwadmin_rest(admin_conn, ['user', 'modify'], {'uid' : user1, 'suspended' : True})
@@ -382,6 +445,7 @@ def task(ctx, config):
 
     assert ret == 200
     assert out['owner'] == user1
+    assert out['tenant'] == ''
     bucket_id = out['id']
 
     # TESTCASE 'bucket-stats4','bucket','stats','new empty bucket','succeeds, expected bucket ID'
@@ -485,7 +549,7 @@ def task(ctx, config):
     assert out['usage']['rgw.main']['num_objects'] == 0
 
     # create a bucket for deletion stats
-    useless_bucket = connection.create_bucket('useless_bucket')
+    useless_bucket = connection.create_bucket('useless-bucket')
     useless_key = useless_bucket.new_key('useless_key')
     useless_key.set_contents_from_string('useless string')
 
