@@ -3,16 +3,13 @@ from __future__ import absolute_import
 
 import errno
 import unittest
-from .. import mgr
+from . import KVStoreMockMixin, ControllerTestCase
 from .. import settings
 from ..controllers.settings import Settings as SettingsController
 from ..settings import Settings, handle_option_command
-from .helper import ControllerTestCase
 
 
-class SettingsTest(unittest.TestCase):
-    CONFIG_KEY_DICT = {}
-
+class SettingsTest(unittest.TestCase, KVStoreMockMixin):
     @classmethod
     def setUpClass(cls):
         # pylint: disable=protected-access
@@ -21,18 +18,8 @@ class SettingsTest(unittest.TestCase):
         settings.Options.GRAFANA_ENABLED = (False, bool)
         settings._OPTIONS_COMMAND_MAP = settings._options_command_map()
 
-    @classmethod
-    def mock_set_config(cls, attr, val):
-        cls.CONFIG_KEY_DICT[attr] = val
-
-    @classmethod
-    def mock_get_config(cls, attr, default):
-        return cls.CONFIG_KEY_DICT.get(attr, default)
-
     def setUp(self):
-        self.CONFIG_KEY_DICT.clear()
-        mgr.set_config.side_effect = self.mock_set_config
-        mgr.get_config.side_effect = self.mock_get_config
+        self.mock_kv_store()
         if Settings.GRAFANA_API_HOST != 'localhost':
             Settings.GRAFANA_API_HOST = 'localhost'
         if Settings.GRAFANA_API_PORT != 3000:
@@ -108,9 +95,7 @@ class SettingsTest(unittest.TestCase):
                          "type object 'Options' has no attribute 'NON_EXISTENT_OPTION'")
 
 
-class SettingsControllerTest(ControllerTestCase):
-    config_values = {}
-
+class SettingsControllerTest(ControllerTestCase, KVStoreMockMixin):
     @classmethod
     def setup_server(cls):
         # pylint: disable=protected-access
@@ -118,22 +103,12 @@ class SettingsControllerTest(ControllerTestCase):
         SettingsController._cp_config['tools.authenticate.on'] = False
         cls.setup_controllers([SettingsController])
 
-    @classmethod
-    def mock_set_config(cls, attr, val):
-        cls.config_values[attr] = val
-
-    @classmethod
-    def mock_get_config(cls, attr, default):
-        return cls.config_values.get(attr, default)
-
     def setUp(self):
-        self.config_values.clear()
-        mgr.set_config.side_effect = self.mock_set_config
-        mgr.get_config.side_effect = self.mock_get_config
+        self.mock_kv_store()
 
     def test_settings_list(self):
         self._get('/api/settings')
-        data = self.jsonBody()
+        data = self.json_body()
         self.assertTrue(len(data) > 0)
         self.assertStatus(200)
         self.assertIn('default', data[0].keys())
@@ -161,7 +136,7 @@ class SettingsControllerTest(ControllerTestCase):
         self.assertInJsonBody('type')
         self.assertInJsonBody('name')
         self.assertInJsonBody('value')
-        self.assertEqual(self.jsonBody()['value'], 'foo')
+        self.assertEqual(self.json_body()['value'], 'foo')
 
     def test_bulk_set(self):
         self._put('/api/settings', {
@@ -172,13 +147,13 @@ class SettingsControllerTest(ControllerTestCase):
 
         self._get('/api/settings/grafana-api-username')
         self.assertStatus(200)
-        body = self.jsonBody()
+        body = self.json_body()
         self.assertEqual(body['value'], 'foo')
 
         self._get('/api/settings/grafana-api-username')
         self.assertStatus(200)
-        self.assertEqual(self.jsonBody()['value'], 'foo')
+        self.assertEqual(self.json_body()['value'], 'foo')
 
         self._get('/api/settings/grafana-api-host')
         self.assertStatus(200)
-        self.assertEqual(self.jsonBody()['value'], 'somehost')
+        self.assertEqual(self.json_body()['value'], 'somehost')

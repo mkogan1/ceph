@@ -18,10 +18,11 @@
 #include "msg/Message.h"
 #include "include/types.h"
 
-class MExportDirDiscoverAck : public MessageInstance<MExportDirDiscoverAck> {
-public:
-  friend factory;
+class MExportDirDiscoverAck : public Message {
 private:
+  static const int HEAD_VERSION = 1;
+  static const int COMPAT_VERSION = 1;
+
   dirfrag_t dirfrag;
   bool success;
 
@@ -31,16 +32,16 @@ private:
   bool is_success() const { return success; }
 
 protected:
-  MExportDirDiscoverAck() : MessageInstance(MSG_MDS_EXPORTDIRDISCOVERACK) {}
+  MExportDirDiscoverAck() : Message{MSG_MDS_EXPORTDIRDISCOVERACK, HEAD_VERSION, COMPAT_VERSION} {}
   MExportDirDiscoverAck(dirfrag_t df, uint64_t tid, bool s=true) :
-    MessageInstance(MSG_MDS_EXPORTDIRDISCOVERACK),
+    Message{MSG_MDS_EXPORTDIRDISCOVERACK, HEAD_VERSION, COMPAT_VERSION},
     dirfrag(df), success(s) {
     set_tid(tid);
   }
   ~MExportDirDiscoverAck() override {}
 
 public:
-  const char *get_type_name() const override { return "ExDisA"; }
+  std::string_view get_type_name() const override { return "ExDisA"; }
   void print(ostream& o) const override {
     o << "export_discover_ack(" << dirfrag;
     if (success) 
@@ -59,6 +60,9 @@ public:
     encode(dirfrag, payload);
     encode(success, payload);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

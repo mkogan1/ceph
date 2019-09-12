@@ -1,8 +1,9 @@
 from abc import ABCMeta, abstractmethod
-from cStringIO import StringIO
+from six import StringIO
+
 import json
 
-from conn import get_gateway_connection
+from .conn import get_gateway_connection
 
 class Cluster:
     """ interface to run commands against a distinct ceph cluster """
@@ -343,14 +344,18 @@ class Credentials:
         return ['--access-key', self.access_key, '--secret', self.secret]
 
 class User(SystemObject):
-    def __init__(self, uid, data = None, name = None, credentials = None):
+    def __init__(self, uid, data = None, name = None, credentials = None, tenant = None):
         self.name = name
         self.credentials = credentials or []
+        self.tenant = tenant
         super(User, self).__init__(data, uid)
 
     def user_arg(self):
         """ command-line argument to specify this user """
-        return ['--uid', self.id]
+        args = ['--uid', self.id]
+        if self.tenant:
+            args += ['--tenant', self.tenant]
+        return args
 
     def build_command(self, command):
         """ build a command line for the given command and args """

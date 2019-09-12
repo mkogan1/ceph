@@ -33,6 +33,7 @@ struct MockManagedLock {
   }
 
   bool m_release_lock_on_shutdown = false;
+  Context *m_on_released = nullptr;
 
   MOCK_METHOD0(construct, void());
   MOCK_METHOD0(destroy, void());
@@ -63,7 +64,7 @@ struct ManagedLock<MockTestImageCtx> {
               const std::string& oid, librbd::Watcher *watcher,
               managed_lock::Mode  mode, bool blacklist_on_break_lock,
               uint32_t blacklist_expire_seconds)
-    : m_work_queue(work_queue), m_lock("ManagedLock::m_lock") {
+    : m_work_queue(work_queue) {
     MockManagedLock::get_instance().construct();
   }
 
@@ -73,7 +74,7 @@ struct ManagedLock<MockTestImageCtx> {
 
   ContextWQ *m_work_queue;
 
-  mutable Mutex m_lock;
+  mutable ceph::mutex m_lock = ceph::make_mutex("ManagedLock::m_lock");
 
   bool is_lock_owner() const {
     return MockManagedLock::get_instance().is_lock_owner();
@@ -103,15 +104,21 @@ struct ManagedLock<MockTestImageCtx> {
   }
 
   void release_lock(Context *on_released) {
+    ceph_assert(MockManagedLock::get_instance().m_on_released == nullptr);
+    MockManagedLock::get_instance().m_on_released = on_released;
+
     Context *post_release_ctx = new FunctionContext(
-      [this, on_released](int r) {
-        post_release_lock_handler(false, r, on_released);
+      [this](int r) {
+        ceph_assert(MockManagedLock::get_instance().m_on_released != nullptr);
+        post_release_lock_handler(false, r,
+                                  MockManagedLock::get_instance().m_on_released);
+        MockManagedLock::get_instance().m_on_released = nullptr;
       });
 
     Context *release_ctx = new FunctionContext(
-      [on_released, post_release_ctx](int r) {
+      [post_release_ctx](int r) {
         if (r < 0) {
-          on_released->complete(r);
+          MockManagedLock::get_instance().m_on_released->complete(r);
         } else {
           MockManagedLock::get_instance().release_lock(post_release_ctx);
         }
@@ -175,7 +182,7 @@ namespace mirror {
 
 template <>
 struct Threads<librbd::MockTestImageCtx> {
-  Mutex &timer_lock;
+  ceph::mutex &timer_lock;
   SafeTimer *timer;
   ContextWQ *work_queue;
 
@@ -333,11 +340,17 @@ public:
   void expect_release_lock(MockManagedLock &mock_managed_lock, int r,
                            Context *on_finish = nullptr) {
     EXPECT_CALL(mock_managed_lock, release_lock(_))
-      .WillOnce(Invoke([on_finish, r](Context *ctx) {
-                         ctx->complete(r);
+      .WillOnce(Invoke([on_finish, &mock_managed_lock, r](Context *ctx) {
                          if (on_finish != nullptr) {
-                           on_finish->complete(0);
+                           auto on_released = mock_managed_lock.m_on_released;
+                           ceph_assert(on_released != nullptr);
+                           mock_managed_lock.m_on_released = new FunctionContext(
+                             [on_released, on_finish](int r) {
+                               on_released->complete(r);
+                               on_finish->complete(r);
+                             });
                          }
+                         ctx->complete(r);
                        }));
   }
 

@@ -20,7 +20,6 @@
 
 #include "common/cmdparse.h"
 #include "common/LogEntry.h"
-#include "common/Mutex.h"
 #include "common/Thread.h"
 #include "mon/health_check.h"
 #include "mgr/Gil.h"
@@ -76,6 +75,7 @@ public:
     return changed;
   }
   void get_health_checks(health_check_map_t *checks);
+  void config_notify();
 
   void set_uri(const std::string &str)
   {

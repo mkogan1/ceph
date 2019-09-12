@@ -263,13 +263,14 @@ setup_pools()
     else
       mon_map_file=${TEMPDIR}/${remote_cluster}.monmap
       ceph --cluster ${remote_cluster} mon getmap > ${mon_map_file}
-      mon_addr=$(monmaptool --print ${mon_map_file} | grep -E 'mon\.' | head -n 1 | sed -E 's/^[0-9]+: ([^/]+).+$/\1/')
+      mon_addr=$(monmaptool --print ${mon_map_file} | grep -E 'mon\.' |
+        head -n 1 | sed -E 's/^[0-9]+: ([^ ]+).+$/\1/' | sed -E 's/\/[0-9]+//g')
 
       admin_key_file=${TEMPDIR}/${remote_cluster}.client.${CEPH_ID}.key
       CEPH_ARGS='' ceph --cluster ${remote_cluster} auth get-key client.${CEPH_ID} > ${admin_key_file}
 
       rbd --cluster ${cluster} mirror pool peer add ${POOL} client.${CEPH_ID}@${remote_cluster}-DNE \
-          --remote-mon-host ${mon_addr} --remote-key-file ${admin_key_file}
+          --remote-mon-host "${mon_addr}" --remote-key-file ${admin_key_file}
 
       uuid=$(rbd --cluster ${cluster} mirror pool peer add ${PARENT_POOL} client.${CEPH_ID}@${remote_cluster}-DNE)
       rbd --cluster ${cluster} mirror pool peer set ${PARENT_POOL} ${uuid} mon-host ${mon_addr}
@@ -307,6 +308,13 @@ setup()
 
     setup_pools "${CLUSTER1}" "${CLUSTER2}"
     setup_pools "${CLUSTER2}" "${CLUSTER1}"
+
+    if [ -n "${RBD_MIRROR_MIN_COMPAT_CLIENT}" ]; then
+        CEPH_ARGS='' ceph --cluster ${CLUSTER1} osd \
+                 set-require-min-compat-client ${RBD_MIRROR_MIN_COMPAT_CLIENT}
+        CEPH_ARGS='' ceph --cluster ${CLUSTER2} osd \
+                 set-require-min-compat-client ${RBD_MIRROR_MIN_COMPAT_CLIENT}
+    fi
 }
 
 cleanup()
@@ -322,6 +330,11 @@ cleanup()
     if [ -z "${RBD_MIRROR_NOCLEANUP}" ]; then
         local cluster instance
 
+        CEPH_ARGS='' ceph --cluster ${CLUSTER1} osd pool rm ${POOL} ${POOL} --yes-i-really-really-mean-it
+        CEPH_ARGS='' ceph --cluster ${CLUSTER2} osd pool rm ${POOL} ${POOL} --yes-i-really-really-mean-it
+        CEPH_ARGS='' ceph --cluster ${CLUSTER1} osd pool rm ${PARENT_POOL} ${PARENT_POOL} --yes-i-really-really-mean-it
+        CEPH_ARGS='' ceph --cluster ${CLUSTER2} osd pool rm ${PARENT_POOL} ${PARENT_POOL} --yes-i-really-really-mean-it
+
         for cluster in "${CLUSTER1}" "${CLUSTER2}"; do
 	    stop_mirrors "${cluster}"
         done
@@ -330,11 +343,6 @@ cleanup()
             cd ${CEPH_ROOT}
             CEPH_ARGS='' ${CEPH_SRC}/mstop.sh ${CLUSTER1}
             CEPH_ARGS='' ${CEPH_SRC}/mstop.sh ${CLUSTER2}
-        else
-            CEPH_ARGS='' ceph --cluster ${CLUSTER1} osd pool rm ${POOL} ${POOL} --yes-i-really-really-mean-it
-            CEPH_ARGS='' ceph --cluster ${CLUSTER2} osd pool rm ${POOL} ${POOL} --yes-i-really-really-mean-it
-            CEPH_ARGS='' ceph --cluster ${CLUSTER1} osd pool rm ${PARENT_POOL} ${PARENT_POOL} --yes-i-really-really-mean-it
-            CEPH_ARGS='' ceph --cluster ${CLUSTER2} osd pool rm ${PARENT_POOL} ${PARENT_POOL} --yes-i-really-really-mean-it
         fi
         test "${RBD_MIRROR_TEMDIR}" = "${TEMPDIR}" || rm -Rf ${TEMPDIR}
     fi
@@ -462,6 +470,8 @@ status()
     do
 	echo "${cluster} status"
 	ceph --cluster ${cluster} -s
+	ceph --cluster ${cluster} service dump
+	ceph --cluster ${cluster} service status
 	echo
 
 	for image_pool in ${POOL} ${PARENT_POOL}
@@ -673,14 +683,56 @@ test_status_in_pool_dir()
     local cluster=$1
     local pool=$2
     local image=$3
-    local state_pattern=$4
-    local description_pattern=$5
+    local state_pattern="$4"
+    local description_pattern="$5"
+    local service_pattern="$6"
 
-    local status_log=${TEMPDIR}/${cluster}-${image}.mirror_status
+    local status_log=${TEMPDIR}/${cluster}-${pool}-${image}.mirror_status
     rbd --cluster ${cluster} -p ${pool} mirror image status ${image} |
 	tee ${status_log} >&2
     grep "state: .*${state_pattern}" ${status_log} || return 1
     grep "description: .*${description_pattern}" ${status_log} || return 1
+
+    if [ -n "${service_pattern}" ]; then
+        grep "service: *${service_pattern}" ${status_log} || return 1
+    elif echo ${state_pattern} | grep '^up+'; then
+        grep "service: *${MIRROR_USER_ID_PREFIX}.* on " ${status_log} || return 1
+    else
+        grep "service: " ${status_log} && return 1
+    fi
+
+    # recheck using `mirror pool status` command to stress test it.
+
+    local last_update="$(sed -nEe 's/^ *last_update: *(.*) *$/\1/p' ${status_log})"
+    test_mirror_pool_status_verbose \
+        ${cluster} ${pool} ${image} "${state_pattern}" "${last_update}" &&
+    return 0
+
+    echo "'mirror pool status' test failed" >&2
+    exit 1
+}
+
+test_mirror_pool_status_verbose()
+{
+    local cluster=$1
+    local pool=$2
+    local image=$3
+    local state_pattern="$4"
+    local prev_last_update="$5"
+
+    local status_log=${TEMPDIR}/${cluster}-${pool}.mirror_status
+
+    rbd --cluster ${cluster} mirror pool status ${pool} --verbose --format xml \
+        > ${status_log}
+
+    local last_update state
+    last_update=$($XMLSTARLET sel -t -v \
+        "//images/image[name='${image}']/last_update" < ${status_log})
+    state=$($XMLSTARLET sel -t -v \
+        "//images/image[name='${image}']/state" < ${status_log})
+
+    echo "${state}" | grep "${state_pattern}" ||
+    test "${last_update}" '>' "${prev_last_update}"
 }
 
 wait_for_status_in_pool_dir()
@@ -688,12 +740,15 @@ wait_for_status_in_pool_dir()
     local cluster=$1
     local pool=$2
     local image=$3
-    local state_pattern=$4
-    local description_pattern=$5
+    local state_pattern="$4"
+    local description_pattern="$5"
+    local service_pattern="$6"
 
     for s in 1 2 4 8 8 8 8 8 8 8 8 16 16; do
 	sleep ${s}
-	test_status_in_pool_dir ${cluster} ${pool} ${image} ${state_pattern} ${description_pattern} && return 0
+	test_status_in_pool_dir ${cluster} ${pool} ${image} "${state_pattern}" \
+                                "${description_pattern}" "${service_pattern}" &&
+            return 0
     done
     return 1
 }
@@ -712,6 +767,15 @@ create_image()
 
     rbd --cluster ${cluster} -p ${pool} create --size ${size} \
 	--image-feature layering,exclusive-lock,journaling $@ ${image}
+}
+
+enable_journaling()
+{
+    local cluster=$1
+    local pool=$2
+    local image=$3
+
+    rbd --cluster ${cluster} -p ${pool} feature enable ${image} journaling
 }
 
 set_image_meta()
@@ -767,6 +831,22 @@ remove_image_retry()
         remove_image ${cluster} ${pool} ${image} && return 0
     done
     return 1
+}
+
+trash_move() {
+    local cluster=$1
+    local pool=$2
+    local image=$3
+
+    rbd --cluster=${cluster} -p ${pool} trash move ${image}
+}
+
+trash_restore() {
+    local cluster=$1
+    local pool=$2
+    local image_id=$3
+
+    rbd --cluster=${cluster} -p ${pool} trash restore ${image_id}
 }
 
 clone_image()
@@ -896,25 +976,43 @@ stress_write_image()
 	2> ${TEMPDIR}/rbd-mirror-random-write.log || true
 }
 
+show_diff()
+{
+    local file1=$1
+    local file2=$2
+
+    xxd ${file1} > ${file1}.xxd
+    xxd ${file2} > ${file2}.xxd
+    sdiff -s ${file1}.xxd ${file2}.xxd | head -n 64
+    rm -f ${file1}.xxd ${file2}.xxd
+}
+
 compare_images()
 {
     local pool=$1
     local image=$2
+    local ret=0
 
     local rmt_export=${TEMPDIR}/${CLUSTER2}-${pool}-${image}.export
     local loc_export=${TEMPDIR}/${CLUSTER1}-${pool}-${image}.export
 
     rm -f ${rmt_export} ${loc_export}
-    rbd --cluster ${CLUSTER2} -p ${pool} export ${image} - | xxd > ${rmt_export}
-    rbd --cluster ${CLUSTER1} -p ${pool} export ${image} - | xxd > ${loc_export}
-    sdiff -s ${rmt_export} ${loc_export} | head -n 64
+    rbd --cluster ${CLUSTER2} -p ${pool} export ${image} ${rmt_export}
+    rbd --cluster ${CLUSTER1} -p ${pool} export ${image} ${loc_export}
+    if ! cmp ${rmt_export} ${loc_export}
+    then
+        show_diff ${rmt_export} ${loc_export}
+        ret=1
+    fi
     rm -f ${rmt_export} ${loc_export}
+    return ${ret}
 }
 
 compare_image_snapshots()
 {
     local pool=$1
     local image=$2
+    local ret=0
 
     local rmt_export=${TEMPDIR}/${CLUSTER2}-${pool}-${image}.export
     local loc_export=${TEMPDIR}/${CLUSTER1}-${pool}-${image}.export
@@ -924,11 +1022,16 @@ compare_image_snapshots()
                            $XMLSTARLET sel -t -v "//snapshot/name" | \
                            grep -E -v "^\.rbd-mirror\."); do
         rm -f ${rmt_export} ${loc_export}
-        rbd --cluster ${CLUSTER2} -p ${pool} export ${image}@${snap_name} - | xxd > ${rmt_export}
-        rbd --cluster ${CLUSTER1} -p ${pool} export ${image}@${snap_name} - | xxd > ${loc_export}
-        sdiff -s ${rmt_export} ${loc_export} | head -n 64
+        rbd --cluster ${CLUSTER2} -p ${pool} export ${image}@${snap_name} ${rmt_export}
+        rbd --cluster ${CLUSTER1} -p ${pool} export ${image}@${snap_name} ${loc_export}
+        if ! cmp ${rmt_export} ${loc_export}
+        then
+            show_diff ${rmt_export} ${loc_export}
+            ret=1
+        fi
     done
     rm -f ${rmt_export} ${loc_export}
+    return ${ret}
 }
 
 demote_image()

@@ -3,7 +3,9 @@ from __future__ import absolute_import
 
 import sys
 import inspect
+import json
 import functools
+import ipaddress
 
 import collections
 from datetime import datetime, timedelta
@@ -11,12 +13,24 @@ from distutils.util import strtobool
 import fnmatch
 import time
 import threading
-import socket
+import six
 from six.moves import urllib
 import cherrypy
 
-from . import logger
+try:
+    from urlparse import urljoin
+except ImportError:
+    from urllib.parse import urljoin
+
+from . import logger, mgr
 from .exceptions import ViewCacheNoDataException
+from .settings import Settings
+from .services.auth import JwtManager
+
+try:
+    from typing import Any, AnyStr, Dict, List  # noqa pylint: disable=unused-import
+except ImportError:
+    pass  # For typing only
 
 
 class RequestLoggingTool(cherrypy.Tool):
@@ -31,20 +45,33 @@ class RequestLoggingTool(cherrypy.Tool):
         cherrypy.request.hooks.attach('after_error_response', self.request_error,
                                       priority=5)
 
-    def _get_user(self):
-        if hasattr(cherrypy.serving, 'session'):
-            return cherrypy.session.get(Session.USERNAME)
-        return None
-
     def request_begin(self):
         req = cherrypy.request
-        user = self._get_user()
-        if user:
-            logger.debug("[%s:%s] [%s] [%s] %s", req.remote.ip,
-                         req.remote.port, req.method, user, req.path_info)
-        else:
-            logger.debug("[%s:%s] [%s] %s", req.remote.ip,
-                         req.remote.port, req.method, req.path_info)
+        user = JwtManager.get_username()
+        # Log the request.
+        logger.debug('[%s:%s] [%s] [%s] %s', req.remote.ip, req.remote.port,
+                     req.method, user, req.path_info)
+        # Audit the request.
+        if Settings.AUDIT_API_ENABLED and req.method not in ['GET']:
+            url = build_url(req.remote.ip, scheme=req.scheme,
+                            port=req.remote.port)
+            msg = '[DASHBOARD] from=\'{}\' path=\'{}\' method=\'{}\' ' \
+                'user=\'{}\''.format(url, req.path_info, req.method, user)
+            if Settings.AUDIT_API_LOG_PAYLOAD:
+                params = dict(req.params or {}, **get_request_body_params(req))
+                # Hide sensitive data like passwords, secret keys, ...
+                # Extend the list of patterns to search for if necessary.
+                # Currently parameters like this are processed:
+                # - secret_key
+                # - user_password
+                # - new_passwd_to_login
+                keys = []
+                for key in ['password', 'passwd', 'secret']:
+                    keys.extend([x for x in params.keys() if key in x])
+                for key in keys:
+                    params[key] = '***'
+                msg = '{} params=\'{}\''.format(msg, json.dumps(params))
+            mgr.cluster_log('audit', mgr.CLUSTER_LOG_PRIO_INFO, msg)
 
     def request_error(self):
         self._request_log(logger.error)
@@ -85,7 +112,7 @@ class RequestLoggingTool(cherrypy.Tool):
         req = cherrypy.request
         res = cherrypy.response
         lat = time.time() - res.time
-        user = self._get_user()
+        user = JwtManager.get_username()
         status = res.status[:3] if isinstance(res.status, str) else res.status
         if 'Content-Length' in res.headers:
             length = self._format_bytes(res.headers['Content-Length'])
@@ -160,6 +187,11 @@ class ViewCache(object):
             self.exception = None
             self.lock = threading.Lock()
 
+        def reset(self):
+            with self.lock:
+                self.value_when = None
+                self.value = None
+
         def run(self, fn, args, kwargs):
             """
             If data less than `stale_period` old is available, return it
@@ -199,7 +231,7 @@ class ViewCache(object):
                         # pylint: disable=raising-bad-type
                         raise self.exception
                     return ViewCache.VALUE_OK, self.value
-                elif self.value_when is not None:
+                if self.value_when is not None:
                     # We have some data, but it doesn't meet freshness requirements
                     return ViewCache.VALUE_STALE, self.value
                 # We have no data, not even stale data
@@ -216,49 +248,12 @@ class ViewCache(object):
                 rvc = ViewCache.RemoteViewCache(self.timeout)
                 self.cache_by_args[args] = rvc
             return rvc.run(fn, args, kwargs)
+        wrapper.reset = self.reset
         return wrapper
 
-
-class Session(object):
-    """
-    This class contains all relevant settings related to cherrypy.session.
-    """
-    NAME = 'session_id'
-
-    # The keys used to store the information in the cherrypy.session.
-    USERNAME = '_username'
-    TS = '_ts'
-    EXPIRE_AT_BROWSER_CLOSE = '_expire_at_browser_close'
-
-    # The default values.
-    DEFAULT_EXPIRE = 1200.0
-
-
-class SessionExpireAtBrowserCloseTool(cherrypy.Tool):
-    """
-    A CherryPi Tool which takes care that the cookie does not expire
-    at browser close if the 'Keep me logged in' checkbox was selected
-    on the login page.
-    """
-    def __init__(self):
-        cherrypy.Tool.__init__(self, 'before_finalize', self._callback)
-
-    def _callback(self):
-        # Shall the cookie expire at browser close?
-        expire_at_browser_close = cherrypy.session.get(
-            Session.EXPIRE_AT_BROWSER_CLOSE, True)
-        logger.debug("expire at browser close: %s", expire_at_browser_close)
-        if expire_at_browser_close:
-            # Get the cookie and its name.
-            cookie = cherrypy.response.cookie
-            name = cherrypy.request.config.get(
-                'tools.sessions.name', Session.NAME)
-            # Make the cookie a session cookie by purging the
-            # fields 'expires' and 'max-age'.
-            logger.debug("expire at browser close: removing 'expires' and 'max-age'")
-            if name in cookie:
-                del cookie[name]['expires']
-                del cookie[name]['max-age']
+    def reset(self):
+        for _, rvc in self.cache_by_args.items():
+            rvc.reset()
 
 
 class NotificationQueue(threading.Thread):
@@ -352,13 +347,13 @@ class NotificationQueue(threading.Thread):
                 raise Exception("n_types param is neither a string nor a list")
             for ev_type in n_types:
                 listeners = cls._listeners[ev_type]
-                toRemove = None
+                to_remove = None
                 for pr, fn in listeners:
                     if fn == func:
-                        toRemove = (pr, fn)
+                        to_remove = (pr, fn)
                         break
-                if toRemove:
-                    listeners.discard(toRemove)
+                if to_remove:
+                    listeners.discard(to_remove)
                     logger.debug("NQ: function %s was deregistered for events "
                                  "of type %s", func, ev_type)
 
@@ -657,14 +652,6 @@ class Task(object):
             self.lock.release()
 
 
-def is_valid_ipv6_address(addr):
-    try:
-        socket.inet_pton(socket.AF_INET6, addr)
-        return True
-    except socket.error:
-        return False
-
-
 def build_url(host, scheme=None, port=None):
     """
     Build a valid URL. IPv6 addresses specified in host will be enclosed in brackets
@@ -687,7 +674,16 @@ def build_url(host, scheme=None, port=None):
     :type port: int
     :rtype: str
     """
-    netloc = host if not is_valid_ipv6_address(host) else '[{}]'.format(host)
+    try:
+        try:
+            u_host = six.u(host)
+        except TypeError:
+            u_host = host
+
+        ipaddress.IPv6Address(u_host)
+        netloc = '[{}]'.format(host)
+    except ValueError:
+        netloc = host
     if port:
         netloc += ':{}'.format(port)
     pr = urllib.parse.ParseResult(
@@ -698,6 +694,14 @@ def build_url(host, scheme=None, port=None):
         query='',
         fragment='')
     return pr.geturl()
+
+
+def prepare_url_prefix(url_prefix):
+    """
+    return '' if no prefix, or '/prefix' without slash in the end.
+    """
+    url_prefix = urljoin('/', url_prefix)
+    return url_prefix.rstrip('/')
 
 
 def dict_contains_path(dct, keys):
@@ -739,6 +743,7 @@ def getargspec(func):
             func = func.__wrapped__
     except AttributeError:
         pass
+    # pylint: disable=deprecated-method
     return _getargspec(func)
 
 
@@ -764,3 +769,85 @@ def str_to_bool(val):
     if isinstance(val, bool):
         return val
     return bool(strtobool(val))
+
+
+def json_str_to_object(value):  # type: (AnyStr) -> Any
+    """
+    It converts a JSON valid string representation to object.
+
+    >>> result = json_str_to_object('{"a": 1}')
+    >>> result == {'a': 1}
+    True
+    """
+    if value == '':
+        return value
+
+    try:
+        # json.loads accepts binary input from version >=3.6
+        value = value.decode('utf-8')
+    except AttributeError:
+        pass
+
+    return json.loads(value)
+
+
+def partial_dict(orig, keys):  # type: (Dict, List[str]) -> Dict
+    """
+    It returns Dict containing only the selected keys of original Dict.
+
+    >>> partial_dict({'a': 1, 'b': 2}, ['b'])
+    {'b': 2}
+    """
+    return {k: orig[k] for k in keys}
+
+
+def get_request_body_params(request):
+    """
+    Helper function to get parameters from the request body.
+    :param request The CherryPy request object.
+    :type request: cherrypy.Request
+    :return: A dictionary containing the parameters.
+    :rtype: dict
+    """
+    params = {}
+    if request.method not in request.methods_with_bodies:
+        return params
+
+    content_type = request.headers.get('Content-Type', '')
+    if content_type in ['application/json', 'text/javascript']:
+        if not hasattr(request, 'json'):
+            raise cherrypy.HTTPError(400, 'Expected JSON body')
+        if isinstance(request.json, str):
+            params.update(json.loads(request.json))
+        else:
+            params.update(request.json)
+
+    return params
+
+
+def find_object_in_list(key, value, iterable):
+    """
+    Get the first occurrence of an object within a list with
+    the specified key/value.
+
+    >>> find_object_in_list('name', 'bar', [{'name': 'foo'}, {'name': 'bar'}])
+    {'name': 'bar'}
+
+    >>> find_object_in_list('name', 'xyz', [{'name': 'foo'}, {'name': 'bar'}]) is None
+    True
+
+    >>> find_object_in_list('foo', 'bar', [{'xyz': 4815162342}]) is None
+    True
+
+    >>> find_object_in_list('foo', 'bar', []) is None
+    True
+
+    :param key: The name of the key.
+    :param value: The value to search for.
+    :param iterable: The list to process.
+    :return: Returns the found object or None.
+    """
+    for obj in iterable:
+        if key in obj and obj[key] == value:
+            return obj
+    return None

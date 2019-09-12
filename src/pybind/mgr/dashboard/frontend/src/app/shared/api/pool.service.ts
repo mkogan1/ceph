@@ -1,7 +1,12 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+
 import { cdEncode } from '../decorators/cd-encode';
+import { RbdConfigurationEntry } from '../models/configuration';
+import { RbdConfigurationService } from '../services/rbd-configuration.service';
 import { ApiModule } from './api.module';
 
 @cdEncode
@@ -11,16 +16,24 @@ import { ApiModule } from './api.module';
 export class PoolService {
   apiPath = 'api/pool';
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private rbdConfigurationService: RbdConfigurationService) {}
 
   create(pool) {
     return this.http.post(this.apiPath, pool, { observe: 'response' });
   }
 
   update(pool) {
-    const name = pool.pool;
-    delete pool.pool;
-    return this.http.put(`${this.apiPath}/${name}`, pool, { observe: 'response' });
+    let name: string;
+    if (pool.hasOwnProperty('srcpool')) {
+      name = pool.srcpool;
+      delete pool.srcpool;
+    } else {
+      name = pool.pool;
+      delete pool.pool;
+    }
+    return this.http.put(`${this.apiPath}/${encodeURIComponent(name)}`, pool, {
+      observe: 'response'
+    });
   }
 
   delete(name) {
@@ -32,11 +45,22 @@ export class PoolService {
   }
 
   getList() {
-    return this.http.get(this.apiPath);
+    return this.http.get(`${this.apiPath}?stats=true`);
   }
 
-  getInfo() {
-    return this.http.get(`${this.apiPath}/_info`);
+  getConfiguration(poolName: string): Observable<RbdConfigurationEntry[]> {
+    return this.http.get<RbdConfigurationEntry[]>(`${this.apiPath}/${poolName}/configuration`).pipe(
+      // Add static data maintained in RbdConfigurationService
+      map((values) =>
+        values.map((entry) =>
+          Object.assign(entry, this.rbdConfigurationService.getOptionByName(entry.name))
+        )
+      )
+    );
+  }
+
+  getInfo(pool_name?: string) {
+    return this.http.get(`${this.apiPath}/_info` + (pool_name ? `?pool_name=${pool_name}` : ''));
   }
 
   list(attrs = []) {

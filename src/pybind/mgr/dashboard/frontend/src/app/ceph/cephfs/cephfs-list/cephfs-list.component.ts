@@ -1,6 +1,9 @@
 import { Component, OnInit } from '@angular/core';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
+
 import { CephfsService } from '../../../shared/api/cephfs.service';
+import { CellTemplate } from '../../../shared/enum/cell-template.enum';
 import { CdTableColumn } from '../../../shared/models/cd-table-column';
 import { CdTableFetchDataContext } from '../../../shared/models/cd-table-fetch-data-context';
 import { CdTableSelection } from '../../../shared/models/cd-table-selection';
@@ -15,24 +18,25 @@ export class CephfsListComponent implements OnInit {
   filesystems: any = [];
   selection = new CdTableSelection();
 
-  constructor(private cephfsService: CephfsService) {}
+  constructor(private cephfsService: CephfsService, private i18n: I18n) {}
 
   ngOnInit() {
     this.columns = [
       {
-        name: 'Name',
+        name: this.i18n('Name'),
         prop: 'mdsmap.fs_name',
         flexGrow: 2
       },
       {
-        name: 'Created',
+        name: this.i18n('Created'),
         prop: 'mdsmap.created',
         flexGrow: 2
       },
       {
-        name: 'Enabled',
+        name: this.i18n('Enabled'),
         prop: 'mdsmap.enabled',
-        flexGrow: 1
+        flexGrow: 1,
+        cellTransformation: CellTemplate.checkIcon
       }
     ];
   }

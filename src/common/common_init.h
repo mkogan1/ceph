@@ -39,6 +39,9 @@ enum common_init_flags_t {
 
   // don't contact mons for config
   CINIT_FLAG_NO_MON_CONFIG = 0x20,
+
+  // don't expose default cct perf counters
+  CINIT_FLAG_NO_CCT_PERF_COUNTERS = 0x40,
 };
 
 #ifndef WITH_SEASTAR
@@ -65,9 +68,9 @@ CephContext *common_preinit(const CephInitParameters &iparams,
 			    enum code_environment_t code_env, int flags);
 #endif // #ifndef WITH_SEASTAR
 
-/* Print out some parse errors. */
-void complain_about_parse_errors(CephContext *cct,
-				 std::deque<std::string> *parse_errors);
+/* Print out some parse error. */
+void complain_about_parse_error(CephContext *cct,
+				const std::string& parse_error);
 
 /* This function is called after you have done your last
  * fork. When you make this call, the system will initialize everything that

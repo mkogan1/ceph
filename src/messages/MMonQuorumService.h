@@ -16,19 +16,18 @@
 
 #include "msg/Message.h"
 
-class MMonQuorumService : public MessageSubType<MMonQuorumService> {
+class MMonQuorumService : public Message {
 public:
   epoch_t epoch = 0;
   version_t round = 0;
 
 protected:
-template<typename... Args>
-  MMonQuorumService(Args&&... args) : MessageSubType(std::forward<Args>(args)...) {}
-
+  MMonQuorumService(int type, int head)
+    : Message{type, head, 1}
+  {}
   ~MMonQuorumService() override { }
 
 public:
-
   void set_epoch(epoch_t e) {
     epoch = e;
   }
@@ -64,7 +63,7 @@ public:
     ceph_abort_msg("MMonQuorumService message must always be a base class");
   }
 
-  const char *get_type_name() const override { return "quorum_service"; }
+  std::string_view get_type_name() const override { return "quorum_service"; }
 };
 
 #endif /* CEPH_MMON_QUORUM_SERVICE_H */

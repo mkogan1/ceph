@@ -5,13 +5,13 @@
 #define CEPH_TEST_LIBRBD_MOCK_JOURNAL_H
 
 #include "gmock/gmock.h"
+#include "include/rados/librados_fwd.hpp"
 #include "librbd/Journal.h"
 #include "librbd/journal/Types.h"
 #include <list>
 
 struct Context;
 struct ContextWQ;
-namespace librados { class IoCtx; }
 
 namespace librbd {
 
@@ -64,6 +64,8 @@ struct MockJournal {
   MOCK_CONST_METHOD0(get_tag_data, journal::TagData());
 
   MOCK_METHOD0(allocate_op_tid, uint64_t());
+
+  MOCK_METHOD0(user_flushed, void());
 
   MOCK_METHOD3(append_op_event_mock, void(uint64_t, const journal::EventEntry&,
                                           Context *));

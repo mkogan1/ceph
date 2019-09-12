@@ -18,10 +18,7 @@
 #include "msg/Message.h"
 
 
-class MClientCapRelease : public MessageInstance<MClientCapRelease> {
-public:
-  friend factory;
-
+class MClientCapRelease : public Message {
 private:
   static constexpr int HEAD_VERSION = 2;
   static constexpr int COMPAT_VERSION = 1;
@@ -35,7 +32,7 @@ private:
   epoch_t osd_epoch_barrier;
 
   MClientCapRelease() : 
-    MessageInstance(CEPH_MSG_CLIENT_CAPRELEASE, HEAD_VERSION, COMPAT_VERSION),
+    Message{CEPH_MSG_CLIENT_CAPRELEASE, HEAD_VERSION, COMPAT_VERSION},
     osd_epoch_barrier(0)
   {
     memset(&head, 0, sizeof(head));
@@ -44,7 +41,7 @@ private:
   ~MClientCapRelease() override {}
 
 public:
-  const char *get_type_name() const override { return "client_cap_release";}
+  std::string_view get_type_name() const override { return "client_cap_release";}
   void print(ostream& out) const override {
     out << "client_cap_release(" << caps.size() << ")";
   }

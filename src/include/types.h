@@ -1,4 +1,4 @@
-// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 /*
  * Ceph - scalable distributed file system
@@ -7,9 +7,9 @@
  *
  * This is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
- * License version 2.1, as published by the Free Software 
+ * License version 2.1, as published by the Free Software
  * Foundation.  See file COPYING.
- * 
+ *
  */
 #ifndef CEPH_TYPES_H
 #define CEPH_TYPES_H
@@ -24,19 +24,9 @@
 #include <fcntl.h>
 #include <string.h>
 
-// <macro hackery>
-// temporarily remap __le* to ceph_le* for benefit of shared kernel/userland headers
-#define __le16 ceph_le16
-#define __le32 ceph_le32
-#define __le64 ceph_le64
 #include "ceph_fs.h"
 #include "ceph_frag.h"
 #include "rbd_types.h"
-#undef __le16
-#undef __le32
-#undef __le64
-// </macro hackery>
-
 
 #ifdef __cplusplus
 #ifndef _BACKWARD_BACKWARD_WARNING_H
@@ -58,6 +48,7 @@ extern "C" {
 #include <boost/container/flat_map.hpp>
 #include <map>
 #include <vector>
+#include <optional>
 #include <iostream>
 #include <iomanip>
 
@@ -100,10 +91,14 @@ template<class A, class B>
 inline std::ostream& operator<<(std::ostream&out, const std::pair<A,B>& v);
 template<class A, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::vector<A,Alloc>& v);
+template<class A, std::size_t N, class Alloc>
+inline std::ostream& operator<<(std::ostream& out, const boost::container::small_vector<A,N,Alloc>& v);
 template<class A, class Comp, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::deque<A,Alloc>& v);
 template<typename... Ts>
 inline std::ostream& operator<<(std::ostream& out, const std::tuple<Ts...> &t);
+template<typename T>
+inline std::ostream& operator<<(std::ostream& out, const std::optional<T> &t);
 template<class A, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::list<A,Alloc>& ilist);
 template<class A, class Comp, class Alloc>
@@ -136,10 +131,25 @@ inline std::ostream& operator<<(std::ostream& out, const std::pair<A,B>& v) {
 
 template<class A, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::vector<A,Alloc>& v) {
+  bool first = true;
   out << "[";
-  for (auto p = v.begin(); p != v.end(); ++p) {
-    if (p != v.begin()) out << ",";
-    out << *p;
+  for (const auto& p : v) {
+    if (!first) out << ",";
+    out << p;
+    first = false;
+  }
+  out << "]";
+  return out;
+}
+
+template<class A, std::size_t N, class Alloc>
+inline std::ostream& operator<<(std::ostream& out, const boost::container::small_vector<A,N,Alloc>& v) {
+  bool first = true;
+  out << "[";
+  for (const auto& p : v) {
+    if (!first) out << ",";
+    out << p;
+    first = false;
   }
   out << "]";
   return out;
@@ -158,12 +168,22 @@ inline std::ostream& operator<<(std::ostream& out, const std::deque<A,Alloc>& v)
 
 template<typename... Ts>
 inline std::ostream& operator<<(std::ostream& out, const std::tuple<Ts...> &t) {
-  auto f = [n = sizeof...(Ts), i = 0, &out](const auto& e) mutable {
+  auto f = [n = sizeof...(Ts), i = 0U, &out](const auto& e) mutable {
     out << e;
     if (++i != n)
       out << ",";
   };
   ceph::for_each(t, f);
+  return out;
+}
+
+// Mimics boost::optional
+template<typename T>
+inline std::ostream& operator<<(std::ostream& out, const std::optional<T> &t) {
+  if (!t)
+    out << "--" ;
+  else
+    out << ' ' << *t ;
   return out;
 }
 
@@ -342,12 +362,12 @@ struct client_t {
 
   // cppcheck-suppress noExplicitConstructor
   client_t(int64_t _v = -2) : v(_v) {}
-  
-  void encode(bufferlist& bl) const {
+
+  void encode(ceph::buffer::list& bl) const {
     using ceph::encode;
     encode(v, bl);
   }
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
     using ceph::decode;
     decode(v, bl);
   }
@@ -364,7 +384,7 @@ static inline bool operator>=(const client_t& l, const client_t& r) { return l.v
 static inline bool operator>=(const client_t& l, int64_t o) { return l.v >= o; }
 static inline bool operator<(const client_t& l, int64_t o) { return l.v < o; }
 
-inline ostream& operator<<(ostream& out, const client_t& c) {
+inline std::ostream& operator<<(std::ostream& out, const client_t& c) {
   return out << c.v;
 }
 
@@ -373,7 +393,7 @@ inline ostream& operator<<(ostream& out, const client_t& c) {
 // --
 
 namespace {
-  inline ostream& format_u(ostream& out, const uint64_t v, const uint64_t n,
+inline std::ostream& format_u(std::ostream& out, const uint64_t v, const uint64_t n,
       const int index, const uint64_t mult, const char* u)
   {
     char buffer[32];
@@ -413,7 +433,7 @@ struct si_u_t {
   explicit si_u_t(uint64_t _v) : v(_v) {};
 };
 
-inline ostream& operator<<(ostream& out, const si_u_t& b)
+inline std::ostream& operator<<(std::ostream& out, const si_u_t& b)
 {
   uint64_t n = b.v;
   int index = 0;
@@ -441,7 +461,7 @@ struct byte_u_t {
   explicit byte_u_t(uint64_t _v) : v(_v) {};
 };
 
-inline ostream& operator<<(ostream& out, const byte_u_t& b)
+inline std::ostream& operator<<(std::ostream& out, const byte_u_t& b)
 {
   uint64_t n = b.v;
   int index = 0;
@@ -455,7 +475,7 @@ inline ostream& operator<<(ostream& out, const byte_u_t& b)
   return format_u(out, b.v, n, index, 1ULL << (10 * index), u[index]);
 }
 
-inline ostream& operator<<(ostream& out, const ceph_mon_subscribe_item& i)
+inline std::ostream& operator<<(std::ostream& out, const ceph_mon_subscribe_item& i)
 {
   return out << i.start
 	     << ((i.flags & CEPH_SUBSCRIBE_ONETIME) ? "" : "+");
@@ -467,7 +487,7 @@ struct weightf_t {
   weightf_t(float _v) : v(_v) {}
 };
 
-inline ostream& operator<<(ostream& out, const weightf_t& w)
+inline std::ostream& operator<<(std::ostream& out, const weightf_t& w)
 {
   if (w.v < -0.01F) {
     return out << "-";
@@ -489,11 +509,11 @@ struct shard_id_t {
 
   const static shard_id_t NO_SHARD;
 
-  void encode(bufferlist &bl) const {
+  void encode(ceph::buffer::list &bl) const {
     using ceph::encode;
     encode(id, bl);
   }
-  void decode(bufferlist::const_iterator &bl) {
+  void decode(ceph::buffer::list::const_iterator &bl) {
     using ceph::decode;
     decode(id, bl);
   }
@@ -501,7 +521,7 @@ struct shard_id_t {
 WRITE_CLASS_ENCODER(shard_id_t)
 WRITE_EQ_OPERATORS_1(shard_id_t, id)
 WRITE_CMP_OPERATORS_1(shard_id_t, id)
-ostream &operator<<(ostream &lhs, const shard_id_t &rhs);
+std::ostream &operator<<(std::ostream &lhs, const shard_id_t &rhs);
 
 #if defined(__sun) || defined(_AIX) || defined(__APPLE__) || defined(__FreeBSD__)
 __s32  ceph_to_hostos_errno(__s32 e);
@@ -526,12 +546,12 @@ struct errorcode32_t {
   int operator<(int i)  { return code < i; }
   int operator<=(int i) { return code <= i; }
 
-  void encode(bufferlist &bl) const {
+  void encode(ceph::buffer::list &bl) const {
     using ceph::encode;
     __s32 newcode = hostos_to_ceph_errno(code);
     encode(newcode, bl);
   }
-  void decode(bufferlist::const_iterator &bl) {
+  void decode(ceph::buffer::list::const_iterator &bl) {
     using ceph::decode;
     decode(code, bl);
     code = ceph_to_hostos_errno(code);
@@ -541,28 +561,62 @@ WRITE_CLASS_ENCODER(errorcode32_t)
 WRITE_EQ_OPERATORS_1(errorcode32_t, code)
 WRITE_CMP_OPERATORS_1(errorcode32_t, code)
 
-struct sha1_digest_t {
-#define SHA1_DIGEST_SIZE 20
-  unsigned char v[SHA1_DIGEST_SIZE] = {0};
+template <uint8_t S>
+struct sha_digest_t {
+  constexpr static uint32_t SIZE = S;
+  // TODO: we might consider std::array in the future. Avoiding it for now
+  // as sha_digest_t is a part of our public API.
+  unsigned char v[S] = {0};
 
-  string to_str() const {
-    char str[SHA1_DIGEST_SIZE*2+1] = {0};
+  std::string to_str() const {
+    char str[S * 2 + 1] = {0};
     str[0] = '\0';
-    for (size_t i = 0; i < 20; i++) {
-      ::sprintf(&str[i*2], "%02x", static_cast<int>(v[i]));
+    for (size_t i = 0; i < S; i++) {
+      ::sprintf(&str[i * 2], "%02x", static_cast<int>(v[i]));
     }
     return string(str);
   }
-  sha1_digest_t(unsigned char *_v) {
-    memcpy(v, _v, 20);
-  };
-  sha1_digest_t() {}
+  sha_digest_t(const unsigned char *_v) { memcpy(v, _v, SIZE); };
+  sha_digest_t() {}
+
+  bool operator==(const sha_digest_t& r) const {
+    return ::memcmp(v, r.v, SIZE) == 0;
+  }
+  bool operator!=(const sha_digest_t& r) const {
+    return ::memcmp(v, r.v, SIZE) != 0;
+  }
+
+  void encode(ceph::buffer::list &bl) const {
+    // copy to avoid reinterpret_cast, is_pod and other nasty things
+    using ceph::encode;
+    std::array<unsigned char, SIZE> tmparr;
+    memcpy(tmparr.data(), v, SIZE);
+    encode(tmparr, bl);
+  }
+  void decode(ceph::buffer::list::const_iterator &bl) {
+    using ceph::decode;
+    std::array<unsigned char, SIZE> tmparr;
+    decode(tmparr, bl);
+    memcpy(v, tmparr.data(), SIZE);
+  }
 };
 
-inline ostream& operator<<(ostream& out, const sha1_digest_t& b)
-{
-  string str = b.to_str();
+template<uint8_t S>
+inline std::ostream &operator<<(std::ostream &out, const sha_digest_t<S> &b) {
+  std::string str = b.to_str();
   return out << str;
 }
+
+using sha1_digest_t = sha_digest_t<20>;
+WRITE_CLASS_ENCODER(sha1_digest_t)
+
+using sha256_digest_t = sha_digest_t<32>;
+WRITE_CLASS_ENCODER(sha256_digest_t)
+
+using sha512_digest_t = sha_digest_t<64>;
+
+using md5_digest_t = sha_digest_t<16>;
+WRITE_CLASS_ENCODER(md5_digest_t)
+
 
 #endif

@@ -17,10 +17,11 @@
 
 #include "msg/Message.h"
 
-class MExportDirFinish : public MessageInstance<MExportDirFinish> {
-public:
-  friend factory;
+class MExportDirFinish : public Message {
 private:
+  static const int HEAD_VERSION = 1;
+  static const int COMPAT_VERSION = 1;
+
   dirfrag_t dirfrag;
   bool last;
 
@@ -29,15 +30,16 @@ private:
   bool is_last() const { return last; }
   
 protected:
-  MExportDirFinish() : last(false) {}
+  MExportDirFinish() :
+    Message{MSG_MDS_EXPORTDIRFINISH, HEAD_VERSION, COMPAT_VERSION}, last(false) {}
   MExportDirFinish(dirfrag_t df, bool l, uint64_t tid) :
-    MessageInstance(MSG_MDS_EXPORTDIRFINISH), dirfrag(df), last(l) {
+    Message{MSG_MDS_EXPORTDIRFINISH, HEAD_VERSION, COMPAT_VERSION}, dirfrag(df), last(l) {
     set_tid(tid);
   }
   ~MExportDirFinish() override {}
 
 public:
-  const char *get_type_name() const override { return "ExFin"; }
+  std::string_view get_type_name() const override { return "ExFin"; }
   void print(ostream& o) const override {
     o << "export_finish(" << dirfrag << (last ? " last" : "") << ")";
   }
@@ -52,7 +54,9 @@ public:
     decode(dirfrag, p);
     decode(last, p);
   }
-
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

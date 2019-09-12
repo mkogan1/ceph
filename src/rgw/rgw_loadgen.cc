@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <algorithm>
 #include <sstream>
@@ -29,6 +29,7 @@ int RGWLoadGenRequestEnv::sign(RGWAccessKey& access_key)
                                  content_type.c_str(),
                                  date_str.c_str(),
                                  meta_map,
+				 map<string, string>{},
                                  uri.c_str(),
                                  sub_resources,
                                  canonical_header);

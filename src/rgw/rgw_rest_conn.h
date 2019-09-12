@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #ifndef CEPH_RGW_REST_CONN_H
 #define CEPH_RGW_REST_CONN_H
@@ -12,15 +12,14 @@
 #include <atomic>
 
 class CephContext;
-class RGWRados;
+class RGWSI_Zone;
 
 template <class T>
-static int parse_decode_json(CephContext *cct, T& t, bufferlist& bl)
+static int parse_decode_json(T& t, bufferlist& bl)
 {
   JSONParser p;
-  int ret = p.parse(bl.c_str(), bl.length());
-  if (ret < 0) {
-    return ret;
+  if (!p.parse(bl.c_str(), bl.length())) {
+    return -EINVAL;
   }
 
   try {
@@ -79,8 +78,8 @@ class RGWRESTConn
 
 public:
 
-  RGWRESTConn(CephContext *_cct, RGWRados *store, const string& _remote_id, const list<string>& endpoints, HostStyle _host_style = PathStyle);
-  RGWRESTConn(CephContext *_cct, RGWRados *store, const string& _remote_id, const list<string>& endpoints, RGWAccessKey _cred, HostStyle _host_style = PathStyle);
+  RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc, const string& _remote_id, const list<string>& endpoints, HostStyle _host_style = PathStyle);
+  RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc, const string& _remote_id, const list<string>& endpoints, RGWAccessKey _cred, HostStyle _host_style = PathStyle);
 
   // custom move needed for atomic
   RGWRESTConn(RGWRESTConn&& other);
@@ -193,11 +192,11 @@ class S3RESTConn : public RGWRESTConn {
 
 public:
 
-  S3RESTConn(CephContext *_cct, RGWRados *store, const string& _remote_id, const list<string>& endpoints, HostStyle _host_style = PathStyle) :
-    RGWRESTConn(_cct, store, _remote_id, endpoints, _host_style) {}
+  S3RESTConn(CephContext *_cct, RGWSI_Zone *svc_zone, const string& _remote_id, const list<string>& endpoints, HostStyle _host_style = PathStyle) :
+    RGWRESTConn(_cct, svc_zone, _remote_id, endpoints, _host_style) {}
 
-  S3RESTConn(CephContext *_cct, RGWRados *store, const string& _remote_id, const list<string>& endpoints, RGWAccessKey _cred, HostStyle _host_style = PathStyle):
-    RGWRESTConn(_cct, store, _remote_id, endpoints, _cred, _host_style) {}
+  S3RESTConn(CephContext *_cct, RGWSI_Zone *svc_zone, const string& _remote_id, const list<string>& endpoints, RGWAccessKey _cred, HostStyle _host_style = PathStyle):
+    RGWRESTConn(_cct, svc_zone, _remote_id, endpoints, _cred, _host_style) {}
   ~S3RESTConn() override = default;
 
   void populate_params(param_vec_t& params, const rgw_user *uid, const string& zonegroup) override {
@@ -216,7 +215,7 @@ int RGWRESTConn::get_json_resource(const string& resource, param_vec_t *params, 
     return ret;
   }
 
-  ret = parse_decode_json(cct, t, bl);
+  ret = parse_decode_json(t, bl);
   if (ret < 0) {
     return ret;
   }
@@ -302,8 +301,8 @@ public:
     return req.get_http_status();
   }
 
-  int wait(bufferlist *pbl) {
-    int ret = req.wait();
+  int wait(bufferlist *pbl, optional_yield y) {
+    int ret = req.wait(y);
     if (ret < 0) {
       return ret;
     }
@@ -316,7 +315,7 @@ public:
   }
 
   template <class T>
-  int wait(T *dest);
+  int wait(T *dest, optional_yield y);
 
   template <class T>
   int fetch(T *dest);
@@ -330,7 +329,7 @@ int RGWRESTReadResource::decode_resource(T *dest)
   if (ret < 0) {
     return ret;
   }
-  ret = parse_decode_json(cct, *dest, bl);
+  ret = parse_decode_json(*dest, bl);
   if (ret < 0) {
     return ret;
   }
@@ -353,9 +352,9 @@ int RGWRESTReadResource::fetch(T *dest)
 }
 
 template <class T>
-int RGWRESTReadResource::wait(T *dest)
+int RGWRESTReadResource::wait(T *dest, optional_yield y)
 {
-  int ret = req.wait();
+  int ret = req.wait(y);
   if (ret < 0) {
     return ret;
   }
@@ -411,9 +410,6 @@ public:
     return req.get_io_user_info();
   }
 
-  template <class T>
-  int decode_resource(T *dest);
-
   int send(bufferlist& bl);
 
   int aio_send(bufferlist& bl);
@@ -426,50 +422,44 @@ public:
     return req.get_http_status();
   }
 
-  int wait(bufferlist *pbl) {
-    int ret = req.wait();
+  template <class E = int>
+  int wait(bufferlist *pbl, optional_yield y, E *err_result = nullptr) {
+    int ret = req.wait(y);
     *pbl = bl;
-    if (ret < 0) {
-      return ret;
+
+    if (ret < 0 && err_result ) {
+      ret = parse_decode_json(*err_result, bl);
     }
 
-    if (req.get_status() < 0) {
-      return req.get_status();
-    }
-    return 0;
+    return req.get_status();
   }
 
-  template <class T>
-  int wait(T *dest);
+  template <class T, class E = int>
+  int wait(T *dest, optional_yield y, E *err_result = nullptr);
 };
 
-template <class T>
-int RGWRESTSendResource::decode_resource(T *dest)
+template <class T, class E>
+int RGWRESTSendResource::wait(T *dest, optional_yield y, E *err_result)
 {
-  int ret = req.get_status();
-  if (ret < 0) {
-    return ret;
+  int ret = req.wait(y);
+  if (ret >= 0) {
+    ret = req.get_status();
   }
-  ret = parse_decode_json(cct, *dest, bl);
-  if (ret < 0) {
-    return ret;
-  }
-  return 0;
-}
 
-template <class T>
-int RGWRESTSendResource::wait(T *dest)
-{
-  int ret = req.wait();
+  if (ret < 0 && err_result) {
+    ret = parse_decode_json(*err_result, bl);
+  }
+
   if (ret < 0) {
     return ret;
   }
 
-  ret = decode_resource(dest);
+  ret = parse_decode_json(*dest, bl);
   if (ret < 0) {
     return ret;
   }
   return 0;
+
 }
 
 class RGWRESTPostResource : public RGWRESTSendResource {

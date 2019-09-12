@@ -1,5 +1,5 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include <algorithm>
 #include <map>
@@ -9,6 +9,7 @@
 
 #include "common/armor.h"
 #include "common/utf8.h"
+#include "rgw_rest_s3.h"
 #include "rgw_auth_s3.h"
 #include "rgw_common.h"
 #include "rgw_client_io.h"
@@ -46,7 +47,8 @@ static const auto signed_subresources = {
   "versionId",
   "versioning",
   "versions",
-  "website"
+  "website",
+  "object-lock"
 };
 
 /*
@@ -116,6 +118,7 @@ void rgw_create_s3_canonical_header(
   const char* const content_type,
   const char* const date,
   const std::map<std::string, std::string>& meta_map,
+  const std::map<std::string, std::string>& qs_map,
   const char* const request_uri,
   const std::map<std::string, std::string>& sub_resources,
   std::string& dest_str)
@@ -143,6 +146,7 @@ void rgw_create_s3_canonical_header(
   dest.append("\n");
 
   dest.append(get_canon_amz_hdr(meta_map));
+  dest.append(get_canon_amz_hdr(qs_map));
   dest.append(get_canon_resource(request_uri, sub_resources));
 
   dest_str = dest;
@@ -150,6 +154,17 @@ void rgw_create_s3_canonical_header(
 
 static inline bool is_base64_for_content_md5(unsigned char c) {
   return (isalnum(c) || isspace(c) || (c == '+') || (c == '/') || (c == '='));
+}
+
+static inline void get_v2_qs_map(const req_info& info,
+				 std::map<std::string, std::string>& qs_map) {
+  const auto& params = const_cast<RGWHTTPArgs&>(info.args).get_params();
+  for (const auto& elt : params) {
+    std::string k = boost::algorithm::to_lower_copy(elt.first);
+    if (k.find("x-amz-meta-") == /* offset */ 0) {
+      rgw_add_amz_meta_header(qs_map, k, elt.second);
+    }
+  }
 }
 
 /*
@@ -175,7 +190,10 @@ bool rgw_create_s3_canonical_header(const req_info& info,
   const char *content_type = info.env->get("CONTENT_TYPE");
 
   std::string date;
+  std::map<std::string, std::string> qs_map;
+
   if (qsr) {
+    get_v2_qs_map(info, qs_map); // handle qs metadata
     date = info.args.get("Expires");
   } else {
     const char *str = info.env->get("HTTP_X_AMZ_DATE");
@@ -214,8 +232,8 @@ bool rgw_create_s3_canonical_header(const req_info& info,
   }
 
   rgw_create_s3_canonical_header(info.method, content_md5, content_type,
-                                 date.c_str(), meta_map, request_uri.c_str(),
-                                 sub_resources, dest);
+                                 date.c_str(), meta_map, qs_map,
+				 request_uri.c_str(), sub_resources, dest);
   return true;
 }
 
@@ -422,14 +440,14 @@ static inline int parse_v4_auth_header(const req_info& info,               /* in
   return 0;
 }
 
-int parse_credentials(const req_info& info,                     /* in */
-                      boost::string_view& access_key_id,        /* out */
-                      boost::string_view& credential_scope,     /* out */
-                      boost::string_view& signedheaders,        /* out */
-                      boost::string_view& signature,            /* out */
-                      boost::string_view& date,                 /* out */
-                      boost::string_view& session_token,        /* out */
-                      const bool using_qs)                      /* in */
+int parse_v4_credentials(const req_info& info,                     /* in */
+			 boost::string_view& access_key_id,        /* out */
+			 boost::string_view& credential_scope,     /* out */
+			 boost::string_view& signedheaders,        /* out */
+			 boost::string_view& signature,            /* out */
+			 boost::string_view& date,                 /* out */
+			 boost::string_view& session_token,        /* out */
+			 const bool using_qs)                      /* in */
 {
   boost::string_view credential;
   int ret;
@@ -503,14 +521,10 @@ std::string get_v4_canonical_qs(const req_info& info, const bool using_qs)
       continue;
     }
 
-    if (key == "X-Amz-Credential") {
-      /* FIXME(rzarzynski): I can't find any comment in the previously linked
-       * Amazon's docs saying that X-Amz-Credential should be handled in this
-       * way. */
-      canonical_qs_map[key.to_string()] = val.to_string();
-    } else {
-      canonical_qs_map[aws4_uri_recode(key, true)] = aws4_uri_recode(val, true);
-    }
+    // while awsv4 specs ask for all slashes to be encoded, s3 itself is relaxed
+    // in its implementation allowing non-url-encoded slashes to be present in
+    // presigned urls for instance
+    canonical_qs_map[aws4_uri_recode(key, true)] = aws4_uri_recode(val, true);
   }
 
   /* Thanks to the early exist we have the guarantee that canonical_qs_map has
@@ -628,9 +642,10 @@ get_v4_canon_req_hash(CephContext* cct,
 
   const auto canonical_req_hash = calc_hash_sha256(canonical_req);
 
-  ldout(cct, 10) << "canonical request = " << canonical_req << dendl;
+  using sanitize = rgw::crypt_sanitize::log_content;
+  ldout(cct, 10) << "canonical request = " << sanitize{canonical_req} << dendl;
   ldout(cct, 10) << "canonical request hash = "
-                 << buf_to_hex(canonical_req_hash).data() << dendl;
+                 << canonical_req_hash << dendl;
 
   return canonical_req_hash;
 }
@@ -647,9 +662,8 @@ get_v4_string_to_sign(CephContext* const cct,
                       const boost::string_view& credential_scope,
                       const sha256_digest_t& canonreq_hash)
 {
-  const auto hexed_cr_hash = buf_to_hex(canonreq_hash);
-  const boost::string_view hexed_cr_hash_str(hexed_cr_hash.data(),
-                                             hexed_cr_hash.size() - 1);
+  const auto hexed_cr_hash = canonreq_hash.to_str();
+  const boost::string_view hexed_cr_hash_str(hexed_cr_hash);
 
   const auto string_to_sign = string_join_reserve("\n",
     algorithm,
@@ -729,10 +743,10 @@ get_v4_signing_key(CephContext* const cct,
   const auto signing_key = calc_hmac_sha256(service_k,
                                             boost::string_view("aws4_request"));
 
-  ldout(cct, 10) << "date_k    = " << buf_to_hex(date_k).data() << dendl;
-  ldout(cct, 10) << "region_k  = " << buf_to_hex(region_k).data() << dendl;
-  ldout(cct, 10) << "service_k = " << buf_to_hex(service_k).data() << dendl;
-  ldout(cct, 10) << "signing_k = " << buf_to_hex(signing_key).data() << dendl;
+  ldout(cct, 10) << "date_k    = " << date_k << dendl;
+  ldout(cct, 10) << "region_k  = " << region_k << dendl;
+  ldout(cct, 10) << "service_k = " << service_k << dendl;
+  ldout(cct, 10) << "signing_k = " << signing_key << dendl;
 
   return signing_key;
 }
@@ -761,8 +775,8 @@ get_v4_signature(const boost::string_view& credential_scope,
    * the non-const data() variant like C++17's std::string. */
   using srv_signature_t = AWSEngine::VersionAbstractor::server_signature_t;
   srv_signature_t signature(srv_signature_t::initialized_later(),
-                            digest.size() * 2);
-  buf_to_hex(digest.data(), digest.size(), signature.begin());
+                            digest.SIZE * 2);
+  buf_to_hex(digest.v, digest.SIZE, signature.begin());
 
   ldout(cct, 10) << "generated signature = " << signature << dendl;
 
@@ -784,8 +798,8 @@ get_v2_signature(CephContext* const cct,
   char buf[64];
   const int ret = ceph_armor(std::begin(buf),
                              std::begin(buf) + 64,
-                             std::begin(digest),
-                             std::begin(digest) + digest.size());
+                             reinterpret_cast<const char *>(digest.v),
+                             reinterpret_cast<const char *>(digest.v + digest.SIZE));
   if (ret < 0) {
     ldout(cct, 10) << "ceph_armor failed" << dendl;
     throw ret;
@@ -892,10 +906,9 @@ AWSv4ComplMulti::calc_chunk_signature(const std::string& payload_hash) const
                  << dendl;
 
   /* new chunk signature */
-  const auto sighex = buf_to_hex(calc_hmac_sha256(signing_key,
-                                                  string_to_sign));
+  const auto sig = calc_hmac_sha256(signing_key, string_to_sign);
   /* FIXME(rzarzynski): std::string here is really unnecessary. */
-  return std::string(sighex.data(), sighex.size() - 1);
+  return sig.to_str();
 }
 
 

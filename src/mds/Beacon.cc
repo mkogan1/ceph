@@ -56,7 +56,8 @@ void Beacon::shutdown()
   if (!finished) {
     finished = true;
     lock.unlock();
-    sender.join();
+    if (sender.joinable())
+      sender.join();
   }
 }
 
@@ -65,10 +66,6 @@ void Beacon::init(const MDSMap &mdsmap)
   std::unique_lock lock(mutex);
 
   _notify_mdsmap(mdsmap);
-  standby_for_rank = mds_rank_t(g_conf()->mds_standby_for_rank);
-  standby_for_name = g_conf()->mds_standby_for_name;
-  standby_for_fscid = fs_cluster_id_t(g_conf()->mds_standby_for_fscid);
-  standby_replay = g_conf()->mds_standby_replay;
 
   sender = std::thread([this]() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -90,22 +87,22 @@ void Beacon::init(const MDSMap &mdsmap)
   });
 }
 
-bool Beacon::ms_can_fast_dispatch2(const Message::const_ref& m) const
+bool Beacon::ms_can_fast_dispatch2(const cref_t<Message>& m) const
 {
   return m->get_type() == MSG_MDS_BEACON;
 }
 
-void Beacon::ms_fast_dispatch2(const Message::ref& m)
+void Beacon::ms_fast_dispatch2(const ref_t<Message>& m)
 {
   bool handled = ms_dispatch2(m);
   ceph_assert(handled);
 }
 
-bool Beacon::ms_dispatch2(const Message::ref& m)
+bool Beacon::ms_dispatch2(const ref_t<Message>& m)
 {
   if (m->get_type() == MSG_MDS_BEACON) {
     if (m->get_connection()->get_peer_type() == CEPH_ENTITY_TYPE_MON) {
-      handle_mds_beacon(MMDSBeacon::msgref_cast(m));
+      handle_mds_beacon(ref_cast<MMDSBeacon>(m));
     }
     return true;
   }
@@ -119,7 +116,7 @@ bool Beacon::ms_dispatch2(const Message::ref& m)
  *
  * This function puts the passed message before returning
  */
-void Beacon::handle_mds_beacon(const MMDSBeacon::const_ref &m)
+void Beacon::handle_mds_beacon(const cref_t<MMDSBeacon> &m)
 {
   std::unique_lock lock(mutex);
 
@@ -200,7 +197,7 @@ bool Beacon::_send()
 
   ceph_assert(want_state != MDSMap::STATE_NULL);
   
-  auto beacon = MMDSBeacon::create(
+  auto beacon = make_message<MMDSBeacon>(
       monc->get_fsid(), mds_gid_t(monc->get_global_id()),
       name,
       epoch,
@@ -208,10 +205,6 @@ bool Beacon::_send()
       last_seq,
       CEPH_FEATURES_SUPPORTED_DEFAULT);
 
-  beacon->set_standby_for_rank(standby_for_rank);
-  beacon->set_standby_for_name(standby_for_name);
-  beacon->set_standby_for_fscid(standby_for_fscid);
-  beacon->set_standby_replay(standby_replay);
   beacon->set_health(health);
   beacon->set_compat(compat);
   // piggyback the sys info on beacon msg
@@ -260,14 +253,6 @@ bool Beacon::is_laggy()
 	      << "s since last acked beacon" << dendl;
     }
     laggy = true;
-    auto last_reconnect = std::chrono::duration<double>(now-last_mon_reconnect).count();
-    if (since > (g_conf()->mds_beacon_grace*2) && last_reconnect > g_conf()->mds_beacon_interval) {
-      // maybe it's not us?
-      dout(1) << "initiating monitor reconnect; maybe we're not the slow one"
-              << dendl;
-      last_mon_reconnect = now;
-      monc->reopen_session();
-    }
     return true;
   }
   return false;
@@ -307,7 +292,7 @@ void Beacon::notify_health(MDSRank const *mds)
   }
 
   // I'm going to touch this MDS, so it must be locked
-  ceph_assert(mds->mds_lock.is_locked_by_me());
+  ceph_assert(ceph_mutex_is_locked_by_me(mds->mds_lock));
 
   health.metrics.clear();
 
@@ -336,41 +321,38 @@ void Beacon::notify_health(MDSRank const *mds)
   // Detect clients failing to respond to modifications to capabilities in
   // CLIENT_CAPS messages.
   {
-    std::list<client_t> late_clients;
-    mds->locker->get_late_revoking_clients(&late_clients,
-                                           mds->mdsmap->get_session_timeout());
-    std::list<MDSHealthMetric> late_cap_metrics;
+    auto&& late_clients = mds->locker->get_late_revoking_clients(mds->mdsmap->get_session_timeout());
+    std::vector<MDSHealthMetric> late_cap_metrics;
 
-    for (std::list<client_t>::iterator i = late_clients.begin(); i != late_clients.end(); ++i) {
-
+    for (const auto& client : late_clients) {
       // client_t is equivalent to session.info.inst.name.num
       // Construct an entity_name_t to lookup into SessionMap
-      entity_name_t ename(CEPH_ENTITY_TYPE_CLIENT, i->v);
+      entity_name_t ename(CEPH_ENTITY_TYPE_CLIENT, client.v);
       Session const *s = mds->sessionmap.get_session(ename);
       if (s == NULL) {
         // Shouldn't happen, but not worth crashing if it does as this is
         // just health-reporting code.
-        derr << "Client ID without session: " << i->v << dendl;
+        derr << "Client ID without session: " << client.v << dendl;
         continue;
       }
 
       std::ostringstream oss;
       oss << "Client " << s->get_human_name() << " failing to respond to capability release";
       MDSHealthMetric m(MDS_HEALTH_CLIENT_LATE_RELEASE, HEALTH_WARN, oss.str());
-      m.metadata["client_id"] = stringify(i->v);
-      late_cap_metrics.push_back(m);
+      m.metadata["client_id"] = stringify(client.v);
+      late_cap_metrics.emplace_back(std::move(m));
     }
 
     if (late_cap_metrics.size() <= (size_t)g_conf()->mds_health_summarize_threshold) {
-      health.metrics.splice(health.metrics.end(), late_cap_metrics);
+      auto&& m = late_cap_metrics;
+      health.metrics.insert(std::end(health.metrics), std::cbegin(m), std::cend(m));
     } else {
       std::ostringstream oss;
       oss << "Many clients (" << late_cap_metrics.size()
           << ") failing to respond to capability release";
       MDSHealthMetric m(MDS_HEALTH_CLIENT_LATE_RELEASE_MANY, HEALTH_WARN, oss.str());
       m.metadata["client_count"] = stringify(late_cap_metrics.size());
-      health.metrics.push_back(m);
-      late_cap_metrics.clear();
+      health.metrics.push_back(std::move(m));
     }
   }
 
@@ -382,50 +364,38 @@ void Beacon::notify_health(MDSRank const *mds)
     set<Session*> sessions;
     mds->sessionmap.get_client_session_set(sessions);
 
-    auto mds_recall_state_timeout = g_conf()->mds_recall_state_timeout;
-    auto last_recall = mds->mdcache->last_recall_state;
-    auto last_recall_span = std::chrono::duration<double>(clock::now()-last_recall).count();
-    bool recall_state_timedout = last_recall_span > mds_recall_state_timeout;
-
-    std::list<MDSHealthMetric> late_recall_metrics;
-    std::list<MDSHealthMetric> large_completed_requests_metrics;
+    const auto recall_warning_threshold = g_conf().get_val<Option::size_t>("mds_recall_warning_threshold");
+    const auto max_completed_requests = g_conf()->mds_max_completed_requests;
+    const auto max_completed_flushes = g_conf()->mds_max_completed_flushes;
+    std::vector<MDSHealthMetric> late_recall_metrics;
+    std::vector<MDSHealthMetric> large_completed_requests_metrics;
     for (auto& session : sessions) {
-      if (session->recalled_at != Session::clock::zero()) {
-        auto last_recall_sent = session->last_recall_sent;
-        auto recalled_at = session->recalled_at;
-        auto recalled_at_span = std::chrono::duration<double>(clock::now()-recalled_at).count();
-
-        dout(20) << "Session servicing RECALL " << session->info.inst
-          << ": " << recalled_at_span << "s ago " << session->recall_release_count
-          << "/" << session->recall_count << dendl;
-	if (recall_state_timedout || last_recall_sent < last_recall) {
-	  dout(20) << "  no longer recall" << dendl;
-	  session->clear_recalled_at();
-	} else if (recalled_at_span > mds_recall_state_timeout) {
-          dout(20) << "  exceeded timeout " << recalled_at_span << " vs. " << mds_recall_state_timeout << dendl;
-          std::ostringstream oss;
-	  oss << "Client " << session->get_human_name() << " failing to respond to cache pressure";
-          MDSHealthMetric m(MDS_HEALTH_CLIENT_RECALL, HEALTH_WARN, oss.str());
-          m.metadata["client_id"] = stringify(session->get_client());
-          late_recall_metrics.push_back(m);
-        } else {
-          dout(20) << "  within timeout " << recalled_at_span << " vs. " << mds_recall_state_timeout << dendl;
-        }
+      const uint64_t recall_caps = session->get_recall_caps();
+      if (recall_caps > recall_warning_threshold) {
+        dout(2) << "Session " << *session <<
+             " is not releasing caps fast enough. Recalled caps at " << recall_caps
+          << " > " << recall_warning_threshold << " (mds_recall_warning_threshold)." << dendl;
+        std::ostringstream oss;
+        oss << "Client " << session->get_human_name() << " failing to respond to cache pressure";
+        MDSHealthMetric m(MDS_HEALTH_CLIENT_RECALL, HEALTH_WARN, oss.str());
+        m.metadata["client_id"] = stringify(session->get_client());
+        late_recall_metrics.emplace_back(std::move(m));
       }
       if ((session->get_num_trim_requests_warnings() > 0 &&
-	   session->get_num_completed_requests() >= g_conf()->mds_max_completed_requests) ||
+	   session->get_num_completed_requests() >= max_completed_requests) ||
 	  (session->get_num_trim_flushes_warnings() > 0 &&
-	   session->get_num_completed_flushes() >= g_conf()->mds_max_completed_flushes)) {
+	   session->get_num_completed_flushes() >= max_completed_flushes)) {
 	std::ostringstream oss;
-	oss << "Client " << session->get_human_name() << " failing to advance its oldest client/flush tid";
+	oss << "Client " << session->get_human_name() << " failing to advance its oldest client/flush tid. ";
 	MDSHealthMetric m(MDS_HEALTH_CLIENT_OLDEST_TID, HEALTH_WARN, oss.str());
 	m.metadata["client_id"] = stringify(session->get_client());
-	large_completed_requests_metrics.push_back(m);
+	large_completed_requests_metrics.emplace_back(std::move(m));
       }
     }
 
     if (late_recall_metrics.size() <= (size_t)g_conf()->mds_health_summarize_threshold) {
-      health.metrics.splice(health.metrics.end(), late_recall_metrics);
+      auto&& m = late_recall_metrics;
+      health.metrics.insert(std::end(health.metrics), std::cbegin(m), std::cend(m));
     } else {
       std::ostringstream oss;
       oss << "Many clients (" << late_recall_metrics.size()
@@ -437,7 +407,8 @@ void Beacon::notify_health(MDSRank const *mds)
     }
 
     if (large_completed_requests_metrics.size() <= (size_t)g_conf()->mds_health_summarize_threshold) {
-      health.metrics.splice(health.metrics.end(), large_completed_requests_metrics);
+      auto&& m = large_completed_requests_metrics;
+      health.metrics.insert(std::end(health.metrics), std::cbegin(m), std::cend(m));
     } else {
       std::ostringstream oss;
       oss << "Many clients (" << large_completed_requests_metrics.size()

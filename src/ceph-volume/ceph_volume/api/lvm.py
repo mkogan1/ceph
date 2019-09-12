@@ -67,8 +67,13 @@ def _splitname_parser(line):
 
     :returns: dictionary with stripped prefixes
     """
-    parts = line[0].split(';')
     parsed = {}
+    try:
+        parts = line[0].split(';')
+    except IndexError:
+        logger.exception('Unable to parse mapper device: %s', line)
+        return parsed
+
     for part in parts:
         part = part.replace("'", '')
         key, value = part.split('=')
@@ -293,7 +298,8 @@ def get_api_vgs():
     """
     fields = 'vg_name,pv_count,lv_count,snap_count,vg_attr,vg_size,vg_free,vg_free_count'
     stdout, stderr, returncode = process.call(
-        ['vgs', '--noheadings', '--readonly', '--units=g', '--separator=";"', '-o', fields]
+        ['vgs', '--noheadings', '--readonly', '--units=g', '--separator=";"', '-o', fields],
+        verbose_on_failure=False
     )
     return _output_parser(stdout, fields)
 
@@ -305,14 +311,15 @@ def get_api_lvs():
 
     Command and delimited output should look like::
 
-        $ lvs --noheadings --readonly --separator=';' -o lv_tags,lv_path,lv_name,vg_name
+        $ lvs --noheadings --readonly --separator=';' -a -o lv_tags,lv_path,lv_name,vg_name
           ;/dev/ubuntubox-vg/root;root;ubuntubox-vg
           ;/dev/ubuntubox-vg/swap_1;swap_1;ubuntubox-vg
 
     """
     fields = 'lv_tags,lv_path,lv_name,vg_name,lv_uuid,lv_size'
     stdout, stderr, returncode = process.call(
-        ['lvs', '--noheadings', '--readonly', '--separator=";"', '-o', fields]
+        ['lvs', '--noheadings', '--readonly', '--separator=";"', '-a', '-o', fields],
+        verbose_on_failure=False
     )
     return _output_parser(stdout, fields)
 
@@ -334,7 +341,8 @@ def get_api_pvs():
     fields = 'pv_name,pv_tags,pv_uuid,vg_name,lv_uuid'
 
     stdout, stderr, returncode = process.call(
-        ['pvs', '--no-heading', '--readonly', '--separator=";"', '-o', fields]
+        ['pvs', '--no-heading', '--readonly', '--separator=";"', '-o', fields],
+        verbose_on_failure=False
     )
 
     return _output_parser(stdout, fields)
@@ -356,7 +364,7 @@ def get_lv_from_argument(argument):
     return get_lv(lv_name=lv_name, vg_name=vg_name)
 
 
-def get_lv(lv_name=None, vg_name=None, lv_path=None, lv_uuid=None, lv_tags=None):
+def get_lv(lv_name=None, vg_name=None, lv_path=None, lv_uuid=None, lv_tags=None, lvs=None):
     """
     Return a matching lv for the current system, requiring ``lv_name``,
     ``vg_name``, ``lv_path`` or ``tags``. Raises an error if more than one lv
@@ -368,7 +376,8 @@ def get_lv(lv_name=None, vg_name=None, lv_path=None, lv_uuid=None, lv_tags=None)
     """
     if not any([lv_name, vg_name, lv_path, lv_uuid, lv_tags]):
         return None
-    lvs = Volumes()
+    if lvs is None:
+        lvs = Volumes()
     return lvs.get(
         lv_name=lv_name, vg_name=vg_name, lv_path=lv_path, lv_uuid=lv_uuid,
         lv_tags=lv_tags
@@ -425,6 +434,8 @@ def create_vg(devices, name=None, name_prefix=None):
         name = "ceph-%s" % str(uuid.uuid4())
     process.run([
         'vgcreate',
+        '-s',
+        '1G',
         '--force',
         '--yes',
         name] + devices
@@ -459,10 +470,36 @@ def extend_vg(vg, devices):
     return vg
 
 
+def reduce_vg(vg, devices):
+    """
+    Reduce a Volume Group. Command looks like::
+
+        vgreduce --force --yes group_name [device, ...]
+
+    :param vg: A VolumeGroup object
+    :param devices: A list of devices to remove from the VG. Optionally, a
+                    single device (as a string) can be used.
+    """
+    if not isinstance(devices, list):
+        devices = [devices]
+    process.run([
+        'vgreduce',
+        '--force',
+        '--yes',
+        vg.name] + devices
+    )
+
+    vg = get_vg(vg_name=vg.name)
+    return vg
+
+
 def remove_vg(vg_name):
     """
     Removes a volume group.
     """
+    if not vg_name:
+        logger.warning('Skipping removal of invalid VG name: "%s"', vg_name)
+        return
     fail_msg = "Unable to remove vg %s" % vg_name
     process.run(
         [
@@ -502,13 +539,20 @@ def remove_pv(pv_name):
     )
 
 
-def remove_lv(path):
+def remove_lv(lv):
     """
     Removes a logical volume given it's absolute path.
 
     Will return True if the lv is successfully removed or
     raises a RuntimeError if the removal fails.
+
+    :param lv: A ``Volume`` object or the path for an LV
     """
+    if isinstance(lv, Volume):
+        path = lv.lv_path
+    else:
+        path = lv
+
     stdout, stderr, returncode = process.call(
         [
             'lvremove',
@@ -524,7 +568,7 @@ def remove_lv(path):
     return True
 
 
-def create_lv(name, group, extents=None, size=None, tags=None, uuid_name=False):
+def create_lv(name, group, extents=None, size=None, tags=None, uuid_name=False, pv=None):
     """
     Create a Logical Volume in a Volume Group. Command looks like::
 
@@ -558,31 +602,34 @@ def create_lv(name, group, extents=None, size=None, tags=None, uuid_name=False):
         'lockbox': 'ceph.lockbox_device',  # XXX might not ever need this lockbox sorcery
     }
     if size:
-        process.run([
+        command = [
             'lvcreate',
             '--yes',
             '-L',
             '%s' % size,
             '-n', name, group
-        ])
+        ]
     elif extents:
-        process.run([
+        command = [
             'lvcreate',
             '--yes',
             '-l',
             '%s' % extents,
             '-n', name, group
-        ])
+        ]
     # create the lv with all the space available, this is needed because the
     # system call is different for LVM
     else:
-        process.run([
+        command = [
             'lvcreate',
             '--yes',
             '-l',
             '100%FREE',
             '-n', name, group
-        ])
+        ]
+    if pv:
+        command.append(pv)
+    process.run(command)
 
     lv = get_lv(lv_name=name, vg_name=group)
     lv.set_tags(tags)
@@ -1078,6 +1125,7 @@ class Volume(object):
         self.name = kw['lv_name']
         self.tags = parse_tags(kw['lv_tags'])
         self.encrypted = self.tags.get('ceph.encrypted', '0') == '1'
+        self.used_by_ceph = 'ceph.osd_id' in self.tags
 
     def __str__(self):
         return '<%s>' % self.lv_api['lv_path']
@@ -1094,13 +1142,33 @@ class Volume(object):
         obj['path'] = self.lv_path
         return obj
 
+    def report(self):
+        if not self.used_by_ceph:
+            return {
+                'name': self.lv_name,
+                'comment': 'not used by ceph'
+            }
+        else:
+            type_ = self.tags['ceph.type']
+            report = {
+                'name': self.lv_name,
+                'osd_id': self.tags['ceph.osd_id'],
+                'cluster_name': self.tags['ceph.cluster_name'],
+                'type': type_,
+                'osd_fsid': self.tags['ceph.osd_fsid'],
+                'cluster_fsid': self.tags['ceph.cluster_fsid'],
+            }
+            type_uuid = '{}_uuid'.format(type_)
+            report[type_uuid] = self.tags['ceph.{}'.format(type_uuid)]
+            return report
+
     def clear_tags(self):
         """
         Removes all tags from the Logical Volume.
         """
-        for k, v in self.tags.items():
-            tag = "%s=%s" % (k, v)
-            process.run(['lvchange', '--deltag', tag, self.lv_path])
+        for k in list(self.tags):
+            self.clear_tag(k)
+
 
     def set_tags(self, tags):
         """
@@ -1116,22 +1184,22 @@ class Volume(object):
         """
         for k, v in tags.items():
             self.set_tag(k, v)
-        # after setting all the tags, refresh them for the current object, use the
-        # lv_* identifiers to filter because those shouldn't change
-        lv_object = get_lv(lv_name=self.lv_name, lv_path=self.lv_path)
-        self.tags = lv_object.tags
 
-    def set_tag(self, key, value):
-        """
-        Set the key/value pair as an LVM tag. Does not "refresh" the values of
-        the current object for its tags. Meant to be a "fire and forget" type
-        of modification.
-        """
-        # remove it first if it exists
+
+    def clear_tag(self, key):
         if self.tags.get(key):
             current_value = self.tags[key]
             tag = "%s=%s" % (key, current_value)
-            process.call(['lvchange', '--deltag', tag, self.lv_api['lv_path']])
+            process.call(['lvchange', '--deltag', tag, self.lv_path])
+            del self.tags[key]
+
+
+    def set_tag(self, key, value):
+        """
+        Set the key/value pair as an LVM tag.
+        """
+        # remove it first if it exists
+        self.clear_tag(key)
 
         process.call(
             [
@@ -1139,6 +1207,7 @@ class Volume(object):
                 '--addtag', '%s=%s' % (key, value), self.lv_path
             ]
         )
+        self.tags[key] = value
 
 
 class PVolume(object):

@@ -18,25 +18,25 @@
 #include "msg/Message.h"
 #include "include/types.h"
 
-class MExportDirCancel : public MessageInstance<MExportDirCancel> {
-public:
-  friend factory;
+class MExportDirCancel : public Message {
 private:
+  static const int HEAD_VERSION = 1;
+  static const int COMPAT_VERSION = 1;
   dirfrag_t dirfrag;
 
  public:
   dirfrag_t get_dirfrag() const { return dirfrag; }
 
 protected:
-  MExportDirCancel() : MessageInstance(MSG_MDS_EXPORTDIRCANCEL) {}
+  MExportDirCancel() : Message{MSG_MDS_EXPORTDIRCANCEL, HEAD_VERSION, COMPAT_VERSION} {}
   MExportDirCancel(dirfrag_t df, uint64_t tid) :
-    MessageInstance(MSG_MDS_EXPORTDIRCANCEL), dirfrag(df) {
+    Message{MSG_MDS_EXPORTDIRCANCEL, HEAD_VERSION, COMPAT_VERSION}, dirfrag(df) {
     set_tid(tid);
   }
   ~MExportDirCancel() override {}
 
 public:
-  const char *get_type_name() const override { return "ExCancel"; }
+  std::string_view get_type_name() const override { return "ExCancel"; }
   void print(ostream& o) const override {
     o << "export_cancel(" << dirfrag << ")";
   }
@@ -49,6 +49,9 @@ public:
     auto p = payload.cbegin();
     decode(dirfrag, p);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

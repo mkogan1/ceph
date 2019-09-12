@@ -4,7 +4,11 @@ import { RouterTestingModule } from '@angular/router/testing';
 
 import { of } from 'rxjs';
 
-import { configureTestBed } from '../../../testing/unit-test-helper';
+import {
+  configureTestBed,
+  expectItemTasks,
+  i18nProviders
+} from '../../../testing/unit-test-helper';
 import { ExecutingTask } from '../models/executing-task';
 import { SummaryService } from './summary.service';
 import { TaskListService } from './task-list.service';
@@ -15,7 +19,6 @@ describe('TaskListService', () => {
   let summaryService: SummaryService;
   let taskMessageService: TaskMessageService;
 
-  let reset: boolean;
   let list: any[];
   let apiResp: any;
   let tasks: any[];
@@ -25,7 +28,7 @@ describe('TaskListService', () => {
   };
 
   configureTestBed({
-    providers: [TaskListService, TaskMessageService, SummaryService],
+    providers: [TaskListService, TaskMessageService, SummaryService, i18nProviders],
     imports: [HttpClientTestingModule, RouterTestingModule]
   });
 
@@ -39,7 +42,6 @@ describe('TaskListService', () => {
     taskMessageService.messages['test/edit'] = taskMessageService.messages['rbd/edit'];
     taskMessageService.messages['test/delete'] = taskMessageService.messages['rbd/delete'];
 
-    reset = false;
     tasks = [];
     apiResp = [];
     list = [];
@@ -51,11 +53,11 @@ describe('TaskListService', () => {
       () => of(apiResp),
       undefined,
       (updatedList) => (list = updatedList),
-      () => (reset = true),
+      () => true,
       (task) => task.name.startsWith('test'),
       (item, task) => item.name === task.metadata['name'],
       {
-        default: (task) => ({ name: task.metadata['name'] })
+        default: (metadata) => ({ name: metadata['name'] })
       }
     );
   });
@@ -64,16 +66,13 @@ describe('TaskListService', () => {
     expect(service).toBeTruthy();
   });
 
-  const addTask = (name: string, itemName: string) => {
+  const addTask = (name: string, itemName: string, progress?: number) => {
     const task = new ExecutingTask();
     task.name = name;
+    task.progress = progress;
     task.metadata = { name: itemName };
     tasks.push(task);
     summaryService.addRunningTask(task);
-  };
-
-  const expectItemTasks = (item: any, executing: string) => {
-    expect(item.cdExecuting).toBe(executing);
   };
 
   it('gets all items without any executing items', () => {
@@ -85,6 +84,14 @@ describe('TaskListService', () => {
     addTask('test/create', 'd');
     expect(list.length).toBe(4);
     expectItemTasks(list[3], 'Creating');
+  });
+
+  it('shows progress of current task if any above 0', () => {
+    addTask('test/edit', 'd', 97);
+    addTask('test/edit', 'e', 0);
+    expect(list.length).toBe(5);
+    expectItemTasks(list[3], 'Updating', 97);
+    expectItemTasks(list[4], 'Updating');
   });
 
   it('gets all items with one executing items', () => {
@@ -103,8 +110,8 @@ describe('TaskListService', () => {
     addTask('test/delete', 'b');
     addTask('test/delete', 'c');
     expect(list.length).toBe(3);
-    expectItemTasks(list[0], 'Creating, Updating, Deleting');
-    expectItemTasks(list[1], 'Updating, Deleting');
+    expectItemTasks(list[0], 'Creating..., Updating..., Deleting');
+    expectItemTasks(list[1], 'Updating..., Deleting');
     expectItemTasks(list[2], 'Deleting');
   });
 

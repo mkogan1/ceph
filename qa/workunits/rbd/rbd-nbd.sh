@@ -4,6 +4,7 @@ set -ex
 . $(dirname $0)/../../standalone/ceph-helpers.sh
 
 POOL=rbd
+NS=ns
 IMAGE=testrbdnbd$$
 SIZE=64
 DATA=
@@ -28,6 +29,8 @@ _sudo()
 
 setup()
 {
+    local ns x
+
     if [ -e CMakeCache.txt ]; then
 	# running under cmake build dir
 
@@ -49,25 +52,38 @@ setup()
     TEMPDIR=`mktemp -d`
     DATA=${TEMPDIR}/data
     dd if=/dev/urandom of=${DATA} bs=1M count=${SIZE}
-    rbd --dest-pool ${POOL} --no-progress import ${DATA} ${IMAGE}
+
+    rbd namespace create ${POOL}/${NS}
+
+    for ns in '' ${NS}; do
+        rbd --dest-pool ${POOL} --dest-namespace "${ns}" --no-progress import \
+            ${DATA} ${IMAGE}
+    done
 }
 
 function cleanup()
 {
+    local ns s
+
     set +e
-    rm -Rf ${TMPDIR}
+    rm -Rf ${TEMPDIR}
     if [ -n "${DEV}" ]
     then
 	_sudo rbd-nbd unmap ${DEV}
     fi
-    if rbd -p ${POOL} status ${IMAGE} 2>/dev/null; then
-	for s in 0.5 1 2 4 8 16 32; do
-	    sleep $s
-	    rbd -p ${POOL} status ${IMAGE} | grep 'Watchers: none' && break
-	done
-	rbd -p ${POOL} snap purge ${IMAGE}
-	rbd -p ${POOL} remove ${IMAGE}
-    fi
+
+    for ns in '' ${NS}; do
+        if rbd -p ${POOL} --namespace "${ns}" status ${IMAGE} 2>/dev/null; then
+	    for s in 0.5 1 2 4 8 16 32; do
+	        sleep $s
+	        rbd -p ${POOL} --namespace "${ns}" status ${IMAGE} |
+                    grep 'Watchers: none' && break
+	    done
+	    rbd -p ${POOL} --namespace "${ns}" snap purge ${IMAGE}
+	    rbd -p ${POOL} --namespace "${ns}" remove ${IMAGE}
+        fi
+    done
+    rbd namespace remove ${POOL}/${NS}
 }
 
 function expect_false()
@@ -77,10 +93,25 @@ function expect_false()
 
 function get_pid()
 {
+    local ns=$1
+
     PID=$(rbd-nbd --format xml list-mapped | $XMLSTARLET sel -t -v \
-      "//devices/device[pool='${POOL}'][image='${IMAGE}'][device='${DEV}']/id")
+      "//devices/device[pool='${POOL}'][namespace='${ns}'][image='${IMAGE}'][device='${DEV}']/id")
     test -n "${PID}"
     ps -p ${PID} -o cmd | grep rbd-nbd
+}
+
+unmap_device()
+{
+    local unmap_dev=$1
+    local list_dev=$2
+    _sudo rbd-nbd unmap ${unmap_dev}
+
+    for s in 0.5 1 2 4 8 16 32; do
+	sleep ${s}
+        rbd-nbd list-mapped | expect_false grep "${list_dev} $" && return 0
+    done
+    return 1
 }
 
 #
@@ -110,8 +141,7 @@ get_pid
 # map test specifying the device
 expect_false _sudo rbd-nbd --device ${DEV} map ${POOL}/${IMAGE}
 dev1=${DEV}
-_sudo rbd-nbd unmap ${DEV}
-rbd-nbd list-mapped | expect_false grep "${DEV} $"
+unmap_device ${DEV} ${DEV}
 DEV=
 # XXX: race possible when the device is reused by other process
 DEV=`_sudo rbd-nbd --device ${dev1} map ${POOL}/${IMAGE}`
@@ -190,8 +220,15 @@ ps -p ${PID} -o cmd | expect_false grep rbd-nbd
 rbd snap create ${POOL}/${IMAGE}@snap
 DEV=`_sudo rbd-nbd map ${POOL}/${IMAGE}@snap`
 get_pid
-_sudo rbd-nbd unmap "${IMAGE}@snap"
-rbd-nbd list-mapped | expect_false grep "${DEV} $"
+unmap_device "${IMAGE}@snap" ${DEV}
+DEV=
+ps -p ${PID} -o cmd | expect_false grep rbd-nbd
+
+# map/unmap namespace test
+rbd snap create ${POOL}/${NS}/${IMAGE}@snap
+DEV=`_sudo rbd-nbd map ${POOL}/${NS}/${IMAGE}@snap`
+get_pid ${NS}
+unmap_device "${POOL}/${NS}/${IMAGE}@snap" ${DEV}
 DEV=
 ps -p ${PID} -o cmd | expect_false grep rbd-nbd
 

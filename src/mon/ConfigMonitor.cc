@@ -5,6 +5,7 @@
 
 #include "mon/Monitor.h"
 #include "mon/ConfigMonitor.h"
+#include "mon/MgrMonitor.h"
 #include "mon/OSDMonitor.h"
 #include "messages/MConfig.h"
 #include "messages/MGetConfig.h"
@@ -133,7 +134,7 @@ static string indent_who(const string& who)
 
 bool ConfigMonitor::preprocess_command(MonOpRequestRef op)
 {
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   std::stringstream ss;
   int err = 0;
 
@@ -152,20 +153,52 @@ bool ConfigMonitor::preprocess_command(MonOpRequestRef op)
 
   bufferlist odata;
   if (prefix == "config help") {
+    stringstream ss;
     string name;
     cmd_getval(g_ceph_context, cmdmap, "key", name);
     const Option *opt = g_conf().find_option(name);
     if (!opt) {
+      opt = mon->mgrmon()->find_module_option(name);
+    }
+    if (opt) {
+      if (f) {
+	f->dump_object("option", *opt);
+      } else {
+	opt->print(&ss);
+      }
+    } else {
       ss << "configuration option '" << name << "' not recognized";
       err = -ENOENT;
       goto reply;
     }
     if (f) {
-      f->dump_object("option", *opt);
       f->flush(odata);
     } else {
-      stringstream ss;
-      opt->print(&ss);
+      odata.append(ss.str());
+    }
+  } else if (prefix == "config ls") {
+    ostringstream ss;
+    if (f) {
+      f->open_array_section("options");
+    }
+    for (auto& i : ceph_options) {
+      if (f) {
+	f->dump_string("option", i.name);
+      } else {
+	ss << i.name << "\n";
+      }
+    }
+    for (auto& i : mon->mgrmon()->get_mgr_module_options()) {
+      if (f) {
+	f->dump_string("option", i.first);
+      } else {
+	ss << i.first << "\n";
+      }
+    }
+    if (f) {
+      f->close_section();
+      f->flush(odata);
+    } else {
       odata.append(ss.str());
     }
   } else if (prefix == "config dump") {
@@ -243,14 +276,13 @@ bool ConfigMonitor::preprocess_command(MonOpRequestRef op)
 	       << " class " << device_class << dendl;
     }
 
-    std::map<std::string,std::string> config;
     std::map<std::string,pair<std::string,const MaskedOption*>> src;
-    config_map.generate_entity_map(
+    auto config = config_map.generate_entity_map(
       entity,
       crush_location,
       mon->osdmon()->osdmap.crush.get(),
       device_class,
-      &config, &src);
+      &src);
 
     if (cmd_getval(g_ceph_context, cmdmap, "key", name)) {
       // get a single value
@@ -261,6 +293,9 @@ bool ConfigMonitor::preprocess_command(MonOpRequestRef op)
 	goto reply;
       }
       const Option *opt = g_conf().find_option(name);
+      if (!opt) {
+	opt = mon->mgrmon()->find_module_option(name);
+      }
       if (!opt) {
 	err = -ENOENT;
 	goto reply;
@@ -338,6 +373,34 @@ bool ConfigMonitor::preprocess_command(MonOpRequestRef op)
     } else {
       odata.append(ds.str());
     }
+  } else if (prefix == "config generate-minimal-conf") {
+    ostringstream conf;
+    conf << "# minimal ceph.conf for " << mon->monmap->get_fsid() << "\n";
+
+    // the basics
+    conf << "[global]\n";
+    conf << "\tfsid = " << mon->monmap->get_fsid() << "\n";
+    conf << "\tmon_host = ";
+    for (auto i = mon->monmap->mon_info.begin();
+	 i != mon->monmap->mon_info.end();
+	 ++i) {
+      if (i != mon->monmap->mon_info.begin()) {
+	conf << " ";
+      }
+      conf << i->second.public_addrs;
+    }
+    conf << "\n";
+    conf << config_map.global.get_minimal_conf();
+    for (auto m : { &config_map.by_type, &config_map.by_id }) {
+      for (auto& i : *m) {
+	auto s = i.second.get_minimal_conf();
+	if (s.size()) {
+	  conf << "\n[" << i.first << "]\n" << s;
+	}
+      }
+    }
+    odata.append(conf.str());
+    err = 0;
   } else {
     return false;
   }
@@ -349,21 +412,19 @@ bool ConfigMonitor::preprocess_command(MonOpRequestRef op)
 
 void ConfigMonitor::handle_get_config(MonOpRequestRef op)
 {
-  MGetConfig *m = static_cast<MGetConfig*>(op->get_req());
+  auto m = op->get_req<MGetConfig>();
   dout(10) << __func__ << " " << m->name << " host " << m->host << dendl;
 
   const OSDMap& osdmap = mon->osdmon()->osdmap;
   map<string,string> crush_location;
   osdmap.crush->get_full_location(m->host, &crush_location);
-  map<string,string> out;
-  config_map.generate_entity_map(
+  auto out = config_map.generate_entity_map(
     m->name,
     crush_location,
     osdmap.crush.get(),
-    m->device_class,
-    &out);
+    m->device_class);
   dout(20) << " config is " << out << dendl;
-  m->get_connection()->send_message(new MConfig(out));
+  m->get_connection()->send_message(new MConfig{std::move(out)});
 }
 
 bool ConfigMonitor::prepare_update(MonOpRequestRef op)
@@ -386,7 +447,7 @@ bool ConfigMonitor::prepare_update(MonOpRequestRef op)
 
 bool ConfigMonitor::prepare_command(MonOpRequestRef op)
 {
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   std::stringstream ss;
   int err = -EINVAL;
 
@@ -405,19 +466,24 @@ bool ConfigMonitor::prepare_command(MonOpRequestRef op)
       prefix == "config rm") {
     string who;
     string name, value;
+    bool force = false;
     cmd_getval(g_ceph_context, cmdmap, "who", who);
     cmd_getval(g_ceph_context, cmdmap, "name", name);
     cmd_getval(g_ceph_context, cmdmap, "value", value);
+    cmd_getval(g_ceph_context, cmdmap, "force", force);
 
-    if (prefix == "config set") {
-      if (name.substr(0, 4) != "mgr/") {
-	const Option *opt = g_conf().find_option(name);
-	if (!opt) {
-	  ss << "unrecognized config option '" << name << "'";
-	  err = -EINVAL;
-	  goto reply;
-	}
-	
+    if (prefix == "config set" && !force) {
+      const Option *opt = g_conf().find_option(name);
+      if (!opt) {
+	opt = mon->mgrmon()->find_module_option(name);
+      }
+      if (!opt) {
+	ss << "unrecognized config option '" << name << "'";
+	err = -EINVAL;
+	goto reply;
+      }
+
+      if (opt) {
 	Option::value_t real_value;
 	string errstr;
 	err = opt->parse_value(value, &real_value, &errstr, &value);
@@ -455,25 +521,21 @@ bool ConfigMonitor::prepare_command(MonOpRequestRef op)
     }
     goto update;
   } else if (prefix == "config reset") {
-    int64_t num;
-    if (!cmd_getval(g_ceph_context, cmdmap, "num", num)) {
+    int64_t revert_to = -1;
+    cmd_getval(g_ceph_context, cmdmap, "num", revert_to);
+    if (revert_to < 0 ||
+        revert_to > (int64_t)version) {
       err = -EINVAL;
-      ss << "must specify what to revert to";
+      ss << "must specify a valid historical version to revert to; "
+         << "see 'ceph config log' for a list of avialable configuration "
+         << "historical versions";
       goto reply;
     }
-    if (num < 0 ||
-	(num > 0 && num > (int64_t)version)) {
-      err = -EINVAL;
-      ss << "must specify a valid version to revert to";
-      goto reply;
-    }
-    if (num == (int64_t)version) {
+    if (revert_to == (int64_t)version) {
       err = 0;
       goto reply;
     }
-    ceph_assert(num > 0);
-    ceph_assert((version_t)num < version);
-    for (int64_t v = version; v > num; --v) {
+    for (int64_t v = version; v > revert_to; --v) {
       ConfigChangeSet ch;
       load_changeset(v, &ch);
       for (auto& i : ch.diff) {
@@ -486,81 +548,79 @@ bool ConfigMonitor::prepare_command(MonOpRequestRef op)
 	}
       }
     }
-    pending_description = string("reset to ") + stringify(num);
+    pending_description = string("reset to ") + stringify(revert_to);
     goto update;
   } else if (prefix == "config assimilate-conf") {
     ConfFile cf;
-    deque<string> errors;
     bufferlist bl = m->get_data();
-    err = cf.parse_bufferlist(&bl, &errors, &ss);
+    err = cf.parse_bufferlist(&bl, &ss);
     if (err < 0) {
-      ss << "parse errors: " << errors;
       goto reply;
     }
     bool updated = false;
     ostringstream newconf;
-    for (auto i = cf.sections_begin(); i != cf.sections_end(); ++i) {
-      string section = i->first;
-      const ConfSection& s = i->second;
+    for (auto& [section, s] : cf) {
       dout(20) << __func__ << " [" << section << "]" << dendl;
       bool did_section = false;
-      for (auto& j : s.lines) {
+      for (auto& [key, val] : s) {
 	Option::value_t real_value;
 	string value;
 	string errstr;
-	if (!j.key.size()) {
+	if (key.empty()) {
 	  continue;
 	}
 	// a known and worthy option?
-	const Option *o = g_conf().find_option(j.key);
+	const Option *o = g_conf().find_option(key);
+	if (!o) {
+	  o = mon->mgrmon()->find_module_option(key);
+	}
 	if (!o ||
 	    o->flags & Option::FLAG_NO_MON_UPDATE) {
 	  goto skip;
 	}
 	// normalize
-	err = o->parse_value(j.val, &real_value, &errstr, &value);
+	err = o->parse_value(val, &real_value, &errstr, &value);
 	if (err < 0) {
-	  dout(20) << __func__ << " failed to parse " << j.key << " = '"
-		   << j.val << "'" << dendl;
+	  dout(20) << __func__ << " failed to parse " << key << " = '"
+		   << val << "'" << dendl;
 	  goto skip;
 	}
 	// does it conflict with an existing value?
 	{
 	  const Section *s = config_map.find_section(section);
 	  if (s) {
-	    auto k = s->options.find(j.key);
+	    auto k = s->options.find(key);
 	    if (k != s->options.end()) {
 	      if (value != k->second.raw_value) {
-		dout(20) << __func__ << " have " << j.key
+		dout(20) << __func__ << " have " << key
 			 << " = " << k->second.raw_value
 			 << " (not " << value << ")" << dendl;
 		goto skip;
 	      }
-	      dout(20) << __func__ << " already have " << j.key
+	      dout(20) << __func__ << " already have " << key
 		       << " = " << k->second.raw_value << dendl;
 	      continue;
 	    }
 	  }
 	}
-	dout(20) << __func__ << "  add " << j.key << " = " << value
-		 << " (" << j.val << ")" << dendl;
+	dout(20) << __func__ << "  add " << key << " = " << value
+		 << " (" << val << ")" << dendl;
 	{
-	  string key = section + "/" + j.key;
 	  bufferlist bl;
 	  bl.append(value);
-	  pending[key] = bl;
+	  pending[section + "/" + key] = bl;
 	  updated = true;
 	}
 	continue;
 
        skip:
-	dout(20) << __func__ << " skip " << j.key << " = " << value
-		 << " (" << j.val << ")" << dendl;
+	dout(20) << __func__ << " skip " << key << " = " << value
+		 << " (" << val << ")" << dendl;
 	if (!did_section) {
 	  newconf << "\n[" << section << "]\n";
 	  did_section = true;
 	}
-	newconf << "\t" << j.key << " = " << j.val << "\n";
+	newconf << "\t" << key << " = " << val << "\n";
       }
     }
     odata.append(newconf.str());
@@ -639,58 +699,48 @@ void ConfigMonitor::load_config()
     string who;
     if (last_slash == std::string::npos) {
       name = key;
+    } else if (auto mgrpos = key.find("/mgr/"); mgrpos != std::string::npos) {
+      name = key.substr(mgrpos + 1);
+      who = key.substr(0, mgrpos);
     } else {
       name = key.substr(last_slash + 1);
       who = key.substr(0, last_slash);
     }
 
+    const Option *opt = g_conf().find_option(name);
+    if (!opt) {
+      opt = mon->mgrmon()->find_module_option(name);
+    }
+    if (!opt) {
+      dout(10) << __func__ << " unrecognized option '" << name << "'" << dendl;
+      opt = new Option(name, Option::TYPE_STR, Option::LEVEL_UNKNOWN);
+      // FIXME: this will be leaked!
+    }
+
+    string err;
+    int r = opt->pre_validate(&value, &err);
+    if (r < 0) {
+      dout(10) << __func__ << " pre-validate failed on '" << name << "' = '"
+	       << value << "' for " << name << dendl;
+    }
+    
+    MaskedOption mopt(opt);
+    mopt.raw_value = value;
     string section_name;
-    if (key.find("/mgr/") != std::string::npos) {
-      // mgr module option, "something/mgr/foo"
-      name = key.substr(key.find("/mgr/") + 1);
-      MaskedOption mopt(new Option(name, Option::TYPE_STR,
-				   Option::LEVEL_UNKNOWN));
-      mopt.raw_value = value;      
+    if (who.size() &&
+	!ConfigMap::parse_mask(who, &section_name, &mopt.mask)) {
+      derr << __func__ << " ignoring key " << key << dendl;
+    } else {
       Section *section = &config_map.global;;
-      section_name = "mgr";
-      if (section_name.find('.') != std::string::npos) {
-	section = &config_map.by_id[section_name];
-      } else {
-	section = &config_map.by_type[section_name];
+      if (section_name.size()) {
+	if (section_name.find('.') != std::string::npos) {
+	  section = &config_map.by_id[section_name];
+	} else {
+	  section = &config_map.by_type[section_name];
+	}
       }
       section->options.insert(make_pair(name, std::move(mopt)));
-      ++num;      
-    } else {
-      // normal option
-      const Option *opt = g_conf().find_option(name);
-      if (!opt) {
-	dout(10) << __func__ << " unrecognized option '" << name << "'" << dendl;
-	opt = new Option(name, Option::TYPE_STR, Option::LEVEL_UNKNOWN);
-      }
-      string err;
-      int r = opt->pre_validate(&value, &err);
-      if (r < 0) {
-	dout(10) << __func__ << " pre-validate failed on '" << name << "' = '"
-		 << value << "' for " << name << dendl;
-      }
-    
-      MaskedOption mopt(opt);
-      mopt.raw_value = value;
-      if (who.size() &&
-	  !ConfigMap::parse_mask(who, &section_name, &mopt.mask)) {
-	derr << __func__ << " ignoring key " << key << dendl;
-      } else {
-	Section *section = &config_map.global;;
-	if (section_name.size()) {
-	  if (section_name.find('.') != std::string::npos) {
-	    section = &config_map.by_id[section_name];
-	  } else {
-	    section = &config_map.by_type[section_name];
-	  }
-	}
-	section->options.insert(make_pair(name, std::move(mopt)));
-	++num;
-      }
+      ++num;
     }
     it->next();
   }
@@ -708,13 +758,11 @@ void ConfigMonitor::load_config()
     const OSDMap& osdmap = mon->osdmon()->osdmap;
     map<string,string> crush_location;
     osdmap.crush->get_full_location(g_conf()->host, &crush_location);
-    map<string,string> out;
-    config_map.generate_entity_map(
+    auto out = config_map.generate_entity_map(
       g_conf()->name,
       crush_location,
       osdmap.crush.get(),
-      string(), // no device class
-      &out);
+      string{}); // no device class
     g_conf().set_mon_vals(g_ceph_context, out, nullptr);
   }
 }
@@ -770,13 +818,11 @@ bool ConfigMonitor::refresh_config(MonSession *s)
 
   dout(20) << __func__ << " " << s->entity_name << " crush " << crush_location
 	   << " device_class " << device_class << dendl;
-  map<string,string> out;
-  config_map.generate_entity_map(
+  auto out = config_map.generate_entity_map(
     s->entity_name,
     crush_location,
     osdmap.crush.get(),
-    device_class,
-    &out);
+    device_class);
 
   if (out == s->last_config && s->any_config) {
     dout(20) << __func__ << " no change, " << out << dendl;
@@ -784,7 +830,7 @@ bool ConfigMonitor::refresh_config(MonSession *s)
   }
 
   dout(20) << __func__ << " " << out << dendl;
-  s->last_config = out;
+  s->last_config = std::move(out);
   s->any_config = true;
   return true;
 }

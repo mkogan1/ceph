@@ -42,7 +42,7 @@ class DashboardException(Exception):
     def code(self):
         if self._code:
             return str(self._code)
-        return str(abs(self.errno))
+        return str(abs(self.errno)) if self.errno is not None else 'Error'
 
 
 # access control module exceptions
@@ -101,3 +101,7 @@ class RoleNotInUser(Exception):
         super(RoleNotInUser, self).__init__(
             "Role '{}' is not associated with user '{}'"
             .format(rolename, username))
+
+
+class GrafanaError(Exception):
+    pass

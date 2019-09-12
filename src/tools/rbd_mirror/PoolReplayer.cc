@@ -1,4 +1,4 @@
-
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
 #include "PoolReplayer.h"
@@ -47,6 +47,7 @@ using ::operator<<;
 
 namespace {
 
+const std::string SERVICE_DAEMON_INSTANCE_ID_KEY("instance_id");
 const std::string SERVICE_DAEMON_LEADER_KEY("leader");
 const std::string SERVICE_DAEMON_LOCAL_COUNT_KEY("image_local_count");
 const std::string SERVICE_DAEMON_REMOTE_COUNT_KEY("image_remote_count");
@@ -226,16 +227,17 @@ private:
 } // anonymous namespace
 
 template <typename I>
-PoolReplayer<I>::PoolReplayer(Threads<I> *threads,
-                              ServiceDaemon<I>* service_daemon,
-			      int64_t local_pool_id, const PeerSpec &peer,
-			      const std::vector<const char*> &args) :
+PoolReplayer<I>::PoolReplayer(
+    Threads<I> *threads, ServiceDaemon<I> *service_daemon,
+    journal::CacheManagerHandler *cache_manager_handler, int64_t local_pool_id,
+    const PeerSpec &peer, const std::vector<const char*> &args) :
   m_threads(threads),
   m_service_daemon(service_daemon),
+  m_cache_manager_handler(cache_manager_handler),
   m_local_pool_id(local_pool_id),
   m_peer(peer),
   m_args(args),
-  m_lock(stringify("rbd::mirror::PoolReplayer ") + stringify(peer)),
+  m_lock(ceph::make_mutex(stringify("rbd::mirror::PoolReplayer ") + stringify(peer))),
   m_local_pool_watcher_listener(this, true),
   m_remote_pool_watcher_listener(this, false),
   m_image_map_listener(this),
@@ -253,13 +255,13 @@ PoolReplayer<I>::~PoolReplayer()
 
 template <typename I>
 bool PoolReplayer<I>::is_blacklisted() const {
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   return m_blacklisted;
 }
 
 template <typename I>
 bool PoolReplayer<I>::is_leader() const {
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   return m_leader_watcher && m_leader_watcher->is_leader();
 }
 
@@ -335,8 +337,8 @@ void PoolReplayer<I>::init()
   dout(10) << "connected to " << m_peer << dendl;
 
   m_instance_replayer.reset(InstanceReplayer<I>::create(
-    m_threads, m_service_daemon, m_local_rados, local_mirror_uuid,
-    m_local_pool_id));
+    m_threads, m_service_daemon, m_cache_manager_handler, m_local_rados,
+    local_mirror_uuid, m_local_pool_id));
   m_instance_replayer->init();
   m_instance_replayer->add_peer(m_peer.uuid, m_remote_io_ctx);
 
@@ -350,6 +352,9 @@ void PoolReplayer<I>::init()
       "unable to initialize instance messenger object");
     return;
   }
+  m_service_daemon->add_or_update_attribute(
+      m_local_pool_id, SERVICE_DAEMON_INSTANCE_ID_KEY,
+      m_instance_watcher->get_instance_id());
 
   m_leader_watcher.reset(LeaderWatcher<I>::create(m_threads, m_local_io_ctx,
                                                   &m_leader_listener));
@@ -374,8 +379,8 @@ template <typename I>
 void PoolReplayer<I>::shut_down() {
   m_stopping = true;
   {
-    Mutex::Locker l(m_lock);
-    m_cond.Signal();
+    std::lock_guard l{m_lock};
+    m_cond.notify_all();
   }
   if (m_pool_replayer_thread.is_started()) {
     m_pool_replayer_thread.join();
@@ -429,10 +434,9 @@ int PoolReplayer<I>::init_rados(const std::string &cluster_name,
   // librados::Rados::conf_read_file
   int r = cct->_conf.parse_config_files(nullptr, nullptr, 0);
   if (r < 0 && r != -ENOENT) {
+    // do not treat this as fatal, it might still be able to connect
     derr << "could not read ceph conf for " << description << ": "
 	 << cpp_strerror(r) << dendl;
-    cct->put();
-    return r;
   }
 
   // preserve cluster-specific config settings before applying environment/cli
@@ -446,7 +450,7 @@ int PoolReplayer<I>::init_rados(const std::string &cluster_name,
     }
   }
 
-  cct->_conf.parse_env();
+  cct->_conf.parse_env(cct->get_module_type());
 
   // librados::Rados::conf_parse_env
   std::vector<const char*> args;
@@ -457,7 +461,7 @@ int PoolReplayer<I>::init_rados(const std::string &cluster_name,
     cct->put();
     return r;
   }
-  cct->_conf.parse_env();
+  cct->_conf.parse_env(cct->get_module_type());
 
   if (!m_args.empty()) {
     // librados::Rados::conf_parse_argv
@@ -513,7 +517,7 @@ int PoolReplayer<I>::init_rados(const std::string &cluster_name,
   // disable unnecessary librbd cache
   cct->_conf.set_val_or_die("rbd_cache", "false");
   cct->_conf.apply_changes(nullptr);
-  cct->_conf.complain_about_parse_errors(cct);
+  cct->_conf.complain_about_parse_error(cct);
 
   r = (*rados_ref)->init_with_context(cct);
   ceph_assert(r == 0);
@@ -545,7 +549,7 @@ void PoolReplayer<I>::run()
 						       m_asok_hook_name, this);
     }
 
-    Mutex::Locker locker(m_lock);
+    std::unique_lock locker{m_lock};
     if ((m_local_pool_watcher && m_local_pool_watcher->is_blacklisted()) ||
 	(m_remote_pool_watcher && m_remote_pool_watcher->is_blacklisted())) {
       m_blacklisted = true;
@@ -554,7 +558,7 @@ void PoolReplayer<I>::run()
     }
 
     if (!m_stopping) {
-      m_cond.WaitInterval(m_lock, utime_t(1, 0));
+      m_cond.wait_for(locker, 1s);
     }
   }
 
@@ -570,7 +574,7 @@ void PoolReplayer<I>::print_status(Formatter *f, stringstream *ss)
     return;
   }
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   f->open_object_section("pool_replayer_status");
   f->dump_string("pool", m_local_io_ctx.get_pool_name());
@@ -629,7 +633,7 @@ void PoolReplayer<I>::start()
 {
   dout(20) << "enter" << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -644,10 +648,10 @@ void PoolReplayer<I>::stop(bool manual)
 {
   dout(20) << "enter: manual=" << manual << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
   if (!manual) {
     m_stopping = true;
-    m_cond.Signal();
+    m_cond.notify_all();
     return;
   } else if (m_stopping) {
     return;
@@ -662,7 +666,7 @@ void PoolReplayer<I>::restart()
 {
   dout(20) << "enter" << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping) {
     return;
@@ -676,7 +680,7 @@ void PoolReplayer<I>::flush()
 {
   dout(20) << "enter" << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping || m_manual_stop) {
     return;
@@ -690,7 +694,7 @@ void PoolReplayer<I>::release_leader()
 {
   dout(20) << "enter" << dendl;
 
-  Mutex::Locker l(m_lock);
+  std::lock_guard l{m_lock};
 
   if (m_stopping || !m_leader_watcher) {
     return;
@@ -710,7 +714,7 @@ void PoolReplayer<I>::handle_update(const std::string &mirror_uuid,
   dout(10) << "mirror_uuid=" << mirror_uuid << ", "
            << "added_count=" << added_image_ids.size() << ", "
            << "removed_count=" << removed_image_ids.size() << dendl;
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   if (!m_leader_watcher->is_leader()) {
     return;
   }
@@ -763,7 +767,7 @@ template <typename I>
 void PoolReplayer<I>::init_image_map(Context *on_finish) {
   dout(5) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_image_map);
   m_image_map.reset(ImageMap<I>::create(m_local_io_ctx, m_threads,
                                         m_instance_watcher->get_instance_id(),
@@ -795,7 +799,7 @@ template <typename I>
 void PoolReplayer<I>::init_local_pool_watcher(Context *on_finish) {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_local_pool_watcher);
   m_local_pool_watcher.reset(PoolWatcher<I>::create(
     m_threads, m_local_io_ctx, m_local_pool_watcher_listener));
@@ -829,7 +833,7 @@ template <typename I>
 void PoolReplayer<I>::init_remote_pool_watcher(Context *on_finish) {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_remote_pool_watcher);
   m_remote_pool_watcher.reset(PoolWatcher<I>::create(
     m_threads, m_remote_io_ctx, m_remote_pool_watcher_listener));
@@ -845,7 +849,13 @@ template <typename I>
 void PoolReplayer<I>::handle_init_remote_pool_watcher(
     int r, Context *on_finish) {
   dout(10) << "r=" << r << dendl;
-  if (r < 0) {
+  if (r == -ENOENT) {
+    // Technically nothing to do since the other side doesn't
+    // have mirroring enabled. Eventually the remote pool watcher will
+    // detect images (if mirroring is enabled), so no point propagating
+    // an error which would just busy-spin the state machines.
+    dout(0) << "remote peer does not have mirroring configured" << dendl;
+  } else if (r < 0) {
     derr << "failed to retrieve remote images: " << cpp_strerror(r) << dendl;
     on_finish = new FunctionContext([on_finish, r](int) {
         on_finish->complete(r);
@@ -861,7 +871,7 @@ template <typename I>
 void PoolReplayer<I>::init_image_deleter(Context *on_finish) {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(!m_image_deleter);
 
   on_finish = new FunctionContext([this, on_finish](int r) {
@@ -887,15 +897,15 @@ void PoolReplayer<I>::handle_init_image_deleter(int r, Context *on_finish) {
 
   on_finish->complete(0);
 
-  Mutex::Locker locker(m_lock);
-  m_cond.Signal();
+  std::lock_guard locker{m_lock};
+  m_cond.notify_all();
 }
 
 template <typename I>
 void PoolReplayer<I>::shut_down_image_deleter(Context* on_finish) {
   dout(10) << dendl;
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     if (m_image_deleter) {
       Context *ctx = new FunctionContext([this, on_finish](int r) {
           handle_shut_down_image_deleter(r, on_finish);
@@ -915,7 +925,7 @@ void PoolReplayer<I>::handle_shut_down_image_deleter(
   dout(10) << "r=" << r << dendl;
 
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     ceph_assert(m_image_deleter);
     m_image_deleter.reset();
   }
@@ -928,7 +938,7 @@ void PoolReplayer<I>::shut_down_pool_watchers(Context *on_finish) {
   dout(10) << dendl;
 
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     if (m_local_pool_watcher) {
       Context *ctx = new FunctionContext([this, on_finish](int r) {
           handle_shut_down_pool_watchers(r, on_finish);
@@ -954,7 +964,7 @@ void PoolReplayer<I>::handle_shut_down_pool_watchers(
   dout(10) << "r=" << r << dendl;
 
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     ceph_assert(m_local_pool_watcher);
     m_local_pool_watcher.reset();
 
@@ -969,7 +979,7 @@ template <typename I>
 void PoolReplayer<I>::wait_for_update_ops(Context *on_finish) {
   dout(10) << dendl;
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
 
   Context *ctx = new FunctionContext([this, on_finish](int r) {
       handle_wait_for_update_ops(r, on_finish);
@@ -992,7 +1002,7 @@ void PoolReplayer<I>::shut_down_image_map(Context *on_finish) {
   dout(5) << dendl;
 
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     if (m_image_map) {
       on_finish = new FunctionContext([this, on_finish](int r) {
           handle_shut_down_image_map(r, on_finish);
@@ -1013,7 +1023,7 @@ void PoolReplayer<I>::handle_shut_down_image_map(int r, Context *on_finish) {
     derr << "failed to shut down image map: " << cpp_strerror(r) << dendl;
   }
 
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   ceph_assert(m_image_map);
   m_image_map.reset();
 
@@ -1067,7 +1077,7 @@ void PoolReplayer<I>::handle_remove_image(const std::string &mirror_uuid,
 template <typename I>
 void PoolReplayer<I>::handle_instances_added(const InstanceIds &instance_ids) {
   dout(5) << "instance_ids=" << instance_ids << dendl;
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   if (!m_leader_watcher->is_leader()) {
     return;
   }
@@ -1080,7 +1090,7 @@ template <typename I>
 void PoolReplayer<I>::handle_instances_removed(
     const InstanceIds &instance_ids) {
   dout(5) << "instance_ids=" << instance_ids << dendl;
-  Mutex::Locker locker(m_lock);
+  std::lock_guard locker{m_lock};
   if (!m_leader_watcher->is_leader()) {
     return;
   }

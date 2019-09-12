@@ -270,7 +270,7 @@ void SessionMap::_load_finish(
  * Populate session state from OMAP records in this
  * rank's sessionmap object.
  */
-void SessionMap::load(MDSInternalContextBase *onload)
+void SessionMap::load(MDSContext *onload)
 {
   dout(10) << "load" << dendl;
 
@@ -373,7 +373,7 @@ public:
 };
 }
 
-void SessionMap::save(MDSInternalContextBase *onsave, version_t needv)
+void SessionMap::save(MDSContext *onsave, version_t needv)
 {
   dout(10) << __func__ << ": needv " << needv << ", v " << version << dendl;
  
@@ -547,7 +547,7 @@ void SessionMapStore::decode_legacy(bufferlist::const_iterator& p)
     
     while (n-- && !p.end()) {
       auto p2 = p;
-      Session *s = new Session(nullptr);
+      Session *s = new Session(ConnectionRef());
       s->info.decode(p);
       if (session_map.count(s->info.inst.name)) {
 	// eager client connected too fast!  aie.
@@ -586,7 +586,7 @@ void SessionMapStore::dump(Formatter *f) const
   f->close_section(); // Sessions
 }
 
-void SessionMapStore::generate_test_instances(list<SessionMapStore*>& ls)
+void SessionMapStore::generate_test_instances(std::list<SessionMapStore*>& ls)
 {
   // pretty boring for now
   ls.push_back(new SessionMapStore());
@@ -669,12 +669,13 @@ void SessionMap::touch_session(Session *session)
   session->last_cap_renew = clock::now();
 }
 
-void SessionMap::_mark_dirty(Session *s)
+void SessionMap::_mark_dirty(Session *s, bool may_save)
 {
   if (dirty_sessions.count(s->info.inst.name))
     return;
 
-  if (dirty_sessions.size() >= g_conf()->mds_sessionmap_keys_per_op) {
+  if (may_save &&
+      dirty_sessions.size() >= g_conf()->mds_sessionmap_keys_per_op) {
     // Pre-empt the usual save() call from journal segment trim, in
     // order to avoid building up an oversized OMAP update operation
     // from too many sessions modified at once
@@ -685,12 +686,12 @@ void SessionMap::_mark_dirty(Session *s)
   dirty_sessions.insert(s->info.inst.name);
 }
 
-void SessionMap::mark_dirty(Session *s)
+void SessionMap::mark_dirty(Session *s, bool may_save)
 {
   dout(20) << __func__ << " s=" << s << " name=" << s->info.inst.name
     << " v=" << version << dendl;
 
-  _mark_dirty(s);
+  _mark_dirty(s, may_save);
   version++;
   s->pop_pv(version);
 }
@@ -700,7 +701,7 @@ void SessionMap::replay_dirty_session(Session *s)
   dout(20) << __func__ << " s=" << s << " name=" << s->info.inst.name
     << " v=" << version << dendl;
 
-  _mark_dirty(s);
+  _mark_dirty(s, false);
 
   replay_advance_version();
 }
@@ -709,6 +710,46 @@ void SessionMap::replay_advance_version()
 {
   version++;
   projected = version;
+}
+
+void SessionMap::replay_open_sessions(version_t event_cmapv,
+			    map<client_t,entity_inst_t>& client_map,
+			    map<client_t,client_metadata_t>& client_metadata_map)
+{
+  unsigned already_saved;
+
+  if (version + client_map.size() < event_cmapv)
+    goto bad;
+
+  // Server::finish_force_open_sessions() marks sessions dirty one by one.
+  // Marking a session dirty may flush all existing dirty sessions. So it's
+  // possible that some sessions are already saved in sessionmap.
+  already_saved = client_map.size() - (event_cmapv - version);
+  for (const auto& p : client_map) {
+    Session *s = get_or_add_session(p.second);
+    auto q = client_metadata_map.find(p.first);
+    if (q != client_metadata_map.end())
+      s->info.client_metadata.merge(q->second);
+
+    if (already_saved > 0) {
+      if (s->is_closed())
+	goto bad;
+
+      --already_saved;
+      continue;
+    }
+
+    set_state(s, Session::STATE_OPEN);
+    replay_dirty_session(s);
+  }
+  return;
+
+bad:
+  mds->clog->error() << "error replaying open sessions(" << client_map.size()
+		     << ") sessionmap v " << event_cmapv << " table " << version;
+  ceph_assert(g_conf()->mds_wipe_sessions);
+  mds->sessionmap.wipe();
+  mds->sessionmap.set_version(event_cmapv);
 }
 
 version_t SessionMap::mark_projected(Session *s)
@@ -722,9 +763,9 @@ version_t SessionMap::mark_projected(Session *s)
 
 namespace {
 class C_IO_SM_Save_One : public SessionMapIOContext {
-  MDSInternalContextBase *on_safe;
+  MDSContext *on_safe;
 public:
-  C_IO_SM_Save_One(SessionMap *cm, MDSInternalContextBase *on_safe_)
+  C_IO_SM_Save_One(SessionMap *cm, MDSContext *on_safe_)
     : SessionMapIOContext(cm), on_safe(on_safe_) {}
   void finish(int r) override {
     if (r != 0) {
@@ -810,7 +851,7 @@ void SessionMap::save_if_dirty(const std::set<entity_name_t> &tgt_sessions,
       SnapContext snapc;
       object_t oid = get_object_name();
       object_locator_t oloc(mds->mdsmap->get_metadata_pool());
-      MDSInternalContextBase *on_safe = gather_bld->new_sub();
+      MDSContext *on_safe = gather_bld->new_sub();
       mds->objecter->mutate(oid, oloc, op, snapc,
 			    ceph::real_clock::now(), 0,
 			    new C_OnFinisher(
@@ -855,11 +896,8 @@ size_t Session::get_request_count()
  */
 void Session::notify_cap_release(size_t n_caps)
 {
-  if (recalled_at != clock::zero()) {
-    recall_release_count += n_caps;
-    if (recall_release_count >= recall_count)
-      clear_recalled_at();
-  }
+  recall_caps.hit(-(double)n_caps);
+  release_caps.hit(n_caps);
 }
 
 /**
@@ -868,32 +906,27 @@ void Session::notify_cap_release(size_t n_caps)
  * in order to generate health metrics if the session doesn't see
  * a commensurate number of calls to ::notify_cap_release
  */
-void Session::notify_recall_sent(const size_t new_limit)
+uint64_t Session::notify_recall_sent(size_t new_limit)
 {
-  if (recalled_at == clock::zero()) {
-    // Entering recall phase, set up counters so we can later
-    // judge whether the client has respected the recall request
-    recalled_at = last_recall_sent = clock::now();
-    assert (new_limit < caps.size());  // Behaviour of Server::recall_client_state
-    recall_count = caps.size() - new_limit;
-    recall_release_count = 0;
+  const auto num_caps = caps.size();
+  ceph_assert(new_limit < num_caps);  // Behaviour of Server::recall_client_state
+  const auto count = num_caps-new_limit;
+  uint64_t new_change;
+  if (recall_limit != new_limit) {
+    new_change = count;
   } else {
-    last_recall_sent = clock::now();
+    new_change = 0; /* no change! */
   }
-}
 
-void Session::clear_recalled_at()
-{
-  recalled_at = last_recall_sent = clock::zero();
-  recall_count = 0;
-  recall_release_count = 0;
-}
-
-void Session::set_client_metadata(const client_metadata_t& meta)
-{
-  info.client_metadata = meta;
-
-  _update_human_name();
+  /* Always hit the session counter as a RECALL message is still sent to the
+   * client and we do not want the MDS to burn its global counter tokens on a
+   * session that is not releasing caps (i.e. allow the session counter to
+   * throttle future RECALL messages).
+   */
+  recall_caps_throttle.hit(count);
+  recall_caps_throttle2o.hit(count);
+  recall_caps.hit(count);
+  return new_change;
 }
 
 /**
@@ -986,26 +1019,47 @@ void SessionMap::hit_session(Session *session) {
   session->hit_session();
 }
 
-void SessionMap::handle_conf_change(const ConfigProxy &conf,
-                                    const std::set <std::string> &changed) {
+void SessionMap::handle_conf_change(const std::set<std::string>& changed)
+{
+  auto apply_to_open_sessions = [this](auto f) {
+    if (auto it = by_state.find(Session::STATE_OPEN); it != by_state.end()) {
+      for (const auto &session : *(it->second)) {
+        f(session);
+      }
+    }
+    if (auto it = by_state.find(Session::STATE_STALE); it != by_state.end()) {
+      for (const auto &session : *(it->second)) {
+        f(session);
+      }
+    }
+  };
+
   if (changed.count("mds_request_load_average_decay_rate")) {
-    decay_rate = g_conf().get_val<double>("mds_request_load_average_decay_rate");
-    dout(20) << __func__ << " decay rate changed to " << decay_rate << dendl;
+    auto d = g_conf().get_val<double>("mds_request_load_average_decay_rate");
+    dout(20) << __func__ << " decay rate changed to " << d << dendl;
 
-    total_load_avg = DecayCounter(decay_rate);
+    decay_rate = d;
+    total_load_avg = DecayCounter(d);
 
-    auto p = by_state.find(Session::STATE_OPEN);
-    if (p != by_state.end()) {
-      for (const auto &session : *(p->second)) {
-        session->set_load_avg_decay_rate(decay_rate);
-      }
-    }
-    p = by_state.find(Session::STATE_STALE);
-    if (p != by_state.end()) {
-      for (const auto &session : *(p->second)) {
-        session->set_load_avg_decay_rate(decay_rate);
-      }
-    }
+    auto mut = [d](auto s) {
+      s->set_load_avg_decay_rate(d);
+    };
+    apply_to_open_sessions(mut);
+  }
+  if (changed.count("mds_recall_max_decay_rate")) {
+    auto d = g_conf().get_val<double>("mds_recall_max_decay_rate");
+    auto mut = [d](auto s) {
+      s->recall_caps_throttle = DecayCounter(d);
+    };
+    apply_to_open_sessions(mut);
+  }
+  if (changed.count("mds_recall_warning_decay_rate")) {
+    auto d = g_conf().get_val<double>("mds_recall_warning_decay_rate");
+    auto mut = [d](auto s) {
+      s->recall_caps = DecayCounter(d);
+      s->release_caps = DecayCounter(d);
+    };
+    apply_to_open_sessions(mut);
   }
 }
 

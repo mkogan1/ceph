@@ -18,7 +18,7 @@
 
 #include "msg/Message.h"
 
-class MClientReclaimReply: public MessageInstance<MClientReclaimReply> {
+class MClientReclaimReply: public Message {
 public:
   static constexpr int HEAD_VERSION = 1;
   static constexpr int COMPAT_VERSION = 1;
@@ -30,7 +30,7 @@ public:
   const entity_addrvec_t& get_addrs() const { return addrs; }
   void set_addrs(const entity_addrvec_t& _addrs)  { addrs = _addrs; }
 
-  const char *get_type_name() const override { return "client_reclaim_reply"; }
+  std::string_view get_type_name() const override { return "client_reclaim_reply"; }
   void print(ostream& o) const override {
     o << "client_reclaim_reply(" << result << " e " << epoch << ")";
   }
@@ -51,11 +51,11 @@ public:
   }
 
 protected:
-  friend factory;
   MClientReclaimReply() :
-    MessageInstance(CEPH_MSG_CLIENT_RECLAIM_REPLY, HEAD_VERSION, COMPAT_VERSION) {}
+    MClientReclaimReply{0, 0}
+  {}
   MClientReclaimReply(int r, epoch_t e=0) :
-    MessageInstance(CEPH_MSG_CLIENT_RECLAIM_REPLY, HEAD_VERSION, COMPAT_VERSION),
+    Message{CEPH_MSG_CLIENT_RECLAIM_REPLY, HEAD_VERSION, COMPAT_VERSION},
     result(r), epoch(e) {}
 
 private:
@@ -64,6 +64,9 @@ private:
   int32_t result;
   epoch_t epoch;
   entity_addrvec_t addrs;
+
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

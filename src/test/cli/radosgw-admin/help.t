@@ -4,6 +4,7 @@
     user create                create a new user
     user modify                modify user
     user info                  get user info
+    user rename                rename user
     user rm                    remove user
     user suspend               suspend a user
     user enable                re-enable user after suspension
@@ -17,13 +18,15 @@
     subuser rm                 remove subuser
     key create                 create access key
     key rm                     remove access key
-    bucket list                list buckets
+    bucket list                list buckets (specify --allow-unordered for
+                               faster, unsorted listing)
     bucket limit check         show bucket sharding stats
     bucket link                link bucket to specified user
     bucket unlink              unlink bucket from specified user
     bucket stats               returns bucket statistics
     bucket rm                  remove bucket
     bucket check               check bucket index
+    bucket chown               link bucket to specified user and update its object ACLs
     bucket reshard             reshard bucket
     bucket rewrite             rewrite all objects in the specified bucket
     bucket sync disable        disable bucket sync
@@ -33,10 +36,13 @@
     bi list                    list raw bucket index entries
     bi purge                   purge bucket index entries
     object rm                  remove object
+    object put                 put object
     object stat                stat an object for its metadata
     object unlink              unlink object from bucket index
     object rewrite             rewrite the specified object
     objects expire             run expired objects cleanup
+    objects expire-stale list  list stale expired objects (caused by reshard)
+    objects expire-stale rm    remove stale expired objects
     period rm                  remove a period
     period get                 get period info
     period get-current         get current period info
@@ -104,15 +110,17 @@
                                (NOTE: required to specify formatting of date
                                to "YYYY-MM-DD-hh")
     log rm                     remove log object
-    usage show                 show usage (by user, date range)
-    usage trim                 trim usage (by user, date range)
+    usage show                 show usage (by user, by bucket, date range)
+    usage trim                 trim usage (by user, by bucket, date range)
     usage clear                reset all the usage stats for the cluster
     gc list                    dump expired garbage collection objects (specify
                                --include-all to list all entries, including unexpired)
     gc process                 manually process garbage (specify
                                --include-all to process all entries, including unexpired)
     lc list                    list all bucket lifecycle progress
+    lc get                     get a lifecycle bucket configuration
     lc process                 manually process lifecycle
+    lc reshard fix             fix LC for a resharded bucket
     metadata get               get metadata info
     metadata put               put metadata info
     metadata rm                remove metadata info
@@ -143,6 +151,8 @@
     reshard status             read bucket resharding status
     reshard process            process of scheduled reshard jobs
     reshard cancel             cancel resharding a bucket
+    reshard stale-instances list list stale-instances from bucket resharding
+    reshard stale-instances rm   cleanup stale-instances from bucket resharding
     sync error list            list sync error
     sync error trim            trim sync error
     mfa create                 create a new MFA TOTP token
@@ -154,6 +164,7 @@
   options:
      --tenant=<tenant>         tenant name
      --uid=<id>                user id
+     --new-uid=<id>            new user id
      --subuser=<name>          subuser name
      --access-key=<key>        S3 access key
      --email=<email>           user's email address
@@ -169,13 +180,17 @@
      --max-buckets             max number of buckets for a user
      --admin                   set the admin flag on the user
      --system                  set the system flag on the user
+     --op-mask                 set the op mask on the user
      --bucket=<bucket>         Specify the bucket name. Also used by the quota command.
      --pool=<pool>             Specify the pool name. Also used to scan for leaked rados objects.
      --object=<object>         object name
+     --object-version=<version>         object version
      --date=<date>             date in the format yyyy-mm-dd
      --start-date=<date>       start date in the format yyyy-mm-dd
      --end-date=<date>         end date in the format yyyy-mm-dd
      --bucket-id=<bucket-id>   bucket id
+     --bucket-new-name=<bucket>
+                               for bucket link: optional new name
      --shard-id=<shard-id>     optional for: 
                                  mdlog list
                                  data sync status
@@ -206,6 +221,7 @@
      --read-only               set zone as read-only (when adding to zonegroup)
      --redirect-zone           specify zone id to redirect when response is 404 (not found)
      --placement-id            placement id for zonegroup placement commands
+     --storage-class           storage class for zonegroup placement commands
      --tags=<list>             list of tags for zonegroup placement add and modify commands
      --tags-add=<list>         list of tags to add for zonegroup placement modify command
      --tags-rm=<list>          list of tags to remove for zonegroup placement modify command
@@ -247,6 +263,7 @@
      --infile=<file>           specify a file to read in when setting data
      --categories=<list>       comma separated list of categories, used in usage show
      --caps=<caps>             list of caps (e.g., "usage=read, write; user=read")
+     --op-mask=<op-mask>       permission of user's operations (e.g., "read, write, delete, *")
      --yes-i-really-mean-it    required for certain operations
      --warnings-only           when specified with bucket limit check, list
                                only buckets nearing or over the current max
@@ -273,6 +290,7 @@
      --orphan-stale-secs       num of seconds to wait before declaring an object to be an orphan (default: 86400)
      --job-id                  set the job id (for orphans find)
      --max-concurrent-ios      maximum concurrent ios for orphans find (default: 32)
+     --detail                  detailed mode, log and stat head objects as well
   
   Orphans list-jobs options:
      --extra-info              provide extra info in job list

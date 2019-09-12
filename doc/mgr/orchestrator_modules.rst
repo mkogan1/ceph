@@ -26,6 +26,39 @@ by subclasses.  The purpose of defining this common interface
 for different orchestrators is to enable common UI code, such as
 the dashboard, to work with various different backends.
 
+
+.. graphviz::
+
+    digraph G {
+        subgraph cluster_1 {
+            volumes [label="mgr/volumes"]
+            rook [label="mgr/rook"]
+            dashboard [label="mgr/dashboard"]
+            orchestrator_cli [label="mgr/orchestrator_cli"]
+            orchestrator [label="Orchestrator Interface"]
+            ansible [label="mgr/ansible"]
+            ssh [label="mgr/ssh"]
+            deepsea [label="mgr/deepsea"]
+
+            label = "ceph-mgr";
+        }
+
+        volumes -> orchestrator
+        dashboard -> orchestrator
+        orchestrator_cli -> orchestrator
+        orchestrator -> rook -> rook_io
+        orchestrator -> ansible -> ceph_ansible
+        orchestrator -> deepsea -> suse_deepsea
+        orchestrator -> ssh
+
+
+        rook_io [label="Rook"]
+        ceph_ansible [label="ceph-ansible"]
+        suse_deepsea [label="DeepSea"]
+
+        rankdir="TB";
+    }
+
 Behind all the abstraction, the purpose of orchestrator modules is simple:
 enable Ceph to do things like discover available hardware, create and
 destroy OSDs, and run MDS and RGW services.
@@ -102,8 +135,14 @@ effect.  Second, the completion becomes *effective*, meaning that the operation 
 
 .. automethod:: Orchestrator.wait
 
+.. autoclass:: _Completion
+   :members:
+
 .. autoclass:: ReadCompletion
+   :members:
+
 .. autoclass:: WriteCompletion
+   :members:
 
 Placement
 ---------
@@ -117,6 +156,58 @@ specify a location when creating a stateless service.
 OSD services generally require a specific placement choice, as this
 will determine which storage devices are used.
 
+Error Handling
+--------------
+
+The main goal of error handling within orchestrator modules is to provide debug information to
+assist users when dealing with deployment errors.
+
+.. autoclass:: OrchestratorError
+.. autoclass:: NoOrchestrator
+.. autoclass:: OrchestratorValidationError
+
+
+In detail, orchestrators need to explicitly deal with different kinds of errors:
+
+1. No orchestrator configured
+
+   See :class:`NoOrchestrator`.
+
+2. An orchestrator doesn't implement a specific method.
+
+   For example, an Orchestrator doesn't support ``add_host``.
+
+   In this case, a ``NotImplementedError`` is raised.
+
+3. Missing features within implemented methods.
+
+   E.g. optional parameters to a command that are not supported by the
+   backend (e.g. the hosts field in :func:`Orchestrator.update_mons` command with the rook backend).
+
+   See :class:`OrchestratorValidationError`.
+
+4. Input validation errors
+
+   The ``orchestrator_cli`` module and other calling modules are supposed to
+   provide meaningful error messages.
+
+   See :class:`OrchestratorValidationError`.
+
+5. Errors when actually executing commands
+
+   The resulting Completion should contain an error string that assists in understanding the
+   problem. In addition, :func:`_Completion.is_errored` is set to ``True``
+
+6. Invalid configuration in the orchestrator modules
+
+   This can be tackled similar to 5.
+
+
+All other errors are unexpected orchestrator issues and thus should raise an exception that are then
+logged into the mgr log file. If there is a completion object at that point,
+:func:`_Completion.result` may contain an error message.
+
+
 Excluded functionality
 ----------------------
 
@@ -127,17 +218,30 @@ Excluded functionality
   Ceph clusters).  Each drive is assumed to be visible only on
   a single node.
 
+Host management
+---------------
+
+.. automethod:: Orchestrator.add_host
+.. automethod:: Orchestrator.remove_host
+.. automethod:: Orchestrator.get_hosts
+
 Inventory and status
 --------------------
 
 .. automethod:: Orchestrator.get_inventory
 .. autoclass:: InventoryFilter
 .. autoclass:: InventoryNode
+
 .. autoclass:: InventoryDevice
+   :members:
 
 .. automethod:: Orchestrator.describe_service
 .. autoclass:: ServiceDescription
-.. autoclass:: ServiceLocation
+
+Service Actions
+---------------
+
+.. automethod:: Orchestrator.service_action
 
 OSD management
 --------------
@@ -145,8 +249,35 @@ OSD management
 .. automethod:: Orchestrator.create_osds
 .. automethod:: Orchestrator.replace_osds
 .. automethod:: Orchestrator.remove_osds
-.. autoclass:: OsdCreationSpec
+
+.. py:currentmodule:: ceph.deployment.drive_group
+
+.. autoclass:: DeviceSelection
+   :members:
+
 .. autoclass:: DriveGroupSpec
+   :members:
+   :exclude-members: from_json
+
+.. py:currentmodule:: orchestrator
+
+Stateless Services
+------------------
+
+.. autoclass:: StatelessServiceSpec
+
+.. automethod:: Orchestrator.add_mds
+.. automethod:: Orchestrator.remove_mds
+.. automethod:: Orchestrator.update_mds
+.. automethod:: Orchestrator.add_rgw
+.. automethod:: Orchestrator.remove_rgw
+.. automethod:: Orchestrator.update_rgw
+
+.. autoclass:: NFSServiceSpec
+
+.. automethod:: Orchestrator.add_nfs
+.. automethod:: Orchestrator.remove_nfs
+.. automethod:: Orchestrator.update_nfs
 
 Upgrades
 --------
@@ -161,4 +292,10 @@ Utility
 -------
 
 .. automethod:: Orchestrator.available
+.. automethod:: Orchestrator.get_feature_set
 
+Client Modules
+--------------
+
+.. autoclass:: OrchestratorClientMixin
+   :members:

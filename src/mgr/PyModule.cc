@@ -15,6 +15,7 @@
 #include "BaseMgrStandbyModule.h"
 #include "PyOSDMap.h"
 #include "MgrContext.h"
+#include "PyUtil.h"
 
 #include "PyModule.h"
 
@@ -337,8 +338,8 @@ int PyModule::load(PyThreadState *pMainThreadState)
       PySys_SetArgv(1, (char**)argv);
 #endif
       // Configure sys.path to include mgr_module_path
-      string paths = (":" + get_site_packages() +
-		      ":" + g_conf().get_val<std::string>("mgr_module_path"));
+      string paths = (":" + g_conf().get_val<std::string>("mgr_module_path") +
+		      ":" + get_site_packages());
 #if PY_MAJOR_VERSION >= 3
       wstring sys_path(Py_GetPath() + wstring(begin(paths), end(paths)));
       PySys_SetPath(const_cast<wchar_t*>(sys_path.c_str()));
@@ -372,9 +373,9 @@ int PyModule::load(PyThreadState *pMainThreadState)
 
     r = load_options();
     if (r != 0) {
-      derr << "Missing or invalid OPTIONS attribute in module '"
+      derr << "Missing or invalid MODULE_OPTIONS attribute in module '"
           << module_name << "'" << dendl;
-      error_string = "Missing or invalid OPTIONS attribute";
+      error_string = "Missing or invalid MODULE_OPTIONS attribute";
       return r;
     }
 
@@ -474,6 +475,16 @@ int PyModule::walk_dict_list(
 
 int PyModule::load_commands()
 {
+  PyObject *pRegCmd = PyObject_CallMethod(pClass,
+  const_cast<char*>("_register_commands"), const_cast<char*>("()"));
+  if (pRegCmd != nullptr) {
+    Py_DECREF(pRegCmd);
+  } else {
+    derr << "Exception calling _register_commands on " << get_name()
+         << dendl;
+    derr << handle_pyerror() << dendl;
+  }
+
   int r = walk_dict_list("COMMANDS", [this](PyObject *pCommand) -> int {
     ModuleCommand command;
 
@@ -514,16 +525,87 @@ int PyModule::load_commands()
 
 int PyModule::load_options()
 {
-  int r = walk_dict_list("OPTIONS", [this](PyObject *pOption) -> int {
-    PyObject *pName = PyDict_GetItemString(pOption, "name");
-    ceph_assert(pName != nullptr);
-
-    ModuleOption option;
-    option.name = PyString_AsString(pName);
-    dout(20) << "loaded option " << option.name << dendl;
-
+  int r = walk_dict_list("MODULE_OPTIONS", [this](PyObject *pOption) -> int {
+    MgrMap::ModuleOption option;
+    PyObject *p;
+    p = PyDict_GetItemString(pOption, "name");
+    ceph_assert(p != nullptr);
+    option.name = PyString_AsString(p);
+    option.type = Option::TYPE_STR;
+    p = PyDict_GetItemString(pOption, "type");
+    if (p && PyObject_TypeCheck(p, &PyString_Type)) {
+      std::string s = PyString_AsString(p);
+      int t = Option::str_to_type(s);
+      if (t >= 0) {
+	option.type = t;
+      }
+    }
+    p = PyDict_GetItemString(pOption, "desc");
+    if (p && PyObject_TypeCheck(p, &PyString_Type)) {
+      option.desc = PyString_AsString(p);
+    }
+    p = PyDict_GetItemString(pOption, "long_desc");
+    if (p && PyObject_TypeCheck(p, &PyString_Type)) {
+      option.long_desc = PyString_AsString(p);
+    }
+    p = PyDict_GetItemString(pOption, "default");
+    if (p) {
+      auto q = PyObject_Str(p);
+      option.default_value = PyString_AsString(q);
+      Py_DECREF(q);
+    }
+    p = PyDict_GetItemString(pOption, "min");
+    if (p) {
+      auto q = PyObject_Str(p);
+      option.min = PyString_AsString(q);
+      Py_DECREF(q);
+    }
+    p = PyDict_GetItemString(pOption, "max");
+    if (p) {
+      auto q = PyObject_Str(p);
+      option.max = PyString_AsString(q);
+      Py_DECREF(q);
+    }
+    p = PyDict_GetItemString(pOption, "enum_allowed");
+    if (p && PyObject_TypeCheck(p, &PyList_Type)) {
+      for (unsigned i = 0; i < PyList_Size(p); ++i) {
+	auto q = PyList_GetItem(p, i);
+	if (q) {
+	  auto r = PyObject_Str(q);
+	  option.enum_allowed.insert(PyString_AsString(r));
+	  Py_DECREF(r);
+	}
+      }
+    }
+    p = PyDict_GetItemString(pOption, "see_also");
+    if (p && PyObject_TypeCheck(p, &PyList_Type)) {
+      for (unsigned i = 0; i < PyList_Size(p); ++i) {
+	auto q = PyList_GetItem(p, i);
+	if (q && PyObject_TypeCheck(q, &PyString_Type)) {
+	  option.see_also.insert(PyString_AsString(q));
+	}
+      }
+    }
+    p = PyDict_GetItemString(pOption, "tags");
+    if (p && PyObject_TypeCheck(p, &PyList_Type)) {
+      for (unsigned i = 0; i < PyList_Size(p); ++i) {
+	auto q = PyList_GetItem(p, i);
+	if (q && PyObject_TypeCheck(q, &PyString_Type)) {
+	  option.tags.insert(PyString_AsString(q));
+	}
+      }
+    }
+    p = PyDict_GetItemString(pOption, "runtime");
+    if (p && PyObject_TypeCheck(p, &PyBool_Type)) {
+      if (p == Py_True) {
+	option.flags |= Option::FLAG_RUNTIME;
+      }
+      if (p == Py_False) {
+	option.flags &= ~Option::FLAG_RUNTIME;
+      }
+    }
+    dout(20) << "loaded module option " << option.name << dendl;
     options[option.name] = std::move(option);
-
     return 0;
   });
 
@@ -536,6 +618,18 @@ bool PyModule::is_option(const std::string &option_name)
 {
   std::lock_guard l(lock);
   return options.count(option_name) > 0;
+}
+
+PyObject *PyModule::get_typed_option_value(const std::string& name,
+					   const std::string& value)
+{
+  // we don't need to hold a lock here because these MODULE_OPTIONS
+  // are set up exactly once during startup.
+  auto p = options.find(name);
+  if (p != options.end()) {
+    return get_python_typed_option_value((Option::type_t)p->second.type, value);
+  }
+  return PyString_FromString(value.c_str());
 }
 
 int PyModule::load_subclass_of(const char* base_class, PyObject** py_class)

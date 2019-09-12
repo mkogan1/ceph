@@ -16,6 +16,7 @@
 #include "rocksdb/iostats_context.h"
 #include "rocksdb/statistics.h"
 #include "rocksdb/table.h"
+#include "kv/rocksdb_cache/BinnedLRUCache.h"
 #include <errno.h>
 #include "common/errno.h"
 #include "common/dout.h"
@@ -89,13 +90,14 @@ class RocksDBStore : public KeyValueDB {
   int submit_common(rocksdb::WriteOptions& woptions, KeyValueDB::Transaction t);
   int install_cf_mergeop(const string &cf_name, rocksdb::ColumnFamilyOptions *cf_opt);
   int create_db_dir();
-  int do_open(ostream &out, bool create_if_missing,
+  int do_open(ostream &out, bool create_if_missing, bool open_readonly,
 	      const vector<ColumnFamily>* cfs = nullptr);
   int load_rocksdb_options(bool create_if_missing, rocksdb::Options& opt);
 
   // manage async compactions
-  Mutex compact_queue_lock;
-  Cond compact_queue_cond;
+  ceph::mutex compact_queue_lock =
+    ceph::make_mutex("RocksDBStore::compact_thread_lock");
+  ceph::condition_variable compact_queue_cond;
   list< pair<string,string> > compact_queue;
   bool compact_queue_stop;
   class CompactThread : public Thread {
@@ -118,9 +120,7 @@ public:
   /// compact the underlying rocksdb store
   bool compact_on_mount;
   bool disableWAL;
-  bool enable_rmrange;
   void compact() override;
-  int64_t high_pri_watermark;
 
   void compact_async() override {
     compact_range_async(string(), string());
@@ -154,13 +154,10 @@ public:
     db(NULL),
     env(static_cast<rocksdb::Env*>(p)),
     dbstats(NULL),
-    compact_queue_lock("RocksDBStore::compact_thread_lock"),
     compact_queue_stop(false),
     compact_thread(this),
     compact_on_mount(false),
-    disableWAL(false),
-    enable_rmrange(cct->_conf->rocksdb_enable_rmrange),
-    high_pri_watermark(0)
+    disableWAL(false)
   {}
 
   ~RocksDBStore() override;
@@ -168,11 +165,15 @@ public:
   static bool check_omap_dir(string &omap_dir);
   /// Opens underlying db
   int open(ostream &out, const vector<ColumnFamily>& cfs = {}) override {
-    return do_open(out, false, &cfs);
+    return do_open(out, false, false, &cfs);
   }
   /// Creates underlying db if missing and opens it
   int create_and_open(ostream &out,
 		      const vector<ColumnFamily>& cfs = {}) override;
+
+  int open_read_only(ostream &out, const vector<ColumnFamily>& cfs = {}) override {
+    return do_open(out, false, true, &cfs);
+  }
 
   void close() override;
 
@@ -192,7 +193,8 @@ public:
     return logger;
   }
 
-  int64_t estimate_prefix_size(const string& prefix) override;
+  int64_t estimate_prefix_size(const string& prefix,
+			       const string& key_prefix) override;
 
   struct  RocksWBHandler: public rocksdb::WriteBatch::Handler {
     std::string seen ;
@@ -478,14 +480,9 @@ err:
     return total_size;
   }
 
-  virtual int64_t request_cache_bytes(
-      PriorityCache::Priority pri, uint64_t cache_bytes) const override;
-  virtual int64_t commit_cache_size() override;
-  virtual std::string get_cache_name() const override {
-    return "RocksDB Block Cache";
+  virtual int64_t get_cache_usage() const override {
+    return static_cast<int64_t>(bbt_opts.block_cache->GetUsage());
   }
-  virtual int64_t get_cache_usage() const override;
-
 
   int set_cache_size(uint64_t s) override {
     cache_size = s;
@@ -495,6 +492,12 @@ err:
 
   int set_cache_capacity(int64_t capacity);
   int64_t get_cache_capacity();
+
+  virtual std::shared_ptr<PriorityCache::PriCache> get_priority_cache() 
+      const override {
+    return dynamic_pointer_cast<PriorityCache::PriCache>(
+        bbt_opts.block_cache);
+  }
 
   WholeSpaceIterator get_wholespace_iterator() override;
 };

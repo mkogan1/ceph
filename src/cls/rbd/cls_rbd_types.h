@@ -559,6 +559,8 @@ enum TrashImageSource {
   TRASH_IMAGE_SOURCE_USER = 0,
   TRASH_IMAGE_SOURCE_MIRRORING = 1,
   TRASH_IMAGE_SOURCE_MIGRATION = 2,
+  TRASH_IMAGE_SOURCE_REMOVING = 3,
+  TRASH_IMAGE_SOURCE_USER_PARENT= 4,
 };
 
 inline std::ostream& operator<<(std::ostream& os,
@@ -572,6 +574,9 @@ inline std::ostream& operator<<(std::ostream& os,
     break;
   case TRASH_IMAGE_SOURCE_MIGRATION:
     os << "migration";
+    break;
+  case TRASH_IMAGE_SOURCE_REMOVING:
+    os << "removing";
     break;
   default:
     os << "unknown (" << static_cast<uint32_t>(source) << ")";
@@ -716,6 +721,7 @@ std::ostream& operator<<(std::ostream& os,
 struct MigrationSpec {
   MigrationHeaderType header_type = MIGRATION_HEADER_TYPE_SRC;
   int64_t pool_id = -1;
+  std::string pool_namespace;
   std::string image_name;
   std::string image_id;
   std::map<uint64_t, uint64_t> snap_seqs;
@@ -728,11 +734,13 @@ struct MigrationSpec {
   MigrationSpec() {
   }
   MigrationSpec(MigrationHeaderType header_type, int64_t pool_id,
+                const std::string& pool_namespace,
                 const std::string &image_name, const std::string &image_id,
                 const std::map<uint64_t, uint64_t> &snap_seqs, uint64_t overlap,
                 bool mirroring, bool flatten, MigrationState state,
                 const std::string &state_description)
-    : header_type(header_type), pool_id(pool_id), image_name(image_name),
+    : header_type(header_type), pool_id(pool_id),
+      pool_namespace(pool_namespace), image_name(image_name),
       image_id(image_id), snap_seqs(snap_seqs), overlap(overlap),
       flatten(flatten), mirroring(mirroring), state(state),
       state_description(state_description) {
@@ -746,9 +754,10 @@ struct MigrationSpec {
 
   inline bool operator==(const MigrationSpec& ms) const {
     return header_type == ms.header_type && pool_id == ms.pool_id &&
-      image_name == ms.image_name && image_id == ms.image_id &&
-      snap_seqs == ms.snap_seqs && overlap == ms.overlap &&
-      flatten == ms.flatten && mirroring == ms.mirroring && state == ms.state &&
+      pool_namespace == ms.pool_namespace && image_name == ms.image_name &&
+      image_id == ms.image_id && snap_seqs == ms.snap_seqs &&
+      overlap == ms.overlap && flatten == ms.flatten &&
+      mirroring == ms.mirroring && state == ms.state &&
       state_description == ms.state_description;
   }
 };

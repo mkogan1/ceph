@@ -17,17 +17,16 @@
 
 #include "messages/PaxosServiceMessage.h"
 
-class MMonGlobalID : public MessageInstance<MMonGlobalID, PaxosServiceMessage> {
+class MMonGlobalID : public PaxosServiceMessage {
 public:
-  friend factory;
-
-  uint64_t old_max_id;
-  MMonGlobalID() : MessageInstance(MSG_MON_GLOBAL_ID, 0), old_max_id(0) { }
+  uint64_t old_max_id = 0;
+  MMonGlobalID() : PaxosServiceMessage{MSG_MON_GLOBAL_ID, 0}
+  {}
 private:
   ~MMonGlobalID() override {}
 
 public:
-  const char *get_type_name() const override { return "global_id"; }
+  std::string_view get_type_name() const override { return "global_id"; }
   void print(ostream& out) const override {
     out << "global_id  (" << old_max_id << ")";
   }
@@ -42,6 +41,9 @@ public:
     paxos_encode();
     encode(old_max_id, payload);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

@@ -21,7 +21,7 @@ using std::vector;
  *
  * Kyoto Cabinet or LevelDB should implement this
  */
-class KeyValueDB : public PriorityCache::PriCache {
+class KeyValueDB {
 public:
   /*
    *  See RocksDB's definition of a column family(CF) and how to use it.
@@ -40,24 +40,24 @@ public:
     /// Set Keys
     void set(
       const std::string &prefix,                      ///< [in] Prefix for keys, or CF name
-      const std::map<std::string, bufferlist> &to_set ///< [in] keys/values to set
+      const std::map<std::string, ceph::buffer::list> &to_set ///< [in] keys/values to set
     ) {
-      std::map<std::string, bufferlist>::const_iterator it;
-      for (it = to_set.begin(); it != to_set.end(); ++it)
+      for (auto it = to_set.cbegin(); it != to_set.cend(); ++it)
 	set(prefix, it->first, it->second);
     }
 
-    /// Set Keys (via encoded bufferlist)
+    /// Set Keys (via encoded ceph::buffer::list)
     void set(
       const std::string &prefix,      ///< [in] prefix, or CF name
-      bufferlist& to_set_bl           ///< [in] encoded key/values to set
+      ceph::buffer::list& to_set_bl           ///< [in] encoded key/values to set
       ) {
+      using ceph::decode;
       auto p = std::cbegin(to_set_bl);
       uint32_t num;
       decode(num, p);
       while (num--) {
 	string key;
-	bufferlist value;
+	ceph::buffer::list value;
 	decode(key, p);
 	decode(value, p);
 	set(prefix, key, value);
@@ -68,21 +68,22 @@ public:
     virtual void set(
       const std::string &prefix,      ///< [in] Prefix or CF for the key
       const std::string &k,	      ///< [in] Key to set
-      const bufferlist &bl            ///< [in] Value to set
+      const ceph::buffer::list &bl            ///< [in] Value to set
       ) = 0;
     virtual void set(
       const std::string &prefix,
       const char *k,
       size_t keylen,
-      const bufferlist& bl) {
+      const ceph::buffer::list& bl) {
       set(prefix, string(k, keylen), bl);
     }
 
-    /// Removes Keys (via encoded bufferlist)
+    /// Removes Keys (via encoded ceph::buffer::list)
     void rmkeys(
       const std::string &prefix,     ///< [in] Prefix or CF to search for
-      bufferlist &keys_bl            ///< [in] Keys to remove
+      ceph::buffer::list &keys_bl            ///< [in] Keys to remove
     ) {
+      using ceph::decode;
       auto p = std::cbegin(keys_bl);
       uint32_t num;
       decode(num, p);
@@ -98,8 +99,7 @@ public:
       const std::string &prefix,        ///< [in] Prefix/CF to search for
       const std::set<std::string> &keys ///< [in] Keys to remove
     ) {
-      std::set<std::string>::const_iterator it;
-      for (it = keys.begin(); it != keys.end(); ++it)
+      for (auto it = keys.cbegin(); it != keys.cend(); ++it)
 	rmkey(prefix, *it);
     }
 
@@ -141,7 +141,7 @@ public:
     virtual void merge(
       const std::string &prefix,   ///< [in] Prefix/CF ==> MUST match some established merge operator
       const std::string &key,      ///< [in] Key to be merged
-      const bufferlist  &value     ///< [in] value to be merged into key
+      const ceph::buffer::list  &value     ///< [in] value to be merged into key
     ) { ceph_abort_msg("Not implemented"); }
 
     virtual ~TransactionImpl() {}
@@ -151,16 +151,21 @@ public:
   /// create a new instance
   static KeyValueDB *create(CephContext *cct, const std::string& type,
 			    const std::string& dir,
-			    map<std::string,std::string> options = {},
+			    std::map<std::string,std::string> options = {},
 			    void *p = NULL);
 
   /// test whether we can successfully initialize; may have side effects (e.g., create)
   static int test_init(const std::string& type, const std::string& dir);
   virtual int init(string option_str="") = 0;
-  virtual int open(std::ostream &out, const vector<ColumnFamily>& cfs = {}) = 0;
-  // vector cfs contains column families to be created when db is created.
+  virtual int open(std::ostream &out, const std::vector<ColumnFamily>& cfs = {}) = 0;
+  // std::vector cfs contains column families to be created when db is created.
   virtual int create_and_open(std::ostream &out,
-			      const vector<ColumnFamily>& cfs = {}) = 0;
+			      const std::vector<ColumnFamily>& cfs = {}) = 0;
+
+  virtual int open_read_only(std::ostream &out, const std::vector<ColumnFamily>& cfs = {}) {
+    return -ENOTSUP;
+  }
+
   virtual void close() { }
 
   /// Try to repair K/V database. leveldb and rocksdb require that database must be not opened.
@@ -176,26 +181,26 @@ public:
   virtual int get(
     const std::string &prefix,               ///< [in] Prefix/CF for key
     const std::set<std::string> &key,        ///< [in] Key to retrieve
-    std::map<std::string, bufferlist> *out   ///< [out] Key value retrieved
+    std::map<std::string, ceph::buffer::list> *out   ///< [out] Key value retrieved
     ) = 0;
   virtual int get(const std::string &prefix, ///< [in] prefix or CF name
 		  const std::string &key,    ///< [in] key
-		  bufferlist *value) {       ///< [out] value
+		  ceph::buffer::list *value) {       ///< [out] value
     std::set<std::string> ks;
     ks.insert(key);
-    std::map<std::string,bufferlist> om;
+    std::map<std::string,ceph::buffer::list> om;
     int r = get(prefix, ks, &om);
     if (om.find(key) != om.end()) {
       *value = std::move(om[key]);
     } else {
-      *value = bufferlist();
+      *value = ceph::buffer::list();
       r = -ENOENT;
     }
     return r;
   }
   virtual int get(const string &prefix,
 		  const char *key, size_t keylen,
-		  bufferlist *value) {
+		  ceph::buffer::list *value) {
     return get(prefix, string(key, keylen), value);
   }
 
@@ -208,9 +213,12 @@ public:
     virtual int upper_bound(const std::string &after) = 0;
     virtual int lower_bound(const std::string &to) = 0;
     virtual bool valid() = 0;
-    virtual int next(bool validate=true) = 0;
+    virtual int next() = 0;
     virtual std::string key() = 0;
-    virtual bufferlist value() = 0;
+    virtual std::string tail_key() {
+      return "";
+    }
+    virtual ceph::buffer::list value() = 0;
     virtual int status() = 0;
     virtual ~SimplestIteratorImpl() {}
   };
@@ -219,14 +227,14 @@ public:
   public:
     virtual ~IteratorImpl() {}
     virtual int seek_to_last() = 0;
-    virtual int prev(bool validate=true) = 0;
+    virtual int prev() = 0;
     virtual std::pair<std::string, std::string> raw_key() = 0;
-    virtual bufferptr value_as_ptr() {
-      bufferlist bl = value();
+    virtual ceph::buffer::ptr value_as_ptr() {
+      ceph::buffer::list bl = value();
       if (bl.length() == 1) {
         return *bl.buffers().begin();
       } else if (bl.length() == 0) {
-        return bufferptr();
+        return ceph::buffer::ptr();
       } else {
 	ceph_abort();
       }
@@ -249,13 +257,13 @@ public:
     virtual std::string key() = 0;
     virtual std::pair<std::string,std::string> raw_key() = 0;
     virtual bool raw_key_is_prefixed(const std::string &prefix) = 0;
-    virtual bufferlist value() = 0;
-    virtual bufferptr value_as_ptr() {
-      bufferlist bl = value();
+    virtual ceph::buffer::list value() = 0;
+    virtual ceph::buffer::ptr value_as_ptr() {
+      ceph::buffer::list bl = value();
       if (bl.length()) {
         return *bl.buffers().begin();
       } else {
-        return bufferptr();
+        return ceph::buffer::ptr();
       }
     }
     virtual int status() = 0;
@@ -270,9 +278,6 @@ public:
   typedef std::shared_ptr< WholeSpaceIteratorImpl > WholeSpaceIterator;
 
 private:
-  int64_t cache_bytes[PriorityCache::Priority::LAST+1] = { 0 };
-  double cache_ratio = 0;
-
   // This class filters a WholeSpaceIterator by a prefix.
   class PrefixIteratorImpl : public IteratorImpl {
     const std::string prefix;
@@ -299,26 +304,11 @@ private:
 	return false;
       return generic_iter->raw_key_is_prefixed(prefix);
     }
-    // Note that next() and prev() shouldn't validate iters,
-    // it's responsibility of caller to ensure they're valid.
-    int next(bool validate=true) override {
-      if (validate) {
-        if (valid())
-          return generic_iter->next();
-        return status();
-      } else {
-        return generic_iter->next();  
-      }      
+    int next() override {
+      return generic_iter->next();
     }
-    
-    int prev(bool validate=true) override {
-      if (validate) {
-        if (valid())
-          return generic_iter->prev();
-        return status();
-      } else {
-        return generic_iter->prev();  
-      }      
+    int prev() override {
+      return generic_iter->prev();
     }
     std::string key() override {
       return generic_iter->key();
@@ -326,10 +316,10 @@ private:
     std::pair<std::string, std::string> raw_key() override {
       return generic_iter->raw_key();
     }
-    bufferlist value() override {
+    ceph::buffer::list value() override {
       return generic_iter->value();
     }
-    bufferptr value_as_ptr() override {
+    ceph::buffer::ptr value_as_ptr() override {
       return generic_iter->value_as_ptr();
     }
     int status() override {
@@ -362,52 +352,6 @@ public:
     return -EOPNOTSUPP;
   }
 
-  // PriCache
-
-  virtual int64_t request_cache_bytes(PriorityCache::Priority pri, uint64_t chunk_bytes) const {
-    return -EOPNOTSUPP;
-  }
-
-  virtual int64_t get_cache_bytes(PriorityCache::Priority pri) const {
-    return cache_bytes[pri];
-  }
-
-  virtual int64_t get_cache_bytes() const {
-    int64_t total = 0;
-
-    for (int i = 0; i < PriorityCache::Priority::LAST + 1; i++) {
-      PriorityCache::Priority pri = static_cast<PriorityCache::Priority>(i);
-      total += get_cache_bytes(pri);
-    }
-    return total;
-  }
-
-  virtual void set_cache_bytes(PriorityCache::Priority pri, int64_t bytes) {
-    cache_bytes[pri] = bytes;
-  }
-
-  virtual void add_cache_bytes(PriorityCache::Priority pri, int64_t bytes) {
-    cache_bytes[pri] += bytes;
-  }
-
-  virtual int64_t commit_cache_size() {
-    return -EOPNOTSUPP;
-  }
-
-  virtual double get_cache_ratio() const {
-    return cache_ratio;
-  }
-
-  virtual void set_cache_ratio(double ratio) {
-    cache_ratio = ratio;
-  }
-
-  virtual string get_cache_name() const {
-    return "Unknown KeyValueDB Cache";
-  } 
-
-  // End PriCache
-
   virtual int set_cache_high_pri_pool_ratio(double ratio) {
     return -EOPNOTSUPP;
   }
@@ -416,10 +360,15 @@ public:
     return -EOPNOTSUPP;
   }
 
+  virtual std::shared_ptr<PriorityCache::PriCache> get_priority_cache() const {
+    return nullptr;
+  }
+
   virtual ~KeyValueDB() {}
 
   /// estimate space utilization for a prefix (in bytes)
-  virtual int64_t estimate_prefix_size(const string& prefix) {
+  virtual int64_t estimate_prefix_size(const string& prefix,
+				       const string& key_prefix) {
     return 0;
   }
 
@@ -463,7 +412,7 @@ public:
     return -EOPNOTSUPP;
   }
 
-  virtual void get_statistics(Formatter *f) {
+  virtual void get_statistics(ceph::Formatter *f) {
     return;
   }
 

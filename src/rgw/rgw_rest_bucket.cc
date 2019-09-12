@@ -1,11 +1,13 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "rgw_op.h"
 #include "rgw_bucket.h"
 #include "rgw_rest_bucket.h"
 
 #include "include/str_list.h"
+
+#include "services/svc_sys_obj.h"
 
 #define dout_subsys ceph_subsys_rgw
 
@@ -107,7 +109,7 @@ void RGWOp_Check_Bucket_Index::execute()
   op_state.set_fix_index(fix_index);
   op_state.set_check_objects(check_objects);
 
-  http_ret = RGWBucketAdminOp::check_index(store, op_state, flusher);
+  http_ret = RGWBucketAdminOp::check_index(store, op_state, flusher, s->yield);
 }
 
 class RGWOp_Bucket_Link : public RGWRESTOp {
@@ -129,17 +131,20 @@ void RGWOp_Bucket_Link::execute()
   std::string uid_str;
   std::string bucket;
   std::string bucket_id;
+  std::string new_bucket_name;
 
   RGWBucketAdminOpState op_state;
 
   RESTArgs::get_string(s, "uid", uid_str, &uid_str);
   RESTArgs::get_string(s, "bucket", bucket, &bucket);
   RESTArgs::get_string(s, "bucket-id", bucket_id, &bucket_id);
+  RESTArgs::get_string(s, "new-bucket-name", new_bucket_name, &new_bucket_name);
 
   rgw_user uid(uid_str);
   op_state.set_user_id(uid);
   op_state.set_bucket_name(bucket);
   op_state.set_bucket_id(bucket_id);
+  op_state.set_new_bucket_name(new_bucket_name);
 
   http_ret = RGWBucketAdminOp::link(store, op_state);
 }
@@ -203,7 +208,7 @@ void RGWOp_Bucket_Remove::execute()
   op_state.set_bucket_name(bucket);
   op_state.set_delete_children(delete_children);
 
-  http_ret = RGWBucketAdminOp::remove_bucket(store, op_state);
+  http_ret = RGWBucketAdminOp::remove_bucket(store, op_state, s->yield);
 }
 
 class RGWOp_Set_Bucket_Quota : public RGWRESTOp {
@@ -262,8 +267,8 @@ void RGWOp_Set_Bucket_Quota::execute()
   if (use_http_params) {
     RGWBucketInfo bucket_info;
     map<string, bufferlist> attrs;
-    RGWObjectCtx obj_ctx(store);
-    http_ret = store->get_bucket_info(obj_ctx, uid.tenant, bucket, bucket_info, NULL, &attrs);
+    auto obj_ctx = store->svc()->sysobj->init_obj_ctx();
+    http_ret = store->getRados()->get_bucket_info(obj_ctx, uid.tenant, bucket, bucket_info, NULL, s->yield, &attrs);
     if (http_ret < 0) {
       return;
     }

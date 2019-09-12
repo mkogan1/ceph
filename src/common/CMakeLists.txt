@@ -4,6 +4,9 @@ add_library(common_buffer_obj OBJECT
 add_library(common_texttable_obj OBJECT
   TextTable.cc)
 
+add_library(common_prioritycache_obj OBJECT
+  PriorityCache.cc)
+
 set(common_srcs
   AsyncOpTracker.cc
   BackTrace.cc
@@ -17,10 +20,9 @@ set(common_srcs
   HeartbeatMap.cc
   LogClient.cc
   LogEntry.cc
-  Mutex.cc
+  ostream_temp.cc
   OutputDataSocket.cc
   PluginRegistry.cc
-  PriorityCache.cc
   Readahead.cc
   SloppyCRCMap.cc
   SubProcess.cc
@@ -40,12 +42,12 @@ set(common_srcs
   ceph_argparse.cc
   ceph_context.cc
   ceph_crypto.cc
-  ceph_crypto_cms.cc
   ceph_frag.cc
   ceph_fs.cc
   ceph_hash.cc
   ceph_json.cc
   ceph_strings.cc
+  ceph_releases.cc
   ceph_time.cc
   cmdparse.cc
   code_environment.cc
@@ -66,7 +68,6 @@ set(common_srcs
   histogram.cc
   hobject.cc
   hostname.cc
-  io_priority.cc
   ipaddr.cc
   iso_8601.cc
   linux_version.c
@@ -74,11 +75,14 @@ set(common_srcs
   mempool.cc
   mime.c
   mutex_debug.cc
+  numa.cc
   options.cc
   page.cc
   perf_counters.cc
+  perf_counters_collection.cc
   perf_histogram.cc
   pick_address.cc
+  rabin.cc
   reverse.c
   run_cmd.cc
   scrub_types.cc
@@ -126,7 +130,8 @@ add_library(common-common-objs OBJECT
 # for options.cc
 target_compile_definitions(common-common-objs PRIVATE
   "CEPH_LIBDIR=\"${CMAKE_INSTALL_FULL_LIBDIR}\""
-  "CEPH_PKGLIBDIR=\"${CMAKE_INSTALL_FULL_PKGLIBDIR}\"")
+  "CEPH_PKGLIBDIR=\"${CEPH_INSTALL_FULL_PKGLIBDIR}\""
+  "CEPH_DATADIR=\"${CEPH_INSTALL_DATADIR}\"")
 
 set(common_mountcephfs_srcs
   armor.c

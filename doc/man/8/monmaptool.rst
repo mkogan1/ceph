@@ -10,7 +10,7 @@ Synopsis
 ========
 
 | **monmaptool** *mapfilename* [ --clobber ] [ --print ] [ --create ]
-  [ --add *ip*:*port* *...* ] [ --rm *ip*:*port* *...* ]
+  [ --add *ip*:*port* *...* ] [ --addv [*protocol*:*ip*:*port*[,*...*] ] *...* ] [ --rm *ip*:*port* *...* ]
 
 
 Description
@@ -53,7 +53,7 @@ Options
 
       #. ``--monmap filename`` to specify a monmap to load
       #. ``--mon-host 'host1,ip2'`` to specify a list of hosts or ip addresses
-      #. ``[mon.foo]`` sections containing ``mon addr`` settings in the config
+      #. ``[mon.foo]`` sections containing ``mon addr`` settings in the config. Note that this method is not recommended and support will be removed in a future release.
 
 .. option:: --filter-initial-members
 
@@ -65,6 +65,10 @@ Options
 .. option:: --add name ip:port
 
    will add a monitor with the specified ip:port to the map.
+
+.. option:: --addv name [protocol:ip:port[,...]]
+
+   will add a monitor with the specified version:ip:port to the map.
 
 .. option:: --rm name
 

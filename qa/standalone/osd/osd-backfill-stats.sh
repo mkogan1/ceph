@@ -55,9 +55,9 @@ function above_margin() {
     return $(( $check >= $target && $check <= $target + $margin ? 0 : 1 ))
 }
 
-FIND_UPACT='grep "pg[[]${PG}.*backfilling.*_update_calc_stats " $log | tail -1 | sed "s/.*[)] \([[][^ p]*\).*$/\1/"'
-FIND_FIRST='grep "pg[[]${PG}.*backfilling.*_update_calc_stats $which " $log | grep -F " ${UPACT}${addp}" | grep -v est | head -1 | sed "s/.* \([0-9]*\)$/\1/"'
-FIND_LAST='grep "pg[[]${PG}.*backfilling.*_update_calc_stats $which " $log | tail -1 | sed "s/.* \([0-9]*\)$/\1/"'
+FIND_UPACT='grep "pg[[]${PG}.*backfilling.*update_calc_stats " $log | tail -1 | sed "s/.*[)] \([[][^ p]*\).*$/\1/"'
+FIND_FIRST='grep "pg[[]${PG}.*backfilling.*update_calc_stats $which " $log | grep -F " ${UPACT}${addp}" | grep -v est | head -1 | sed "s/.* \([0-9]*\)$/\1/"'
+FIND_LAST='grep "pg[[]${PG}.*backfilling.*update_calc_stats $which " $log | tail -1 | sed "s/.* \([0-9]*\)$/\1/"'
 
 function check() {
     local dir=$1
@@ -70,13 +70,17 @@ function check() {
     local misplaced_end=$8
     local primary_start=${9:-}
     local primary_end=${10:-}
+    local check_setup=${11:-true}
 
     local log=$(grep -l +backfilling $dir/osd.$primary.log)
-    test -n "$log" || return 1
-    if [ "$(echo "$log" | wc -w)" != "1" ];
+    if [ $check_setup = "true" ];
     then
-      echo "Test setup failure, a single OSD should have performed backfill"
-      return 1
+      local alllogs=$(grep -l +backfilling $dir/osd.*.log)
+      if [ "$(echo "$alllogs" | wc -w)" != "1" ];
+      then
+        echo "Test setup failure, a single OSD should have performed backfill"
+        return 1
+      fi
     fi
 
     local addp=" "
@@ -478,7 +482,7 @@ function TEST_backfill_remapped() {
 
     local misplaced=$(expr $objects \* 2)
 
-    check $dir $PG $primary replicated 0 0 $misplaced $objects || return 1
+    check $dir $PG $primary replicated 0 0 $misplaced $objects "" "" false || return 1
 
     delete_pool $poolname
     kill_daemons $dir || return 1

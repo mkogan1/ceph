@@ -24,30 +24,65 @@
 
 #define dout_subsys ceph_subsys_mon
 #undef dout_prefix
-#define dout_prefix _prefix(_dout, mon, epoch)
+#define dout_prefix _prefix(_dout, mon, get_epoch())
 static ostream& _prefix(std::ostream *_dout, Monitor *mon, epoch_t epoch) {
   return *_dout << "mon." << mon->name << "@" << mon->rank
 		<< "(" << mon->get_state_name()
 		<< ").elector(" << epoch << ") ";
 }
 
+Elector::Elector(Monitor *m) : logic(this, m->cct),
+					mon(m), elector(this) {}
 
-void Elector::init()
+
+void Elector::persist_epoch(epoch_t e)
 {
-  epoch = mon->store->get(Monitor::MONITOR_NAME, "election_epoch");
-  if (!epoch) {
-    dout(1) << "init, first boot, initializing epoch at 1 " << dendl;
-    epoch = 1;
-  } else if (epoch % 2) {
-    dout(1) << "init, last seen epoch " << epoch
-	    << ", mid-election, bumping" << dendl;
-    ++epoch;
-    auto t(std::make_shared<MonitorDBStore::Transaction>());
-    t->put(Monitor::MONITOR_NAME, "election_epoch", epoch);
-    mon->store->apply_transaction(t);
-  } else {
-    dout(1) << "init, last seen epoch " << epoch << dendl;
-  }
+  auto t(std::make_shared<MonitorDBStore::Transaction>());
+  t->put(Monitor::MONITOR_NAME, "election_epoch", e);
+  mon->store->apply_transaction(t);
+}
+
+epoch_t Elector::read_persisted_epoch() const
+{
+  return mon->store->get(Monitor::MONITOR_NAME, "election_epoch");
+}
+
+void Elector::validate_store()
+{
+  auto t(std::make_shared<MonitorDBStore::Transaction>());
+  t->put(Monitor::MONITOR_NAME, "election_writeable_test", rand());
+  int r = mon->store->apply_transaction(t);
+  ceph_assert(r >= 0);
+}
+
+bool Elector::is_current_member(int rank) const
+{
+  return mon->quorum.count(rank);
+}
+
+void Elector::trigger_new_election()
+{
+  mon->start_election();
+}
+
+int Elector::get_my_rank() const
+{
+  return mon->rank;
+}
+
+void Elector::reset_election()
+{
+  mon->bootstrap();
+}
+
+bool Elector::ever_participated() const
+{
+  return mon->has_ever_joined;
+}
+
+unsigned Elector::paxos_size() const
+{
+  return (unsigned)mon->monmap->size();
 }
 
 void Elector::shutdown()
@@ -55,76 +90,39 @@ void Elector::shutdown()
   cancel_timer();
 }
 
-void Elector::bump_epoch(epoch_t e) 
+void Elector::notify_bump_epoch()
 {
-  dout(10) << "bump_epoch " << epoch << " to " << e << dendl;
-  ceph_assert(epoch <= e);
-  epoch = e;
-  auto t(std::make_shared<MonitorDBStore::Transaction>());
-  t->put(Monitor::MONITOR_NAME, "election_epoch", epoch);
-  mon->store->apply_transaction(t);
-
   mon->join_election();
-
-  // clear up some state
-  electing_me = false;
-  acked_me.clear();
 }
 
-
-void Elector::start()
+void Elector::propose_to_peers(epoch_t e)
 {
-  if (!participating) {
-    dout(0) << "not starting new election -- not participating" << dendl;
-    return;
-  }
-  dout(5) << "start -- can i be leader?" << dendl;
-
-  acked_me.clear();
-  init();
-  
-  // start by trying to elect me
-  if (epoch % 2 == 0) {
-    bump_epoch(epoch+1);  // odd == election cycle
-  } else {
-    // do a trivial db write just to ensure it is writeable.
-    auto t(std::make_shared<MonitorDBStore::Transaction>());
-    t->put(Monitor::MONITOR_NAME, "election_writeable_test", rand());
-    int r = mon->store->apply_transaction(t);
-    ceph_assert(r >= 0);
-  }
-  electing_me = true;
-  acked_me[mon->rank].cluster_features = CEPH_FEATURES_ALL;
-  acked_me[mon->rank].mon_features = ceph::features::mon::get_supported();
-  mon->collect_metadata(&acked_me[mon->rank].metadata);
-  leader_acked = -1;
-
   // bcast to everyone else
   for (unsigned i=0; i<mon->monmap->size(); ++i) {
     if ((int)i == mon->rank) continue;
     MMonElection *m =
-      new MMonElection(MMonElection::OP_PROPOSE, epoch, mon->monmap);
+      new MMonElection(MMonElection::OP_PROPOSE, e, mon->monmap);
     m->mon_features = ceph::features::mon::get_supported();
+    m->mon_release = ceph_release();
     mon->send_mon_message(m, i);
-  }
-  
+  }  
+}
+
+void Elector::_start()
+{
+  peer_info.clear();
+  peer_info[mon->rank].cluster_features = CEPH_FEATURES_ALL;
+  peer_info[mon->rank].mon_release = ceph_release();
+  peer_info[mon->rank].mon_features = ceph::features::mon::get_supported();
+  mon->collect_metadata(&peer_info[mon->rank].metadata);
   reset_timer();
 }
 
-void Elector::defer(int who)
+void Elector::_defer_to(int who)
 {
-  dout(5) << "defer to " << who << dendl;
-
-  if (electing_me) {
-    // drop out
-    acked_me.clear();
-    electing_me = false;
-  }
-
-  // ack them
-  leader_acked = who;
-  MMonElection *m = new MMonElection(MMonElection::OP_ACK, epoch, mon->monmap);
+  MMonElection *m = new MMonElection(MMonElection::OP_ACK, get_epoch(), mon->monmap);
   m->mon_features = ceph::features::mon::get_supported();
+  m->mon_release = ceph_release();
   mon->collect_metadata(&m->metadata);
 
   mon->send_mon_message(m, who);
@@ -154,7 +152,7 @@ void Elector::reset_timer(double plus)
   expire_event = mon->timer.add_event_after(
     g_conf()->mon_election_timeout + plus,
     new C_MonContext(mon, [this](int) {
-	expire();
+	logic.end_election_period();
       }));
 }
 
@@ -167,72 +165,54 @@ void Elector::cancel_timer()
   }
 }
 
-void Elector::expire()
+void Elector::message_victory(const std::set<int>& quorum)
 {
-  dout(5) << "election timer expired" << dendl;
-  
-  // did i win?
-  if (electing_me &&
-      acked_me.size() > (unsigned)(mon->monmap->size() / 2)) {
-    // i win
-    victory();
-  } else {
-    // whoever i deferred to didn't declare victory quickly enough.
-    if (mon->has_ever_joined)
-      start();
-    else
-      mon->bootstrap();
-  }
-}
-
-
-void Elector::victory()
-{
-  leader_acked = -1;
-  electing_me = false;
-
   uint64_t cluster_features = CEPH_FEATURES_ALL;
   mon_feature_t mon_features = ceph::features::mon::get_supported();
-  set<int> quorum;
   map<int,Metadata> metadata;
-  for (map<int, elector_info_t>::iterator p = acked_me.begin();
-       p != acked_me.end();
-       ++p) {
-    quorum.insert(p->first);
-    cluster_features &= p->second.cluster_features;
-    mon_features &= p->second.mon_features;
-    metadata[p->first] = p->second.metadata;
+  ceph_release_t min_mon_release{ceph_release_t::unknown};
+  for (auto id : quorum) {
+    auto i = peer_info.find(id);
+    ceph_assert(i != peer_info.end());
+    auto& info = i->second;
+    cluster_features &= info.cluster_features;
+    mon_features &= info.mon_features;
+    metadata[id] = info.metadata;
+    if (min_mon_release == ceph_release_t::unknown ||
+	info.mon_release < min_mon_release) {
+      min_mon_release = info.mon_release;
+    }
   }
 
   cancel_timer();
   
-  ceph_assert(epoch % 2 == 1);  // election
-  bump_epoch(epoch+1);     // is over!
 
   // tell everyone!
   for (set<int>::iterator p = quorum.begin();
        p != quorum.end();
        ++p) {
     if (*p == mon->rank) continue;
-    MMonElection *m = new MMonElection(MMonElection::OP_VICTORY, epoch,
+    MMonElection *m = new MMonElection(MMonElection::OP_VICTORY, get_epoch(),
 				       mon->monmap);
     m->quorum = quorum;
     m->quorum_features = cluster_features;
     m->mon_features = mon_features;
     m->sharing_bl = mon->get_local_commands_bl(mon_features);
+    m->mon_release = min_mon_release;
     mon->send_mon_message(m, *p);
   }
 
   // tell monitor
-  mon->win_election(epoch, quorum,
-                    cluster_features, mon_features, metadata);
+  mon->win_election(get_epoch(), quorum,
+                    cluster_features, mon_features, min_mon_release,
+		    metadata);
 }
 
 
 void Elector::handle_propose(MonOpRequestRef op)
 {
   op->mark_event("elector:handle_propose");
-  MMonElection *m = static_cast<MMonElection*>(op->get_req());
+  auto m = op->get_req<MMonElection>();
   dout(5) << "handle_propose from " << m->get_source() << dendl;
   int from = m->get_source().num();
 
@@ -252,6 +232,13 @@ void Elector::handle_propose(MonOpRequestRef op)
 	    << " without required features" << dendl;
     nak_old_peer(op);
     return;
+  } else if (mon->monmap->min_mon_release > m->mon_release) {
+    dout(5) << " ignoring propose from mon" << from
+	    << " release " << (int)m->mon_release
+	    << " < min_mon_release " << (int)mon->monmap->min_mon_release
+	    << dendl;
+    nak_old_peer(op);
+    return;
   } else if (!m->mon_features.contains_all(required_mon_features)) {
     // all the features in 'required_mon_features' not in 'm->mon_features'
     mon_feature_t missing = required_mon_features.diff(m->mon_features);
@@ -259,62 +246,18 @@ void Elector::handle_propose(MonOpRequestRef op)
             << " without required mon_features " << missing
             << dendl;
     nak_old_peer(op);
-  } else if (m->epoch > epoch) {
-    bump_epoch(m->epoch);
-  } else if (m->epoch < epoch) {
-    // got an "old" propose,
-    if (epoch % 2 == 0 &&    // in a non-election cycle
-	mon->quorum.count(from) == 0) {  // from someone outside the quorum
-      // a mon just started up, call a new election so they can rejoin!
-      dout(5) << " got propose from old epoch, quorum is " << mon->quorum 
-	      << ", " << m->get_source() << " must have just started" << dendl;
-      // we may be active; make sure we reset things in the monitor appropriately.
-      mon->start_election();
-    } else {
-      dout(5) << " ignoring old propose" << dendl;
-      return;
-    }
   }
-
-  if (mon->rank < from) {
-    // i would win over them.
-    if (leader_acked >= 0) {        // we already acked someone
-      ceph_assert(leader_acked < from);  // and they still win, of course
-      dout(5) << "no, we already acked " << leader_acked << dendl;
-    } else {
-      // wait, i should win!
-      if (!electing_me) {
-	mon->start_election();
-      }
-    }
-  } else {
-    // they would win over me
-    if (leader_acked < 0 ||      // haven't acked anyone yet, or
-	leader_acked > from ||   // they would win over who you did ack, or
-	leader_acked == from) {  // this is the guy we're already deferring to
-      defer(from);
-    } else {
-      // ignore them!
-      dout(5) << "no, we already acked " << leader_acked << dendl;
-    }
-  }
+  logic.receive_propose(from, m->epoch);
 }
 
 void Elector::handle_ack(MonOpRequestRef op)
 {
   op->mark_event("elector:handle_ack");
-  MMonElection *m = static_cast<MMonElection*>(op->get_req());
+  auto m = op->get_req<MMonElection>();
   dout(5) << "handle_ack from " << m->get_source() << dendl;
   int from = m->get_source().num();
 
-  ceph_assert(m->epoch % 2 == 1); // election
-  if (m->epoch > epoch) {
-    dout(5) << "woah, that's a newer epoch, i must have rebooted.  bumping and re-starting!" << dendl;
-    bump_epoch(m->epoch);
-    start();
-    return;
-  }
-  ceph_assert(m->epoch == epoch);
+  ceph_assert(m->epoch == get_epoch());
   uint64_t required_features = mon->get_required_features();
   if ((required_features ^ m->get_connection()->get_features()) &
       required_features) {
@@ -332,63 +275,48 @@ void Elector::handle_ack(MonOpRequestRef op)
     return;
   }
 
-  if (electing_me) {
+  if (logic.electing_me) {
     // thanks
-    acked_me[from].cluster_features = m->get_connection()->get_features();
-    acked_me[from].mon_features = m->mon_features;
-    acked_me[from].metadata = m->metadata;
+    peer_info[from].cluster_features = m->get_connection()->get_features();
+    peer_info[from].mon_features = m->mon_features;
+    peer_info[from].mon_release = m->mon_release;
+    peer_info[from].metadata = m->metadata;
     dout(5) << " so far i have {";
-    for (map<int, elector_info_t>::const_iterator p = acked_me.begin();
-         p != acked_me.end();
-         ++p) {
-      if (p != acked_me.begin())
+    for (auto q = logic.acked_me.begin();
+         q != logic.acked_me.end();
+         ++q) {
+      auto p = peer_info.find(*q);
+      ceph_assert(p != peer_info.end());
+      if (q != logic.acked_me.begin())
         *_dout << ",";
       *_dout << " mon." << p->first << ":"
              << " features " << p->second.cluster_features
              << " " << p->second.mon_features;
     }
     *_dout << " }" << dendl;
-
-    // is that _everyone_?
-    if (acked_me.size() == mon->monmap->size()) {
-      // if yes, shortcut to election finish
-      victory();
-    }
-  } else {
-    // ignore, i'm deferring already.
-    ceph_assert(leader_acked >= 0);
   }
-}
 
+  logic.receive_ack(from, m->epoch);
+}
 
 void Elector::handle_victory(MonOpRequestRef op)
 {
   op->mark_event("elector:handle_victory");
-  MMonElection *m = static_cast<MMonElection*>(op->get_req());
+  auto m = op->get_req<MMonElection>();
   dout(5) << "handle_victory from " << m->get_source()
           << " quorum_features " << m->quorum_features
           << " " << m->mon_features
           << dendl;
   int from = m->get_source().num();
 
-  ceph_assert(from < mon->rank);
-  ceph_assert(m->epoch % 2 == 0);  
+  bool accept_victory = logic.receive_victory_claim(from, m->epoch);
 
-  leader_acked = -1;
-
-  // i should have seen this election if i'm getting the victory.
-  if (m->epoch != epoch + 1) { 
-    dout(5) << "woah, that's a funny epoch, i must have rebooted.  bumping and re-starting!" << dendl;
-    bump_epoch(m->epoch);
-    start();
+  if (!accept_victory) {
     return;
   }
 
-  bump_epoch(m->epoch);
-
-  // they win
-  mon->lose_election(epoch, m->quorum, from,
-                     m->quorum_features, m->mon_features);
+  mon->lose_election(get_epoch(), m->quorum, from,
+                     m->quorum_features, m->mon_features, m->mon_release);
 
   // cancel my timer
   cancel_timer();
@@ -404,21 +332,21 @@ void Elector::handle_victory(MonOpRequestRef op)
 void Elector::nak_old_peer(MonOpRequestRef op)
 {
   op->mark_event("elector:nak_old_peer");
-  MMonElection *m = static_cast<MMonElection*>(op->get_req());
+  auto m = op->get_req<MMonElection>();
   uint64_t supported_features = m->get_connection()->get_features();
   uint64_t required_features = mon->get_required_features();
   mon_feature_t required_mon_features = mon->get_required_mon_features();
   dout(10) << "sending nak to peer " << m->get_source()
-    << " that only supports " << supported_features
-    << " " << m->mon_features
-    << " of the required " << required_features
-    << " " << required_mon_features
-    << dendl;
-
+	   << " supports " << supported_features << " " << m->mon_features
+	   << ", required " << required_features << " " << required_mon_features
+	   << ", release " << (int)m->mon_release
+	   << " vs required " << (int)mon->monmap->min_mon_release
+	   << dendl;
   MMonElection *reply = new MMonElection(MMonElection::OP_NAK, m->epoch,
                                          mon->monmap);
   reply->quorum_features = required_features;
   reply->mon_features = required_mon_features;
+  reply->mon_release = mon->monmap->min_mon_release;
   mon->features.encode(reply->sharing_bl);
   m->get_connection()->send_message(reply);
 }
@@ -426,24 +354,29 @@ void Elector::nak_old_peer(MonOpRequestRef op)
 void Elector::handle_nak(MonOpRequestRef op)
 {
   op->mark_event("elector:handle_nak");
-  MMonElection *m = static_cast<MMonElection*>(op->get_req());
+  auto m = op->get_req<MMonElection>();
   dout(1) << "handle_nak from " << m->get_source()
 	  << " quorum_features " << m->quorum_features
           << " " << m->mon_features
+	  << " min_mon_release " << (int)m->mon_release
           << dendl;
 
-  CompatSet other;
-  auto bi = m->sharing_bl.cbegin();
-  other.decode(bi);
-  CompatSet diff = Monitor::get_supported_features().unsupported(other);
+  if (m->mon_release > ceph_release()) {
+    derr << "Shutting down because I am release " << (int)ceph_release()
+	 << " < min_mon_release " << (int)m->mon_release << dendl;
+  } else {
+    CompatSet other;
+    auto bi = m->sharing_bl.cbegin();
+    other.decode(bi);
+    CompatSet diff = Monitor::get_supported_features().unsupported(other);
 
-  mon_feature_t mon_supported = ceph::features::mon::get_supported();
-  // all features in 'm->mon_features' not in 'mon_supported'
-  mon_feature_t mon_diff = m->mon_features.diff(mon_supported);
+    mon_feature_t mon_supported = ceph::features::mon::get_supported();
+    // all features in 'm->mon_features' not in 'mon_supported'
+    mon_feature_t mon_diff = m->mon_features.diff(mon_supported);
 
-  derr << "Shutting down because I do not support required monitor features: { "
-       << diff << " } " << mon_diff << dendl;
-
+    derr << "Shutting down because I lack required monitor features: { "
+	 << diff << " } " << mon_diff << dendl;
+  }
   exit(0);
   // the end!
 }
@@ -457,7 +390,7 @@ void Elector::dispatch(MonOpRequestRef op)
     
   case MSG_MON_ELECTION:
     {
-      if (!participating) {
+      if (!logic.participating) {
         return;
       }
       if (op->get_req()->get_source().num() >= mon->monmap->size()) {
@@ -466,7 +399,7 @@ void Elector::dispatch(MonOpRequestRef op)
 	return;
       }
 
-      MMonElection *em = static_cast<MMonElection*>(op->get_req());
+      auto em = op->get_req<MMonElection>();
 
       // assume an old message encoding would have matched
       if (em->fsid != mon->monmap->fsid) {
@@ -510,7 +443,7 @@ void Elector::dispatch(MonOpRequestRef op)
 	return;
       }
 
-      if (em->epoch < epoch) {
+      if (em->epoch < get_epoch()) {
 	dout(5) << "old epoch, dropping" << dendl;
 	break;
       }
@@ -538,7 +471,5 @@ void Elector::dispatch(MonOpRequestRef op)
 
 void Elector::start_participating()
 {
-  if (!participating) {
-    participating = true;
-  }
+  logic.participating = true;
 }

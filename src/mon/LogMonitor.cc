@@ -143,26 +143,28 @@ void LogMonitor::update_from_paxos(bool *need_bootstrap)
 		<< " host:" << channels.log_to_graylog_host << dendl;
       }
 
-      string log_file = channels.get_log_file(channel);
-      dout(20) << __func__ << " logging for channel '" << channel
-               << "' to file '" << log_file << "'" << dendl;
+      if (g_conf()->mon_cluster_log_to_file) {
+	string log_file = channels.get_log_file(channel);
+	dout(20) << __func__ << " logging for channel '" << channel
+		 << "' to file '" << log_file << "'" << dendl;
 
-      if (!log_file.empty()) {
-        string log_file_level = channels.get_log_file_level(channel);
-        if (log_file_level.empty()) {
-          dout(1) << __func__ << " warning: log file level not defined for"
-                  << " channel '" << channel << "' yet a log file is --"
-                  << " will assume lowest level possible" << dendl;
-        }
+	if (!log_file.empty()) {
+	  string log_file_level = channels.get_log_file_level(channel);
+	  if (log_file_level.empty()) {
+	    dout(1) << __func__ << " warning: log file level not defined for"
+		    << " channel '" << channel << "' yet a log file is --"
+		    << " will assume lowest level possible" << dendl;
+	  }
 
-	int min = string_to_syslog_level(log_file_level);
-	int l = clog_type_to_syslog_level(le.prio);
-	if (l <= min) {
-	  stringstream ss;
-	  ss << le << "\n";
-          // init entry if DNE
-          bufferlist &blog = channel_blog[channel];
-          blog.append(ss.str());
+	  int min = string_to_syslog_level(log_file_level);
+	  int l = clog_type_to_syslog_level(le.prio);
+	  if (l <= min) {
+	    stringstream ss;
+	    ss << le << "\n";
+	    // init entry if DNE
+	    bufferlist &blog = channel_blog[channel];
+	    blog.append(ss.str());
+	  }
 	}
       }
 
@@ -254,7 +256,7 @@ version_t LogMonitor::get_trim_to() const
 bool LogMonitor::preprocess_query(MonOpRequestRef op)
 {
   op->mark_logmon_event("preprocess_query");
-  PaxosServiceMessage *m = static_cast<PaxosServiceMessage*>(op->get_req());
+  auto m = op->get_req<PaxosServiceMessage>();
   dout(10) << "preprocess_query " << *m << " from " << m->get_orig_source_inst() << dendl;
   switch (m->get_type()) {
   case MSG_MON_COMMAND:
@@ -278,7 +280,7 @@ bool LogMonitor::preprocess_query(MonOpRequestRef op)
 bool LogMonitor::prepare_update(MonOpRequestRef op)
 {
   op->mark_logmon_event("prepare_update");
-  PaxosServiceMessage *m = static_cast<PaxosServiceMessage*>(op->get_req());
+  auto m = op->get_req<PaxosServiceMessage>();
   dout(10) << "prepare_update " << *m << " from " << m->get_orig_source_inst() << dendl;
   switch (m->get_type()) {
   case MSG_MON_COMMAND:
@@ -300,7 +302,7 @@ bool LogMonitor::prepare_update(MonOpRequestRef op)
 bool LogMonitor::preprocess_log(MonOpRequestRef op)
 {
   op->mark_logmon_event("preprocess_log");
-  MLog *m = static_cast<MLog*>(op->get_req());
+  auto m = op->get_req<MLog>();
   dout(10) << "preprocess_log " << *m << " from " << m->get_orig_source() << dendl;
   int num_new = 0;
 
@@ -346,7 +348,7 @@ struct LogMonitor::C_Log : public C_MonOp {
 bool LogMonitor::prepare_log(MonOpRequestRef op) 
 {
   op->mark_logmon_event("prepare_log");
-  MLog *m = static_cast<MLog*>(op->get_req());
+  auto m = op->get_req<MLog>();
   dout(10) << "prepare_log " << *m << " from " << m->get_orig_source() << dendl;
 
   if (m->fsid != mon->monmap->fsid) {
@@ -371,7 +373,7 @@ bool LogMonitor::prepare_log(MonOpRequestRef op)
 
 void LogMonitor::_updated_log(MonOpRequestRef op)
 {
-  MLog *m = static_cast<MLog*>(op->get_req());
+  auto m = op->get_req<MLog>();
   dout(7) << "_updated_log for " << m->get_orig_source_inst() << dendl;
   mon->send_reply(op, new MLogAck(m->fsid, m->entries.rbegin()->seq));
 }
@@ -391,7 +393,7 @@ bool LogMonitor::should_propose(double& delay)
 bool LogMonitor::preprocess_command(MonOpRequestRef op)
 {
   op->mark_logmon_event("preprocess_command");
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   int r = -EINVAL;
   bufferlist rdata;
   stringstream ss;
@@ -446,6 +448,7 @@ bool LogMonitor::preprocess_command(MonOpRequestRef op)
       return entry.prio >= level;
     };
 
+    // Decrement operation that sets to container end when hitting rbegin
     ostringstream ss;
     if (channel == "*") {
       list<LogEntry> full_tail;
@@ -460,7 +463,21 @@ bool LogMonitor::preprocess_command(MonOpRequestRef op)
       if (rp == full_tail.rend()) {
 	--rp;
       }
-      for (; rp != full_tail.rbegin(); --rp) {
+
+      // Decrement a reverse iterator such that going past rbegin()
+      // sets it to rend().  This is for writing a for() loop that
+      // goes up to (and including) rbegin()
+      auto dec = [&rp, &full_tail] () {
+        if (rp == full_tail.rbegin()) {
+          rp = full_tail.rend();
+        } else {
+          --rp;
+        }
+      };
+
+      // Move forward to the end of the container (decrement the reverse
+      // iterator).
+      for (; rp != full_tail.rend(); dec()) {
 	if (!match(*rp)) {
 	  continue;
 	}
@@ -471,7 +488,6 @@ bool LogMonitor::preprocess_command(MonOpRequestRef op)
 	}
       }
     } else {
-      derr << "bar" << dendl;
       auto p = summary.tail_by_channel.find(channel);
       if (p != summary.tail_by_channel.end()) {
 	auto rp = p->second.rbegin();
@@ -483,7 +499,21 @@ bool LogMonitor::preprocess_command(MonOpRequestRef op)
 	if (rp == p->second.rend()) {
 	  --rp;
 	}
-	for (; rp != p->second.rbegin(); --rp) {
+
+        // Decrement a reverse iterator such that going past rbegin()
+        // sets it to rend().  This is for writing a for() loop that
+        // goes up to (and including) rbegin()
+        auto dec = [&rp, &p] () {
+          if (rp == p->second.rbegin()) {
+            rp = p->second.rend();
+          } else {
+            --rp;
+          }
+        };
+
+        // Move forward to the end of the container (decrement the reverse
+        // iterator).
+	for (; rp != p->second.rend(); dec()) {
 	  if (!match(rp->second)) {
 	    continue;
 	  }
@@ -516,7 +546,7 @@ bool LogMonitor::preprocess_command(MonOpRequestRef op)
 bool LogMonitor::prepare_command(MonOpRequestRef op)
 {
   op->mark_logmon_event("prepare_command");
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   stringstream ss;
   string rs;
   int err = -EINVAL;
@@ -612,7 +642,7 @@ void LogMonitor::check_sub(Subscription *s)
     _create_sub_incremental(mlog, sub_level, s->next);
   }
 
-  dout(1) << __func__ << " sending message to " << s->session->name
+  dout(10) << __func__ << " sending message to " << s->session->name
 	  << " with " << mlog->entries.size() << " entries"
 	  << " (version " << mlog->version << ")" << dendl;
   
@@ -687,70 +717,78 @@ void LogMonitor::update_log_channels()
 
   channels.clear();
 
-  int r = get_conf_str_map_helper(g_conf()->mon_cluster_log_to_syslog,
-                                  oss, &channels.log_to_syslog,
-                                  CLOG_CONFIG_DEFAULT_KEY);
+  int r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_to_syslog"),
+    oss, &channels.log_to_syslog,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_to_syslog'" << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_to_syslog_level,
-                              oss, &channels.syslog_level,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_to_syslog_level"),
+    oss, &channels.syslog_level,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_to_syslog_level'"
          << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_to_syslog_facility,
-                              oss, &channels.syslog_facility,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_to_syslog_facility"),
+    oss, &channels.syslog_facility,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_to_syslog_facility'"
          << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_file, oss,
-                              &channels.log_file,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_file"), oss,
+    &channels.log_file,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_file'" << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_file_level, oss,
-                              &channels.log_file_level,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_file_level"), oss,
+    &channels.log_file_level,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_file_level'"
          << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_to_graylog, oss,
-                              &channels.log_to_graylog,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_to_graylog"), oss,
+    &channels.log_to_graylog,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_to_graylog'"
          << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_to_graylog_host, oss,
-                              &channels.log_to_graylog_host,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_to_graylog_host"), oss,
+    &channels.log_to_graylog_host,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_to_graylog_host'"
          << dendl;
     return;
   }
 
-  r = get_conf_str_map_helper(g_conf()->mon_cluster_log_to_graylog_port, oss,
-                              &channels.log_to_graylog_port,
-                              CLOG_CONFIG_DEFAULT_KEY);
+  r = get_conf_str_map_helper(
+    g_conf().get_val<string>("mon_cluster_log_to_graylog_port"), oss,
+    &channels.log_to_graylog_port,
+    CLOG_CONFIG_DEFAULT_KEY);
   if (r < 0) {
     derr << __func__ << " error parsing 'mon_cluster_log_to_graylog_port'"
          << dendl;

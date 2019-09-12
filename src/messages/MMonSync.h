@@ -15,9 +15,7 @@
 
 #include "msg/Message.h"
 
-class MMonSync : public MessageInstance<MMonSync> {
-public:
-  friend factory;
+class MMonSync : public Message {
 private:
   static constexpr int HEAD_VERSION = 2;
   static constexpr int COMPAT_VERSION = 2;
@@ -63,17 +61,17 @@ public:
   entity_inst_t reply_to;
 
   MMonSync()
-    : MessageInstance(MSG_MON_SYNC, HEAD_VERSION, COMPAT_VERSION)
+    : Message{MSG_MON_SYNC, HEAD_VERSION, COMPAT_VERSION}
   { }
 
   MMonSync(uint32_t op, uint64_t c = 0)
-    : MessageInstance(MSG_MON_SYNC, HEAD_VERSION, COMPAT_VERSION),
+    : Message{MSG_MON_SYNC, HEAD_VERSION, COMPAT_VERSION},
       op(op),
       cookie(c),
       last_committed(0)
   { }
 
-  const char *get_type_name() const override { return "mon_sync"; }
+  std::string_view get_type_name() const override { return "mon_sync"; }
 
   void print(ostream& out) const override {
     out << "mon_sync(" << get_opname(op);
@@ -109,6 +107,9 @@ public:
     decode(chunk_bl, p);
     decode(reply_to, p);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif /* CEPH_MMONSYNC_H */

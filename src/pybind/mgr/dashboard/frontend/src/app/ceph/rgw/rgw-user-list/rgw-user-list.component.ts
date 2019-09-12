@@ -1,26 +1,33 @@
 import { Component, ViewChild } from '@angular/core';
 
-import { BsModalService } from 'ngx-bootstrap';
+import { I18n } from '@ngx-translate/i18n-polyfill';
+import { BsModalService } from 'ngx-bootstrap/modal';
 import { forkJoin as observableForkJoin, Observable, Subscriber } from 'rxjs';
 
 import { RgwUserService } from '../../../shared/api/rgw-user.service';
-import { DeletionModalComponent } from '../../../shared/components/deletion-modal/deletion-modal.component';
+import { CriticalConfirmationModalComponent } from '../../../shared/components/critical-confirmation-modal/critical-confirmation-modal.component';
+import { ActionLabelsI18n } from '../../../shared/constants/app.constants';
 import { TableComponent } from '../../../shared/datatable/table/table.component';
 import { CellTemplate } from '../../../shared/enum/cell-template.enum';
+import { Icons } from '../../../shared/enum/icons.enum';
 import { CdTableAction } from '../../../shared/models/cd-table-action';
 import { CdTableColumn } from '../../../shared/models/cd-table-column';
 import { CdTableFetchDataContext } from '../../../shared/models/cd-table-fetch-data-context';
 import { CdTableSelection } from '../../../shared/models/cd-table-selection';
 import { Permission } from '../../../shared/models/permissions';
 import { AuthStorageService } from '../../../shared/services/auth-storage.service';
+import { URLBuilderService } from '../../../shared/services/url-builder.service';
+
+const BASE_URL = 'rgw/user';
 
 @Component({
   selector: 'cd-rgw-user-list',
   templateUrl: './rgw-user-list.component.html',
-  styleUrls: ['./rgw-user-list.component.scss']
+  styleUrls: ['./rgw-user-list.component.scss'],
+  providers: [{ provide: URLBuilderService, useValue: new URLBuilderService(BASE_URL) }]
 })
 export class RgwUserListComponent {
-  @ViewChild(TableComponent)
+  @ViewChild(TableComponent, { static: true })
   table: TableComponent;
 
   permission: Permission;
@@ -32,55 +39,60 @@ export class RgwUserListComponent {
   constructor(
     private authStorageService: AuthStorageService,
     private rgwUserService: RgwUserService,
-    private bsModalService: BsModalService
+    private bsModalService: BsModalService,
+    private i18n: I18n,
+    private urlBuilder: URLBuilderService,
+    public actionLabels: ActionLabelsI18n
   ) {
     this.permission = this.authStorageService.getPermissions().rgw;
     this.columns = [
       {
-        name: 'Username',
-        prop: 'user_id',
+        name: this.i18n('Username'),
+        prop: 'uid',
         flexGrow: 1
       },
       {
-        name: 'Full name',
+        name: this.i18n('Full name'),
         prop: 'display_name',
         flexGrow: 1
       },
       {
-        name: 'Email address',
+        name: this.i18n('Email address'),
         prop: 'email',
         flexGrow: 1
       },
       {
-        name: 'Suspended',
+        name: this.i18n('Suspended'),
         prop: 'suspended',
         flexGrow: 1,
+        cellClass: 'text-center',
         cellTransformation: CellTemplate.checkIcon
       },
       {
-        name: 'Max. buckets',
+        name: this.i18n('Max. buckets'),
         prop: 'max_buckets',
         flexGrow: 1
       }
     ];
-    const getUserUri = () => this.selection.first() && this.selection.first().user_id;
+    const getUserUri = () =>
+      this.selection.first() && `${encodeURIComponent(this.selection.first().uid)}`;
     const addAction: CdTableAction = {
       permission: 'create',
-      icon: 'fa-plus',
-      routerLink: () => '/rgw/user/add',
-      name: 'Add'
+      icon: Icons.add,
+      routerLink: () => this.urlBuilder.getCreate(),
+      name: this.actionLabels.CREATE
     };
     const editAction: CdTableAction = {
       permission: 'update',
-      icon: 'fa-pencil',
-      routerLink: () => `/rgw/user/edit/${getUserUri()}`,
-      name: 'Edit'
+      icon: Icons.edit,
+      routerLink: () => this.urlBuilder.getEdit(getUserUri()),
+      name: this.actionLabels.EDIT
     };
     const deleteAction: CdTableAction = {
       permission: 'delete',
-      icon: 'fa-times',
+      icon: Icons.destroy,
       click: () => this.deleteAction(),
-      name: 'Delete'
+      name: this.actionLabels.DELETE
     };
     this.tableActions = [addAction, editAction, deleteAction];
   }
@@ -101,15 +113,15 @@ export class RgwUserListComponent {
   }
 
   deleteAction() {
-    this.bsModalService.show(DeletionModalComponent, {
+    this.bsModalService.show(CriticalConfirmationModalComponent, {
       initialState: {
-        itemDescription: this.selection.hasSingleSelection ? 'user' : 'users',
+        itemDescription: this.selection.hasSingleSelection ? this.i18n('user') : this.i18n('users'),
         submitActionObservable: (): Observable<any> => {
           return new Observable((observer: Subscriber<any>) => {
             // Delete all selected data table rows.
             observableForkJoin(
               this.selection.selected.map((user: any) => {
-                return this.rgwUserService.delete(user.user_id);
+                return this.rgwUserService.delete(user.uid);
               })
             ).subscribe(
               null,

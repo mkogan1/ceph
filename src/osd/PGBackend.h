@@ -25,6 +25,7 @@
 #include "common/LogClient.h"
 #include <string>
 #include "PGTransaction.h"
+#include "common/ostream_temp.h"
 
 namespace Scrub {
   class Store;
@@ -105,33 +106,33 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
        pg_shard_t peer,
        const hobject_t oid) = 0;
 
-     virtual void failed_push(const list<pg_shard_t> &from, const hobject_t &soid) = 0;
-     virtual void finish_degraded_object(const hobject_t& oid) = 0;
-     virtual void primary_failed(const hobject_t &soid) = 0;
-     virtual bool primary_error(const hobject_t& soid, eversion_t v) = 0;
-     virtual void cancel_pull(const hobject_t &soid) = 0;
-
      virtual void apply_stats(
        const hobject_t &soid,
        const object_stat_sum_t &delta_stats) = 0;
 
      /**
-      * Called when a read on the primary fails when pushing
+      * Called when a read from a set of replicas/primary fails
       */
-     virtual void on_primary_error(
-       const hobject_t &oid,
-       eversion_t v
+     virtual void on_failed_pull(
+       const set<pg_shard_t> &from,
+       const hobject_t &soid,
+       const eversion_t &v
        ) = 0;
 
-     virtual void backfill_add_missing(
+     /**
+      * Called when a pull on soid cannot be completed due to
+      * down peers
+      */
+     virtual void cancel_pull(
+       const hobject_t &soid) = 0;
+
+     /**
+      * Called to remove an object.
+      */
+     virtual void remove_missing_object(
        const hobject_t &oid,
-       eversion_t v
-       ) = 0;
-
-     virtual void remove_missing_object(const hobject_t &oid,
-					eversion_t v,
-					Context *on_complete) = 0;
-
+       eversion_t v,
+       Context *on_complete) = 0;
 
      /**
       * Bless a context
@@ -154,7 +155,6 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
        vector<ObjectStore::Transaction>& tls,
        OpRequestRef op = OpRequestRef()
        ) = 0;
-     virtual epoch_t get_epoch() const = 0;
      virtual epoch_t get_interval_start_epoch() const = 0;
      virtual epoch_t get_last_peering_reset_epoch() const = 0;
 
@@ -171,17 +171,17 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
      virtual void add_local_next_event(const pg_log_entry_t& e) = 0;
      virtual const map<pg_shard_t, pg_missing_t> &get_shard_missing()
        const = 0;
-     virtual boost::optional<const pg_missing_const_i &> maybe_get_shard_missing(
+     virtual const pg_missing_const_i * maybe_get_shard_missing(
        pg_shard_t peer) const {
        if (peer == primary_shard()) {
-	 return get_local_missing();
+	 return &get_local_missing();
        } else {
 	 map<pg_shard_t, pg_missing_t>::const_iterator i =
 	   get_shard_missing().find(peer);
 	 if (i == get_shard_missing().end()) {
-	   return boost::optional<const pg_missing_const_i &>();
+	   return nullptr;
 	 } else {
-	   return i->second;
+	   return &(i->second);
 	 }
        }
      }
@@ -205,7 +205,8 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
 
      virtual const PGLog &get_log() const = 0;
      virtual bool pgb_is_primary() const = 0;
-     virtual OSDMapRef pgb_get_osdmap() const = 0;
+     virtual const OSDMapRef& pgb_get_osdmap() const = 0;
+     virtual epoch_t pgb_get_osdmap_epoch() const = 0;
      virtual const pg_info_t &get_info() const = 0;
      virtual const pg_pool_t &get_pool() const = 0;
 
@@ -227,10 +228,11 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
        const hobject_t &hoid) = 0;
 
      virtual bool pg_is_undersized() const = 0;
+     virtual bool pg_is_repair() const = 0;
 
      virtual void log_operation(
        const vector<pg_log_entry_t> &logv,
-       const boost::optional<pg_hit_set_history_t> &hset_history,
+       const std::optional<pg_hit_set_history_t> &hset_history,
        const eversion_t &trim_to,
        const eversion_t &roll_forward_to,
        bool transaction_applied,
@@ -269,9 +271,7 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
 
      virtual spg_t primary_spg_t() const = 0;
      virtual pg_shard_t primary_shard() const = 0;
-
      virtual uint64_t min_peer_features() const = 0;
-
      virtual hobject_t get_temp_recovery_object(const hobject_t& target,
 						eversion_t version) = 0;
 
@@ -288,13 +288,18 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
 
      virtual ceph_tid_t get_tid() = 0;
 
-     virtual LogClientTemp clog_error() = 0;
-     virtual LogClientTemp clog_warn() = 0;
+     virtual OstreamTemp clog_error() = 0;
+     virtual OstreamTemp clog_warn() = 0;
 
      virtual bool check_failsafe_full() = 0;
 
-     virtual bool check_osdmap_full(const set<pg_shard_t> &missing_on) = 0;
-
+     virtual bool pg_is_repair() = 0;
+     virtual void inc_osd_stat_repaired() = 0;
+     virtual bool pg_is_remote_backfilling() = 0;
+     virtual void pg_add_local_num_bytes(int64_t num_bytes) = 0;
+     virtual void pg_sub_local_num_bytes(int64_t num_bytes) = 0;
+     virtual void pg_add_num_bytes(int64_t num_bytes) = 0;
+     virtual void pg_sub_num_bytes(int64_t num_bytes) = 0;
      virtual bool maybe_preempt_replica_scrub(const hobject_t& oid) = 0;
      virtual ~Listener() {}
    };
@@ -308,7 +313,8 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
      ch(ch),
      parent(l) {}
    bool is_primary() const { return get_parent()->pgb_is_primary(); }
-   OSDMapRef get_osdmap() const { return get_parent()->pgb_get_osdmap(); }
+   const OSDMapRef& get_osdmap() const { return get_parent()->pgb_get_osdmap(); }
+   epoch_t get_osdmap_epoch() const { return get_parent()->pgb_get_osdmap_epoch(); }
    const pg_info_t &get_info() { return get_parent()->get_info(); }
 
    std::ostream& gen_prefix(std::ostream& out) const {
@@ -405,6 +411,8 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
 
    virtual IsPGRecoverablePredicate *get_is_recoverable_predicate() const = 0;
    virtual IsPGReadablePredicate *get_is_readable_predicate() const = 0;
+   virtual int get_ec_data_chunk_count() const { return 0; };
+   virtual int get_ec_stripe_chunk_size() const { return 0; };
 
    virtual void dump_recovery_info(Formatter *f) const = 0;
 
@@ -441,7 +449,7 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
      const eversion_t &roll_forward_to,  ///< [in] trim rollback info to here
      const vector<pg_log_entry_t> &log_entries, ///< [in] log entries for t
      /// [in] hitset history (if updated with this transaction)
-     boost::optional<pg_hit_set_history_t> &hset_history,
+     std::optional<pg_hit_set_history_t> &hset_history,
      Context *on_all_commit,              ///< [in] called when all commit
      ceph_tid_t tid,                      ///< [in] tid
      osd_reqid_t reqid,                   ///< [in] reqid
@@ -481,7 +489,7 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
    /// Reapply old attributes
    void rollback_setattrs(
      const hobject_t &hoid,
-     map<string, boost::optional<bufferlist> > &old_attrs,
+     map<string, std::optional<bufferlist> > &old_attrs,
      ObjectStore::Transaction *t);
 
    /// Truncate object to rollback append
@@ -553,6 +561,14 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
      uint32_t op_flags,
      bufferlist *bl) = 0;
 
+   virtual int objects_readv_sync(
+     const hobject_t &hoid,
+     map<uint64_t, uint64_t>& m,
+     uint32_t op_flags,
+     bufferlist *bl) {
+     return -EOPNOTSUPP;
+   }
+
    virtual void objects_read_async(
      const hobject_t &hoid,
      const list<pair<boost::tuple<uint64_t, uint64_t, uint32_t>,
@@ -587,8 +603,8 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
      map<hobject_t, set<pg_shard_t>> &missing,
      map<hobject_t, set<pg_shard_t>> &inconsistent,
      map<hobject_t, list<pg_shard_t>> &authoritative,
-     map<hobject_t, pair<boost::optional<uint32_t>,
-                         boost::optional<uint32_t>>> &missing_digest,
+     map<hobject_t, pair<std::optional<uint32_t>,
+                         std::optional<uint32_t>>> &missing_digest,
      int &shallow_errors, int &deep_errors,
      Scrub::Store *store,
      const spg_t& pgid,
@@ -601,10 +617,10 @@ typedef std::shared_ptr<const OSDMap> OSDMapRef;
      ScrubMap &map,
      ScrubMapBuilder &pos,
      ScrubMap::object &o) = 0;
-   void be_large_omap_check(
+   void be_omap_checks(
      const map<pg_shard_t,ScrubMap*> &maps,
      const set<hobject_t> &master_set,
-     int& large_omap_objects,
+     omap_stat_t& omap_stats,
      ostream &warnstream) const;
 
    static PGBackend *build_pg_backend(

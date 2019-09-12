@@ -30,6 +30,9 @@ which are as follows:
 :command:`list-crc [prefix]`
     Print CRC of all KV pairs stored with the URL encoded prefix.
 
+:command:`dump [prefix]`
+    Print key and value of all KV pairs stored with the URL encoded prefix.
+
 :command:`exists <prefix> [key]`
     Check if there is any KV pair stored with the URL encoded prefix. If key
     is also specified, check for the key with the prefix instead.
@@ -76,6 +79,11 @@ which are as follows:
     Make a (potentially destructive) effort to recover a corrupted database.
     Note that in the case of rocksdb this may corrupt an otherwise uncorrupted
     database--use this only as a last resort!
+
+:command:`stats`
+    Prints statistics from underlying key-value database. This is only for informative purposes.
+    Format and information content may vary between releases. For RocksDB information includes
+    compactions stats, performance counters, memory usage and internal RocksDB stats. 
 
 Availability
 ============

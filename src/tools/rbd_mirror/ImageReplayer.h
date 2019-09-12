@@ -5,7 +5,7 @@
 #define CEPH_RBD_MIRROR_IMAGE_REPLAYER_H
 
 #include "common/AsyncOpTracker.h"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 #include "common/WorkQueue.h"
 #include "include/rados/librados.hpp"
 #include "cls/journal/cls_journal_types.h"
@@ -29,8 +29,11 @@
 #include <vector>
 
 class AdminSocketHook;
+class PerfCounters;
 
 namespace journal {
+
+struct CacheManagerHandler;
 
 class Journaler;
 class ReplayHandler;
@@ -62,10 +65,12 @@ class ImageReplayer {
 public:
   static ImageReplayer *create(
     Threads<ImageCtxT> *threads, InstanceWatcher<ImageCtxT> *instance_watcher,
-    RadosRef local, const std::string &local_mirror_uuid, int64_t local_pool_id,
+    journal::CacheManagerHandler *cache_manager_handler, RadosRef local,
+    const std::string &local_mirror_uuid, int64_t local_pool_id,
     const std::string &global_image_id) {
-    return new ImageReplayer(threads, instance_watcher, local,
-                             local_mirror_uuid, local_pool_id, global_image_id);
+    return new ImageReplayer(threads, instance_watcher, cache_manager_handler,
+                             local, local_mirror_uuid, local_pool_id,
+                             global_image_id);
   }
   void destroy() {
     delete this;
@@ -73,31 +78,32 @@ public:
 
   ImageReplayer(Threads<ImageCtxT> *threads,
                 InstanceWatcher<ImageCtxT> *instance_watcher,
+                journal::CacheManagerHandler *cache_manager_handler,
                 RadosRef local, const std::string &local_mirror_uuid,
                 int64_t local_pool_id, const std::string &global_image_id);
   virtual ~ImageReplayer();
   ImageReplayer(const ImageReplayer&) = delete;
   ImageReplayer& operator=(const ImageReplayer&) = delete;
 
-  bool is_stopped() { Mutex::Locker l(m_lock); return is_stopped_(); }
-  bool is_running() { Mutex::Locker l(m_lock); return is_running_(); }
-  bool is_replaying() { Mutex::Locker l(m_lock); return is_replaying_(); }
+  bool is_stopped() { std::lock_guard l{m_lock}; return is_stopped_(); }
+  bool is_running() { std::lock_guard l{m_lock}; return is_running_(); }
+  bool is_replaying() { std::lock_guard l{m_lock}; return is_replaying_(); }
 
-  std::string get_name() { Mutex::Locker l(m_lock); return m_name; };
+  std::string get_name() { std::lock_guard l{m_lock}; return m_name; };
   void set_state_description(int r, const std::string &desc);
 
   // TODO temporary until policy handles release of image replayers
   inline bool is_finished() const {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     return m_finished;
   }
   inline void set_finished(bool finished) {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     m_finished = finished;
   }
 
   inline bool is_blacklisted() const {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker{m_lock};
     return (m_last_r == -EBLACKLISTED);
   }
 
@@ -116,7 +122,7 @@ public:
   void stop(Context *on_finish = nullptr, bool manual = false,
 	    int r = 0, const std::string& desc = "");
   void restart(Context *on_finish = nullptr);
-  void flush(Context *on_finish = nullptr);
+  void flush();
 
   void resync_image(Context *on_finish=nullptr);
 
@@ -198,13 +204,9 @@ protected:
 
   virtual void on_start_fail(int r, const std::string &desc);
   virtual bool on_start_interrupted();
+  virtual bool on_start_interrupted(ceph::mutex& lock);
 
   virtual void on_stop_journal_replay(int r = 0, const std::string &desc = "");
-
-  virtual void on_flush_local_replay_flush_start(Context *on_flush);
-  virtual void on_flush_local_replay_flush_finish(Context *on_flush, int r);
-  virtual void on_flush_flush_commit_position_start(Context *on_flush);
-  virtual void on_flush_flush_commit_position_finish(Context *on_flush, int r);
 
   bool on_replay_interrupted();
 
@@ -270,6 +272,7 @@ private:
 
   Threads<ImageCtxT> *m_threads;
   InstanceWatcher<ImageCtxT> *m_instance_watcher;
+  journal::CacheManagerHandler *m_cache_manager_handler;
 
   Peers m_peers;
   RemoteImage m_remote_image;
@@ -282,7 +285,7 @@ private:
   std::string m_local_image_name;
   std::string m_name;
 
-  mutable Mutex m_lock;
+  mutable ceph::mutex m_lock;
   State m_state = STATE_STOPPED;
   std::string m_state_desc;
 
@@ -318,6 +321,7 @@ private:
   bool m_manual_stop = false;
 
   AdminSocketHook *m_asok_hook = nullptr;
+  PerfCounters *m_perf_counters = nullptr;
 
   image_replayer::BootstrapRequest<ImageCtxT> *m_bootstrap_request = nullptr;
 
@@ -330,6 +334,7 @@ private:
   librbd::journal::MirrorPeerClientMeta m_client_meta;
 
   ReplayEntry m_replay_entry;
+  utime_t m_replay_start_time;
   bool m_replay_tag_valid = false;
   uint64_t m_replay_tag_tid = 0;
   cls::journal::Tag m_replay_tag;
@@ -349,13 +354,16 @@ private:
   struct C_ReplayCommitted : public Context {
     ImageReplayer *replayer;
     ReplayEntry replay_entry;
+    utime_t replay_start_time;
 
     C_ReplayCommitted(ImageReplayer *replayer,
-                      ReplayEntry &&replay_entry)
-      : replayer(replayer), replay_entry(std::move(replay_entry)) {
+                      ReplayEntry &&replay_entry,
+                      const utime_t &replay_start_time)
+      : replayer(replayer), replay_entry(std::move(replay_entry)),
+        replay_start_time(replay_start_time) {
     }
     void finish(int r) override {
-      replayer->handle_process_entry_safe(replay_entry, r);
+      replayer->handle_process_entry_safe(replay_entry, replay_start_time, r);
     }
   };
 
@@ -371,6 +379,12 @@ private:
     return (m_state == STATE_REPLAYING ||
             m_state == STATE_REPLAY_FLUSHING);
   }
+
+  void flush_local_replay(Context* on_flush);
+  void handle_flush_local_replay(Context* on_flush, int r);
+
+  void flush_commit_position(Context* on_flush);
+  void handle_flush_commit_position(Context* on_flush, int r);
 
   bool update_mirror_image_status(bool force, const OptionalState &state);
   bool start_mirror_image_status_update(bool force, bool restarting);
@@ -414,7 +428,8 @@ private:
 
   void process_entry();
   void handle_process_entry_ready(int r);
-  void handle_process_entry_safe(const ReplayEntry& replay_entry, int r);
+  void handle_process_entry_safe(const ReplayEntry& replay_entry,
+                                 const utime_t &m_replay_start_time, int r);
 
   void register_admin_socket_hook();
   void unregister_admin_socket_hook();

@@ -35,21 +35,23 @@ namespace mutex_debug_detail {
 class mutex_debugging_base
 {
 protected:
-  std::string name;
-  int id;
+  std::string group;
+  int id = -1;
+  bool lockdep;   // track this mutex using lockdep_*
   bool backtrace; // gather backtrace on lock acquisition
 
-  int nlock;
-  std::thread::id locked_by;
+  int nlock = 0;
+  std::thread::id locked_by = {};
 
-
+  bool _enable_lockdep() const {
+    return lockdep && g_lockdep;
+  }
   void _register();
   void _will_lock(bool recursive=false); // about to lock
   void _locked(); // just locked
   void _will_unlock(); // about to unlock
 
-  mutex_debugging_base(const std::string &n, bool bt = false);
-  mutex_debugging_base(const char *n, bool bt = false);
+  mutex_debugging_base(std::string group, bool ld = true, bool bt = false);
   ~mutex_debugging_base();
 
 public:
@@ -85,16 +87,21 @@ private:
     ceph_assert(r == 0);
   }
 
+  bool enable_lockdep(bool no_lockdep) const {
+    if (recursive) {
+      return false;
+    } else if (no_lockdep) {
+      return false;
+    } else {
+      return _enable_lockdep();
+    }
+  }
+
 public:
   static constexpr bool recursive = Recursive;
 
-  // Mutex concept is DefaultConstructible
-  mutex_debug_impl(const std::string &n, bool bt = false)
-    : mutex_debugging_base(n, bt) {
-    _init();
-  }
-  mutex_debug_impl(const char *n, bool bt = false)
-    : mutex_debugging_base(n, bt) {
+  mutex_debug_impl(std::string group, bool ld = true, bool bt = false)
+    : mutex_debugging_base(group, ld, bt) {
     _init();
   }
 
@@ -163,7 +170,7 @@ public:
   bool try_lock(bool no_lockdep = false) {
     bool locked = try_lock_impl();
     if (locked) {
-      if (g_lockdep && !no_lockdep)
+      if (enable_lockdep(no_lockdep))
 	_locked();
       _post_lock();
     }
@@ -171,21 +178,21 @@ public:
   }
 
   void lock(bool no_lockdep = false) {
-    if (g_lockdep && !no_lockdep)
+    if (enable_lockdep(no_lockdep))
       _will_lock(recursive);
 
-    if (try_lock())
+    if (try_lock(no_lockdep))
       return;
 
     lock_impl();
-    if (!no_lockdep && g_lockdep)
+    if (enable_lockdep(no_lockdep))
       _locked();
     _post_lock();
   }
 
   void unlock(bool no_lockdep = false) {
     _pre_unlock();
-    if (!no_lockdep && g_lockdep)
+    if (enable_lockdep(no_lockdep))
       _will_unlock();
     unlock_impl();
   }

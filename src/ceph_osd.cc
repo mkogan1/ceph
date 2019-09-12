@@ -35,6 +35,7 @@
 #include "common/Timer.h"
 #include "common/TracepointProvider.h"
 #include "common/ceph_argparse.h"
+#include "common/numa.h"
 
 #include "global/global_init.h"
 #include "global/signal_handler.h"
@@ -87,6 +88,7 @@ static void usage()
        << "  --convert-filestore\n"
        << "                    run any pending upgrade operations\n"
        << "  --flush-journal   flush all data out of journal\n"
+       << "  --dump-journal    dump all data of journal\n"
        << "  --mkjournal       initialize a new journal\n"
        << "  --check-wants-journal\n"
        << "                    check whether a journal is desired\n"
@@ -265,7 +267,7 @@ int main(int argc, const char **argv)
   }
 
   // the store
-  std::string store_type = g_conf().get_val<std::string>("osd_objectstore");
+  std::string store_type;
   {
     char fn[PATH_MAX];
     snprintf(fn, sizeof(fn), "%s/type", data_path.c_str());
@@ -278,6 +280,29 @@ int main(int argc, const char **argv)
 	dout(5) << "object store type is " << store_type << dendl;
       }
       ::close(fd);
+    } else if (mkfs) {
+      store_type = g_conf().get_val<std::string>("osd_objectstore");
+    } else {
+      // hrm, infer the type
+      snprintf(fn, sizeof(fn), "%s/current", data_path.c_str());
+      struct stat st;
+      if (::stat(fn, &st) == 0 &&
+	  S_ISDIR(st.st_mode)) {
+	derr << "missing 'type' file, inferring filestore from current/ dir"
+	     << dendl;
+	store_type = "filestore";
+      } else {
+	snprintf(fn, sizeof(fn), "%s/block", data_path.c_str());
+	if (::stat(fn, &st) == 0 &&
+	    S_ISLNK(st.st_mode)) {
+	  derr << "missing 'type' file, inferring bluestore from block symlink"
+	       << dendl;
+	  store_type = "bluestore";
+	} else {
+	  derr << "missing 'type' file and unable to infer osd type" << dendl;
+	  forker.exit(1);
+	}
+      }
     }
   }
 
@@ -296,25 +321,21 @@ int main(int argc, const char **argv)
 
   if (mkkey) {
     common_init_finish(g_ceph_context);
-    KeyRing *keyring = KeyRing::create_empty();
-    if (!keyring) {
-      derr << "Unable to get a Ceph keyring." << dendl;
-      forker.exit(1);
-    }
+    KeyRing keyring;
 
     EntityName ename{g_conf()->name};
     EntityAuth eauth;
 
     std::string keyring_path = g_conf().get_val<std::string>("keyring");
-    int ret = keyring->load(g_ceph_context, keyring_path);
+    int ret = keyring.load(g_ceph_context, keyring_path);
     if (ret == 0 &&
-	keyring->get_auth(ename, eauth)) {
+	keyring.get_auth(ename, eauth)) {
       derr << "already have key in keyring " << keyring_path << dendl;
     } else {
       eauth.key.create(g_ceph_context, CEPH_CRYPTO_AES);
-      keyring->add(ename, eauth);
+      keyring.add(ename, eauth);
       bufferlist bl;
-      keyring->encode_plaintext(bl);
+      keyring.encode_plaintext(bl);
       int r = bl.write_file(keyring_path.c_str(), 0600);
       if (r)
 	derr << TEXT_RED << " ** ERROR: writing new keyring to "
@@ -439,8 +460,10 @@ flushjournal_out:
   
   string magic;
   uuid_d cluster_fsid, osd_fsid;
+  ceph_release_t require_osd_release = ceph_release_t::unknown;
   int w;
-  int r = OSD::peek_meta(store, magic, cluster_fsid, osd_fsid, w);
+  int r = OSD::peek_meta(store, &magic, &cluster_fsid, &osd_fsid, &w,
+			 &require_osd_release);
   if (r < 0) {
     derr << TEXT_RED << " ** ERROR: unable to open OSD superblock on "
 	 << data_path << ": " << cpp_strerror(-r)
@@ -470,6 +493,27 @@ flushjournal_out:
     forker.exit(0);
   }
 
+  {
+    auto from_release = require_osd_release;
+    ostringstream err;
+    if (!can_upgrade_from(from_release, "require_osd_release", err)) {
+      derr << err.str() << dendl;
+      forker.exit(1);
+    }
+  }
+
+  // consider objectstore numa node
+  int os_numa_node = -1;
+  r = store->get_numa_node(&os_numa_node, nullptr, nullptr);
+  if (r >= 0 && os_numa_node >= 0) {
+    dout(1) << " objectstore numa_node " << os_numa_node << dendl;
+  }
+  int iface_preferred_numa_node = -1;
+  if (g_conf().get_val<bool>("osd_numa_prefer_iface")) {
+    iface_preferred_numa_node = os_numa_node;
+  }
+
+  // messengers
   std::string msg_type = g_conf().get_val<std::string>("ms_type");
   std::string public_msg_type =
     g_conf().get_val<std::string>("ms_public_type");
@@ -560,12 +604,14 @@ flushjournal_out:
   ms_objecter->set_default_policy(Messenger::Policy::lossy_client(CEPH_FEATURE_OSDREPLYMUX));
 
   entity_addrvec_t public_addrs, cluster_addrs;
-  r = pick_addresses(g_ceph_context, CEPH_PICK_ADDRESS_PUBLIC, &public_addrs);
+  r = pick_addresses(g_ceph_context, CEPH_PICK_ADDRESS_PUBLIC, &public_addrs,
+		     iface_preferred_numa_node);
   if (r < 0) {
     derr << "Failed to pick public address." << dendl;
     forker.exit(1);
   }
-  r = pick_addresses(g_ceph_context, CEPH_PICK_ADDRESS_CLUSTER, &cluster_addrs);
+  r = pick_addresses(g_ceph_context, CEPH_PICK_ADDRESS_CLUSTER, &cluster_addrs,
+		     iface_preferred_numa_node);
   if (r < 0) {
     derr << "Failed to pick cluster address." << dendl;
     forker.exit(1);

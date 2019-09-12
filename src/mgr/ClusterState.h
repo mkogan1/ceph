@@ -16,7 +16,7 @@
 
 #include "mds/FSMap.h"
 #include "mon/MgrMap.h"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 
 #include "osdc/Objecter.h"
 #include "mon/MonClient.h"
@@ -39,7 +39,7 @@ protected:
   Objecter *objecter;
   FSMap fsmap;
   ServiceMap servicemap;
-  mutable Mutex lock;
+  mutable ceph::mutex lock = ceph::make_mutex("ClusterState");
 
   MgrMap mgr_map;
 
@@ -50,10 +50,12 @@ protected:
   bufferlist health_json;
   bufferlist mon_status_json;
 
+  class ClusterSocketHook *asok_hook;
+
 public:
 
   void load_digest(MMgrDigest *m);
-  void ingest_pgstats(MPGStats *stats);
+  void ingest_pgstats(ceph::ref_t<MPGStats> stats);
 
   void update_delta_stats();
 
@@ -127,6 +129,20 @@ public:
     return objecter->with_osdmap(std::forward<Args>(args)...);
   }
 
+  // call cb(osdmap, pg_map, ...args) with the appropriate locks
+  template <typename Callback, typename ...Args>
+  auto with_osdmap_and_pgmap(Callback&& cb, Args&& ...args) const {
+    ceph_assert(objecter != nullptr);
+    std::lock_guard l(lock);
+    return objecter->with_osdmap(
+      std::forward<Callback>(cb),
+      pg_map,
+      std::forward<Args>(args)...);
+  }
+  void final_init();
+  void shutdown();
+  bool asok_command(std::string_view admin_command, const cmdmap_t& cmdmap,
+		       std::string_view format, ostream& ss);
 };
 
 #endif

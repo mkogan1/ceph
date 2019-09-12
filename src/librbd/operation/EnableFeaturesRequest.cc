@@ -38,7 +38,7 @@ template <typename I>
 void EnableFeaturesRequest<I>::send_op() {
   I &image_ctx = this->m_image_ctx;
   CephContext *cct = image_ctx.cct;
-  ceph_assert(image_ctx.owner_lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(image_ctx.owner_lock));
 
   ldout(cct, 20) << this << " " << __func__ << ": features=" << m_features
 		 << dendl;
@@ -90,7 +90,7 @@ void EnableFeaturesRequest<I>::send_block_writes() {
   CephContext *cct = image_ctx.cct;
   ldout(cct, 20) << this << " " << __func__ << dendl;
 
-  RWLock::WLocker locker(image_ctx.owner_lock);
+  std::unique_lock locker{image_ctx.owner_lock};
   image_ctx.io_work_queue->block_writes(create_context_callback<
     EnableFeaturesRequest<I>,
     &EnableFeaturesRequest<I>::handle_block_writes>(this));
@@ -163,7 +163,7 @@ Context *EnableFeaturesRequest<I>::handle_get_mirror_mode(int *result) {
 
   bool create_journal = false;
   do {
-    RWLock::WLocker locker(image_ctx.owner_lock);
+    std::unique_lock locker{image_ctx.owner_lock};
 
     // avoid accepting new requests from peers while we manipulate
     // the image features
@@ -175,6 +175,13 @@ Context *EnableFeaturesRequest<I>::handle_get_mirror_mode(int *result) {
     }
 
     m_features &= ~image_ctx.features;
+
+    // interlock object-map and fast-diff together
+    if (((m_features & RBD_FEATURE_OBJECT_MAP) != 0) ||
+        ((m_features & RBD_FEATURE_FAST_DIFF) != 0)) {
+      m_features |= (RBD_FEATURE_OBJECT_MAP | RBD_FEATURE_FAST_DIFF);
+    }
+
     m_new_features = image_ctx.features | m_features;
     m_features_mask = m_features;
 
@@ -186,12 +193,13 @@ Context *EnableFeaturesRequest<I>::handle_get_mirror_mode(int *result) {
 	break;
       }
       m_enable_flags |= RBD_FLAG_OBJECT_MAP_INVALID;
-      m_features_mask |= RBD_FEATURE_EXCLUSIVE_LOCK;
+      m_features_mask |= (RBD_FEATURE_EXCLUSIVE_LOCK | RBD_FEATURE_FAST_DIFF);
     }
     if ((m_features & RBD_FEATURE_FAST_DIFF) != 0) {
       m_enable_flags |= RBD_FLAG_FAST_DIFF_INVALID;
-      m_features_mask |= (RBD_FEATURE_OBJECT_MAP | RBD_FEATURE_EXCLUSIVE_LOCK);
+      m_features_mask |= (RBD_FEATURE_EXCLUSIVE_LOCK | RBD_FEATURE_OBJECT_MAP);
     }
+
     if ((m_features & RBD_FEATURE_JOURNALING) != 0) {
       if ((m_new_features & RBD_FEATURE_EXCLUSIVE_LOCK) == 0) {
 	lderr(cct) << "cannot enable journaling. exclusive-lock must be "
@@ -461,7 +469,7 @@ Context *EnableFeaturesRequest<I>::handle_finish(int r) {
   ldout(cct, 20) << this << " " << __func__ << ": r=" << r << dendl;
 
   {
-    RWLock::WLocker locker(image_ctx.owner_lock);
+    std::unique_lock locker{image_ctx.owner_lock};
 
     if (image_ctx.exclusive_lock != nullptr && m_requests_blocked) {
       image_ctx.exclusive_lock->unblock_requests();

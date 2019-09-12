@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 
+import * as _ from 'lodash';
 import { ApiModule } from './api.module';
 
 @Injectable({
@@ -9,7 +10,41 @@ import { ApiModule } from './api.module';
 export class SettingsService {
   constructor(private http: HttpClient) {}
 
-  getGrafanaApiUrl() {
-    return this.http.get('api/settings/GRAFANA_API_URL');
+  private settings: { [url: string]: string } = {};
+
+  ifSettingConfigured(url: string, fn: (value?: string) => void, elseFn?: () => void): void {
+    const setting = this.settings[url];
+    if (setting === undefined) {
+      this.http.get(url).subscribe(
+        (data: any) => {
+          this.settings[url] = this.getSettingsValue(data);
+          this.ifSettingConfigured(url, fn, elseFn);
+        },
+        (resp) => {
+          if (resp.status !== 401) {
+            this.settings[url] = '';
+          }
+        }
+      );
+    } else if (setting !== '') {
+      fn(setting);
+    } else {
+      if (elseFn) {
+        elseFn();
+      }
+    }
+  }
+
+  // Easiest way to stop reloading external content that can't be reached
+  disableSetting(url) {
+    this.settings[url] = '';
+  }
+
+  private getSettingsValue(data: any): string {
+    return data.value || data.instance || '';
+  }
+
+  validateGrafanaDashboardUrl(uid) {
+    return this.http.get(`api/grafana/validation/${uid}`);
   }
 }

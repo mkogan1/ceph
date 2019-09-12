@@ -2,6 +2,7 @@
 #define CEPH_MDSCACHEOBJECT_H
 
 #include <ostream>
+#include <string_view>
 
 #include "common/config.h"
 
@@ -22,7 +23,7 @@
 class MLock;
 class SimpleLock;
 class MDSCacheObject;
-class MDSInternalContextBase;
+class MDSContext;
 
 /*
  * for metadata leases to clients
@@ -69,7 +70,7 @@ class MDSCacheObject {
   static const int PIN_CLIENTLEASE = 1009;
   static const int PIN_DISCOVERBASE = 1010;
 
-  const char *generic_pin_name(int p) const {
+  std::string_view generic_pin_name(int p) const {
     switch (p) {
     case PIN_REPLICATED: return "replicated";
     case PIN_DIRTY: return "dirty";
@@ -82,7 +83,7 @@ class MDSCacheObject {
     case PIN_TEMPEXPORTING: return "tempexporting";
     case PIN_CLIENTLEASE: return "clientlease";
     case PIN_DISCOVERBASE: return "discoverbase";
-    default: ceph_abort(); return 0;
+    default: ceph_abort(); return std::string_view();
     }
   }
 
@@ -157,7 +158,7 @@ protected:
 #endif
     return ref;
   }
-  virtual const char *pin_name(int by) const = 0;
+  virtual std::string_view pin_name(int by) const = 0;
   //bool is_pinned_by(int by) { return ref_set.count(by); }
   //multiset<int>& get_ref_set() { return ref_set; }
 
@@ -216,17 +217,14 @@ protected:
 #endif
   }
 
-  protected:
+protected:
   int auth_pins = 0;
-  int nested_auth_pins = 0;
 #ifdef MDS_AUTHPIN_SET
   mempool::mds_co::multiset<void*> auth_pin_set;
 #endif
 
-  public:
-  bool is_auth_pinned() const { return auth_pins || nested_auth_pins; }
+public:
   int get_num_auth_pins() const { return auth_pins; }
-  int get_num_nested_auth_pins() const { return nested_auth_pins; }
 #ifdef MDS_AUTHPIN_SET
   void print_authpin_set(std::ostream& out) const {
     out << " (" << auth_pin_set << ")";
@@ -309,7 +307,7 @@ protected:
   // ---------------------------------------------
   // waiting
  private:
-  mempool::mds_co::compact_multimap<uint64_t, std::pair<uint64_t, MDSInternalContextBase*>> waiting;
+  mempool::mds_co::compact_multimap<uint64_t, std::pair<uint64_t, MDSContext*>> waiting;
   static uint64_t last_wait_seq;
 
  public:
@@ -325,7 +323,7 @@ protected:
     }
     return false;
   }
-  virtual void add_waiter(uint64_t mask, MDSInternalContextBase *c) {
+  virtual void add_waiter(uint64_t mask, MDSContext *c) {
     if (waiting.empty())
       get(PIN_WAITER);
 
@@ -334,20 +332,20 @@ protected:
       seq = ++last_wait_seq;
       mask &= ~WAIT_ORDERED;
     }
-    waiting.insert(pair<uint64_t, pair<uint64_t, MDSInternalContextBase*> >(
+    waiting.insert(pair<uint64_t, pair<uint64_t, MDSContext*> >(
 			    mask,
-			    pair<uint64_t, MDSInternalContextBase*>(seq, c)));
+			    pair<uint64_t, MDSContext*>(seq, c)));
 //    pdout(10,g_conf()->debug_mds) << (mdsco_db_line_prefix(this)) 
 //			       << "add_waiter " << hex << mask << dec << " " << c
 //			       << " on " << *this
 //			       << dendl;
     
   }
-  virtual void take_waiting(uint64_t mask, MDSInternalContextBase::vec& ls) {
+  virtual void take_waiting(uint64_t mask, MDSContext::vec& ls) {
     if (waiting.empty()) return;
 
     // process ordered waiters in the same order that they were added.
-    std::map<uint64_t, MDSInternalContextBase*> ordered_waiters;
+    std::map<uint64_t, MDSContext*> ordered_waiters;
 
     for (auto it = waiting.begin(); it != waiting.end(); ) {
       if (it->first & mask) {
@@ -388,7 +386,7 @@ protected:
   virtual void encode_lock_state(int type, bufferlist& bl) { ceph_abort(); }
   virtual void decode_lock_state(int type, const bufferlist& bl) { ceph_abort(); }
   virtual void finish_lock_waiters(int type, uint64_t mask, int r=0) { ceph_abort(); }
-  virtual void add_lock_waiter(int type, uint64_t mask, MDSInternalContextBase *c) { ceph_abort(); }
+  virtual void add_lock_waiter(int type, uint64_t mask, MDSContext *c) { ceph_abort(); }
   virtual bool is_lock_waiting(int type, uint64_t mask) { ceph_abort(); return false; }
 
   virtual void clear_dirty_scattered(int type) { ceph_abort(); }

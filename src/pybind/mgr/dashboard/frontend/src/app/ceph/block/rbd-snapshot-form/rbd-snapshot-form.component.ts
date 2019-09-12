@@ -1,7 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { FormControl, Validators } from '@angular/forms';
 
-import { BsModalRef } from 'ngx-bootstrap';
+import { BsModalRef } from 'ngx-bootstrap/modal';
 import { Subject } from 'rxjs';
 
 import { RbdService } from '../../../shared/api/rbd.service';
@@ -73,7 +73,7 @@ export class RbdSnapshotFormComponent implements OnInit {
     this.rbdService
       .renameSnapshot(this.poolName, this.imageName, this.snapName, snapshotName)
       .toPromise()
-      .then((resp) => {
+      .then(() => {
         this.taskManagerService.subscribe(
           finishedTask.name,
           finishedTask.metadata,
@@ -84,7 +84,7 @@ export class RbdSnapshotFormComponent implements OnInit {
         this.modalRef.hide();
         this.onSubmit.next(this.snapName);
       })
-      .catch((resp) => {
+      .catch(() => {
         this.snapshotForm.setErrors({ cdSubmitButton: true });
       });
   }
@@ -101,7 +101,7 @@ export class RbdSnapshotFormComponent implements OnInit {
     this.rbdService
       .createSnapshot(this.poolName, this.imageName, snapshotName)
       .toPromise()
-      .then((resp) => {
+      .then(() => {
         this.taskManagerService.subscribe(
           finishedTask.name,
           finishedTask.metadata,
@@ -112,7 +112,7 @@ export class RbdSnapshotFormComponent implements OnInit {
         this.modalRef.hide();
         this.onSubmit.next(snapshotName);
       })
-      .catch((resp) => {
+      .catch(() => {
         this.snapshotForm.setErrors({ cdSubmitButton: true });
       });
   }

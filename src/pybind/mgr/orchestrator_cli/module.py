@@ -1,201 +1,405 @@
 import errno
-import time
-from mgr_module import MgrModule
+import json
+
+from prettytable import PrettyTable
+
+try:
+    from typing import Dict, List
+except ImportError:
+    pass  # just for type checking.
+
+from functools import wraps
+
+from ceph.deployment.drive_group import DriveGroupSpec, DriveGroupValidationError, \
+    DeviceSelection
+from mgr_module import MgrModule, CLICommand, HandleCommandResult
 
 import orchestrator
 
 
-class NoOrchestrator(Exception):
-    pass
+def handle_exception(prefix, cmd_args, desc, perm, func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (orchestrator.OrchestratorError, ImportError) as e:
+            # Do not print Traceback for expected errors.
+            return HandleCommandResult(-errno.ENOENT, stderr=str(e))
+        except NotImplementedError:
+            msg = 'This Orchestrator does not support `{}`'.format(prefix)
+            return HandleCommandResult(-errno.ENOENT, stderr=msg)
+
+    return CLICommand(prefix, cmd_args, desc, perm)(wrapper)
 
 
-class OrchestratorCli(MgrModule):
-    OPTIONS = [
+def _cli_command(perm):
+    def inner_cli_command(prefix, cmd_args="", desc=""):
+        return lambda func: handle_exception(prefix, cmd_args, desc, perm, func)
+    return inner_cli_command
+
+
+_read_cli = _cli_command('r')
+_write_cli = _cli_command('rw')
+
+class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
+    MODULE_OPTIONS = [
         {'name': 'orchestrator'}
-    ]
-    COMMANDS = [
-        {
-            'cmd': "orchestrator device ls "
-                   "name=node,type=CephString,req=false",
-            "desc": "List devices on a node",
-            "perm": "r"
-        },
-        {
-            'cmd': "orchestrator service status "
-                   "name=svc_type,type=CephString "
-                   "name=svc_id,type=CephString ",
-            "desc": "Get orchestrator state for Ceph service",
-            "perm": "r"
-        },
-        {
-            'cmd': "orchestrator service add "
-                   "name=svc_type,type=CephString "
-                   "name=svc_arg,type=CephString ",
-            "desc": "Create a service of any type",
-            "perm": "rw"
-        },
-        {
-            'cmd': "orchestrator set backend "
-                   "name=module,type=CephString,req=true",
-            "desc": "Select orchestrator module backend",
-            "perm": "rw"
-        },
-        {
-            "cmd": "orchestrator status",
-            "desc": "Report configured backend and its status",
-            "perm": "r"
-        }
     ]
 
     def _select_orchestrator(self):
-        o = self.get_config("orchestrator")
-        if o is None:
-            raise NoOrchestrator()
+        return self.get_module_option("orchestrator")
 
-        return o
+    @_write_cli('orchestrator host add',
+                "name=host,type=CephString,req=true",
+                'Add a host')
+    def _add_host(self, host):
+        completion = self.add_host(host)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
 
-    def _oremote(self, *args, **kwargs):
+    @_write_cli('orchestrator host rm',
+                "name=host,type=CephString,req=true",
+                'Remove a host')
+    def _remove_host(self, host):
+        completion = self.remove_host(host)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_read_cli('orchestrator host ls',
+               desc='List hosts')
+    def _get_hosts(self):
+        completion = self.get_hosts()
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        result = "\n".join(map(lambda node: node.name, completion.result))
+        return HandleCommandResult(stdout=result)
+
+    @_read_cli('orchestrator device ls',
+               "name=host,type=CephString,n=N,req=false "
+               "name=format,type=CephChoices,strings=json|plain,req=false "
+               "name=refresh,type=CephBool,req=false",
+               'List devices on a node')
+    def _list_devices(self, host=None, format='plain', refresh=False):
+        # type: (List[str], str, bool) -> HandleCommandResult
         """
-        Helper for invoking `remote` on whichever orchestrator is enabled
+        Provide information about storage devices present in cluster hosts
+
+        Note: this does not have to be completely synchronous. Slightly out of
+        date hardware inventory is fine as long as hardware ultimately appears
+        in the output of this command.
         """
-        return self.remote(self._select_orchestrator(),
-                           *args, **kwargs)
+        nf = orchestrator.InventoryFilter(nodes=host) if host else None
 
-    def _wait(self, completions):
-        """
-        Helper to wait for completions to complete (reads) or
-        become persistent (writes).
+        completion = self.get_inventory(node_filter=nf, refresh=refresh)
 
-        Waits for writes to be *persistent* but not *effective*.
-        """
-        done = False
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
 
-        while done is False:
-            done = self._oremote("wait", completions)
-
-            if not done:
-                any_nonpersistent = False
-                for c in completions:
-                    if c.is_read:
-                        if not c.is_complete:
-                            any_nonpersistent = True
-                            break
-                    else:
-                        if not c.is_persistent:
-                            any_nonpersistent = True
-                            break
-
-                if any_nonpersistent:
-                    time.sleep(5)
-                else:
-                    done = True
-
-        if all(hasattr(c, 'error') and getattr(c, 'error')for c in completions):
-            raise Exception([getattr(c, 'error') for c in completions])
-
-    def _list_devices(self, cmd):
-        node = cmd.get('node', None)
-
-        if node:
-            nf = orchestrator.InventoryFilter()
-            nf.nodes = [node]
+        if format == 'json':
+            data = [n.to_json() for n in completion.result]
+            return HandleCommandResult(stdout=json.dumps(data))
         else:
-            nf = None
+            # Return a human readable version
+            result = ""
 
-        completion = self._oremote("get_inventory", node_filter=nf)
+            for inventory_node in completion.result:
+                result += "Host {0}:\n".format(inventory_node.name)
 
-        self._wait([completion])
+                if inventory_node.devices:
+                    result += inventory_node.devices[0].pretty_print(only_header=True)
+                else:
+                    result += "No storage devices found"
 
-        # Spit out a human readable version
-        result = ""
+                for d in inventory_node.devices:
+                    result += d.pretty_print()
+                result += "\n"
 
-        for inventory_node in completion.result:
-            result += "{0}:\n".format(inventory_node.name)
-            for d in inventory_node.devices:
-                result += "  {0} ({1}, {2}b)\n".format(
-                    d.id, d.type, d.size)
-            result += "\n"
+            return HandleCommandResult(stdout=result)
 
-        return 0, result, ""
-
-    def _service_status(self, cmd):
-        svc_type = cmd['svc_type']
-        svc_id = cmd['svc_id']
-
+    @_read_cli('orchestrator service ls',
+               "name=host,type=CephString,req=false "
+               "name=svc_type,type=CephChoices,strings=mon|mgr|osd|mds|iscsi|nfs|rgw|rbd-mirror,req=false "
+               "name=svc_id,type=CephString,req=false "
+               "name=format,type=CephChoices,strings=json|plain,req=false "
+               "name=refresh,type=CephBool,req=false",
+               'List services known to orchestrator')
+    def _list_services(self, host=None, svc_type=None, svc_id=None, format='plain', refresh=False):
         # XXX this is kind of confusing for people because in the orchestrator
         # context the service ID for MDS is the filesystem ID, not the daemon ID
 
-        completion = self._oremote("describe_service", svc_type, svc_id)
+        completion = self.describe_service(svc_type, svc_id, host, refresh=refresh)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        services = completion.result
 
-        self._wait([completion])
+        def ukn(s):
+            return '<unknown>' if s is None else s
+        # Sort the list for display
+        services.sort(key=lambda s: (ukn(s.service_type), ukn(s.nodename), ukn(s.service_instance)))
 
-        service_description = completion.result
-        #assert isinstance(service_description, orchestrator.ServiceDescription)
-
-        if len(service_description.locations) == 0:
-            return 0, "", "No locations reported"
+        if len(services) == 0:
+            return HandleCommandResult(stdout="No services reported")
+        elif format == 'json':
+            data = [s.to_json() for s in services]
+            return HandleCommandResult(stdout=json.dumps(data))
         else:
-            lines = []
-            for l in service_description.locations:
-                lines.append("{0}.{1} {2} {3}".format(
-                    svc_type,
-                    l.daemon_name,
-                    l.nodename,
-                    l.container_id))
+            table = PrettyTable(
+                ['type', 'id', 'host', 'container', 'version', 'status', 'description'],
+                border=False)
+            for s in services:
+                if s.service is None:
+                    service_id = s.service_instance
+                else:
+                    service_id = "{0}.{1}".format(s.service, s.service_instance)
+                status = {
+                    -1: 'error',
+                    0: 'stopped',
+                    1: 'running',
+                    None: '<unknown>'
+                }[s.status]
 
-            return 0, "\n".join(lines), ""
+                table.add_row((
+                    s.service_type,
+                    service_id,
+                    ukn(s.nodename),
+                    ukn(s.container_id),
+                    ukn(s.version),
+                    status,
+                    ukn(s.status_desc)))
 
-    def _service_add(self, cmd):
-        svc_type = cmd['svc_type']
-        if svc_type == "osd":
-            device_spec = cmd['svc_arg']
+            return HandleCommandResult(stdout=table.get_string())
+
+    @_write_cli('orchestrator osd create',
+                "name=svc_arg,type=CephString,req=false",
+                'Create an OSD service. Either --svc_arg=host:drives or -i <drive_group>')
+    def _create_osd(self, svc_arg=None, inbuf=None):
+        # type: (str, str) -> HandleCommandResult
+        """Create one or more OSDs"""
+
+        usage = """
+Usage:
+  ceph orchestrator osd create -i <json_file>
+  ceph orchestrator osd create host:device1,device2,...
+"""
+
+        if inbuf:
             try:
-                node_name, block_device = device_spec.split(":")
-            except TypeError:
-                return -errno.EINVAL, "", "Invalid device spec, should be <node>:<device>"
+                drive_group = DriveGroupSpec.from_json(json.loads(inbuf))
+            except ValueError as e:
+                msg = 'Failed to read JSON input: {}'.format(str(e)) + usage
+                return HandleCommandResult(-errno.EINVAL, stderr=msg)
 
-            spec = orchestrator.OsdCreationSpec()
-            spec.node = node_name
-            spec.format = "bluestore"
-            spec.drive_group = orchestrator.DriveGroupSpec([block_device])
+        elif svc_arg:
+            try:
+                node_name, block_device = svc_arg.split(":")
+                block_devices = block_device.split(',')
+            except (TypeError, KeyError, ValueError):
+                msg = "Invalid host:device spec: '{}'".format(svc_arg) + usage
+                return HandleCommandResult(-errno.EINVAL, stderr=msg)
 
-            completion = self._oremote("create_osds", spec)
-            self._wait([completion])
-
-            return 0, "", "Success."
-
-        elif svc_type == "mds":
-            fs_name = cmd['svc_arg']
-
-            spec = orchestrator.StatelessServiceSpec()
-            spec.name = fs_name
-
-            completion = self._oremote(
-                "add_stateless_service",
-                svc_type,
-                spec
-            )
-            self._wait([completion])
-
-            return 0, "", "Success."
-        elif svc_type == "rgw":
-            store_name = cmd['svc_arg']
-
-            spec = orchestrator.StatelessServiceSpec()
-            spec.name = store_name
-
-            completion = self._oremote(
-                "add_stateless_service",
-                svc_type,
-                spec
-            )
-            self._wait([completion])
-
-            return 0, "", "Success."
+            devs = DeviceSelection(paths=block_devices)
+            drive_group = DriveGroupSpec(node_name, data_devices=devs)
         else:
-            raise NotImplementedError(svc_type)
+            return HandleCommandResult(-errno.EINVAL, stderr=usage)
 
-    def _set_backend(self, cmd):
+        # TODO: Remove this and make the orchestrator composable
+        #   Like a future or so.
+        host_completion = self.get_hosts()
+        self._orchestrator_wait([host_completion])
+        orchestrator.raise_if_exception(host_completion)
+        all_hosts = [h.name for h in host_completion.result]
+
+        try:
+            drive_group.validate(all_hosts)
+        except DriveGroupValidationError as e:
+            return HandleCommandResult(-errno.EINVAL, stderr=str(e))
+
+        completion = self.create_osds(drive_group, all_hosts)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        self.log.warning(str(completion.result))
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator osd rm',
+                "name=svc_id,type=CephString,n=N",
+                'Remove OSD services')
+    def _osd_rm(self, svc_id):
+        # type: (List[str]) -> HandleCommandResult
+        """
+        Remove OSD's
+        :cmd : Arguments for remove the osd
+        """
+        completion = self.remove_osds(svc_id)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator mds add',
+                "name=svc_arg,type=CephString",
+                'Create an MDS service')
+    def _mds_add(self, svc_arg):
+        spec = orchestrator.StatelessServiceSpec(svc_arg)
+        completion = self.add_mds(spec)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator rgw add',
+                'name=zone_name,type=CephString,req=false',
+                'Create an RGW service. A complete <rgw_spec> can be provided'\
+                ' using <-i> to customize completelly the RGW service')
+    def _rgw_add(self, zone_name=None, inbuf=None):
+        usage = """
+Usage:
+  ceph orchestrator rgw add -i <json_file>
+  ceph orchestrator rgw add <zone_name>
+        """
+
+        if inbuf:
+            try:
+                rgw_spec = orchestrator.RGWSpec.from_json(json.loads(inbuf))
+            except ValueError as e:
+                msg = 'Failed to read JSON input: {}'.format(str(e)) + usage
+                return HandleCommandResult(-errno.EINVAL, stderr=msg)
+        elif zone_name:
+            rgw_spec = orchestrator.RGWSpec(rgw_zone=zone_name)
+        else:
+            return HandleCommandResult(-errno.EINVAL, stderr=usage)
+
+        completion = self.add_rgw(rgw_spec)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator nfs add',
+                "name=svc_arg,type=CephString "
+                "name=pool,type=CephString "
+                "name=namespace,type=CephString,req=false",
+                'Create an NFS service')
+    def _nfs_add(self, svc_arg, pool, namespace=None):
+        spec = orchestrator.NFSServiceSpec(svc_arg, pool=pool, namespace=namespace)
+        spec.validate_add()
+        completion = self.add_nfs(spec)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator mds rm',
+                "name=svc_id,type=CephString",
+                'Remove an MDS service')
+    def _mds_rm(self, svc_id):
+        completion = self.remove_mds(svc_id)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator rgw rm',
+                "name=svc_id,type=CephString",
+                'Remove an RGW service')
+    def _rgw_rm(self, svc_id):
+        completion = self.remove_rgw(svc_id)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator nfs rm',
+                "name=svc_id,type=CephString",
+                'Remove an NFS service')
+    def _nfs_rm(self, svc_id):
+        completion = self.remove_nfs(svc_id)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator nfs update',
+                "name=svc_id,type=CephString "
+                "name=num,type=CephInt",
+                'Scale an NFS service')
+    def _nfs_update(self, svc_id, num):
+        spec = orchestrator.NFSServiceSpec(svc_id, count=num)
+        completion = self.update_nfs(spec)
+        self._orchestrator_wait([completion])
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator service',
+                "name=action,type=CephChoices,strings=start|stop|reload "
+                "name=svc_type,type=CephString "
+                "name=svc_name,type=CephString",
+                'Start, stop or reload an entire service (i.e. all daemons)')
+    def _service_action(self, action, svc_type, svc_name):
+        completion = self.service_action(action, svc_type, service_name=svc_name)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator service-instance',
+                "name=action,type=CephChoices,strings=start|stop|reload "
+                "name=svc_type,type=CephString "
+                "name=svc_id,type=CephString",
+                'Start, stop or reload a specific service instance')
+    def _service_instance_action(self, action, svc_type, svc_id):
+        completion = self.service_action(action, svc_type, service_id=svc_id)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator mgr update',
+                "name=num,type=CephInt,req=true "
+                "name=hosts,type=CephString,n=N,req=false",
+                'Update the number of manager instances')
+    def _update_mgrs(self, num, hosts=None):
+        hosts = hosts if hosts is not None else []
+
+        if num <= 0:
+            return HandleCommandResult(-errno.EINVAL,
+                    stderr="Invalid number of mgrs: require {} > 0".format(num))
+
+        completion = self.update_mgrs(num, hosts)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator mon update',
+                "name=num,type=CephInt,req=true "
+                "name=hosts,type=CephString,n=N,req=false",
+                'Update the number of monitor instances')
+    def _update_mons(self, num, hosts=None):
+        hosts = hosts if hosts is not None else []
+
+        if num <= 0:
+            return HandleCommandResult(-errno.EINVAL,
+                    stderr="Invalid number of mons: require {} > 0".format(num))
+
+        def split_host(host):
+            """Split host into host and network parts"""
+            # TODO: stricter validation
+            parts = host.split(":")
+            if len(parts) == 1:
+                return (parts[0], None)
+            elif len(parts) == 2:
+                return (parts[0], parts[1])
+            else:
+                raise RuntimeError("Invalid host specification: "
+                        "'{}'".format(host))
+
+        if hosts:
+            try:
+                hosts = list(map(split_host, hosts))
+            except Exception as e:
+                msg = "Failed to parse host list: '{}': {}".format(hosts, e)
+                return HandleCommandResult(-errno.EINVAL, stderr=msg)
+
+        completion = self.update_mons(num, hosts)
+        self._orchestrator_wait([completion])
+        orchestrator.raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @_write_cli('orchestrator set backend',
+                "name=module_name,type=CephString,req=true",
+                'Select orchestrator module backend')
+    def _set_backend(self, module_name):
         """
         We implement a setter command instead of just having the user
         modify the setting directly, so that we can validate they're setting
@@ -204,13 +408,11 @@ class OrchestratorCli(MgrModule):
         There isn't a mechanism for ensuring they don't *disable* the module
         later, but this is better than nothing.
         """
-
         mgr_map = self.get("mgr_map")
-        module_name = cmd['module']
 
-        if module_name == "":
-            self.set_config("orchestrator", None)
-            return 0, "", ""
+        if module_name is None or module_name == "":
+            self.set_module_option("orchestrator", None)
+            return HandleCommandResult()
 
         for module in mgr_map['available_modules']:
             if module['name'] != module_name:
@@ -221,9 +423,10 @@ class OrchestratorCli(MgrModule):
 
             enabled = module['name'] in mgr_map['modules']
             if not enabled:
-                return -errno.EINVAL, "", "Module '{0}' is not enabled".format(
-                    module_name
-                )
+                return HandleCommandResult(-errno.EINVAL,
+                                           stderr="Module '{module_name}' is not enabled. \n Run "
+                                                  "`ceph mgr module enable {module_name}` "
+                                                  "to enable.".format(module_name=module_name))
 
             try:
                 is_orchestrator = self.remote(module_name,
@@ -232,56 +435,34 @@ class OrchestratorCli(MgrModule):
                 is_orchestrator = False
 
             if not is_orchestrator:
-                return -errno.EINVAL, "",\
-                       "'{0}' is not an orchestrator module".format(
-                           module_name)
+                return HandleCommandResult(-errno.EINVAL,
+                                           stderr="'{0}' is not an orchestrator module".format(module_name))
 
-            self.set_config("orchestrator", module_name)
+            self.set_module_option("orchestrator", module_name)
 
-            return 0, "", ""
+            return HandleCommandResult()
 
-        return -errno.ENOENT, "", "Module '{0}' not found".format(
-            module_name
-        )
+        return HandleCommandResult(-errno.EINVAL, stderr="Module '{0}' not found".format(module_name))
 
+    @_read_cli('orchestrator status',
+               desc='Report configured backend and its status')
     def _status(self):
-        try:
-            avail, why = self._oremote("available")
-        except NoOrchestrator:
-            return 0, "No orchestrator configured (try " \
-                      "`ceph orchestrator set backend`)", ""
+        o = self._select_orchestrator()
+        if o is None:
+            raise orchestrator.NoOrchestrator()
 
+        avail, why = self.available()
         if avail is None:
             # The module does not report its availability
-            return 0, "Backend: {0}".format(
-                self._select_orchestrator()), ""
+            return HandleCommandResult(stdout="Backend: {0}".format(o))
         else:
-            return 0, "Backend: {0}\nAvailable: {1}{2}".format(
-                self._select_orchestrator(),
-                avail,
-                " ({0})".format(why) if not avail else ""
-            ), ""
+            return HandleCommandResult(stdout="Backend: {0}\nAvailable: {1}{2}".format(
+                                           o, avail,
+                                           " ({0})".format(why) if not avail else ""
+                                       ))
 
-    def handle_command(self, inbuf, cmd):
-        try:
-            return self._handle_command(inbuf, cmd)
-        except NoOrchestrator:
-            return -errno.ENODEV, "", "No orchestrator configured"
-        except ImportError as e:
-            return -errno.ENOENT, "", str(e)
-        except NotImplementedError:
-            return -errno.EINVAL, "", "Command not found"
-
-    def _handle_command(self, _, cmd):
-        if cmd['prefix'] == "orchestrator device ls":
-            return self._list_devices(cmd)
-        elif cmd['prefix'] == "orchestrator service status":
-            return self._service_status(cmd)
-        elif cmd['prefix'] == "orchestrator service add":
-            return self._service_add(cmd)
-        elif cmd['prefix'] == "orchestrator set backend":
-            return self._set_backend(cmd)
-        elif cmd['prefix'] == "orchestrator status":
-            return self._status()
-        else:
-            raise NotImplementedError()
+    def self_test(self):
+        old_orch = self._select_orchestrator()
+        self._set_backend('')
+        assert self._select_orchestrator() is None
+        self._set_backend(old_orch)

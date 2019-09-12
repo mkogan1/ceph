@@ -1,4 +1,4 @@
-// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
 #ifndef CEPH_LIBRBD_CLS_RBD_CLIENT_H
@@ -6,17 +6,12 @@
 
 #include "cls/lock/cls_lock_types.h"
 #include "cls/rbd/cls_rbd_types.h"
-#include "common/bit_vector.hpp"
 #include "common/snap_types.h"
 #include "include/types.h"
+#include "include/rados/librados_fwd.hpp"
 
 class Context;
-namespace librados {
-  class IoCtx;
-  class ObjectOperation;
-  class ObjectReadOperation;
-  class ObjectWriteOperation;
-}
+namespace ceph { template <uint8_t> class BitVector; }
 
 namespace librbd {
 namespace cls_client {
@@ -111,10 +106,10 @@ int parent_overlap_get(librados::IoCtx* ioctx, const std::string &oid,
 
 void parent_attach(librados::ObjectWriteOperation* op,
                    const cls::rbd::ParentImageSpec& parent_image_spec,
-                   uint64_t parent_overlap);
+                   uint64_t parent_overlap, bool reattach);
 int parent_attach(librados::IoCtx *ioctx, const std::string &oid,
                   const cls::rbd::ParentImageSpec& parent_image_spec,
-                  uint64_t parent_overlap);
+                  uint64_t parent_overlap, bool reattach);
 
 void parent_detach(librados::ObjectWriteOperation* op);
 int parent_detach(librados::IoCtx *ioctx, const std::string &oid);
@@ -182,9 +177,6 @@ int get_all_features_finish(bufferlist::const_iterator *it,
                             uint64_t *all_features);
 int get_all_features(librados::IoCtx *ioctx, const std::string &oid,
                      uint64_t *all_features);
-
-int copyup(librados::IoCtx *ioctx, const std::string &oid,
-           bufferlist data);
 
 /// NOTE: remove protection after clone v1 is retired
 void get_protection_status_start(librados::ObjectReadOperation *op,
@@ -292,13 +284,6 @@ int migration_get(librados::IoCtx *ioctx, const std::string &oid,
                   cls::rbd::MigrationSpec *migration_spec);
 int migration_remove(librados::IoCtx *ioctx, const std::string &oid);
 void migration_remove(librados::ObjectWriteOperation *op);
-
-int assert_snapc_seq(librados::IoCtx *ioctx, const std::string &oid,
-                     uint64_t snapc_seq,
-                     cls::rbd::AssertSnapcSeqState state);
-void assert_snapc_seq(librados::ObjectWriteOperation *op,
-                      uint64_t snapc_seq,
-                      cls::rbd::AssertSnapcSeqState state);
 
 // operations on rbd_id objects
 void get_id_start(librados::ObjectReadOperation *op);
@@ -474,6 +459,22 @@ int mirror_image_status_get_summary_finish(bufferlist::const_iterator *iter,
 int mirror_image_status_remove_down(librados::IoCtx *ioctx);
 void mirror_image_status_remove_down(librados::ObjectWriteOperation *op);
 
+int mirror_image_instance_get(librados::IoCtx *ioctx,
+                              const std::string &global_image_id,
+                              entity_inst_t *instance);
+void mirror_image_instance_get_start(librados::ObjectReadOperation *op,
+                                     const std::string &global_image_id);
+int mirror_image_instance_get_finish(bufferlist::const_iterator *iter,
+                                     entity_inst_t *instance);
+int mirror_image_instance_list(librados::IoCtx *ioctx,
+                               const std::string &start, uint64_t max_return,
+                               std::map<std::string, entity_inst_t> *instances);
+void mirror_image_instance_list_start(librados::ObjectReadOperation *op,
+                                      const std::string &start,
+                                      uint64_t max_return);
+int mirror_image_instance_list_finish(bufferlist::const_iterator *iter,
+                                      std::map<std::string, entity_inst_t> *instances);
+
 void mirror_instances_list_start(librados::ObjectReadOperation *op);
 int mirror_instances_list_finish(bufferlist::const_iterator *iter,
                                  std::vector<std::string> *instance_ids);
@@ -587,6 +588,30 @@ int namespace_list_finish(bufferlist::const_iterator *it,
 int namespace_list(librados::IoCtx *ioctx,
                    const std::string &start, uint64_t max_return,
                    std::list<std::string> *entries);
+
+// operations on data objects
+int assert_snapc_seq(librados::IoCtx *ioctx, const std::string &oid,
+                     uint64_t snapc_seq,
+                     cls::rbd::AssertSnapcSeqState state);
+void assert_snapc_seq(librados::ObjectWriteOperation *op,
+                      uint64_t snapc_seq,
+                      cls::rbd::AssertSnapcSeqState state);
+
+void copyup(librados::ObjectWriteOperation *op, bufferlist data);
+int copyup(librados::IoCtx *ioctx, const std::string &oid,
+           bufferlist data);
+
+void sparse_copyup(librados::ObjectWriteOperation *op,
+                   const std::map<uint64_t, uint64_t> &extent_map,
+                   bufferlist data);
+int sparse_copyup(librados::IoCtx *ioctx, const std::string &oid,
+                  const std::map<uint64_t, uint64_t> &extent_map,
+                  bufferlist data);
+
+void sparsify(librados::ObjectWriteOperation *op, size_t sparse_size,
+              bool remove_empty);
+int sparsify(librados::IoCtx *ioctx, const std::string &oid, size_t sparse_size,
+             bool remove_empty);
 
 } // namespace cls_client
 } // namespace librbd

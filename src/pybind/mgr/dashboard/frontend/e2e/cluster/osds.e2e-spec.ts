@@ -1,19 +1,36 @@
 import { Helper } from '../helper.po';
-import { OSDsPage } from './osds.po';
+import { OSDsPageHelper } from './osds.po';
 
 describe('OSDs page', () => {
-  let page: OSDsPage;
+  let osds: OSDsPageHelper;
 
   beforeAll(() => {
-    page = new OSDsPage();
+    osds = new OSDsPageHelper();
   });
 
-  afterEach(() => {
-    Helper.checkConsole();
+  afterEach(async () => {
+    await Helper.checkConsole();
   });
 
-  it('should open and show breadcrumnb', () => {
-    page.navigateTo();
-    expect(Helper.getBreadcrumbText()).toEqual('OSDs');
+  describe('breadcrumb and tab tests', () => {
+    beforeAll(async () => {
+      await osds.navigateTo();
+    });
+
+    it('should open and show breadcrumb', async () => {
+      await osds.waitTextToBePresent(osds.getBreadcrumb(), 'OSDs');
+    });
+
+    it('should show two tabs', async () => {
+      await expect(osds.getTabsCount()).toEqual(2);
+    });
+
+    it('should show OSDs list tab at first', async () => {
+      await expect(osds.getTabText(0)).toEqual('OSDs List');
+    });
+
+    it('should show overall performance as a second tab', async () => {
+      await expect(osds.getTabText(1)).toEqual('Overall Performance');
+    });
   });
 });

@@ -1,13 +1,15 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
-// vim: ts=8 sw=2 smarttab
+// vim: ts=8 sw=2 smarttab ft=cpp
 
 #ifndef CEPH_RGW_HTTP_CLIENT_H
 #define CEPH_RGW_HTTP_CLIENT_H
 
+#include "common/async/yield_context.h"
 #include "common/RWLock.h"
 #include "common/Cond.h"
 #include "rgw_common.h"
 #include "rgw_string.h"
+#include "rgw_http_client_types.h"
 
 #include <atomic>
 
@@ -20,54 +22,6 @@ void rgw_http_client_cleanup();
 struct rgw_http_req_data;
 class RGWHTTPManager;
 
-class RGWIOIDProvider
-{
-  std::atomic<int64_t> max = {0};
-
-public:
-  RGWIOIDProvider() {}
-  int64_t get_next() {
-    return ++max;
-  }
-};
-
-struct rgw_io_id {
-  int64_t id{0};
-  int channels{0};
-
-  rgw_io_id() {}
-  rgw_io_id(int64_t _id, int _channels) : id(_id), channels(_channels) {}
-
-  bool intersects(const rgw_io_id& rhs) {
-    return (id == rhs.id && ((channels | rhs.channels) != 0));
-  }
-
-  bool operator<(const rgw_io_id& rhs) const {
-    if (id < rhs.id) {
-      return true;
-    }
-    return (id == rhs.id &&
-            channels < rhs.channels);
-  }
-};
-
-class RGWIOProvider
-{
-  int64_t id{-1};
-
-public:
-  RGWIOProvider() {}
-  virtual ~RGWIOProvider() = default; 
-
-  void assign_io(RGWIOIDProvider& io_id_provider, int io_type = -1);
-  rgw_io_id get_io_id(int io_type) {
-    return rgw_io_id{id, io_type};
-  }
-
-  virtual void set_io_user_info(void *_user_info) = 0;
-  virtual void *get_io_user_info() = 0;
-};
-
 class RGWHTTPClient : public RGWIOProvider
 {
   friend class RGWHTTPManager;
@@ -76,6 +30,7 @@ class RGWHTTPClient : public RGWIOProvider
   bufferlist::iterator send_iter;
   bool has_send_len;
   long http_status;
+  bool send_data_hint{false};
   size_t receive_pause_skip{0}; /* how many bytes to skip next time receive_data is called
                                    due to being paused */
 
@@ -86,6 +41,7 @@ class RGWHTTPClient : public RGWIOProvider
   bool verify_ssl; // Do not validate self signed certificates, default to false
 
   std::atomic<unsigned> stopped { 0 };
+
 
 protected:
   CephContext *cct;
@@ -99,8 +55,7 @@ protected:
 
   RGWHTTPManager *get_manager();
 
-  int init_request(rgw_http_req_data *req_data,
-                   bool send_data_hint = false);
+  int init_request(rgw_http_req_data *req_data);
 
   virtual int receive_header(void *ptr, size_t len) {
     return 0;
@@ -129,7 +84,7 @@ protected:
                                size_t nmemb,
                                void *_info);
 
-  Mutex& get_req_lock();
+  ceph::mutex& get_req_lock();
 
   /* needs to be called under req_lock() */
   void _set_write_paused(bool pause);
@@ -165,18 +120,25 @@ public:
     has_send_len = true;
   }
 
+  void set_send_data_hint(bool hint) {
+    send_data_hint = hint;
+  }
 
   long get_http_status() const {
     return http_status;
+  }
+
+  void set_http_status(long _http_status) {
+    http_status = _http_status;
   }
 
   void set_verify_ssl(bool flag) {
     verify_ssl = flag;
   }
 
-  int process();
+  int process(optional_yield y);
 
-  int wait();
+  int wait(optional_yield y);
   void cancel();
   bool is_done();
 
@@ -300,17 +262,17 @@ class RGWHTTPManager {
   CephContext *cct;
   RGWCompletionManager *completion_mgr;
   void *multi_handle;
-  bool is_started;
+  bool is_started = false;
   std::atomic<unsigned> going_down { 0 };
   std::atomic<unsigned> is_stopped { 0 };
 
-  RWLock reqs_lock;
+  ceph::shared_mutex reqs_lock = ceph::make_shared_mutex("RGWHTTPManager::reqs_lock");
   map<uint64_t, rgw_http_req_data *> reqs;
   list<rgw_http_req_data *> unregistered_reqs;
   list<set_state> reqs_change_state;
   map<uint64_t, rgw_http_req_data *> complete_reqs;
-  int64_t num_reqs;
-  int64_t max_threaded_req;
+  int64_t num_reqs = 0;
+  int64_t max_threaded_req = 0;
   int thread_pipe[2];
 
   void register_request(rgw_http_req_data *req_data);
@@ -319,7 +281,7 @@ class RGWHTTPManager {
   bool unregister_request(rgw_http_req_data *req_data);
   void _unlink_request(rgw_http_req_data *req_data);
   void unlink_request(rgw_http_req_data *req_data);
-  void finish_request(rgw_http_req_data *req_data, int r);
+  void finish_request(rgw_http_req_data *req_data, int r, long http_status = -1);
   void _finish_request(rgw_http_req_data *req_data, int r);
   void _set_req_state(set_state& ss);
   int link_request(rgw_http_req_data *req_data);
@@ -334,7 +296,7 @@ class RGWHTTPManager {
     void *entry() override;
   };
 
-  ReqsThread *reqs_thread;
+  ReqsThread *reqs_thread = nullptr;
 
   void *reqs_thread_entry();
 
@@ -347,7 +309,7 @@ public:
   int start();
   void stop();
 
-  int add_request(RGWHTTPClient *client, bool send_data_hint = false);
+  int add_request(RGWHTTPClient *client);
   int remove_request(RGWHTTPClient *client);
   int set_request_state(RGWHTTPClient *client, RGWHTTPRequestSetState state);
 };
@@ -356,6 +318,6 @@ class RGWHTTP
 {
 public:
   static int send(RGWHTTPClient *req);
-  static int process(RGWHTTPClient *req);
+  static int process(RGWHTTPClient *req, optional_yield y);
 };
 #endif

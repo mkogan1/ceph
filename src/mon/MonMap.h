@@ -20,6 +20,7 @@
 #endif
 
 #include "common/config_fwd.h"
+#include "common/ceph_releases.h"
 
 #include "include/err.h"
 #include "include/types.h"
@@ -44,36 +45,44 @@ struct mon_info_t {
    *
    * i.e., 'foo' in 'mon.foo'
    */
-  string name;
+  std::string name;
   /**
-   * monitor's public address
+   * monitor's public address(es)
    *
-   * public facing address, traditionally used to communicate with all clients
-   * and other monitors.
+   * public facing address(es), used to communicate with all clients
+   * and with other monitors.
    */
-  entity_addr_t public_addr;
+  entity_addrvec_t public_addrs;
   /**
    * the priority of the mon, the lower value the more preferred
    */
   uint16_t priority{0};
+  uint16_t weight{0};
 
-  mon_info_t(const string& n, const entity_addr_t& p_addr, uint16_t p)
-    : name(n), public_addr(p_addr), priority(p)
+  // <REMOVE ME>
+  mon_info_t(const std::string& n, const entity_addr_t& p_addr, uint16_t p)
+    : name(n), public_addrs(p_addr), priority(p)
   {}
-  mon_info_t(const string &n, const entity_addr_t& p_addr)
-    : name(n), public_addr(p_addr)
+  // </REMOVE ME>
+
+  mon_info_t(const std::string& n, const entity_addrvec_t& p_addrs,
+             uint16_t p, uint16_t w)
+    : name(n), public_addrs(p_addrs), priority(p), weight(w)
+  {}
+  mon_info_t(const std::string &n, const entity_addrvec_t& p_addrs)
+    : name(n), public_addrs(p_addrs)
   { }
 
   mon_info_t() { }
 
 
-  void encode(bufferlist& bl, uint64_t features) const;
-  void decode(bufferlist::const_iterator& p);
-  void print(ostream& out) const;
+  void encode(ceph::buffer::list& bl, uint64_t features) const;
+  void decode(ceph::buffer::list::const_iterator& p);
+  void print(std::ostream& out) const;
 };
 WRITE_CLASS_ENCODER_FEATURES(mon_info_t)
 
-inline ostream& operator<<(ostream& out, const mon_info_t& mon) {
+inline std::ostream& operator<<(std::ostream& out, const mon_info_t& mon) {
   mon.print(out);
   return out;
 }
@@ -85,10 +94,10 @@ class MonMap {
   utime_t last_changed;
   utime_t created;
 
-  map<string, mon_info_t> mon_info;
-  map<entity_addr_t, string> addr_mons;
+  std::map<std::string, mon_info_t> mon_info;
+  std::map<entity_addr_t, std::string> addr_mons;
 
-  vector<string> ranks;
+  std::vector<std::string> ranks;
 
   /**
    * Persistent Features are all those features that once set on a
@@ -125,13 +134,24 @@ class MonMap {
     return (persistent_features | optional_features);
   }
 
+  // upgrade gate
+  ceph_release_t min_mon_release{ceph_release_t::unknown};
+
+  void _add_ambiguous_addr(const std::string& name,
+                           entity_addr_t addr,
+                           int priority,
+                           int weight,
+                           bool for_mkfs);
+
 public:
   void calc_legacy_ranks();
   void calc_addr_mons() {
     // populate addr_mons
     addr_mons.clear();
     for (auto& p : mon_info) {
-      addr_mons[p.second.public_addr] = p.first;
+      for (auto& a : p.second.public_addrs.v) {
+	addr_mons[a] = p.first;
+      }
     }
   }
 
@@ -145,6 +165,13 @@ public:
     return mon_info.size();
   }
 
+  unsigned min_quorum_size(unsigned total_mons=0) const {
+    if (total_mons == 0) {
+      total_mons = size();
+    }
+    return total_mons / 2 + 1;
+  }
+
   epoch_t get_epoch() const { return epoch; }
   void set_epoch(epoch_t e) { epoch = e; }
 
@@ -153,11 +180,11 @@ public:
    *
    * @param ls list to populate with the monitors' addresses
    */
-  void list_addrs(list<entity_addr_t>& ls) const {
-    for (map<string,mon_info_t>::const_iterator p = mon_info.begin();
-         p != mon_info.end();
-         ++p) {
-      ls.push_back(p->second.public_addr);
+  void list_addrs(std::list<entity_addr_t>& ls) const {
+    for (auto& i : mon_info) {
+      for (auto& j : i.second.public_addrs.v) {
+	ls.push_back(j);
+      }
     }
   }
 
@@ -168,7 +195,9 @@ public:
    */
   void add(const mon_info_t& m) {
     ceph_assert(mon_info.count(m.name) == 0);
-    ceph_assert(addr_mons.count(m.public_addr) == 0);
+    for (auto& a : m.public_addrs.v) {
+      ceph_assert(addr_mons.count(a) == 0);
+    }
     mon_info[m.name] = m;
     if (get_required_features().contains_all(
 	  ceph::features::mon::FEATURE_NAUTILUS)) {
@@ -186,8 +215,9 @@ public:
    * @param name Monitor name (i.e., 'foo' in 'mon.foo')
    * @param addr Monitor's public address
    */
-  void add(const string &name, const entity_addr_t &addr) {
-    add(mon_info_t(name, addr));
+  void add(const std::string &name, const entity_addrvec_t &addrv,
+	   uint16_t priority=0, uint16_t weight=0) {
+    add(mon_info_t(name, addrv, priority, weight));
   }
 
   /**
@@ -195,7 +225,7 @@ public:
    *
    * @param name Monitor name (i.e., 'foo' in 'mon.foo')
    */
-  void remove(const string &name) {
+  void remove(const std::string &name) {
     ceph_assert(mon_info.count(name));
     mon_info.erase(name);
     ceph_assert(mon_info.count(name) == 0);
@@ -215,7 +245,7 @@ public:
    * @param oldname monitor's current name (i.e., 'foo' in 'mon.foo')
    * @param newname monitor's new name (i.e., 'bar' in 'mon.bar')
    */
-  void rename(string oldname, string newname) {
+  void rename(std::string oldname, std::string newname) {
     ceph_assert(contains(oldname));
     ceph_assert(!contains(newname));
     mon_info[newname] = mon_info[oldname];
@@ -231,7 +261,7 @@ public:
     calc_addr_mons();
   }
 
-  int set_rank(const string& name, int rank) {
+  int set_rank(const std::string& name, int rank) {
     int oldrank = get_rank(name);
     if (oldrank < 0) {
       return -ENOENT;
@@ -246,7 +276,7 @@ public:
     return 0;
   }
 
-  bool contains(const string& name) const {
+  bool contains(const std::string& name) const {
     return mon_info.count(name);
   }
 
@@ -259,29 +289,56 @@ public:
    * @returns true if monmap contains a monitor with address @p;
    *          false otherwise.
    */
-  bool contains(const entity_addr_t &a) const {
-    for (map<string,mon_info_t>::const_iterator p = mon_info.begin();
-         p != mon_info.end();
-         ++p) {
-      if (p->second.public_addr == a)
-        return true;
+  bool contains(const entity_addr_t &a, std::string *name=nullptr) const {
+    for (auto& i : mon_info) {
+      for (auto& j : i.second.public_addrs.v) {
+	if (j == a) {
+	  if (name) {
+	    *name = i.first;
+	  }
+	  return true;
+	}
+      }
+    }
+    return false;
+  }
+  bool contains(const entity_addrvec_t &av, std::string *name=nullptr) const {
+    for (auto& i : mon_info) {
+      for (auto& j : i.second.public_addrs.v) {
+	for (auto& k : av.v) {
+	  if (j == k) {
+	    if (name) {
+	      *name = i.first;
+	    }
+	    return true;
+	  }
+	}
+      }
     }
     return false;
   }
 
-  string get_name(unsigned n) const {
+  std::string get_name(unsigned n) const {
     ceph_assert(n < ranks.size());
     return ranks[n];
   }
-  string get_name(const entity_addr_t& a) const {
-    map<entity_addr_t,string>::const_iterator p = addr_mons.find(a);
+  std::string get_name(const entity_addr_t& a) const {
+    std::map<entity_addr_t, std::string>::const_iterator p = addr_mons.find(a);
     if (p == addr_mons.end())
-      return string();
+      return std::string();
     else
       return p->second;
   }
+  std::string get_name(const entity_addrvec_t& av) const {
+    for (auto& i : av.v) {
+      std::map<entity_addr_t, std::string>::const_iterator p = addr_mons.find(i);
+      if (p != addr_mons.end())
+	return p->second;
+    }
+    return std::string();
+  }
 
-  int get_rank(const string& n) const {
+  int get_rank(const std::string& n) const {
     if (auto found = std::find(ranks.begin(), ranks.end(), n);
 	found != ranks.end()) {
       return std::distance(ranks.begin(), found);
@@ -290,46 +347,62 @@ public:
     }
   }
   int get_rank(const entity_addr_t& a) const {
-    string n = get_name(a);
-    if (n.empty())
-      return -1;
-
-    return get_rank(n);
+    std::string n = get_name(a);
+    if (!n.empty()) {
+      return get_rank(n);
+    }
+    return -1;
   }
-  bool get_addr_name(const entity_addr_t& a, string& name) {
+  int get_rank(const entity_addrvec_t& av) const {
+    std::string n = get_name(av);
+    if (!n.empty()) {
+      return get_rank(n);
+    }
+    return -1;
+  }
+  bool get_addr_name(const entity_addr_t& a, std::string& name) {
     if (addr_mons.count(a) == 0)
       return false;
     name = addr_mons[a];
     return true;
   }
 
-  entity_addrvec_t get_addrs(const string& n) const {
-    return entity_addrvec_t(get_addr(n));
-  }
-  entity_addrvec_t get_addrs(unsigned m) const {
-    return entity_addrvec_t(get_addr(m));
-  }
-
-  const entity_addr_t& get_addr(const string& n) const {
+  const entity_addrvec_t& get_addrs(const std::string& n) const {
     ceph_assert(mon_info.count(n));
-    map<string,mon_info_t>::const_iterator p = mon_info.find(n);
-    return p->second.public_addr;
+    std::map<std::string,mon_info_t>::const_iterator p = mon_info.find(n);
+    return p->second.public_addrs;
   }
-  const entity_addr_t& get_addr(unsigned m) const {
+  const entity_addrvec_t& get_addrs(unsigned m) const {
     ceph_assert(m < ranks.size());
-    return get_addr(ranks[m]);
+    return get_addrs(ranks[m]);
   }
-  void set_addr(const string& n, const entity_addr_t& a) {
+  void set_addrvec(const std::string& n, const entity_addrvec_t& a) {
     ceph_assert(mon_info.count(n));
-    mon_info[n].public_addr = a;
+    mon_info[n].public_addrs = a;
+    calc_addr_mons();
+  }
+  uint16_t get_priority(const std::string& n) const {
+    auto it = mon_info.find(n);
+    ceph_assert(it != mon_info.end());
+    return it->second.priority;
+  }
+  uint16_t get_weight(const std::string& n) const {
+    auto it = mon_info.find(n);
+    ceph_assert(it != mon_info.end());
+    return it->second.weight;
+  }
+  void set_weight(const std::string& n, uint16_t v) {
+    auto it = mon_info.find(n);
+    ceph_assert(it != mon_info.end());
+    it->second.weight = v;
   }
 
-  void encode(bufferlist& blist, uint64_t con_features) const;
-  void decode(bufferlist& blist) {
+  void encode(ceph::buffer::list& blist, uint64_t con_features) const;
+  void decode(ceph::buffer::list& blist) {
     auto p = std::cbegin(blist);
     decode(p);
   }
-  void decode(bufferlist::const_iterator& p);
+  void decode(ceph::buffer::list::const_iterator& p);
 
   void generate_fsid() {
     fsid.generate_random();
@@ -350,12 +423,12 @@ public:
    *   3 config [mon.*] sections, and 'mon addr' fields in those sections
    *
    * @param cct context (and associated config)
-   * @param errout ostream to send error messages too
+   * @param errout std::ostream to send error messages too
    */
 #ifdef WITH_SEASTAR
-  seastar::future<> build_initial(const ceph::common::ConfigProxy& conf);
+  seastar::future<> build_initial(const ceph::common::ConfigProxy& conf, bool for_mkfs);
 #else
-  int build_initial(CephContext *cct, ostream& errout);
+  int build_initial(CephContext *cct, bool for_mkfs, std::ostream& errout);
 #endif
   /**
    * filter monmap given a set of initial members.
@@ -371,15 +444,17 @@ public:
    * @param removed optional pointer to set to insert removed mon addrs to
    */
   void set_initial_members(CephContext *cct,
-			   list<std::string>& initial_members,
-			   string my_name, const entity_addr_t& my_addr,
-			   set<entity_addr_t> *removed);
+			   std::list<std::string>& initial_members,
+			   std::string my_name,
+			   const entity_addrvec_t& my_addrs,
+			   std::set<entity_addrvec_t> *removed);
 
-  void print(ostream& out) const;
-  void print_summary(ostream& out) const;
+  void print(std::ostream& out) const;
+  void print_summary(std::ostream& out) const;
   void dump(ceph::Formatter *f) const;
+  void dump_summary(ceph::Formatter *f) const;
 
-  static void generate_test_instances(list<MonMap*>& o);
+  static void generate_test_instances(std::list<MonMap*>& o);
 protected:
   /**
    * build a monmap from a list of ips
@@ -391,7 +466,8 @@ protected:
    * @return 0 for success, -errno on error
    */
   int init_with_ips(const std::string& ips,
-			 const std::string &prefix);
+		    bool for_mkfs,
+		    const std::string &prefix);
   /**
    * build a monmap from a list of hostnames
    *
@@ -402,25 +478,26 @@ protected:
    * @return 0 for success, -errno on error
    */
   int init_with_hosts(const std::string& hostlist,
-			 const std::string& prefix);
+		      bool for_mkfs,
+		      const std::string& prefix);
   int init_with_config_file(const ConfigProxy& conf, std::ostream& errout);
 #if WITH_SEASTAR
   seastar::future<> read_monmap(const std::string& monmap);
   /// try to build monmap with different settings, like
   /// mon_host, mon* sections, and mon_dns_srv_name
-  seastar::future<> build_monmap(const ceph::common::ConfigProxy& conf);
+  seastar::future<> build_monmap(const ceph::common::ConfigProxy& conf, bool for_mkfs);
   /// initialize monmap by resolving given service name
-  seastar::future<> init_with_dns_srv(const std::string& name);
+  seastar::future<> init_with_dns_srv(bool for_mkfs, const std::string& name);
 #else
   /// read from encoded monmap file
   int init_with_monmap(const std::string& monmap, std::ostream& errout);
-  int init_with_dns_srv(CephContext* cct, std::string srv_name,
+  int init_with_dns_srv(CephContext* cct, std::string srv_name, bool for_mkfs,
 			std::ostream& errout);
 #endif
 };
 WRITE_CLASS_ENCODER_FEATURES(MonMap)
 
-inline ostream& operator<<(ostream &out, const MonMap &m) {
+inline std::ostream& operator<<(std::ostream &out, const MonMap &m) {
   m.print_summary(out);
   return out;
 }

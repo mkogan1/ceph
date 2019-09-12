@@ -36,7 +36,7 @@
 #define talloc(type, num) (type *) malloc(sizeof(type)*(num))
 
 using namespace std;
-
+using namespace ceph;
 static ostream& _prefix(std::ostream* _dout)
 {
   return *_dout << "ErasureCodeClay: ";
@@ -113,6 +113,7 @@ int ErasureCodeClay::decode(const set<int> &want_to_read,
   set<int> avail;
   for ([[maybe_unused]] auto& [node, bl] : chunks) {
     avail.insert(node);
+    (void)bl;  // silence -Wunused-variable
   }
 
   if (is_repair(want_to_read, avail) && 
@@ -192,7 +193,7 @@ int ErasureCodeClay::parse(ErasureCodeProfile &profile,
   err |= to_int("k", profile, &k, DEFAULT_K, ss);
   err |= to_int("m", profile, &m, DEFAULT_M, ss);
 
-  err |= sanity_check_k(k, ss);
+  err |= sanity_check_k_m(k, m, ss);
 
   err |= to_int("d", profile, &d, std::to_string(k+m-1), ss);
 
@@ -484,6 +485,7 @@ int ErasureCodeClay::repair_one_lost_chunk(map<int, bufferlist> &recovered_data,
       // check across all erasures and aloof nodes
       for ([[maybe_unused]] auto& [node, bl] : recovered_data) {
         if (node % q == z_vec[node / q]) order++;
+        (void)bl;  // silence -Wunused-variable
       }
       for (auto node : aloof_nodes) {
         if (node % q == z_vec[node / q]) order++;
@@ -511,6 +513,7 @@ int ErasureCodeClay::repair_one_lost_chunk(map<int, bufferlist> &recovered_data,
   for ([[maybe_unused]] auto& [node, bl] : recovered_data) {
     lost_chunk = node;
     count++;
+    (void)bl;  // silence -Wunused-variable
   }
   ceph_assert(count == 1);
 
@@ -655,6 +658,7 @@ int ErasureCodeClay::decode_layered(set<int> &erased_chunks,
   for (int i = k+nu; (num_erasures < m) && (i < q*t); i++) {
     if ([[maybe_unused]] auto [it, added] = erased_chunks.emplace(i); added) {
       num_erasures++;
+      (void)it;  // silence -Wunused-variable
     }
   }
   ceph_assert(num_erasures == m);

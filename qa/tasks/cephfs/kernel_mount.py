@@ -1,6 +1,7 @@
 from StringIO import StringIO
 import json
 import logging
+import time
 from textwrap import dedent
 from teuthology.orchestra.run import CommandFailedError
 from teuthology import misc
@@ -43,6 +44,7 @@ class KernelMount(CephFSMount):
                 run.Raw('>'),
                 filename,
             ],
+            timeout=(5*60),
         )
 
     def mount(self, mount_path=None, mount_fs_name=None):
@@ -62,6 +64,7 @@ class KernelMount(CephFSMount):
                 '--',
                 self.mountpoint,
             ],
+            timeout=(5*60),
         )
 
         if mount_path is None:
@@ -86,10 +89,11 @@ class KernelMount(CephFSMount):
                 '-o',
                 opts
             ],
+            timeout=(30*60),
         )
 
         self.client_remote.run(
-            args=['sudo', 'chmod', '1777', self.mountpoint])
+            args=['sudo', 'chmod', '1777', self.mountpoint], timeout=(5*60))
 
         self.mounted = True
 
@@ -101,7 +105,7 @@ class KernelMount(CephFSMount):
             cmd.append('-f')
 
         try:
-            self.client_remote.run(args=cmd, timeout=(5*60))
+            self.client_remote.run(args=cmd, timeout=(15*60))
         except Exception as e:
             self.client_remote.run(args=[
                 'sudo',
@@ -109,7 +113,7 @@ class KernelMount(CephFSMount):
                 'lsof',
                 run.Raw(';'),
                 'ps', 'auxf',
-            ])
+            ], timeout=(15*60))
             raise e
 
         rproc = self.client_remote.run(
@@ -173,21 +177,31 @@ class KernelMount(CephFSMount):
                                                 self.ipmi_user,
                                                 self.ipmi_password,
                                                 self.ipmi_domain)
-        con.power_off()
+        con.hard_reset(wait_for_login=False)
 
         self.mounted = False
 
     def kill_cleanup(self):
         assert not self.mounted
 
-        con = orchestra_remote.getRemoteConsole(self.client_remote.hostname,
-                                                self.ipmi_user,
-                                                self.ipmi_password,
-                                                self.ipmi_domain)
-        con.power_on()
+        # We need to do a sleep here because we don't know how long it will
+        # take for a hard_reset to be effected.
+        time.sleep(30)
 
-        # Wait for node to come back up after reboot
-        misc.reconnect(None, 300, [self.client_remote])
+        try:
+            # Wait for node to come back up after reboot
+            misc.reconnect(None, 300, [self.client_remote])
+        except:
+            # attempt to get some useful debug output:
+            con = orchestra_remote.getRemoteConsole(self.client_remote.hostname,
+                                                    self.ipmi_user,
+                                                    self.ipmi_password,
+                                                    self.ipmi_domain)
+            con.check_status(timeout=60)
+            raise
+
+        # Remove mount directory
+        self.client_remote.run(args=['uptime'], timeout=10)
 
         # Remove mount directory
         self.client_remote.run(
@@ -196,6 +210,7 @@ class KernelMount(CephFSMount):
                 '--',
                 self.mountpoint,
             ],
+            timeout=(5*60),
         )
 
     def _find_debug_dir(self):
@@ -221,7 +236,7 @@ class KernelMount(CephFSMount):
 
         p = self.client_remote.run(args=[
             'sudo', 'python', '-c', pyscript
-        ], stdout=StringIO())
+        ], stdout=StringIO(), timeout=(5*60))
         client_id_to_dir = json.loads(p.stdout.getvalue())
 
         try:
@@ -243,7 +258,7 @@ class KernelMount(CephFSMount):
 
         p = self.client_remote.run(args=[
             'sudo', 'python', '-c', pyscript
-        ], stdout=StringIO())
+        ], stdout=StringIO(), timeout=(5*60))
         return p.stdout.getvalue()
 
     def get_global_id(self):

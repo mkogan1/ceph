@@ -5,16 +5,11 @@
 #define CEPH_LIBRBD_API_MIGRATION_H
 
 #include "include/int_types.h"
+#include "include/rados/librados_fwd.hpp"
 #include "include/rbd/librbd.hpp"
 #include "cls/rbd/cls_rbd_types.h"
 
 #include <vector>
-
-namespace librados {
-
-class IoCtx;
-
-}
 
 namespace librbd {
 
@@ -71,7 +66,8 @@ private:
 
   int set_state(cls::rbd::MigrationState state, const std::string &description);
 
-  int list_snaps(std::vector<librbd::snap_info_t> *snaps = nullptr);
+  int list_src_snaps(std::vector<librbd::snap_info_t> *snaps);
+  int validate_src_snaps();
   int disable_mirroring(ImageCtxT *image_ctx, bool *was_enabled);
   int enable_mirroring(ImageCtxT *image_ctx, bool was_enabled);
   int set_migration();
@@ -82,6 +78,7 @@ private:
   int add_group(ImageCtxT *image_ctx, group_info_t &group_info);
   int update_group(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx);
   int remove_migration(ImageCtxT *image_ctx);
+  int relink_children(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx);
   int remove_src_image();
 
   int v1_set_migration();
@@ -90,6 +87,11 @@ private:
   int v2_unlink_src_image();
   int v1_relink_src_image();
   int v2_relink_src_image();
+
+  int relink_child(ImageCtxT *from_image_ctx, ImageCtxT *to_image_ctx,
+                   const librbd::snap_info_t &src_snap,
+                   const librbd::linked_image_spec_t &child_image,
+                   bool migration_abort, bool reattach_child);
 };
 
 } // namespace api

@@ -28,6 +28,16 @@ add_executable(unittest_lockdep
 add_ceph_unittest(unittest_lockdep)
 target_link_libraries(unittest_lockdep ceph-common global)
 
+# FreeBSD only has shims to support NUMA, no functional code.
+if(LINUX)
+# unittest_numa
+add_executable(unittest_numa
+  test_numa.cc
+  )
+add_ceph_unittest(unittest_numa)
+target_link_libraries(unittest_numa ceph-common)
+endif()
+
 # unittest_bloom_filter
 add_executable(unittest_bloom_filter
   test_bloom_filter.cc
@@ -73,6 +83,14 @@ add_ceph_unittest(unittest_json_formattable ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/un
 # add_dependencies(unittest_json_formattable ceph-common)
 target_link_libraries(unittest_json_formattable ceph-common global ${BLKID_LIBRARIES})
 
+# unittest_json_formatter
+add_executable(unittest_json_formatter
+  test_json_formatter.cc
+  )
+add_ceph_unittest(unittest_json_formatter ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/unittest_json_formatter)
+# add_dependencies(unittest_json_formatter ceph-common)
+target_link_libraries(unittest_json_formatter ceph-common global ${BLKID_LIBRARIES})
+
 # unittest_sharedptr_registry
 add_executable(unittest_sharedptr_registry
   test_sharedptr_registry.cc
@@ -110,7 +128,7 @@ add_executable(unittest_util
   ${CMAKE_SOURCE_DIR}/src/common/util.cc
   )
 add_ceph_unittest(unittest_util)
-target_link_libraries(unittest_util global)
+target_link_libraries(unittest_util global StdFilesystem::filesystem)
 
 # unittest_random
 add_executable(unittest_random
@@ -132,13 +150,6 @@ add_executable(unittest_lru
   )
 add_ceph_unittest(unittest_lru)
 target_link_libraries(unittest_lru ceph-common)
-
-# unittest_io_priority
-add_executable(unittest_io_priority
-  test_io_priority.cc
-  )
-add_ceph_unittest(unittest_io_priority)
-target_link_libraries(unittest_io_priority ceph-common)
 
 # unittest_crc32c
 add_executable(unittest_crc32c
@@ -231,13 +242,6 @@ add_executable(unittest_mutex_debug
 add_ceph_unittest(unittest_mutex_debug)
 target_link_libraries(unittest_mutex_debug ceph-common)
 
-# unittest_mutex
-add_executable(unittest_mutex
-  test_mutex.cc
-  )
-add_ceph_unittest(unittest_mutex)
-target_link_libraries(unittest_mutex ceph-common)
-
 # unittest_shunique_lock
 add_executable(unittest_shunique_lock
   test_shunique_lock.cc
@@ -285,7 +289,6 @@ target_link_libraries(unittest_iso_8601 ceph-common)
 add_ceph_unittest(unittest_iso_8601)
 
 add_executable(unittest_convenience test_convenience.cc)
-target_link_libraries(unittest_convenience ceph-common)
 add_ceph_unittest(unittest_convenience)
 
 add_executable(unittest_bounded_key_counter
@@ -309,3 +312,10 @@ target_link_libraries(unittest_async_completion Boost::system)
 add_executable(unittest_async_shared_mutex test_async_shared_mutex.cc)
 add_ceph_unittest(unittest_async_shared_mutex)
 target_link_libraries(unittest_async_shared_mutex ceph-common Boost::system)
+
+add_executable(unittest_rabin_chunk test_rabin_chunk.cc
+  $<TARGET_OBJECTS:unit-main>)
+target_link_libraries(unittest_rabin_chunk global ceph-common)
+add_ceph_unittest(unittest_rabin_chunk)
+
+

@@ -52,7 +52,7 @@ MgrStandby::MgrStandby(int argc, const char **argv) :
   log_client(g_ceph_context, client_messenger.get(), &monc.monmap, LogClient::NO_FLAGS),
   clog(log_client.create_channel(CLOG_CHANNEL_CLUSTER)),
   audit_clog(log_client.create_channel(CLOG_CHANNEL_AUDIT)),
-  lock("MgrStandby::lock"),
+  finisher(g_ceph_context, "MgrStandby", "mgrsb-fin"),
   timer(g_ceph_context, lock),
   py_module_registry(clog),
   active_mgr(nullptr),
@@ -72,7 +72,6 @@ const char** MgrStandby::get_tracked_conf_keys() const
     "clog_to_syslog",
     "clog_to_syslog_facility",
     "clog_to_syslog_level",
-    "osd_objectstore_fuse",
     "clog_to_graylog",
     "clog_to_graylog_host",
     "clog_to_graylog_port",
@@ -107,6 +106,9 @@ int MgrStandby::init()
 
   std::lock_guard l(lock);
 
+  // Start finisher
+  finisher.start();
+
   // Initialize Messenger
   client_messenger->add_dispatcher_tail(this);
   client_messenger->add_dispatcher_head(&objecter);
@@ -138,6 +140,9 @@ int MgrStandby::init()
       }
       return false;
     });
+  monc.register_config_notify_callback([this]() {
+      py_module_registry.handle_config_notify();
+    });
   dout(4) << "Registered monc callback" << dendl;
 
   int r = monc.init();
@@ -158,6 +163,11 @@ int MgrStandby::init()
     client_messenger->wait();
     return r;
   }
+  // only forward monmap updates after authentication finishes, otherwise
+  // monc.authenticate() will be waiting for MgrStandy::ms_dispatch()
+  // to acquire the lock forever, as it is already locked in the beginning of
+  // this method.
+  monc.set_passthrough_monmap();
 
   client_t whoami = monc.get_global_id();
   client_messenger->set_myname(entity_name_t::MGR(whoami.v));
@@ -179,8 +189,8 @@ int MgrStandby::init()
 
 void MgrStandby::send_beacon()
 {
-  ceph_assert(lock.is_locked_by_me());
-  dout(4) << state_str() << dendl;
+  ceph_assert(ceph_mutex_is_locked_by_me(lock));
+  dout(20) << state_str() << dendl;
 
   std::list<PyModuleRef> modules = py_module_registry.get_modules();
 
@@ -192,6 +202,7 @@ void MgrStandby::send_beacon()
     info.name = module->get_name();
     info.error_string = module->get_error_string();
     info.can_run = module->get_can_run();
+    info.module_options = module->get_options();
     module_info.push_back(std::move(info));
   }
 
@@ -203,7 +214,8 @@ void MgrStandby::send_beacon()
   dout(10) << "sending beacon as gid " << monc.get_global_id() << dendl;
 
   map<string,string> metadata;
-  metadata["addr"] = monc.get_my_addr().ip_only_to_str();
+  metadata["addr"] = client_messenger->get_myaddr_legacy().ip_only_to_str();
+  metadata["addrs"] = stringify(client_messenger->get_myaddrs());
   collect_sys_info(&metadata, g_ceph_context);
 
   MMgrBeacon *m = new MMgrBeacon(monc.get_fsid(),
@@ -212,7 +224,8 @@ void MgrStandby::send_beacon()
                                  addrs,
                                  available,
 				 std::move(module_info),
-				 std::move(metadata));
+				 std::move(metadata),
+				 CEPH_FEATURES_ALL);
 
   if (available) {
     if (!available_in_map) {
@@ -248,41 +261,55 @@ void MgrStandby::tick()
 
 void MgrStandby::handle_signal(int signum)
 {
-  std::lock_guard l(lock);
   ceph_assert(signum == SIGINT || signum == SIGTERM);
   derr << "*** Got signal " << sig_str(signum) << " ***" << dendl;
-  shutdown();
+  _exit(0);  // exit with 0 result code, as if we had done an orderly shutdown
+  //shutdown();
 }
 
 void MgrStandby::shutdown()
 {
-  // Expect already to be locked as we're called from signal handler
-  ceph_assert(lock.is_locked_by_me());
+  finisher.queue(new FunctionContext([&](int) {
+    std::lock_guard l(lock);
 
-  dout(4) << "Shutting down" << dendl;
+    dout(4) << "Shutting down" << dendl;
 
-  // stop sending beacon first, i use monc to talk with monitors
-  timer.shutdown();
-  // client uses monc and objecter
-  client.shutdown();
-  mgrc.shutdown();
-  // stop monc, so mon won't be able to instruct me to shutdown/activate after
-  // the active_mgr is stopped
-  monc.shutdown();
-  if (active_mgr) {
-    active_mgr->shutdown();
-  }
+    // stop sending beacon first, i use monc to talk with monitors
+    timer.shutdown();
+    // client uses monc and objecter
+    client.shutdown();
+    mgrc.shutdown();
+    // stop monc, so mon won't be able to instruct me to shutdown/activate after
+    // the active_mgr is stopped
+    monc.shutdown();
+    if (active_mgr) {
+      active_mgr->shutdown();
+    }
 
-  py_module_registry.shutdown();
+    py_module_registry.shutdown();
 
-  // objecter is used by monc and active_mgr
-  objecter.shutdown();
-  // client_messenger is used by all of them, so stop it in the end
-  client_messenger->shutdown();
+    // objecter is used by monc and active_mgr
+    objecter.shutdown();
+    // client_messenger is used by all of them, so stop it in the end
+    client_messenger->shutdown();
+  }));
+
+  // Then stop the finisher to ensure its enqueued contexts aren't going
+  // to touch references to the things we're about to tear down
+  finisher.wait_for_empty();
+  finisher.stop();
 }
 
 void MgrStandby::respawn()
 {
+  // --- WARNING TO FUTURE COPY/PASTERS ---
+  // You must also add a call like
+  //
+  //   ceph_pthread_setname(pthread_self(), "ceph-mgr");
+  //
+  // to main() so that /proc/$pid/stat field 2 contains "(ceph-mgr)"
+  // instead of "(exe)", so that killall (and log rotation) will work.
+
   char *new_argv[orig_argc+1];
   dout(1) << " e: '" << orig_argv[0] << "'" << dendl;
   for (int i=0; i<orig_argc; i++) {
@@ -347,7 +374,7 @@ void MgrStandby::_update_log_config()
   }
 }
 
-void MgrStandby::handle_mgr_map(MMgrMap* mmap)
+void MgrStandby::handle_mgr_map(ref_t<MMgrMap> mmap)
 {
   auto &map = mmap->get_map();
   dout(4) << "received map epoch " << map.get_epoch() << dendl;
@@ -396,26 +423,26 @@ void MgrStandby::handle_mgr_map(MMgrMap* mmap)
       // I am the standby and someone else is active, start modules
       // in standby mode to do redirects if needed
       if (!py_module_registry.is_standby_running()) {
-        py_module_registry.standby_start(monc);
+        py_module_registry.standby_start(monc, finisher);
       }
     }
   }
 }
 
-bool MgrStandby::ms_dispatch(Message *m)
+bool MgrStandby::ms_dispatch2(const ref_t<Message>& m)
 {
   std::lock_guard l(lock);
-  dout(4) << state_str() << " " << *m << dendl;
+  dout(10) << state_str() << " " << *m << dendl;
 
   if (m->get_type() == MSG_MGR_MAP) {
-    handle_mgr_map(static_cast<MMgrMap*>(m));
+    handle_mgr_map(ref_cast<MMgrMap>(m));
   }
   bool handled = false;
   if (active_mgr) {
     auto am = active_mgr;
-    lock.Unlock();
-    handled = am->ms_dispatch(m);
-    lock.Lock();
+    lock.unlock();
+    handled = am->ms_dispatch2(m);
+    lock.lock();
   }
   if (m->get_type() == MSG_MGR_MAP) {
     // let this pass through for mgrc
@@ -424,21 +451,6 @@ bool MgrStandby::ms_dispatch(Message *m)
   return handled;
 }
 
-
-bool MgrStandby::ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer,
-                         bool force_new)
-{
-  if (dest_type == CEPH_ENTITY_TYPE_MON)
-    return true;
-
-  if (force_new) {
-    if (monc.wait_auth_rotating(10) < 0)
-      return false;
-  }
-
-  *authorizer = monc.build_authorizer(dest_type);
-  return *authorizer != NULL;
-}
 
 bool MgrStandby::ms_handle_refused(Connection *con)
 {

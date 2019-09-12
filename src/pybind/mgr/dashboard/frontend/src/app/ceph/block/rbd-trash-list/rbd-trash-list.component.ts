@@ -1,13 +1,16 @@
 import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
 import * as _ from 'lodash';
 import * as moment from 'moment';
-import { BsModalRef, BsModalService } from 'ngx-bootstrap';
+import { BsModalRef, BsModalService } from 'ngx-bootstrap/modal';
 
 import { RbdService } from '../../../shared/api/rbd.service';
-import { DeletionModalComponent } from '../../../shared/components/deletion-modal/deletion-modal.component';
+import { CriticalConfirmationModalComponent } from '../../../shared/components/critical-confirmation-modal/critical-confirmation-modal.component';
+import { ActionLabelsI18n } from '../../../shared/constants/app.constants';
 import { TableComponent } from '../../../shared/datatable/table/table.component';
 import { CellTemplate } from '../../../shared/enum/cell-template.enum';
+import { Icons } from '../../../shared/enum/icons.enum';
 import { ViewCacheStatus } from '../../../shared/enum/view-cache-status.enum';
 import { CdTableAction } from '../../../shared/models/cd-table-action';
 import { CdTableColumn } from '../../../shared/models/cd-table-column';
@@ -29,12 +32,14 @@ import { RbdTrashRestoreModalComponent } from '../rbd-trash-restore-modal/rbd-tr
   providers: [TaskListService]
 })
 export class RbdTrashListComponent implements OnInit {
-  @ViewChild(TableComponent)
+  @ViewChild(TableComponent, { static: true })
   table: TableComponent;
-  @ViewChild('expiresTpl')
+  @ViewChild('expiresTpl', { static: true })
   expiresTpl: TemplateRef<any>;
-  @ViewChild('deleteTpl')
+  @ViewChild('deleteTpl', { static: true })
   deleteTpl: TemplateRef<any>;
+
+  icons = Icons;
 
   columns: CdTableColumn[];
   executingTasks: ExecutingTask[] = [];
@@ -52,21 +57,22 @@ export class RbdTrashListComponent implements OnInit {
     private modalService: BsModalService,
     private cdDatePipe: CdDatePipe,
     private taskListService: TaskListService,
-    private taskWrapper: TaskWrapperService
+    private taskWrapper: TaskWrapperService,
+    private i18n: I18n,
+    public actionLabels: ActionLabelsI18n
   ) {
     this.permission = this.authStorageService.getPermissions().rbdImage;
-
     const restoreAction: CdTableAction = {
       permission: 'update',
-      icon: 'fa-undo',
+      icon: Icons.undo,
       click: () => this.restoreModal(),
-      name: 'Restore'
+      name: this.actionLabels.RESTORE
     };
     const deleteAction: CdTableAction = {
       permission: 'delete',
-      icon: 'fa-times',
+      icon: Icons.destroy,
       click: () => this.deleteModal(),
-      name: 'Delete'
+      name: this.actionLabels.DELETE
     };
     this.tableActions = [restoreAction, deleteAction];
   }
@@ -74,29 +80,29 @@ export class RbdTrashListComponent implements OnInit {
   ngOnInit() {
     this.columns = [
       {
-        name: 'ID',
+        name: this.i18n('ID'),
         prop: 'id',
         flexGrow: 1,
         cellTransformation: CellTemplate.executing
       },
       {
-        name: 'Name',
+        name: this.i18n('Name'),
         prop: 'name',
         flexGrow: 1
       },
       {
-        name: 'Pool',
+        name: this.i18n('Pool'),
         prop: 'pool_name',
         flexGrow: 1
       },
       {
-        name: 'Status',
+        name: this.i18n('Status'),
         prop: 'deferment_end_time',
         flexGrow: 1,
         cellTemplate: this.expiresTpl
       },
       {
-        name: 'Deleted At',
+        name: this.i18n('Deleted At'),
         prop: 'deletion_time',
         flexGrow: 1,
         pipe: this.cdDatePipe
@@ -177,7 +183,7 @@ export class RbdTrashListComponent implements OnInit {
     const imageId = this.selection.first().id;
     const expiresAt = this.selection.first().deferment_end_time;
 
-    this.modalRef = this.modalService.show(DeletionModalComponent, {
+    this.modalRef = this.modalService.show(CriticalConfirmationModalComponent, {
       initialState: {
         itemDescription: 'RBD',
         bodyTemplate: this.deleteTpl,

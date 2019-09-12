@@ -134,8 +134,12 @@ void DeviceState::print(ostream& out) const
 
 void DaemonStateIndex::insert(DaemonStatePtr dm)
 {
-  RWLock::WLocker l(lock);
+  std::unique_lock l{lock};
+  _insert(dm);
+}
 
+void DaemonStateIndex::_insert(DaemonStatePtr dm)
+{
   if (all.count(dm->key)) {
     _erase(dm->key);
   }
@@ -152,7 +156,7 @@ void DaemonStateIndex::insert(DaemonStatePtr dm)
 
 void DaemonStateIndex::_erase(const DaemonKey& dmk)
 {
-  ceph_assert(lock.is_wlocked());
+  ceph_assert(ceph_mutex_is_wlocked(lock));
 
   const auto to_erase = all.find(dmk);
   ceph_assert(to_erase != all.end());
@@ -180,7 +184,7 @@ void DaemonStateIndex::_erase(const DaemonKey& dmk)
 DaemonStateCollection DaemonStateIndex::get_by_service(
   const std::string& svc) const
 {
-  RWLock::RLocker l(lock);
+  std::shared_lock l{lock};
 
   DaemonStateCollection result;
 
@@ -196,7 +200,7 @@ DaemonStateCollection DaemonStateIndex::get_by_service(
 DaemonStateCollection DaemonStateIndex::get_by_server(
   const std::string &hostname) const
 {
-  RWLock::RLocker l(lock);
+  std::shared_lock l{lock};
 
   if (by_server.count(hostname)) {
     return by_server.at(hostname);
@@ -207,14 +211,14 @@ DaemonStateCollection DaemonStateIndex::get_by_server(
 
 bool DaemonStateIndex::exists(const DaemonKey &key) const
 {
-  RWLock::RLocker l(lock);
+  std::shared_lock l{lock};
 
   return all.count(key) > 0;
 }
 
 DaemonStatePtr DaemonStateIndex::get(const DaemonKey &key)
 {
-  RWLock::RLocker l(lock);
+  std::shared_lock l{lock};
 
   auto iter = all.find(key);
   if (iter != all.end()) {
@@ -226,7 +230,12 @@ DaemonStatePtr DaemonStateIndex::get(const DaemonKey &key)
 
 void DaemonStateIndex::rm(const DaemonKey &key)
 {
-  RWLock::WLocker l(lock);
+  std::unique_lock l{lock};
+  _rm(key);
+}
+
+void DaemonStateIndex::_rm(const DaemonKey &key)
+{
   if (all.count(key)) {
     _erase(key);
   }
@@ -237,7 +246,7 @@ void DaemonStateIndex::cull(const std::string& svc_name,
 {
   std::vector<string> victims;
 
-  RWLock::WLocker l(lock);
+  std::unique_lock l{lock};
   auto begin = all.lower_bound({svc_name, ""});
   auto end = all.end();
   for (auto &i = begin; i != end; ++i) {
@@ -255,36 +264,41 @@ void DaemonStateIndex::cull(const std::string& svc_name,
   }
 }
 
-void DaemonPerfCounters::update(MMgrReport *report)
+void DaemonPerfCounters::update(const MMgrReport& report)
 {
-  dout(20) << "loading " << report->declare_types.size() << " new types, "
-	   << report->undeclare_types.size() << " old types, had "
+  dout(20) << "loading " << report.declare_types.size() << " new types, "
+	   << report.undeclare_types.size() << " old types, had "
 	   << types.size() << " types, got "
-           << report->packed.length() << " bytes of data" << dendl;
+           << report.packed.length() << " bytes of data" << dendl;
 
   // Retrieve session state
-  auto priv = report->get_connection()->get_priv();
+  auto priv = report.get_connection()->get_priv();
   auto session = static_cast<MgrSession*>(priv.get());
 
   // Load any newly declared types
-  for (const auto &t : report->declare_types) {
+  for (const auto &t : report.declare_types) {
     types.insert(std::make_pair(t.path, t));
     session->declared_types.insert(t.path);
-    instances.insert(std::pair<std::string, PerfCounterInstance>(
-                     t.path, PerfCounterInstance(t.type)));
   }
   // Remove any old types
-  for (const auto &t : report->undeclare_types) {
+  for (const auto &t : report.undeclare_types) {
     session->declared_types.erase(t);
   }
 
   const auto now = ceph_clock_now();
 
   // Parse packed data according to declared set of types
-  auto p = report->packed.cbegin();
+  auto p = report.packed.cbegin();
   DECODE_START(1, p);
   for (const auto &t_path : session->declared_types) {
     const auto &t = types.at(t_path);
+    auto instances_it = instances.find(t_path);
+    // Always check the instance exists, as we don't prevent yet
+    // multiple sessions from daemons with the same name, and one
+    // session clearing stats created by another on open.
+    if (instances_it == instances.end()) {
+      instances_it = instances.insert({t_path, t.type}).first;
+    }
     uint64_t val = 0;
     uint64_t avgcount = 0;
     uint64_t avgcount2 = 0;
@@ -293,9 +307,9 @@ void DaemonPerfCounters::update(MMgrReport *report)
     if (t.type & PERFCOUNTER_LONGRUNAVG) {
       decode(avgcount, p);
       decode(avgcount2, p);
-      instances.at(t_path).push_avg(now, val, avgcount);
+      instances_it->second.push_avg(now, val, avgcount);
     } else {
-      instances.at(t_path).push(now, val);
+      instances_it->second.push(now, val);
     }
   }
   DECODE_FINISH(p);

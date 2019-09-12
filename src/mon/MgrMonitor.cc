@@ -21,6 +21,8 @@
 #include "mgr/MgrContext.h"
 #include "mgr/mgr_commands.h"
 #include "OSDMonitor.h"
+#include "ConfigMonitor.h"
+#include "HealthMonitor.h"
 
 #include "MgrMonitor.h"
 
@@ -43,8 +45,26 @@ const static std::map<uint32_t, std::set<std::string>> always_on_modules = {
     CEPH_RELEASE_NAUTILUS, {
       "crash",
       "status",
+      "progress",
       "balancer",
-      "devicehealth"
+      "devicehealth",
+      "orchestrator_cli",
+      "rbd_support",
+      "volumes",
+    }
+  },
+  {
+    CEPH_RELEASE_OCTOPUS, {
+      "crash",
+      "status",
+      "progress",
+      "balancer",
+      "devicehealth",
+      "orchestrator_cli",
+      "rbd_support",
+      "volumes",
+      "pg_autoscaler",
+      "telemetry",
     }
   }
 };
@@ -52,6 +72,32 @@ const static std::map<uint32_t, std::set<std::string>> always_on_modules = {
 // Prefix for mon store of active mgr's command descriptions
 const static std::string command_descs_prefix = "mgr_command_descs";
 
+const Option *MgrMonitor::find_module_option(const string& name)
+{
+  // we have two forms of names: "mgr/$module/$option" and
+  // localized "mgr/$module/$instance/$option".  normalize to the
+  // former by stripping out $instance.
+  string real_name;
+  if (name.substr(0, 4) != "mgr/") {
+    return nullptr;
+  }
+  auto second_slash = name.find('/', 5);
+  if (second_slash == std::string::npos) {
+    return nullptr;
+  }
+  auto third_slash = name.find('/', second_slash + 1);
+  if (third_slash != std::string::npos) {
+    // drop the $instance part between the second and third slash
+    real_name = name.substr(0, second_slash) + name.substr(third_slash);
+  } else {
+    real_name = name;
+  }
+  auto p = mgr_module_options.find(real_name);
+  if (p != mgr_module_options.end()) {
+    return &p->second;
+  }
+  return nullptr;
+}
 
 version_t MgrMonitor::get_trim_to() const
 {
@@ -133,8 +179,67 @@ void MgrMonitor::update_from_paxos(bool *need_bootstrap)
     }
   }
 
-  // feed our pet MgrClient
-  mon->mgr_client.ms_dispatch(new MMgrMap(map));
+  // populate module options
+  mgr_module_options.clear();
+  misc_option_strings.clear();
+  for (auto& i : map.available_modules) {
+    for (auto& j : i.module_options) {
+      string name = string("mgr/") + i.name + "/" + j.second.name;
+      auto p = mgr_module_options.emplace(
+	name,
+	Option(name, static_cast<Option::type_t>(j.second.type),
+	       static_cast<Option::level_t>(j.second.level)));
+      Option& opt = p.first->second;
+      opt.set_flags(static_cast<Option::flag_t>(j.second.flags));
+      opt.set_flag(Option::FLAG_MGR);
+      opt.set_description(j.second.desc.c_str());
+      opt.set_long_description(j.second.long_desc.c_str());
+      for (auto& k : j.second.tags) {
+	opt.add_tag(k.c_str());
+      }
+      for (auto& k : j.second.see_also) {
+	if (i.module_options.count(k)) {
+	  // it's another module option
+	  misc_option_strings.push_back(string("mgr/") + i.name + "/" + k);
+	  opt.add_see_also(misc_option_strings.back().c_str());
+	} else {
+	  // it's a native option
+	  opt.add_see_also(k.c_str());
+	}
+      }
+      Option::value_t v, v2;
+      std::string err;
+      if (j.second.default_value.size() &&
+	  !opt.parse_value(j.second.default_value, &v, &err)) {
+	opt.set_default(v);
+      }
+      if (j.second.min.size() &&
+	  j.second.max.size() &&
+	  !opt.parse_value(j.second.min, &v, &err) &&
+	  !opt.parse_value(j.second.max, &v2, &err)) {
+	opt.set_min_max(v, v2);
+      }
+      std::vector<const char *> enum_allowed;
+      for (auto& k : j.second.enum_allowed) {
+	enum_allowed.push_back(k.c_str());
+      }
+      opt.set_enum_allowed(enum_allowed);
+    }
+  }
+  // force ConfigMonitor to refresh, since it uses const Option *
+  // pointers into our mgr_module_options (which we just rebuilt).
+  mon->configmon()->load_config();
+
+  if (!mon->is_init()) {
+    // feed our pet MgrClient, unless we are in Monitor::[pre]init()
+    prime_mgr_client();
+  }
+}
+
+void MgrMonitor::prime_mgr_client()
+{
+  dout(10) << __func__ << dendl;
+  mon->mgr_client.ms_dispatch2(make_message<MMgrMap>(map));
 }
 
 void MgrMonitor::create_pending()
@@ -217,7 +322,7 @@ void MgrMonitor::encode_pending(MonitorDBStore::TransactionRef t)
   if (pending_map.active_gid == 0) {
     auto level = should_warn_about_mgr_down();
     if (level != HEALTH_OK) {
-      next.add("MGR_DOWN", level, "no active mgr");
+      next.add("MGR_DOWN", level, "no active mgr", 0);
     } else {
       dout(10) << __func__ << " no health warning (never active and new cluster)"
 	       << dendl;
@@ -260,7 +365,7 @@ bool MgrMonitor::check_caps(MonOpRequestRef op, const uuid_d& fsid)
 
 bool MgrMonitor::preprocess_query(MonOpRequestRef op)
 {
-  PaxosServiceMessage *m = static_cast<PaxosServiceMessage*>(op->get_req());
+  auto m = op->get_req<PaxosServiceMessage>();
   switch (m->get_type()) {
     case MSG_MGR_BEACON:
       return preprocess_beacon(op);
@@ -282,7 +387,7 @@ bool MgrMonitor::preprocess_query(MonOpRequestRef op)
 
 bool MgrMonitor::prepare_update(MonOpRequestRef op)
 {
-  PaxosServiceMessage *m = static_cast<PaxosServiceMessage*>(op->get_req());
+  auto m = op->get_req<PaxosServiceMessage>();
   switch (m->get_type()) {
     case MSG_MGR_BEACON:
       return prepare_beacon(op);
@@ -324,7 +429,7 @@ public:
 
 bool MgrMonitor::preprocess_beacon(MonOpRequestRef op)
 {
-  MMgrBeacon *m = static_cast<MMgrBeacon*>(op->get_req());
+  auto m = op->get_req<MMgrBeacon>();
   mon->no_reply(op); // we never reply to beacons
   dout(4) << "beacon from " << m->get_gid() << dendl;
 
@@ -339,7 +444,7 @@ bool MgrMonitor::preprocess_beacon(MonOpRequestRef op)
 
 bool MgrMonitor::prepare_beacon(MonOpRequestRef op)
 {
-  MMgrBeacon *m = static_cast<MMgrBeacon*>(op->get_req());
+  auto m = op->get_req<MMgrBeacon>();
   dout(4) << "beacon from " << m->get_gid() << dendl;
 
   // See if we are seeing same name, new GID for the active daemon
@@ -425,6 +530,7 @@ bool MgrMonitor::prepare_beacon(MonOpRequestRef op)
     pending_map.active_gid = m->get_gid();
     pending_map.active_name = m->get_name();
     pending_map.active_change = ceph_clock_now();
+    pending_map.active_mgr_features = m->get_mgr_features();
     pending_map.available_modules = m->get_available_modules();
     encode(m->get_metadata(), pending_metadata[m->get_name()]);
     pending_metadata_rm.erase(m->get_name());
@@ -451,7 +557,8 @@ bool MgrMonitor::prepare_beacon(MonOpRequestRef op)
       mon->clog->debug() << "Standby manager daemon " << m->get_name()
                          << " started";
       pending_map.standbys[m->get_gid()] = {m->get_gid(), m->get_name(),
-					    m->get_available_modules()};
+					    m->get_available_modules(),
+					    m->get_mgr_features()};
       encode(m->get_metadata(), pending_metadata[m->get_name()]);
       pending_metadata_rm.erase(m->get_name());
       updated = true;
@@ -484,7 +591,7 @@ void MgrMonitor::check_sub(Subscription *sub)
     if (sub->next <= map.get_epoch()) {
       dout(20) << "Sending map to subscriber " << sub->session->con
 	       << " " << sub->session->con->get_peer_addr() << dendl;
-      sub->session->con->send_message(new MMgrMap(map));
+      sub->session->con->send_message2(make_message<MMgrMap>(map));
       if (sub->onetime) {
         mon->session_map.remove_sub(sub);
       } else {
@@ -526,10 +633,10 @@ void MgrMonitor::send_digests()
   for (auto sub : *(mon->session_map.subs[type])) {
     dout(10) << __func__ << " sending digest to subscriber " << sub->session->con
 	     << " " << sub->session->con->get_peer_addr() << dendl;
-    MMgrDigest *mdigest = new MMgrDigest;
+    auto mdigest = make_message<MMgrDigest>();
 
     JSONFormatter f;
-    mon->get_health_status(true, &f, nullptr, nullptr, nullptr);
+    mon->healthmon()->get_health_status(true, &f, nullptr, nullptr, nullptr);
     f.flush(mdigest->health_json);
     f.reset();
 
@@ -538,7 +645,7 @@ void MgrMonitor::send_digests()
     f.flush(mdigest->mon_status_json);
     f.reset();
 
-    sub->session->con->send_message(mdigest);
+    sub->session->con->send_message2(mdigest);
   }
 
 timer:
@@ -559,16 +666,21 @@ void MgrMonitor::cancel_timer()
 
 void MgrMonitor::on_active()
 {
-  if (mon->is_leader()) {
-    mon->clog->debug() << "mgrmap e" << map.epoch << ": " << map;
-
-    if (pending_map.always_on_modules != always_on_modules) {
-      pending_map.always_on_modules = always_on_modules;
-      dout(4) << "always on modules changed "
-        << pending_map.get_always_on_modules() << dendl;
-      propose_pending();
-    }
+  if (!mon->is_leader()) {
+    return;
   }
+  mon->clog->debug() << "mgrmap e" << map.epoch << ": " << map;
+  if (!HAVE_FEATURE(mon->get_quorum_con_features(), SERVER_NAUTILUS)) {
+    return;
+  }
+  if (pending_map.always_on_modules == always_on_modules) {
+    return;
+  }
+  dout(4) << "always on modules changed, pending "
+          << pending_map.always_on_modules << " != wanted "
+          << always_on_modules << dendl;
+  pending_map.always_on_modules = always_on_modules;
+  propose_pending();
 }
 
 void MgrMonitor::tick()
@@ -687,6 +799,8 @@ bool MgrMonitor::promote_standby()
     auto replacement_gid = pending_map.standbys.begin()->first;
     pending_map.active_gid = replacement_gid;
     pending_map.active_name = pending_map.standbys.at(replacement_gid).name;
+    pending_map.active_mgr_features =
+      pending_map.standbys.at(replacement_gid).mgr_features;
     pending_map.available = false;
     pending_map.active_addrs = entity_addrvec_t();
     pending_map.active_change = ceph_clock_now();
@@ -710,6 +824,7 @@ void MgrMonitor::drop_active()
   pending_map.active_name = "";
   pending_map.active_gid = 0;
   pending_map.active_change = ceph_clock_now();
+  pending_map.active_mgr_features = 0;
   pending_map.available = false;
   pending_map.active_addrs = entity_addrvec_t();
   pending_map.services.clear();
@@ -733,7 +848,7 @@ void MgrMonitor::drop_standby(uint64_t gid, bool drop_meta)
 
 bool MgrMonitor::preprocess_command(MonOpRequestRef op)
 {
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
   std::stringstream ss;
   bufferlist rdata;
 
@@ -752,8 +867,9 @@ bool MgrMonitor::preprocess_command(MonOpRequestRef op)
   }
 
   string format;
-  cmd_getval(g_ceph_context, cmdmap, "format", format, string("json-pretty"));
-  boost::scoped_ptr<Formatter> f(Formatter::create(format));
+  cmd_getval(g_ceph_context, cmdmap, "format", format);
+  boost::scoped_ptr<Formatter> f(Formatter::create(format, "json-pretty",
+						   "json-pretty"));
 
   string prefix;
   cmd_getval(g_ceph_context, cmdmap, "prefix", prefix);
@@ -849,14 +965,10 @@ bool MgrMonitor::preprocess_command(MonOpRequestRef op)
     }
     f->flush(rdata);
   } else if (prefix == "mgr versions") {
-    if (!f)
-      f.reset(Formatter::create("json-pretty"));
     count_metadata("ceph_version", f.get());
     f->flush(rdata);
     r = 0;
   } else if (prefix == "mgr count-metadata") {
-    if (!f)
-      f.reset(Formatter::create("json-pretty"));
     string field;
     cmd_getval(g_ceph_context, cmdmap, "property", field);
     count_metadata(field, f.get());
@@ -875,7 +987,7 @@ reply:
 
 bool MgrMonitor::prepare_command(MonOpRequestRef op)
 {
-  MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+  auto m = op->get_req<MMonCommand>();
 
   std::stringstream ss;
   bufferlist rdata;

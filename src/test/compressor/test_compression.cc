@@ -322,7 +322,7 @@ TEST_P(CompressorTest, decompress_16384)
 }
 
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
   Compressor,
   CompressorTest,
   ::testing::Values(
@@ -396,7 +396,7 @@ TEST(CompressionPlugin, all)
   EXPECT_EQ(0, factory->factory(&compressor, &ss));
   EXPECT_TRUE(compressor.get());
   {
-    Mutex::Locker l(reg->lock);
+    std::lock_guard l(reg->lock);
     EXPECT_EQ(-ENOENT, reg->remove("compressor", "does not exist"));
     EXPECT_EQ(0, reg->remove("compressor", "example"));
     EXPECT_EQ(0, reg->load("compressor", "example"));

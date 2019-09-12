@@ -57,6 +57,7 @@ function run() {
     CEPH_ARGS+="--mon-host=$CEPH_MON "
     CEPH_ARGS+="--osd-skip-data-digest=false "
 
+    export -n CEPH_CLI_TEST_DUP_COMMAND
     local funcs=${@:-$(set | sed -n -e 's/^\(TEST_[0-9a-z_]*\) .*/\1/p')}
     for func in $funcs ; do
         $func $dir || return 1
@@ -104,6 +105,86 @@ function TEST_corrupt_and_repair_replicated() {
     corrupt_and_repair_one $dir $poolname $(get_primary $poolname SOMETHING) || return 1
 
     teardown $dir || return 1
+}
+
+#
+# Allow repair to be scheduled when some recovering is still undergoing on the same OSD
+#
+function TEST_allow_repair_during_recovery() {
+    local dir=$1
+    local poolname=rbd
+
+    setup $dir || return 1
+    run_mon $dir a --osd_pool_default_size=2 || return 1
+    run_mgr $dir x || return 1
+    run_osd $dir 0 --osd_scrub_during_recovery=false \
+                   --osd_repair_during_recovery=true \
+                   --osd_debug_pretend_recovery_active=true || return 1
+    run_osd $dir 1 --osd_scrub_during_recovery=false \
+                   --osd_repair_during_recovery=true \
+                   --osd_debug_pretend_recovery_active=true || return 1
+    create_rbd_pool || return 1
+    wait_for_clean || return 1
+
+    add_something $dir $poolname || return 1
+    corrupt_and_repair_one $dir $poolname $(get_not_primary $poolname SOMETHING) || return 1
+
+    teardown $dir || return 1
+}
+
+#
+# Skip non-repair scrub correctly during recovery
+#
+function TEST_skip_non_repair_during_recovery() {
+    local dir=$1
+    local poolname=rbd
+
+    setup $dir || return 1
+    run_mon $dir a --osd_pool_default_size=2 || return 1
+    run_mgr $dir x || return 1
+    run_osd $dir 0 --osd_scrub_during_recovery=false \
+                   --osd_repair_during_recovery=true \
+                   --osd_debug_pretend_recovery_active=true || return 1
+    run_osd $dir 1 --osd_scrub_during_recovery=false \
+                   --osd_repair_during_recovery=true \
+                   --osd_debug_pretend_recovery_active=true || return 1
+    create_rbd_pool || return 1
+    wait_for_clean || return 1
+
+    add_something $dir $poolname || return 1
+    scrub_and_not_schedule $dir $poolname $(get_not_primary $poolname SOMETHING) || return 1
+
+    teardown $dir || return 1
+}
+
+function scrub_and_not_schedule() {
+    local dir=$1
+    local poolname=$2
+    local osd=$3
+
+    #
+    # 1) start a non-repair scrub
+    #
+    local pg=$(get_pg $poolname SOMETHING)
+    local last_scrub=$(get_last_scrub_stamp $pg)
+    ceph pg scrub $pg
+
+    #
+    # 2) Assure the scrub is not scheduled
+    #
+    for ((i=0; i < 3; i++)); do
+        if test "$(get_last_scrub_stamp $pg)" '>' "$last_scrub" ; then
+            return 1
+        fi
+        sleep 1
+    done
+
+    #
+    # 3) Access to the file must OK
+    #
+    objectstore_tool $dir $osd SOMETHING list-attrs || return 1
+    rados --pool $poolname get SOMETHING $dir/COPY || return 1
+    diff $dir/ORIGINAL $dir/COPY || return 1
 }
 
 function corrupt_and_repair_two() {
@@ -189,22 +270,6 @@ function corrupt_and_repair_erasure_coded() {
 
 }
 
-function create_ec_pool() {
-    local pool_name=$1
-    local allow_overwrites=$2
-
-    ceph osd erasure-code-profile set myprofile crush-failure-domain=osd $3 $4 $5 $6 $7 || return 1
-
-    create_pool "$poolname" 1 1 erasure myprofile || return 1
-
-    if [ "$allow_overwrites" = "true" ]; then
-        ceph osd pool set "$poolname" allow_ec_overwrites true || return 1
-    fi
-
-    wait_for_clean || return 1
-    return 0
-}
-
 function auto_repair_erasure_coded() {
     local dir=$1
     local allow_overwrites=$2
@@ -221,9 +286,9 @@ function auto_repair_erasure_coded() {
             --osd-scrub-interval-randomize-ratio=0"
     for id in $(seq 0 2) ; do
 	if [ "$allow_overwrites" = "true" ]; then
-            run_osd_bluestore $dir $id $ceph_osd_args || return 1
-	else
             run_osd $dir $id $ceph_osd_args || return 1
+	else
+            run_osd_filestore $dir $id $ceph_osd_args || return 1
 	fi
     done
     create_rbd_pool || return 1
@@ -264,6 +329,383 @@ function TEST_auto_repair_erasure_coded_overwrites() {
     fi
 }
 
+function TEST_auto_repair_bluestore_basic() {
+    local dir=$1
+    local poolname=testpool
+
+    # Launch a cluster with 5 seconds scrub interval
+    setup $dir || return 1
+    run_mon $dir a || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd-scrub-auto-repair=true \
+	    --osd_deep_scrub_randomize_ratio=0 \
+            --osd-scrub-interval-randomize-ratio=0"
+    for id in $(seq 0 2) ; do
+        run_osd $dir $id $ceph_osd_args || return 1
+    done
+
+    create_pool $poolname 1 1 || return 1
+    ceph osd pool set $poolname size 2
+    wait_for_clean || return 1
+
+    # Put an object
+    local payload=ABCDEF
+    echo $payload > $dir/ORIGINAL
+    rados --pool $poolname put SOMETHING $dir/ORIGINAL || return 1
+
+    # Remove the object from one shard physically
+    # Restarted osd get $ceph_osd_args passed
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) SOMETHING remove || return 1
+
+    local pgid=$(get_pg $poolname SOMETHING)
+    local primary=$(get_primary $poolname SOMETHING)
+    local last_scrub_stamp="$(get_last_scrub_stamp $pgid)"
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_deep_scrub $pgid
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_scrub $pgid
+
+    # Wait for auto repair
+    wait_for_scrub $pgid "$last_scrub_stamp" || return 1
+    wait_for_clean || return 1
+    ceph pg dump pgs
+    # Verify - the file should be back
+    # Restarted osd get $ceph_osd_args passed
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) SOMETHING list-attrs || return 1
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) SOMETHING get-bytes $dir/COPY || return 1
+    diff $dir/ORIGINAL $dir/COPY || return 1
+    grep scrub_finish $dir/osd.${primary}.log
+
+    # Tear down
+    teardown $dir || return 1
+}
+
+function TEST_auto_repair_bluestore_scrub() {
+    local dir=$1
+    local poolname=testpool
+
+    # Launch a cluster with 5 seconds scrub interval
+    setup $dir || return 1
+    run_mon $dir a || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd-scrub-auto-repair=true \
+	    --osd_deep_scrub_randomize_ratio=0 \
+            --osd-scrub-interval-randomize-ratio=0"
+    for id in $(seq 0 2) ; do
+        run_osd $dir $id $ceph_osd_args || return 1
+    done
+
+    create_pool $poolname 1 1 || return 1
+    ceph osd pool set $poolname size 2
+    wait_for_clean || return 1
+
+    # Put an object
+    local payload=ABCDEF
+    echo $payload > $dir/ORIGINAL
+    rados --pool $poolname put SOMETHING $dir/ORIGINAL || return 1
+
+    # Remove the object from one shard physically
+    # Restarted osd get $ceph_osd_args passed
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) SOMETHING remove || return 1
+
+    local pgid=$(get_pg $poolname SOMETHING)
+    local primary=$(get_primary $poolname SOMETHING)
+    local last_scrub_stamp="$(get_last_scrub_stamp $pgid)"
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_scrub $pgid
+
+    # Wait for scrub -> auto repair
+    wait_for_scrub $pgid "$last_scrub_stamp" || return 1
+    ceph pg dump pgs
+    # Actually this causes 2 scrubs, so we better wait a little longer
+    sleep 5
+    wait_for_clean || return 1
+    ceph pg dump pgs
+    # Verify - the file should be back
+    # Restarted osd get $ceph_osd_args passed
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) SOMETHING list-attrs || return 1
+    rados --pool $poolname get SOMETHING $dir/COPY || return 1
+    diff $dir/ORIGINAL $dir/COPY || return 1
+    grep scrub_finish $dir/osd.${primary}.log
+
+    # This should have caused 1 object to be repaired
+    COUNT=$(ceph pg $pgid query | jq '.info.stats.stat_sum.num_objects_repaired')
+    test "$COUNT" = "1" || return 1
+
+    # Tear down
+    teardown $dir || return 1
+}
+
+function TEST_auto_repair_bluestore_failed() {
+    local dir=$1
+    local poolname=testpool
+
+    # Launch a cluster with 5 seconds scrub interval
+    setup $dir || return 1
+    run_mon $dir a || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd-scrub-auto-repair=true \
+	    --osd_deep_scrub_randomize_ratio=0 \
+            --osd-scrub-interval-randomize-ratio=0"
+    for id in $(seq 0 2) ; do
+        run_osd $dir $id $ceph_osd_args || return 1
+    done
+
+    create_pool $poolname 1 1 || return 1
+    ceph osd pool set $poolname size 2
+    wait_for_clean || return 1
+
+    # Put an object
+    local payload=ABCDEF
+    echo $payload > $dir/ORIGINAL
+    for i in $(seq 1 10)
+    do
+      rados --pool $poolname put obj$i $dir/ORIGINAL || return 1
+    done
+
+    # Remove the object from one shard physically
+    # Restarted osd get $ceph_osd_args passed
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) obj1 remove || return 1
+    # obj2 can't be repaired
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) obj2 remove || return 1
+    objectstore_tool $dir $(get_primary $poolname SOMETHING) obj2 rm-attr _ || return 1
+
+    local pgid=$(get_pg $poolname obj1)
+    local primary=$(get_primary $poolname obj1)
+    local last_scrub_stamp="$(get_last_scrub_stamp $pgid)"
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_deep_scrub $pgid
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_scrub $pgid
+
+    # Wait for auto repair
+    wait_for_scrub $pgid "$last_scrub_stamp" || return 1
+    wait_for_clean || return 1
+    flush_pg_stats
+    grep scrub_finish $dir/osd.${primary}.log
+    grep -q "scrub_finish.*still present after re-scrub" $dir/osd.${primary}.log || return 1
+    ceph pg dump pgs
+    ceph pg dump pgs | grep -q "^$(pgid).*+failed_repair" || return 1
+
+    # Verify - obj1 should be back
+    # Restarted osd get $ceph_osd_args passed
+    objectstore_tool $dir $(get_not_primary $poolname obj1) obj1 list-attrs || return 1
+    rados --pool $poolname get obj1 $dir/COPY || return 1
+    diff $dir/ORIGINAL $dir/COPY || return 1
+    grep scrub_finish $dir/osd.${primary}.log
+
+    # Make it repairable
+    objectstore_tool $dir $(get_primary $poolname SOMETHING) obj2 remove || return 1
+    repair $pgid
+    sleep 2
+
+    ceph pg dump pgs
+    ceph pg dump pgs | grep -q "^$(pgid).* active+clean " || return 1
+    grep scrub_finish $dir/osd.${primary}.log
+
+    # Tear down
+    teardown $dir || return 1
+}
+
+function TEST_auto_repair_bluestore_failed_norecov() {
+    local dir=$1
+    local poolname=testpool
+
+    # Launch a cluster with 5 seconds scrub interval
+    setup $dir || return 1
+    run_mon $dir a || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd-scrub-auto-repair=true \
+	    --osd_deep_scrub_randomize_ratio=0 \
+            --osd-scrub-interval-randomize-ratio=0"
+    for id in $(seq 0 2) ; do
+        run_osd $dir $id $ceph_osd_args || return 1
+    done
+
+    create_pool $poolname 1 1 || return 1
+    ceph osd pool set $poolname size 2
+    wait_for_clean || return 1
+
+    # Put an object
+    local payload=ABCDEF
+    echo $payload > $dir/ORIGINAL
+    for i in $(seq 1 10)
+    do
+      rados --pool $poolname put obj$i $dir/ORIGINAL || return 1
+    done
+
+    # Remove the object from one shard physically
+    # Restarted osd get $ceph_osd_args passed
+    # obj1 can't be repaired
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) obj1 remove || return 1
+    objectstore_tool $dir $(get_primary $poolname SOMETHING) obj1 rm-attr _ || return 1
+    # obj2 can't be repaired
+    objectstore_tool $dir $(get_not_primary $poolname SOMETHING) obj2 remove || return 1
+    objectstore_tool $dir $(get_primary $poolname SOMETHING) obj2 rm-attr _ || return 1
+
+    local pgid=$(get_pg $poolname obj1)
+    local primary=$(get_primary $poolname obj1)
+    local last_scrub_stamp="$(get_last_scrub_stamp $pgid)"
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_deep_scrub $pgid
+    CEPH_ARGS='' ceph daemon $(get_asok_path osd.$primary) trigger_scrub $pgid
+
+    # Wait for auto repair
+    wait_for_scrub $pgid "$last_scrub_stamp" || return 1
+    wait_for_clean || return 1
+    flush_pg_stats
+    grep -q "scrub_finish.*present with no repair possible" $dir/osd.${primary}.log || return 1
+    ceph pg dump pgs
+    ceph pg dump pgs | grep -q "^$(pgid).*+failed_repair" || return 1
+
+    # Tear down
+    teardown $dir || return 1
+}
+
+function TEST_repair_stats() {
+    local dir=$1
+    local poolname=testpool
+    local OSDS=2
+    local OBJS=30
+    # This need to be an even number
+    local REPAIRS=20
+
+    # Launch a cluster with 5 seconds scrub interval
+    setup $dir || return 1
+    run_mon $dir a || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd_deep_scrub_randomize_ratio=0 \
+            --osd-scrub-interval-randomize-ratio=0"
+    for id in $(seq 0 $(expr $OSDS - 1)) ; do
+        run_osd $dir $id $ceph_osd_args || return 1
+    done
+
+    create_pool $poolname 1 1 || return 1
+    ceph osd pool set $poolname size 2
+    wait_for_clean || return 1
+
+    # Put an object
+    local payload=ABCDEF
+    echo $payload > $dir/ORIGINAL
+    for i in $(seq 1 $OBJS)
+    do
+      rados --pool $poolname put obj$i $dir/ORIGINAL || return 1
+    done
+
+    # Remove the object from one shard physically
+    # Restarted osd get $ceph_osd_args passed
+    local other=$(get_not_primary $poolname obj1)
+    local pgid=$(get_pg $poolname obj1)
+    local primary=$(get_primary $poolname obj1)
+
+    kill_daemons $dir TERM osd.$other >&2 < /dev/null || return 1
+    kill_daemons $dir TERM osd.$primary >&2 < /dev/null || return 1
+    for i in $(seq 1 $REPAIRS)
+    do
+      # Remove from both osd.0 and osd.1
+      OSD=$(expr $i % 2)
+      _objectstore_tool_nodown $dir $OSD obj$i remove || return 1
+    done
+    run_osd $dir $primary $ceph_osd_args || return 1
+    run_osd $dir $other $ceph_osd_args || return 1
+    wait_for_clean || return 1
+
+    repair $pgid
+    wait_for_clean || return 1
+    ceph pg dump pgs
+
+    # This should have caused 1 object to be repaired
+    ceph pg $pgid query | jq '.info.stats.stat_sum'
+    COUNT=$(ceph pg $pgid query | jq '.info.stats.stat_sum.num_objects_repaired')
+    test "$COUNT" = "$REPAIRS" || return 1
+
+    ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats[] | select(.osd == $primary )"
+    COUNT=$(ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats[] | select(.osd == $primary ).num_shards_repaired")
+    test "$COUNT" = "$(expr $REPAIRS / 2)" || return 1
+
+    ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats[] | select(.osd == $other )"
+    COUNT=$(ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats[] | select(.osd == $other ).num_shards_repaired")
+    test "$COUNT" = "$(expr $REPAIRS / 2)" || return 1
+
+    ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats_sum"
+    COUNT=$(ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats_sum.num_shards_repaired")
+    test "$COUNT" = "$REPAIRS" || return 1
+
+    # Tear down
+    teardown $dir || return 1
+}
+
+function TEST_repair_stats_ec() {
+    local dir=$1
+    local poolname=testpool
+    local OSDS=3
+    local OBJS=30
+    # This need to be an even number
+    local REPAIRS=26
+    local allow_overwrites=false
+
+    # Launch a cluster with 5 seconds scrub interval
+    setup $dir || return 1
+    run_mon $dir a || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd_deep_scrub_randomize_ratio=0 \
+            --osd-scrub-interval-randomize-ratio=0"
+    for id in $(seq 0 $(expr $OSDS - 1)) ; do
+        run_osd $dir $id $ceph_osd_args || return 1
+    done
+
+    # Create an EC pool
+    create_ec_pool $poolname $allow_overwrites k=2 m=1 || return 1
+
+    # Put an object
+    local payload=ABCDEF
+    echo $payload > $dir/ORIGINAL
+    for i in $(seq 1 $OBJS)
+    do
+      rados --pool $poolname put obj$i $dir/ORIGINAL || return 1
+    done
+
+    # Remove the object from one shard physically
+    # Restarted osd get $ceph_osd_args passed
+    local other=$(get_not_primary $poolname obj1)
+    local pgid=$(get_pg $poolname obj1)
+    local primary=$(get_primary $poolname obj1)
+
+    kill_daemons $dir TERM osd.$other >&2 < /dev/null || return 1
+    kill_daemons $dir TERM osd.$primary >&2 < /dev/null || return 1
+    for i in $(seq 1 $REPAIRS)
+    do
+      # Remove from both osd.0 and osd.1
+      OSD=$(expr $i % 2)
+      _objectstore_tool_nodown $dir $OSD obj$i remove || return 1
+    done
+    run_osd $dir $primary $ceph_osd_args || return 1
+    run_osd $dir $other $ceph_osd_args || return 1
+    wait_for_clean || return 1
+
+    repair $pgid
+    wait_for_clean || return 1
+    ceph pg dump pgs
+
+    # This should have caused 1 object to be repaired
+    ceph pg $pgid query | jq '.info.stats.stat_sum'
+    COUNT=$(ceph pg $pgid query | jq '.info.stats.stat_sum.num_objects_repaired')
+    test "$COUNT" = "$REPAIRS" || return 1
+
+    for osd in $(seq 0 $(expr $OSDS - 1)) ; do
+      if [ $osd = $other -o $osd = $primary ]; then
+        repair=$(expr $REPAIRS / 2)
+      else
+        repair="0"
+      fi
+
+      ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats[] | select(.osd == $osd )"
+      COUNT=$(ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats[] | select(.osd == $osd ).num_shards_repaired")
+      test "$COUNT" = "$repair" || return 1
+    done
+
+    ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats_sum"
+    COUNT=$(ceph pg dump --format=json-pretty | jq ".pg_map.osd_stats_sum.num_shards_repaired")
+    test "$COUNT" = "$REPAIRS" || return 1
+
+    # Tear down
+    teardown $dir || return 1
+}
+
 function corrupt_and_repair_jerasure() {
     local dir=$1
     local allow_overwrites=$2
@@ -274,9 +716,9 @@ function corrupt_and_repair_jerasure() {
     run_mgr $dir x || return 1
     for id in $(seq 0 3) ; do
 	if [ "$allow_overwrites" = "true" ]; then
-            run_osd_bluestore $dir $id || return 1
-	else
             run_osd $dir $id || return 1
+	else
+            run_osd_filestore $dir $id || return 1
 	fi
     done
     create_rbd_pool || return 1
@@ -289,7 +731,7 @@ function corrupt_and_repair_jerasure() {
 }
 
 function TEST_corrupt_and_repair_jerasure_appends() {
-    corrupt_and_repair_jerasure $1
+    corrupt_and_repair_jerasure $1 false
 }
 
 function TEST_corrupt_and_repair_jerasure_overwrites() {
@@ -308,9 +750,9 @@ function corrupt_and_repair_lrc() {
     run_mgr $dir x || return 1
     for id in $(seq 0 9) ; do
 	if [ "$allow_overwrites" = "true" ]; then
-            run_osd_bluestore $dir $id || return 1
-	else
             run_osd $dir $id || return 1
+	else
+            run_osd_filestore $dir $id || return 1
 	fi
     done
     create_rbd_pool || return 1
@@ -323,12 +765,12 @@ function corrupt_and_repair_lrc() {
 }
 
 function TEST_corrupt_and_repair_lrc_appends() {
-    corrupt_and_repair_jerasure $1
+    corrupt_and_repair_lrc $1 false
 }
 
 function TEST_corrupt_and_repair_lrc_overwrites() {
     if [ "$use_ec_overwrite" = "true" ]; then
-        corrupt_and_repair_jerasure $1 true
+        corrupt_and_repair_lrc $1 true
     fi
 }
 
@@ -343,13 +785,11 @@ function unfound_erasure_coded() {
     run_mgr $dir x || return 1
     for id in $(seq 0 3) ; do
 	if [ "$allow_overwrites" = "true" ]; then
-            run_osd_bluestore $dir $id || return 1
-	else
             run_osd $dir $id || return 1
+	else
+            run_osd_filestore $dir $id || return 1
 	fi
     done
-    create_rbd_pool || return 1
-    wait_for_clean || return 1
 
     create_ec_pool $poolname $allow_overwrites k=2 m=2 || return 1
 
@@ -393,7 +833,7 @@ function unfound_erasure_coded() {
 }
 
 function TEST_unfound_erasure_coded_appends() {
-    unfound_erasure_coded $1
+    unfound_erasure_coded $1 false
 }
 
 function TEST_unfound_erasure_coded_overwrites() {
@@ -415,9 +855,9 @@ function list_missing_erasure_coded() {
     run_mgr $dir x || return 1
     for id in $(seq 0 2) ; do
 	if [ "$allow_overwrites" = "true" ]; then
-            run_osd_bluestore $dir $id || return 1
-	else
             run_osd $dir $id || return 1
+	else
+            run_osd_filestore $dir $id || return 1
 	fi
     done
     create_rbd_pool || return 1
@@ -490,7 +930,7 @@ function TEST_list_missing_erasure_coded_overwrites() {
 function TEST_corrupt_scrub_replicated() {
     local dir=$1
     local poolname=csr_pool
-    local total_objs=18
+    local total_objs=19
 
     setup $dir || return 1
     run_mon $dir a --osd_pool_default_size=2 || return 1
@@ -511,6 +951,11 @@ function TEST_corrupt_scrub_replicated() {
         rados --pool $poolname setomapheader $objname hdr-$objname || return 1
         rados --pool $poolname setomapval $objname key-$objname val-$objname || return 1
     done
+
+    # Increase file 1 MB + 1KB
+    dd if=/dev/zero of=$dir/new.ROBJ19 bs=1024 count=1025
+    rados --pool $poolname put $objname $dir/new.ROBJ19 || return 1
+    rm -f $dir/new.ROBJ19
 
     local pg=$(get_pg $poolname ROBJ0)
     local primary=$(get_primary $poolname ROBJ0)
@@ -631,11 +1076,17 @@ function TEST_corrupt_scrub_replicated() {
 	   objectstore_tool $dir 1 $objname set-bytes $dir/new.ROBJ18 || return 1
 	   # Make one replica have a different object info, so a full repair must happen too
 	   objectstore_tool $dir $osd $objname corrupt-info || return 1
+	   ;;
+
+	19)
+	   # Set osd-max-object-size smaller than this object's size
 
         esac
     done
 
     local pg=$(get_pg $poolname ROBJ0)
+
+    ceph tell osd.\* injectargs -- --osd-max-object-size=1048576
 
     inject_eio rep data $poolname ROBJ11 $dir 0 || return 1 # shard 0 of [1, 0], osd.1
     inject_eio rep mdata $poolname ROBJ12 $dir 1 || return 1 # shard 1 of [1, 0], osd.0
@@ -664,9 +1115,10 @@ function TEST_corrupt_scrub_replicated() {
     err_strings[15]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 1 soid 3:ffdb2004:::ROBJ9:head : object info inconsistent "
     err_strings[16]="log_channel[(]cluster[)] log [[]ERR[]] : scrub [0-9]*[.]0 3:c0c86b1d:::ROBJ14:head : no '_' attr"
     err_strings[17]="log_channel[(]cluster[)] log [[]ERR[]] : scrub [0-9]*[.]0 3:5c7b2c47:::ROBJ16:head : can't decode 'snapset' attr buffer::malformed_input: .* no longer understand old encoding version 3 < 97"
-    err_strings[18]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 scrub : stat mismatch, got 18/18 objects, 0/0 clones, 17/18 dirty, 17/18 omap, 0/0 pinned, 0/0 hit_set_archive, 0/0 whiteouts, 113/120 bytes, 0/0 manifest objects, 0/0 hit_set_archive bytes."
-    err_strings[19]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 scrub 1 missing, 7 inconsistent objects"
-    err_strings[20]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 scrub 17 errors"
+    err_strings[18]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 scrub : stat mismatch, got 19/19 objects, 0/0 clones, 18/19 dirty, 18/19 omap, 0/0 pinned, 0/0 hit_set_archive, 0/0 whiteouts, 1049713/1049720 bytes, 0/0 manifest objects, 0/0 hit_set_archive bytes."
+    err_strings[19]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 scrub 1 missing, 8 inconsistent objects"
+    err_strings[20]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 scrub 18 errors"
+    err_strings[21]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 soid 3:123a5f55:::ROBJ19:head : size 1049600 > 1048576 is too large"
 
     for err_string in "${err_strings[@]}"
     do
@@ -1210,6 +1662,69 @@ function TEST_corrupt_scrub_replicated() {
      "union_shard_errors": []
    },
    {
+      "object": {
+        "name": "ROBJ19",
+        "nspace": "",
+        "locator": "",
+        "snap": "head",
+        "version": 58
+      },
+      "errors": [
+        "size_too_large"
+      ],
+      "union_shard_errors": [],
+      "selected_object_info": {
+        "oid": {
+          "oid": "ROBJ19",
+          "key": "",
+          "snapid": -2,
+          "hash": 2868534344,
+          "max": 0,
+          "pool": 3,
+          "namespace": ""
+        },
+        "version": "63'59",
+        "prior_version": "63'58",
+        "last_reqid": "osd.1.0:58",
+        "user_version": 58,
+        "size": 1049600,
+        "mtime": "2019-08-09T23:33:58.340709+0000",
+        "local_mtime": "2019-08-09T23:33:58.345676+0000",
+        "lost": 0,
+        "flags": [
+          "dirty",
+          "omap",
+          "data_digest",
+          "omap_digest"
+        ],
+        "truncate_seq": 0,
+        "truncate_size": 0,
+        "data_digest": "0x3dde0ef3",
+        "omap_digest": "0xbffddd28",
+        "expected_object_size": 0,
+        "expected_write_size": 0,
+        "alloc_hint_flags": 0,
+        "manifest": {
+          "type": 0
+        },
+        "watchers": {}
+      },
+      "shards": [
+        {
+          "osd": 0,
+          "primary": false,
+          "errors": [],
+          "size": 1049600
+        },
+        {
+          "osd": 1,
+          "primary": true,
+          "errors": [],
+          "size": 1049600
+        }
+      ]
+   },
+   {
       "shards": [
         {
           "size": 7,
@@ -1325,7 +1840,7 @@ function TEST_corrupt_scrub_replicated() {
         "version": "79'66",
         "prior_version": "79'65",
         "last_reqid": "client.4554.0:1",
-        "user_version": 74,
+        "user_version": 79,
         "size": 7,
         "mtime": "",
         "local_mtime": "",
@@ -1377,7 +1892,7 @@ function TEST_corrupt_scrub_replicated() {
             "version": "95'67",
             "prior_version": "51'64",
             "last_reqid": "client.4649.0:1",
-            "user_version": 75,
+            "user_version": 80,
             "size": 1,
             "mtime": "",
             "local_mtime": "",
@@ -1463,7 +1978,7 @@ function TEST_corrupt_scrub_replicated() {
         "version": "95'67",
         "prior_version": "51'64",
         "last_reqid": "client.4649.0:1",
-        "user_version": 75,
+        "user_version": 80,
         "size": 1,
         "mtime": "",
         "local_mtime": "",
@@ -1536,6 +2051,10 @@ EOF
     inject_eio rep mdata $poolname ROBJ12 $dir 1 || return 1 # shard 1 of [1, 0], osd.0
     inject_eio rep mdata $poolname ROBJ13 $dir 1 || return 1 # shard 1 of [1, 0], osd.0
     inject_eio rep data $poolname ROBJ13 $dir 0 || return 1 # shard 0 of [1, 0], osd.1
+
+    # ROBJ19 won't error this time
+    ceph tell osd.\* injectargs -- --osd-max-object-size=134217728
+
     pg_deep_scrub $pg
 
     err_strings=()
@@ -1562,7 +2081,7 @@ EOF
     err_strings[20]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 0 soid 3:c0c86b1d:::ROBJ14:head : candidate had a corrupt info"
     err_strings[21]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 soid 3:c0c86b1d:::ROBJ14:head : failed to pick suitable object info"
     err_strings[22]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 1 soid 3:ce3f1d6a:::ROBJ1:head : candidate size 9 info size 7 mismatch"
-    err_strings[23]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 1 soid 3:ce3f1d6a:::ROBJ1:head : data_digest 0x2d4a11c2 != data_digest 0x2ddbf8f5 from shard 0, data_digest 0x2d4a11c2 != data_digest 0x2ddbf8f5 from auth oi 3:ce3f1d6a:::ROBJ1:head[(][0-9]*'[0-9]* osd.1.0:65 dirty|omap|data_digest|omap_digest s 7 uv 3 dd 2ddbf8f5 od f5fba2c6 alloc_hint [[]0 0 0[]][)], size 9 != size 7 from auth oi 3:ce3f1d6a:::ROBJ1:head[(][0-9]*'[0-9]* osd.1.0:[0-9]* dirty|omap|data_digest|omap_digest s 7 uv 3 dd 2ddbf8f5 od f5fba2c6 alloc_hint [[]0 0 0[]][)], size 9 != size 7 from shard 0"
+    err_strings[23]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 1 soid 3:ce3f1d6a:::ROBJ1:head : data_digest 0x2d4a11c2 != data_digest 0x2ddbf8f5 from shard 0, data_digest 0x2d4a11c2 != data_digest 0x2ddbf8f5 from auth oi 3:ce3f1d6a:::ROBJ1:head[(][0-9]*'[0-9]* osd.1.0:[0-9]* dirty|omap|data_digest|omap_digest s 7 uv 3 dd 2ddbf8f5 od f5fba2c6 alloc_hint [[]0 0 0[]][)], size 9 != size 7 from auth oi 3:ce3f1d6a:::ROBJ1:head[(][0-9]*'[0-9]* osd.1.0:[0-9]* dirty|omap|data_digest|omap_digest s 7 uv 3 dd 2ddbf8f5 od f5fba2c6 alloc_hint [[]0 0 0[]][)], size 9 != size 7 from shard 0"
     err_strings[24]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 1 soid 3:d60617f9:::ROBJ13:head : candidate had a read error"
     err_strings[25]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 0 soid 3:d60617f9:::ROBJ13:head : candidate had a stat error"
     err_strings[26]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 soid 3:d60617f9:::ROBJ13:head : failed to pick suitable object info"
@@ -1575,7 +2094,7 @@ EOF
     err_strings[33]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 shard 0 soid 3:ffdb2004:::ROBJ9:head : object info inconsistent "
     err_strings[34]="log_channel[(]cluster[)] log [[]ERR[]] : deep-scrub [0-9]*[.]0 3:c0c86b1d:::ROBJ14:head : no '_' attr"
     err_strings[35]="log_channel[(]cluster[)] log [[]ERR[]] : deep-scrub [0-9]*[.]0 3:5c7b2c47:::ROBJ16:head : can't decode 'snapset' attr buffer::malformed_input: .* no longer understand old encoding version 3 < 97"
-    err_strings[36]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 deep-scrub : stat mismatch, got 18/18 objects, 0/0 clones, 17/18 dirty, 17/18 omap, 0/0 pinned, 0/0 hit_set_archive, 0/0 whiteouts, 115/116 bytes, 0/0 manifest objects, 0/0 hit_set_archive bytes."
+    err_strings[36]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 deep-scrub : stat mismatch, got 19/19 objects, 0/0 clones, 18/19 dirty, 18/19 omap, 0/0 pinned, 0/0 hit_set_archive, 0/0 whiteouts, 1049715/1049716 bytes, 0/0 manifest objects, 0/0 hit_set_archive bytes."
     err_strings[37]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 deep-scrub 1 missing, 11 inconsistent objects"
     err_strings[38]="log_channel[(]cluster[)] log [[]ERR[]] : [0-9]*[.]0 deep-scrub 35 errors"
 
@@ -2793,7 +3312,7 @@ EOF
         "version": "79'66",
         "prior_version": "79'65",
         "last_reqid": "client.4554.0:1",
-        "user_version": 74,
+        "user_version": 79,
         "size": 7,
         "mtime": "2018-04-05 14:34:05.598688",
         "local_mtime": "2018-04-05 14:34:05.599698",
@@ -2891,7 +3410,7 @@ EOF
             "version": "119'68",
             "prior_version": "51'64",
             "last_reqid": "client.4834.0:1",
-            "user_version": 76,
+            "user_version": 81,
             "size": 3,
             "mtime": "2018-04-05 14:35:01.500659",
             "local_mtime": "2018-04-05 14:35:01.502117",
@@ -2935,7 +3454,7 @@ EOF
         "version": "119'68",
         "prior_version": "51'64",
         "last_reqid": "client.4834.0:1",
-        "user_version": 76,
+        "user_version": 81,
         "size": 3,
         "mtime": "2018-04-05 14:35:01.500659",
         "local_mtime": "2018-04-05 14:35:01.502117",
@@ -3026,9 +3545,9 @@ function corrupt_scrub_erasure() {
     run_mgr $dir x || return 1
     for id in $(seq 0 2) ; do
 	if [ "$allow_overwrites" = "true" ]; then
-            run_osd_bluestore $dir $id || return 1
-	else
             run_osd $dir $id || return 1
+	else
+            run_osd_filestore $dir $id || return 1
 	fi
     done
     create_rbd_pool || return 1
@@ -5240,7 +5759,7 @@ function TEST_periodic_scrub_replicated() {
     # Can't upgrade with this set
     ceph osd set nodeep-scrub
     # Let map change propagate to OSDs
-    flush pg_stats
+    flush_pg_stats
     sleep 5
 
     # Fake a schedule scrub
@@ -5267,6 +5786,91 @@ function TEST_periodic_scrub_replicated() {
 
     # deep-scrub error is no longer present
     rados list-inconsistent-obj $pg | jq '.' | grep -qv $objname || return 1
+}
+
+function TEST_scrub_warning() {
+    local dir=$1
+    local poolname=psr_pool
+    local objname=POBJ
+    local scrubs=5
+    local deep_scrubs=5
+    local i1_day=86400
+    local i7_days=$(calc $i1_day \* 7)
+    local i14_days=$(calc $i1_day \* 14)
+    local overdue=0.5
+    local conf_overdue_seconds=$(calc $i7_days + $i1_day + \( $i7_days \* $overdue \) )
+    local pool_overdue_seconds=$(calc $i14_days + $i1_day + \( $i14_days \* $overdue \) )
+
+    setup $dir || return 1
+    run_mon $dir a --osd_pool_default_size=1 || return 1
+    run_mgr $dir x --mon_warn_pg_not_scrubbed_ratio=${overdue} --mon_warn_pg_not_deep_scrubbed_ratio=${overdue} || return 1
+    run_osd $dir 0 $ceph_osd_args --osd_scrub_backoff_ratio=0 || return 1
+
+    for i in $(seq 1 $(expr $scrubs + $deep_scrubs))
+    do
+      create_pool $poolname-$i 1 1 || return 1
+      wait_for_clean || return 1
+      if [ $i = "1" ];
+      then
+        ceph osd pool set $poolname-$i scrub_max_interval $i14_days
+      fi
+      if [ $i = $(expr $scrubs + 1) ];
+      then
+        ceph osd pool set $poolname-$i deep_scrub_interval $i14_days
+      fi
+    done
+
+    # Only 1 osd
+    local primary=0
+
+    ceph osd set noscrub || return 1
+    ceph osd set nodeep-scrub || return 1
+    ceph config set global osd_scrub_interval_randomize_ratio 0
+    ceph config set global osd_deep_scrub_randomize_ratio 0
+    ceph config set global osd_scrub_max_interval ${i7_days}
+    ceph config set global osd_deep_scrub_interval ${i7_days}
+
+    # Fake schedule scrubs
+    for i in $(seq 1 $scrubs)
+    do
+      if [ $i = "1" ];
+      then
+        overdue_seconds=$pool_overdue_seconds
+      else
+        overdue_seconds=$conf_overdue_seconds
+      fi
+      CEPH_ARGS='' ceph daemon $(get_asok_path osd.${primary}) \
+             trigger_scrub ${i}.0 $(expr ${overdue_seconds} + ${i}00) || return 1
+    done
+    # Fake schedule deep scrubs
+    for i in $(seq $(expr $scrubs + 1) $(expr $scrubs + $deep_scrubs))
+    do
+      if [ $i = "$(expr $scrubs + 1)" ];
+      then
+        overdue_seconds=$pool_overdue_seconds
+      else
+        overdue_seconds=$conf_overdue_seconds
+      fi
+      CEPH_ARGS='' ceph daemon $(get_asok_path osd.${primary}) \
+             trigger_deep_scrub ${i}.0 $(expr ${overdue_seconds} + ${i}00) || return 1
+    done
+    flush_pg_stats
+
+    ceph health
+    ceph health detail
+    ceph health | grep -q "$deep_scrubs pgs not deep-scrubbed in time" || return 1
+    ceph health | grep -q "$scrubs pgs not scrubbed in time" || return 1
+    COUNT=$(ceph health detail | grep "not scrubbed since" | wc -l)
+    if [ "$COUNT" != $scrubs ]; then
+      ceph health detail | grep "not scrubbed since"
+      return 1
+    fi
+    COUNT=$(ceph health detail | grep "not deep-scrubbed since" | wc -l)
+    if [ "$COUNT" != $deep_scrubs ]; then
+      ceph health detail | grep "not deep-scrubbed since"
+      return 1
+    fi
+    return 0
 }
 
 #
@@ -5402,12 +6006,7 @@ function TEST_corrupt_snapset_scrub_rep() {
                 ]
               }
             ],
-            "snap_context": {
-              "seq": 1,
-              "snaps": [
-                1
-              ]
-            }
+            "seq": 1
           }
         },
         {
@@ -5417,10 +6016,7 @@ function TEST_corrupt_snapset_scrub_rep() {
           "size": 21,
           "snapset": {
             "clones": [],
-            "snap_context": {
-              "seq": 0,
-              "snaps": []
-            }
+            "seq": 0
           }
         }
       ]
@@ -5480,10 +6076,7 @@ function TEST_corrupt_snapset_scrub_rep() {
           "size": 21,
           "snapset": {
             "clones": [],
-            "snap_context": {
-              "seq": 0,
-              "snaps": []
-            }
+            "seq": 0
           }
         },
         {
@@ -5502,12 +6095,7 @@ function TEST_corrupt_snapset_scrub_rep() {
                 ]
               }
             ],
-            "snap_context": {
-              "seq": 1,
-              "snaps": [
-                1
-              ]
-            }
+            "seq": 1
           }
         }
       ]
@@ -5555,6 +6143,67 @@ EOF
     ceph osd pool rm $poolname $poolname --yes-i-really-really-mean-it
     teardown $dir || return 1
 }
+
+function TEST_request_scrub_priority() {
+    local dir=$1
+    local poolname=psr_pool
+    local objname=POBJ
+    local OBJECTS=64
+    local PGS=8
+
+    setup $dir || return 1
+    run_mon $dir a --osd_pool_default_size=1 || return 1
+    run_mgr $dir x || return 1
+    local ceph_osd_args="--osd-scrub-interval-randomize-ratio=0 --osd-deep-scrub-randomize-ratio=0 "
+    ceph_osd_args+="--osd_scrub_backoff_ratio=0"
+    run_osd $dir 0 $ceph_osd_args || return 1
+
+    create_pool $poolname $PGS $PGS || return 1
+    wait_for_clean || return 1
+
+    local osd=0
+    add_something $dir $poolname $objname noscrub || return 1
+    local primary=$(get_primary $poolname $objname)
+    local pg=$(get_pg $poolname $objname)
+    poolid=$(ceph osd dump | grep "^pool.*[']${poolname}[']" | awk '{ print $2 }')
+
+    local otherpgs
+    for i in $(seq 0 $(expr $PGS - 1))
+    do
+        opg="${poolid}.${i}"
+        if [ "$opg" = "$pg" ]; then
+          continue
+        fi
+        otherpgs="${otherpgs}${opg} "
+        local other_last_scrub=$(get_last_scrub_stamp $pg)
+        # Fake a schedule scrub
+        CEPH_ARGS='' ceph --admin-daemon $(get_asok_path osd.${primary}) \
+             trigger_scrub $opg || return 1
+    done
+
+    sleep 15
+    flush_pg_stats
+
+    # Request a regular scrub and it will be done
+    local last_scrub=$(get_last_scrub_stamp $pg)
+    ceph pg scrub $pg
+
+    ceph osd unset noscrub || return 1
+    ceph osd unset nodeep-scrub || return 1
+
+    wait_for_scrub $pg "$last_scrub"
+
+    for opg in $otherpgs $pg
+    do
+        wait_for_scrub $opg "$other_last_scrub"
+    done
+
+    # Verify that the requested scrub ran first
+    grep "log_channel.*scrub ok" $dir/osd.${primary}.log | grep -v purged_snaps | head -1 | sed 's/.*[[]DBG[]]//' | grep -q $pg || return 1
+
+    return 0
+}
+
 
 main osd-scrub-repair "$@"
 

@@ -83,8 +83,8 @@ ostream& operator<<(ostream& out, const CDentry& dn)
     out << " pv=" << dn.get_projected_version();
   out << " v=" << dn.get_version();
 
-  if (dn.is_auth_pinned()) {
-    out << " ap=" << dn.get_num_auth_pins() << "+" << dn.get_num_nested_auth_pins();
+  if (dn.get_num_auth_pins()) {
+    out << " ap=" << dn.get_num_auth_pins();
 #ifdef MDS_AUTHPIN_SET
     dn.print_authpin_set(out);
 #endif
@@ -147,7 +147,7 @@ mds_authority_t CDentry::authority() const
 }
 
 
-void CDentry::add_waiter(uint64_t tag, MDSInternalContextBase *c)
+void CDentry::add_waiter(uint64_t tag, MDSContext *c)
 {
   // wait on the directory?
   if (tag & (WAIT_UNFREEZE|WAIT_SINGLEAUTH)) {
@@ -354,11 +354,9 @@ void CDentry::auth_pin(void *by)
   auth_pin_set.insert(by);
 #endif
 
-  dout(10) << "auth_pin by " << by << " on " << *this 
-	   << " now " << auth_pins << "+" << nested_auth_pins
-	   << dendl;
+  dout(10) << "auth_pin by " << by << " on " << *this << " now " << auth_pins << dendl;
 
-  dir->adjust_nested_auth_pins(1, 1, by);
+  dir->adjust_nested_auth_pins(1, by);
 }
 
 void CDentry::auth_unpin(void *by)
@@ -376,25 +374,15 @@ void CDentry::auth_unpin(void *by)
   if (auth_pins == 0)
     put(PIN_AUTHPIN);
 
-  dout(10) << "auth_unpin by " << by << " on " << *this
-	   << " now " << auth_pins << "+" << nested_auth_pins
-	   << dendl;
+  dout(10) << "auth_unpin by " << by << " on " << *this << " now " << auth_pins << dendl;
   ceph_assert(auth_pins >= 0);
 
-  dir->adjust_nested_auth_pins(-1, -1, by);
+  dir->adjust_nested_auth_pins(-1, by);
 }
 
-void CDentry::adjust_nested_auth_pins(int adjustment, int diradj, void *by)
+void CDentry::adjust_nested_auth_pins(int diradj, void *by)
 {
-  nested_auth_pins += adjustment;
-
-  dout(35) << __func__ << " by " << by 
-	   << ", change " << adjustment << " yields "
-	   << auth_pins << "+" << nested_auth_pins
-	   << dendl;
-  ceph_assert(nested_auth_pins >= 0);
-
-  dir->adjust_nested_auth_pins(adjustment, diradj, by);
+  dir->adjust_nested_auth_pins(diradj, by);
 }
 
 bool CDentry::is_frozen() const
@@ -405,31 +393,6 @@ bool CDentry::is_frozen() const
 bool CDentry::is_freezing() const
 {
   return dir->is_freezing();
-}
-
-void CDentry::decode_replica(bufferlist::const_iterator& p, bool is_new)
-{
-  __u32 nonce;
-  decode(nonce, p);
-  replica_nonce = nonce;
-  
-  decode(first, p);
-
-  inodeno_t rino;
-  unsigned char rdtype;
-  decode(rino, p);
-  decode(rdtype, p);
-  lock.decode_state(p, is_new);
-
-  bool need_recover;
-  decode(need_recover, p);
-
-  if (is_new) {
-    if (rino)
-      dir->link_remote_inode(this, rino, rdtype);
-    if (need_recover)
-      lock.mark_need_recover();
-  }
 }
 
 // ----------------------------
@@ -599,7 +562,6 @@ void CDentry::dump(Formatter *f) const
   f->dump_unsigned("projected_version", get_projected_version());
 
   f->dump_int("auth_pins", auth_pins);
-  f->dump_int("nested_auth_pins", nested_auth_pins);
 
   MDSCacheObject::dump(f);
 

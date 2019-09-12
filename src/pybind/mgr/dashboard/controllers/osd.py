@@ -6,6 +6,10 @@ from ..security import Scope
 from ..services.ceph_service import CephService, SendCommandError
 from ..services.exception import handle_send_command_error
 from ..tools import str_to_bool
+try:
+    from typing import Dict, List, Any, Union  # noqa: F401 pylint: disable=unused-import
+except ImportError:
+    pass  # For typing only
 
 
 @ApiController('/osd', Scope.OSD)
@@ -14,44 +18,50 @@ class Osd(RESTController):
         osds = self.get_osd_map()
 
         # Extending by osd stats information
-        for s in mgr.get('osd_stats')['osd_stats']:
-            osds[str(s['osd'])].update({'osd_stats': s})
+        for stat in mgr.get('osd_stats')['osd_stats']:
+            if stat['osd'] in osds:
+                osds[stat['osd']]['osd_stats'] = stat
 
         # Extending by osd node information
         nodes = mgr.get('osd_map_tree')['nodes']
-        osd_tree = [(str(o['id']), o) for o in nodes if o['id'] >= 0]
-        for o in osd_tree:
-            osds[o[0]].update({'tree': o[1]})
+        for node in nodes:
+            if node['type'] == 'osd' and node['id'] in osds:
+                osds[node['id']]['tree'] = node
 
         # Extending by osd parent node information
-        hosts = [(h['name'], h) for h in nodes if h['id'] < 0]
-        for h in hosts:
-            for o_id in h[1]['children']:
-                if o_id >= 0:
-                    osds[str(o_id)]['host'] = h[1]
+        for host in [n for n in nodes if n['type'] == 'host']:
+            for osd_id in host['children']:
+                if osd_id >= 0 and osd_id in osds:
+                    osds[osd_id]['host'] = host
 
         # Extending by osd histogram data
-        for o_id in osds:
-            o = osds[o_id]
-            o['stats'] = {}
-            o['stats_history'] = {}
-            osd_spec = str(o['osd'])
-            for s in ['osd.op_w', 'osd.op_in_bytes', 'osd.op_r', 'osd.op_out_bytes']:
-                prop = s.split('.')[1]
-                o['stats'][prop] = CephService.get_rate('osd', osd_spec, s)
-                o['stats_history'][prop] = CephService.get_rates('osd', osd_spec, s)
+        for osd_id, osd in osds.items():
+            osd['stats'] = {}
+            osd['stats_history'] = {}
+            osd_spec = str(osd_id)
+            if 'osd' not in osd:
+                continue
+            for stat in ['osd.op_w', 'osd.op_in_bytes', 'osd.op_r', 'osd.op_out_bytes']:
+                prop = stat.split('.')[1]
+                osd['stats'][prop] = CephService.get_rate('osd', osd_spec, stat)
+                osd['stats_history'][prop] = CephService.get_rates('osd', osd_spec, stat)
             # Gauge stats
-            for s in ['osd.numpg', 'osd.stat_bytes', 'osd.stat_bytes_used']:
-                o['stats'][s.split('.')[1]] = mgr.get_latest('osd', osd_spec, s)
+            for stat in ['osd.numpg', 'osd.stat_bytes', 'osd.stat_bytes_used']:
+                osd['stats'][stat.split('.')[1]] = mgr.get_latest('osd', osd_spec, stat)
 
         return list(osds.values())
 
-    def get_osd_map(self):
-        osds = {}
-        for osd in mgr.get('osd_map')['osds']:
+    @staticmethod
+    def get_osd_map(svc_id=None):
+        # type: (Union[int, None]) -> Dict[int, Union[Dict[str, Any], Any]]
+        def add_id(osd):
             osd['id'] = osd['osd']
-            osds[str(osd['id'])] = osd
-        return osds
+            return osd
+        resp = {
+            osd['osd']: add_id(osd)
+            for osd in mgr.get('osd_map')['osds'] if svc_id is None or osd['osd'] == int(svc_id)
+        }
+        return resp if svc_id is None else resp[int(svc_id)]
 
     @handle_send_command_error('osd')
     def get(self, svc_id):
@@ -71,7 +81,7 @@ class Osd(RESTController):
                 raise
 
         return {
-            'osd_map': self.get_osd_map()[svc_id],
+            'osd_map': self.get_osd_map(svc_id),
             'osd_metadata': mgr.get_metadata('osd', svc_id),
             'histogram': histogram,
         }
@@ -124,7 +134,7 @@ class Osd(RESTController):
             'mon',
             'osd lost',
             id=int(svc_id),
-            sure='--yes-i-really-mean-it')
+            yes_i_really_mean_it=True)
 
     def create(self, uuid=None, svc_id=None):
         """
@@ -133,19 +143,20 @@ class Osd(RESTController):
         :return:
         """
         result = CephService.send_command(
-            'mon', 'osd create', id=svc_id, uuid=uuid)
+            'mon', 'osd create', id=int(svc_id), uuid=uuid)
         return {
             'result': result,
-            'svc_id': svc_id,
+            'svc_id': int(svc_id),
             'uuid': uuid,
         }
 
     @RESTController.Resource('POST')
-    def remove(self, svc_id):
+    def purge(self, svc_id):
         """
         Note: osd must be marked `down` before removal.
         """
-        CephService.send_command('mon', 'osd rm', ids=[svc_id])
+        CephService.send_command('mon', 'osd purge-actual', id=int(svc_id),
+                                 yes_i_really_mean_it=True)
 
     @RESTController.Resource('POST')
     def destroy(self, svc_id):
@@ -157,7 +168,7 @@ class Osd(RESTController):
         The osd must be marked down before being destroyed.
         """
         CephService.send_command(
-            'mon', 'osd destroy-actual', id=int(svc_id), sure='--yes-i-really-mean-it')
+            'mon', 'osd destroy-actual', id=int(svc_id), yes_i_really_mean_it=True)
 
     @RESTController.Resource('GET')
     def safe_to_destroy(self, svc_id):
@@ -168,13 +179,15 @@ class Osd(RESTController):
             svc_id = [svc_id]
         svc_id = list(map(str, svc_id))
         try:
-            CephService.send_command(
+            result = CephService.send_command(
                 'mon', 'osd safe-to-destroy', ids=svc_id, target=('mgr', ''))
-            return {'safe-to-destroy': True}
+            result['is_safe_to_destroy'] = set(result['safe_to_destroy']) == set(map(int, svc_id))
+            return result
+
         except SendCommandError as e:
             return {
                 'message': str(e),
-                'safe-to-destroy': False,
+                'is_safe_to_destroy': False,
             }
 
 
@@ -197,9 +210,9 @@ class OsdFlagsController(RESTController):
 
     def bulk_set(self, flags):
         """
-        The `recovery_deletes` and `sortbitwise` flags cannot be unset.
+        The `recovery_deletes`, `sortbitwise` and `pglog_hardlimit` flags cannot be unset.
         `purged_snapshots` cannot even be set. It is therefore required to at
-        least include those three flags for a successful operation.
+        least include those four flags for a successful operation.
         """
         assert isinstance(flags, list)
 

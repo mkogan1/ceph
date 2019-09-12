@@ -19,13 +19,12 @@
 #include "msg/Message.h"
 
 
-class MExportCaps : public MessageInstance<MExportCaps> {
-public:
-  friend factory;
+class MExportCaps : public Message {
 private:
   static constexpr int HEAD_VERSION = 2;
   static constexpr int COMPAT_VERSION = 1;
-public:
+
+public:  
   inodeno_t ino;
   bufferlist cap_bl;
   map<client_t,entity_inst_t> client_map;
@@ -33,11 +32,11 @@ public:
 
 protected:
   MExportCaps() :
-    MessageInstance(MSG_MDS_EXPORTCAPS, HEAD_VERSION, COMPAT_VERSION) {}
+    Message{MSG_MDS_EXPORTCAPS, HEAD_VERSION, COMPAT_VERSION} {}
   ~MExportCaps() override {}
 
 public:
-  const char *get_type_name() const override { return "export_caps"; }
+  std::string_view get_type_name() const override { return "export_caps"; }
   void print(ostream& o) const override {
     o << "export_caps(" << ino << ")";
   }
@@ -57,7 +56,9 @@ public:
     if (header.version >= 2)
       decode(client_metadata_map, p);
   }
-
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

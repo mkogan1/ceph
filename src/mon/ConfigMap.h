@@ -35,6 +35,12 @@ struct OptionMask {
   std::string location_type, location_value; ///< matches crush_location
   std::string device_class;                  ///< matches device class
 
+  bool empty() const {
+    return location_type.size() == 0
+      && location_value.size() == 0
+      && device_class.size() == 0;
+  }
+
   std::string to_str() const {
     std::string r;
     if (location_type.size()) {
@@ -86,6 +92,7 @@ struct Section {
     options.clear();
   }
   void dump(Formatter *f) const;
+  std::string get_minimal_conf() const;
 };
 
 struct ConfigMap {
@@ -113,12 +120,11 @@ struct ConfigMap {
     by_id.clear();
   }
   void dump(Formatter *f) const;
-  void generate_entity_map(
+  std::map<std::string,std::string,std::less<>> generate_entity_map(
     const EntityName& name,
     const map<std::string,std::string>& crush_location,
     const CrushWrapper *crush,
     const std::string& device_class,
-    std::map<std::string,std::string> *out,
     std::map<std::string,pair<std::string,const MaskedOption*>> *src=0);
 
   static bool parse_mask(

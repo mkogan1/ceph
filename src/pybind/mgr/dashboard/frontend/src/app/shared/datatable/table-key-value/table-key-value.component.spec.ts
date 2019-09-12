@@ -3,9 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { RouterTestingModule } from '@angular/router/testing';
 
 import { NgxDatatableModule } from '@swimlane/ngx-datatable';
+import { BsDropdownModule } from 'ngx-bootstrap/dropdown';
 
 import { configureTestBed } from '../../../../testing/unit-test-helper';
 import { ComponentsModule } from '../../components/components.module';
+import { CellTemplate } from '../../enum/cell-template.enum';
+import { CdTableColumn } from '../../models/cd-table-column';
+import { CdDatePipe } from '../../pipes/cd-date.pipe';
 import { TableComponent } from '../table/table.component';
 import { TableKeyValueComponent } from './table-key-value.component';
 
@@ -15,7 +19,13 @@ describe('TableKeyValueComponent', () => {
 
   configureTestBed({
     declarations: [TableComponent, TableKeyValueComponent],
-    imports: [FormsModule, NgxDatatableModule, ComponentsModule, RouterTestingModule]
+    imports: [
+      FormsModule,
+      NgxDatatableModule,
+      ComponentsModule,
+      RouterTestingModule,
+      BsDropdownModule.forRoot()
+    ]
   });
 
   beforeEach(() => {
@@ -24,6 +34,7 @@ describe('TableKeyValueComponent', () => {
   });
 
   it('should create', () => {
+    fixture.detectChanges();
     expect(component).toBeTruthy();
   });
 
@@ -85,17 +96,55 @@ describe('TableKeyValueComponent', () => {
     component.data = [['someKey', 0, 3]];
     expect(() => component.ngOnInit()).toThrowError('Wrong array format: [string, any][]');
     component.data = [{ somekey: 939, somethingElse: 'test' }];
-    expect(() => component.ngOnInit()).toThrowError(
-      'Wrong object array format: {key: string, value: any}[]'
-    );
+  });
+
+  describe('Class objects equal plain objects', () => {
+    class Example {
+      sth = 'something';
+      deep?: Example;
+      constructor(deep: boolean) {
+        if (deep) {
+          this.deep = new Example(false);
+        }
+      }
+    }
+
+    const classExample = new Example(true);
+    const objectExample = {
+      sth: 'something',
+      deep: {
+        sth: 'something'
+      }
+    };
+
+    const getTableData = (data) => {
+      component.data = data;
+      expect(() => component.ngOnInit()).not.toThrow();
+      return component.tableData;
+    };
+
+    const doesClassEqualsObject = (classData, objectData, dataLength) => {
+      const classTableData = getTableData(classData);
+      expect(classTableData).toEqual(getTableData(objectData));
+      expect(classTableData.length).toBe(dataLength);
+    };
+
+    it('should convert class objects the same way as plain objects', () => {
+      doesClassEqualsObject(classExample, objectExample, 1);
+      doesClassEqualsObject([classExample], [objectExample], 1);
+      component.renderObjects = true;
+      doesClassEqualsObject(classExample, objectExample, 2);
+      doesClassEqualsObject([classExample], [objectExample], 2);
+    });
   });
 
   it('tests _makePairs', () => {
     expect(component._makePairs([['dash', 'board']])).toEqual([{ key: 'dash', value: 'board' }]);
     const pair = [{ key: 'dash', value: 'board' }, { key: 'ceph', value: 'mimic' }];
-    expect(component._makePairs(pair)).toEqual(pair);
+    const pairInverse = [{ key: 'ceph', value: 'mimic' }, { key: 'dash', value: 'board' }];
+    expect(component._makePairs(pair)).toEqual(pairInverse);
     expect(component._makePairs({ dash: 'board' })).toEqual([{ key: 'dash', value: 'board' }]);
-    expect(component._makePairs({ dash: 'board', ceph: 'mimic' })).toEqual(pair);
+    expect(component._makePairs({ dash: 'board', ceph: 'mimic' })).toEqual(pairInverse);
   });
 
   it('tests _makePairsFromArray', () => {
@@ -140,32 +189,34 @@ describe('TableKeyValueComponent', () => {
       component.renderObjects = true;
       expect(component._convertValue(v({ sth: 'something' }))).toEqual(v({ sth: 'something' }));
     });
-  });
 
-  it('tests _insertFlattenObjects', () => {
-    component.renderObjects = true;
-    const v = [
-      {
-        key: 'no',
-        value: 'change'
-      },
-      {
-        key: 'first',
-        value: {
-          second: {
-            l3_1: 33,
-            l3_2: 44
-          },
-          layer: 'something'
-        }
-      }
-    ];
-    expect(component._insertFlattenObjects(v)).toEqual([
-      { key: 'no', value: 'change' },
-      { key: 'first second l3_1', value: 33 },
-      { key: 'first second l3_2', value: 44 },
-      { key: 'first layer', value: 'something' }
-    ]);
+    describe('automatically pipe utc dates through cdDate', () => {
+      let datePipe: CdDatePipe;
+
+      beforeEach(() => {
+        datePipe = TestBed.get(CdDatePipe);
+        spyOn(datePipe, 'transform').and.callThrough();
+      });
+
+      const expectTimeConversion = (date: string) => {
+        component.data = {
+          3: 'some time',
+          someKey: date
+        };
+        component.ngOnInit();
+        expect(component.tableData.length).toBe(2);
+        expect(datePipe.transform).toHaveBeenCalledWith(date);
+        expect(component.tableData[1].key).not.toBe(date);
+      };
+
+      it('converts some date', () => {
+        expectTimeConversion('2019-04-15 12:26:52.305285');
+      });
+
+      it('converts utc date', () => {
+        expectTimeConversion('2019-04-16T12:35:46.646300974Z');
+      });
+    });
   });
 
   describe('render objects', () => {
@@ -180,7 +231,17 @@ describe('TableKeyValueComponent', () => {
             sub3: 56
           }
         },
-        someKey: 0
+        someKey: 0,
+        o2: {
+          sub1: {
+            x: 42
+          },
+          sub2: {
+            y: 555
+          }
+        },
+        additionalKeyContainingObject: { type: 'none' },
+        keyWithEmptyObject: {}
       };
       component.renderObjects = true;
     });
@@ -188,8 +249,12 @@ describe('TableKeyValueComponent', () => {
     it('with parent key', () => {
       component.ngOnInit();
       expect(component.tableData).toEqual([
-        { key: 'options someSetting1', value: 38 },
+        { key: 'additionalKeyContainingObject type', value: 'none' },
+        { key: 'keyWithEmptyObject', value: '' },
+        { key: 'o2 sub1 x', value: 42 },
+        { key: 'o2 sub2 y', value: 555 },
         { key: 'options anotherSetting2', value: 'somethingElse' },
+        { key: 'options someSetting1', value: 38 },
         { key: 'options suboptions sub1', value: 12 },
         { key: 'options suboptions sub2', value: 34 },
         { key: 'options suboptions sub3', value: 56 },
@@ -201,12 +266,16 @@ describe('TableKeyValueComponent', () => {
       component.appendParentKey = false;
       component.ngOnInit();
       expect(component.tableData).toEqual([
-        { key: 'someSetting1', value: 38 },
         { key: 'anotherSetting2', value: 'somethingElse' },
+        { key: 'keyWithEmptyObject', value: '' },
+        { key: 'someKey', value: 0 },
+        { key: 'someSetting1', value: 38 },
         { key: 'sub1', value: 12 },
         { key: 'sub2', value: 34 },
         { key: 'sub3', value: 56 },
-        { key: 'someKey', value: 0 }
+        { key: 'type', value: 'none' },
+        { key: 'x', value: 42 },
+        { key: 'y', value: 555 }
       ]);
     });
   });
@@ -226,6 +295,93 @@ describe('TableKeyValueComponent', () => {
       expect(component.table.fetchData.observers.length).toBe(1);
       component.table.fetchData.emit();
       expect(called).toBeTruthy();
+    });
+  });
+
+  describe('hide empty items', () => {
+    beforeEach(() => {
+      component.data = {
+        string: '',
+        array: [],
+        object: {},
+        emptyObject: {
+          string: '',
+          array: [],
+          object: {}
+        },
+        someNumber: 0,
+        someDifferentNumber: 1,
+        someArray: [0, 1],
+        someString: '0',
+        someObject: {
+          empty: {},
+          something: 0.1
+        }
+      };
+      component.renderObjects = true;
+    });
+
+    it('should show all items as default', () => {
+      expect(component.hideEmpty).toBe(false);
+      component.ngOnInit();
+      expect(component.tableData).toEqual([
+        { key: 'array', value: '' },
+        { key: 'emptyObject array', value: '' },
+        { key: 'emptyObject object', value: '' },
+        { key: 'emptyObject string', value: '' },
+        { key: 'object', value: '' },
+        { key: 'someArray', value: '0, 1' },
+        { key: 'someDifferentNumber', value: 1 },
+        { key: 'someNumber', value: 0 },
+        { key: 'someObject empty', value: '' },
+        { key: 'someObject something', value: 0.1 },
+        { key: 'someString', value: '0' },
+        { key: 'string', value: '' }
+      ]);
+    });
+
+    it('should hide all empty items', () => {
+      component.hideEmpty = true;
+      component.ngOnInit();
+      expect(component.tableData).toEqual([
+        { key: 'someArray', value: '0, 1' },
+        { key: 'someDifferentNumber', value: 1 },
+        { key: 'someNumber', value: 0 },
+        { key: 'someObject something', value: 0.1 },
+        { key: 'someString', value: '0' }
+      ]);
+    });
+  });
+
+  describe('columns set up', () => {
+    let columns: CdTableColumn[];
+
+    beforeEach(() => {
+      columns = [
+        {
+          prop: 'key',
+          flexGrow: 1,
+          cellTransformation: CellTemplate.bold
+        },
+        {
+          prop: 'value',
+          flexGrow: 3
+        }
+      ];
+    });
+
+    it('should have the following default column set up', () => {
+      component.ngOnInit();
+      expect(component.columns).toEqual(columns);
+    });
+
+    it('should have the following column set up if customCss is defined', () => {
+      component.customCss = {
+        'answer-of-everything': 42
+      };
+      component.ngOnInit();
+      columns[1].cellTransformation = CellTemplate.classAdding;
+      expect(component.columns).toEqual(columns);
     });
   });
 });

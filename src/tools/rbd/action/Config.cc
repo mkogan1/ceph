@@ -20,6 +20,8 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/program_options.hpp>
 
+#include "json_spirit/json_spirit.h"
+
 namespace rbd {
 namespace action {
 namespace config {
@@ -30,7 +32,6 @@ namespace po = boost::program_options;
 namespace {
 
 const std::string METADATA_CONF_PREFIX = "conf_";
-const uint32_t MAX_KEYS = 64;
 
 void add_config_entity_option(
     boost::program_options::options_description *positional) {
@@ -71,11 +72,14 @@ int get_pool(const po::variables_map &vm, std::string *pool_name) {
   return 0;
 }
 
-int get_key(const po::variables_map &vm, std::string *key) {
-  *key = utils::get_positional_argument(vm, 1);
+int get_key(const po::variables_map &vm, size_t *arg_index,
+            std::string *key) {
+  *key = utils::get_positional_argument(vm, *arg_index);
   if (key->empty()) {
     std::cerr << "rbd: config key was not specified" << std::endl;
     return -EINVAL;
+  } else {
+    ++(*arg_index);
   }
 
   if (!boost::starts_with(*key, "rbd_")) {
@@ -203,7 +207,8 @@ int execute_global_get(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  size_t arg_index = 1;
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -248,7 +253,8 @@ int execute_global_set(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  size_t arg_index = 1;
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -294,7 +300,8 @@ int execute_global_remove(
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  size_t arg_index = 1;
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -406,7 +413,8 @@ int execute_pool_get(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  size_t arg_index = 1;
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -453,7 +461,8 @@ int execute_pool_set(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  size_t arg_index = 1;
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -493,7 +502,8 @@ int execute_pool_remove(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  size_t arg_index = 1;
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -607,7 +617,7 @@ int execute_image_get(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
@@ -662,12 +672,16 @@ int execute_image_set(const po::variables_map &vm,
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }
 
-  std::string value = utils::get_positional_argument(vm, 2);
+  std::string value = utils::get_positional_argument(vm, arg_index);
+  if (value.empty()) {
+    std::cerr << "rbd: image config value was not specified" << std::endl;
+    return -EINVAL;
+  }
 
   librados::Rados rados;
   librados::IoCtx io_ctx;
@@ -711,7 +725,7 @@ int execute_image_remove(
   }
 
   std::string key;
-  r = get_key(vm, &key);
+  r = get_key(vm, &arg_index, &key);
   if (r < 0) {
     return r;
   }

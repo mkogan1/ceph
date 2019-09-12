@@ -38,7 +38,8 @@ try:
 except ImportError:
     DEVNULL = open(os.devnull, "wb")
 
-logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.WARNING)
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.WARNING,
+                    datefmt="%FT%T")
 
 
 if sys.version_info[0] >= 3:
@@ -604,6 +605,7 @@ def test_removeall(CFSD_PREFIX, db, OBJREPPGS, REP_POOL, CEPH_BIN, OSDDIR, REP_N
     errors=0
     print("Test removeall")
     kill_daemons()
+    test_force_remove = 0
     for nspace in db.keys():
         for basename in db[nspace].keys():
             JSON = db[nspace][basename]['json']
@@ -618,7 +620,26 @@ def test_removeall(CFSD_PREFIX, db, OBJREPPGS, REP_POOL, CEPH_BIN, OSDDIR, REP_N
 
                     if int(basename.split(REP_NAME)[1]) <= int(NUM_CLONED_REP_OBJECTS):
                         cmd = (CFSD_PREFIX + "'{json}' remove").format(osd=osd, json=JSON)
-                        errors += test_failure(cmd, "Snapshots are present, use removeall to delete everything")
+                        errors += test_failure(cmd, "Clones are present, use removeall to delete everything")
+                        if not test_force_remove:
+
+                            cmd = (CFSD_PREFIX + " '{json}' set-attr snapset /dev/null").format(osd=osd, json=JSON)
+                            logging.debug(cmd)
+                            ret = call(cmd, shell=True, stdout=nullfd, stderr=nullfd)
+                            if ret != 0:
+                                logging.error("Test set-up to corrupt snapset failed for {json}".format(json=JSON))
+                                errors += 1
+                                # Do the removeall since this test failed to set-up
+                            else:
+                                test_force_remove = 1
+
+                                cmd = (CFSD_PREFIX + " '{json}' --force remove").format(osd=osd, json=JSON)
+                                logging.debug(cmd)
+                                ret = call(cmd, shell=True, stdout=nullfd, stderr=nullfd)
+                                if ret != 0:
+                                    logging.error("forced remove with corrupt snapset failed for {json}".format(json=JSON))
+                                    errors += 1
+                                continue
 
                     cmd = (CFSD_PREFIX + " --force --dry-run '{json}' remove").format(osd=osd, json=JSON)
                     logging.debug(cmd)
@@ -686,8 +707,8 @@ def main(argv):
     EC_NAME = "ECobject"
     if len(argv) > 0 and argv[0] == 'large':
         PG_COUNT = 12
-        NUM_REP_OBJECTS = 800
-        NUM_CLONED_REP_OBJECTS = 100
+        NUM_REP_OBJECTS = 200
+        NUM_CLONED_REP_OBJECTS = 50
         NUM_EC_OBJECTS = 12
         NUM_NSPACES = 4
         # Larger data sets for first object per namespace
@@ -1014,7 +1035,7 @@ def main(argv):
 
     # Specify a bad --op command
     cmd = (CFSD_PREFIX + "--op oops").format(osd=ONEOSD)
-    ERRORS += test_failure(cmd, "Must provide --op (info, log, remove, mkfs, fsck, repair, export, export-remove, import, list, fix-lost, list-pgs, dump-journal, dump-super, meta-list, get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, dump-import, trim-pg-log)")
+    ERRORS += test_failure(cmd, "Must provide --op (info, log, remove, mkfs, fsck, repair, export, export-remove, import, list, fix-lost, list-pgs, dump-journal, dump-super, meta-list, get-osdmap, set-osdmap, get-inc-osdmap, set-inc-osdmap, mark-complete, reset-last-complete, dump-export, trim-pg-log)")
 
     # Provide just the object param not a command
     cmd = (CFSD_PREFIX + "object").format(osd=ONEOSD)
@@ -1457,7 +1478,7 @@ def main(argv):
         for basename in db[nspace].keys():
             file = os.path.join(DATADIR, nspace + "-" + basename + "__head")
             JSON = db[nspace][basename]['json']
-            GETNAME = "/tmp/getbytes.{pid}".format(pid=pid)
+            jsondict = json.loads(JSON)
             for pg in OBJREPPGS:
                 OSDS = get_osds(pg, OSDDIR)
                 for osd in OSDS:
@@ -1468,12 +1489,33 @@ def main(argv):
                         continue
                     if int(basename.split(REP_NAME)[1]) > int(NUM_CLONED_REP_OBJECTS):
                         continue
+                    logging.debug("REPobject " + JSON)
                     cmd = (CFSD_PREFIX + " '{json}' dump | grep '\"snap\": 1,' > /dev/null").format(osd=osd, json=JSON)
                     logging.debug(cmd)
                     ret = call(cmd, shell=True)
                     if ret != 0:
                         logging.error("Invalid dump for {json}".format(json=JSON))
                         ERRORS += 1
+            if 'shard_id' in jsondict[1]:
+                logging.debug("ECobject " + JSON)
+                for pg in OBJECPGS:
+                    OSDS = get_osds(pg, OSDDIR)
+                    jsondict = json.loads(JSON)
+                    for osd in OSDS:
+                        DIR = os.path.join(OSDDIR, os.path.join(osd, os.path.join("current", "{pg}_head".format(pg=pg))))
+                        fnames = [f for f in os.listdir(DIR) if os.path.isfile(os.path.join(DIR, f))
+                                  and f.split("_")[0] == basename and f.split("_")[4] == nspace]
+                        if not fnames:
+                            continue
+                        if int(basename.split(EC_NAME)[1]) > int(NUM_EC_OBJECTS):
+                            continue
+                        # Fix shard_id since we only have one json instance for each object
+                        jsondict[1]['shard_id'] = int(pg.split('s')[1])
+                        cmd = (CFSD_PREFIX + " '{json}' dump | grep '\"hinfo\": [{{]' > /dev/null").format(osd=osd, json=json.dumps((pg, jsondict[1])))
+                        logging.debug(cmd)
+                        ret = call(cmd, shell=True)
+                        if ret != 0:
+                            logging.error("Invalid dump for {json}".format(json=JSON))
 
     print("Test list-attrs get-attr")
     ATTRFILE = r"/tmp/attrs.{pid}".format(pid=pid)
@@ -1484,16 +1526,16 @@ def main(argv):
             JSON = db[nspace][basename]['json']
             jsondict = json.loads(JSON)
 
-            if 'shard_id' in jsondict:
+            if 'shard_id' in jsondict[1]:
                 logging.debug("ECobject " + JSON)
                 found = 0
                 for pg in OBJECPGS:
                     OSDS = get_osds(pg, OSDDIR)
                     # Fix shard_id since we only have one json instance for each object
-                    jsondict['shard_id'] = int(pg.split('s')[1])
-                    JSON = json.dumps(jsondict)
+                    jsondict[1]['shard_id'] = int(pg.split('s')[1])
+                    JSON = json.dumps((pg, jsondict[1]))
                     for osd in OSDS:
-                        cmd = (CFSD_PREFIX + "--pgid {pg} '{json}' get-attr hinfo_key").format(osd=osd, pg=pg, json=JSON)
+                        cmd = (CFSD_PREFIX + " '{json}' get-attr hinfo_key").format(osd=osd, json=JSON)
                         logging.debug("TRY: " + cmd)
                         try:
                             out = check_output(cmd, shell=True, stderr=subprocess.STDOUT)
@@ -1509,12 +1551,12 @@ def main(argv):
 
             for pg in ALLPGS:
                 # Make sure rep obj with rep pg or ec obj with ec pg
-                if ('shard_id' in jsondict) != (pg.find('s') > 0):
+                if ('shard_id' in jsondict[1]) != (pg.find('s') > 0):
                     continue
-                if 'shard_id' in jsondict:
+                if 'shard_id' in jsondict[1]:
                     # Fix shard_id since we only have one json instance for each object
-                    jsondict['shard_id'] = int(pg.split('s')[1])
-                    JSON = json.dumps(jsondict)
+                    jsondict[1]['shard_id'] = int(pg.split('s')[1])
+                    JSON = json.dumps((pg, jsondict[1]))
                 OSDS = get_osds(pg, OSDDIR)
                 for osd in OSDS:
                     DIR = os.path.join(OSDDIR, os.path.join(osd, os.path.join("current", "{pg}_head".format(pg=pg))))
@@ -1523,7 +1565,7 @@ def main(argv):
                     if not fnames:
                         continue
                     afd = open(ATTRFILE, "wb")
-                    cmd = (CFSD_PREFIX + "--pgid {pg} '{json}' list-attrs").format(osd=osd, pg=pg, json=JSON)
+                    cmd = (CFSD_PREFIX + " '{json}' list-attrs").format(osd=osd, json=JSON)
                     logging.debug(cmd)
                     ret = call(cmd, shell=True, stdout=afd)
                     afd.close()
@@ -1543,7 +1585,7 @@ def main(argv):
                             continue
                         exp = values.pop(key)
                         vfd = open(VALFILE, "wb")
-                        cmd = (CFSD_PREFIX + "--pgid {pg} '{json}' get-attr {key}").format(osd=osd, pg=pg, json=JSON, key="_" + key)
+                        cmd = (CFSD_PREFIX + " '{json}' get-attr {key}").format(osd=osd, json=JSON, key="_" + key)
                         logging.debug(cmd)
                         ret = call(cmd, shell=True, stdout=vfd)
                         vfd.close()
@@ -1708,6 +1750,27 @@ def main(argv):
 
     ERRORS += EXP_ERRORS
 
+    print("Test clear-data-digest")
+    for nspace in db.keys():
+        for basename in db[nspace].keys():
+          JSON = db[nspace][basename]['json']
+          cmd = (CFSD_PREFIX + "'{json}' clear-data-digest").format(osd='osd0', json=JSON)
+          logging.debug(cmd)
+          ret = call(cmd, shell=True, stdout=nullfd, stderr=nullfd)
+          if ret != 0:
+              logging.error("Clearing data digest failed for {json}".format(json=JSON))
+              ERRORS += 1
+              break
+          cmd = (CFSD_PREFIX + "'{json}' dump | grep '\"data_digest\": \"0xff'").format(osd='osd0', json=JSON)
+          logging.debug(cmd)
+          ret = call(cmd, shell=True, stdout=nullfd, stderr=nullfd)
+          if ret != 0:
+              logging.error("Data digest not cleared for {json}".format(json=JSON))
+              ERRORS += 1
+              break
+          break
+        break
+
     print("Test pg removal")
     RM_ERRORS = 0
     for pg in ALLREPPGS + ALLECPGS:
@@ -1737,11 +1800,11 @@ def main(argv):
             for pg in PGS:
                 file = os.path.join(dir, pg)
                 # Make sure this doesn't crash
-                cmd = (CFSD_PREFIX + "--op dump-import --file {file}").format(osd=osd, file=file)
+                cmd = (CFSD_PREFIX + "--op dump-export --file {file}").format(osd=osd, file=file)
                 logging.debug(cmd)
                 ret = call(cmd, shell=True, stdout=nullfd)
                 if ret != 0:
-                    logging.error("Dump-import failed from {file} with {ret}".format(file=file, ret=ret))
+                    logging.error("Dump-export failed from {file} with {ret}".format(file=file, ret=ret))
                     IMP_ERRORS += 1
                 # This should do nothing
                 cmd = (CFSD_PREFIX + "--op import --file {file} --dry-run").format(osd=osd, file=file)

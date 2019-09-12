@@ -16,7 +16,6 @@ set(librbd_internal_srcs
   internal.cc
   Journal.cc
   LibrbdAdminSocketHook.cc
-  LibrbdWriteback.cc
   ManagedLock.cc
   MirroringWatcher.cc
   ObjectMap.cc
@@ -31,12 +30,16 @@ set(librbd_internal_srcs
   api/Migration.cc
   api/Mirror.cc
   api/Namespace.cc
+  api/Pool.cc
   api/PoolMetadata.cc
   api/Snapshot.cc
   api/Trash.cc
   cache/ImageWriteback.cc
   cache/ObjectCacherObjectDispatch.cc
+  cache/ParentCacheObjectDispatch.cc
+  cache/ObjectCacherWriteback.cc
   cache/PassthroughImageCache.cc
+  cache/WriteAroundObjectDispatch.cc
   deep_copy/ImageCopyRequest.cc
   deep_copy/MetadataCopyRequest.cc
   deep_copy/ObjectCopyRequest.cc
@@ -49,6 +52,7 @@ set(librbd_internal_srcs
   exclusive_lock/PostAcquireRequest.cc
   exclusive_lock/PreReleaseRequest.cc
   exclusive_lock/StandardPolicy.cc
+  image/AttachChildRequest.cc
   image/AttachParentRequest.cc
   image/CloneRequest.cc
   image/CloseRequest.cc
@@ -57,11 +61,13 @@ set(librbd_internal_srcs
   image/DetachParentRequest.cc
   image/ListWatchersRequest.cc
   image/OpenRequest.cc
+  image/PreRemoveRequest.cc
   image/RefreshParentRequest.cc
   image/RefreshRequest.cc
   image/RemoveRequest.cc
   image/SetFlagsRequest.cc
   image/SetSnapRequest.cc
+  image/ValidatePoolRequest.cc
   image_watcher/NotifyLockOwner.cc
   io/AioCompletion.cc
   io/AsyncOperation.cc
@@ -74,6 +80,7 @@ set(librbd_internal_srcs
   io/ObjectDispatcher.cc
   io/ObjectRequest.cc
   io/ReadResult.cc
+  io/SimpleSchedulerObjectDispatch.cc
   io/Utils.cc
   journal/CreateRequest.cc
   journal/DemoteRequest.cc
@@ -127,8 +134,10 @@ set(librbd_internal_srcs
   operation/SnapshotRollbackRequest.cc
   operation/SnapshotUnprotectRequest.cc
   operation/SnapshotLimitRequest.cc
+  operation/SparsifyRequest.cc
   operation/TrimRequest.cc
   trash/MoveRequest.cc
+  trash/RemoveRequest.cc
   watcher/Notifier.cc
   watcher/RewatchRequest.cc
   ${CMAKE_SOURCE_DIR}/src/common/ContextCompletion.cc)
@@ -138,29 +147,36 @@ add_library(rbd_internal STATIC
   ${librbd_internal_srcs}
   $<TARGET_OBJECTS:rados_snap_set_diff_obj>)
 if(WITH_LTTNG)
+  # librbd.cc includes tracing/librbd.h
+  add_dependencies(rbd_api librbd-tp)
+  # io/AioCompletion.cc includes tracing/librbd.h
   add_dependencies(rbd_internal librbd-tp)
 endif()
 if(WITH_LTTNG AND WITH_EVENTTRACE)
   add_dependencies(rbd_internal eventtrace_tp)
 endif()
 target_link_libraries(rbd_internal PRIVATE
+  ceph_immutable_object_cache_lib
   osdc)
 
 add_library(librbd ${CEPH_SHARED}
   librbd.cc)
+if(WITH_LTTNG)
+  add_dependencies(librbd librbd-tp)
+endif()
 
 target_link_libraries(librbd PRIVATE
   rbd_internal
   rbd_types
   journal
-  librados 
+  librados
   cls_rbd_client 
   cls_lock_client 
   cls_journal_client 
   ceph-common
   pthread
   ${CMAKE_DL_LIBS}
-  ${EXTRALIBS})
+  ${EXTRALIBS} ${GSSAPI_LIBRARIES})
 if(HAVE_UDEV)
   target_link_libraries(librbd PRIVATE
     udev)

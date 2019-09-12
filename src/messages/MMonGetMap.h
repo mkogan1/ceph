@@ -19,19 +19,21 @@
 
 #include "include/types.h"
 
-class MMonGetMap : public MessageInstance<MMonGetMap> {
+class MMonGetMap : public Message {
 public:
-  friend factory;
-
-  MMonGetMap() : MessageInstance(CEPH_MSG_MON_GET_MAP) { }
+  MMonGetMap() : Message{CEPH_MSG_MON_GET_MAP} { }
 private:
   ~MMonGetMap() override {}
 
 public:
-  const char *get_type_name() const override { return "mon_getmap"; }
+  std::string_view get_type_name() const override { return "mon_getmap"; }
   
   void encode_payload(uint64_t features) override { }
   void decode_payload() override { }
+
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif

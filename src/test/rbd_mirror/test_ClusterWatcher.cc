@@ -3,14 +3,14 @@
 #include "include/rados/librados.hpp"
 #include "common/Cond.h"
 #include "common/errno.h"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 #include "librbd/internal.h"
 #include "librbd/api/Mirror.h"
 #include "tools/rbd_mirror/ClusterWatcher.h"
 #include "tools/rbd_mirror/ServiceDaemon.h"
 #include "tools/rbd_mirror/Types.h"
 #include "test/rbd_mirror/test_fixture.h"
-#include "test/librados/test.h"
+#include "test/librados/test_cxx.h"
 #include "test/librbd/test_support.h"
 #include "gtest/gtest.h"
 #include <boost/scope_exit.hpp>
@@ -32,8 +32,7 @@ void register_test_cluster_watcher() {
 class TestClusterWatcher : public ::rbd::mirror::TestFixture {
 public:
 
-  TestClusterWatcher() : m_lock("TestClusterWatcherLock")
-  {
+  TestClusterWatcher() {
     m_cluster = std::make_shared<librados::Rados>();
     EXPECT_EQ("", connect_cluster_pp(*m_cluster));
   }
@@ -162,12 +161,12 @@ public:
 
   void check_peers() {
     m_cluster_watcher->refresh_pools();
-    Mutex::Locker l(m_lock);
+    std::lock_guard l{m_lock};
     ASSERT_EQ(m_pool_peers, m_cluster_watcher->get_pool_peers());
   }
 
   RadosRef m_cluster;
-  Mutex m_lock;
+  ceph::mutex m_lock = ceph::make_mutex("TestClusterWatcherLock");
   unique_ptr<rbd::mirror::ServiceDaemon<>> m_service_daemon;
   unique_ptr<ClusterWatcher> m_cluster_watcher;
 

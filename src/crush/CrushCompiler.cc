@@ -1,4 +1,3 @@
-
 #include "CrushCompiler.h"
 
 #if defined(_AIX)
@@ -11,6 +10,14 @@
 #include <string>
 #include "common/errno.h"
 #include <boost/algorithm/string.hpp>
+
+using std::cout;
+using std::istream;
+using std::map;
+using std::ostream;
+using std::set;
+using std::string;
+using std::vector;
 
 // -------------
 
@@ -744,7 +751,7 @@ int CrushCompiler::parse_bucket(iter_t const& i)
   ceph_assert(id != 0);
   int idout;
   int r = crush.add_bucket(id, alg, hash, type, size,
-                           &items[0], &weights[0], &idout);
+                           items.data(), weights.data(), &idout);
   if (r < 0) {
     if (r == -EEXIST)
       err << "Duplicate bucket id " << id << std::endl;
@@ -1053,9 +1060,13 @@ void CrushCompiler::find_used_bucket_ids(iter_t const& i)
 {
   for (iter_t p = i->children.begin(); p != i->children.end(); p++) {
     if ((int)p->value.id().to_long() == crush_grammar::_bucket) {
-      iter_t firstline = p->children.begin() + 3;
-      string tag = string_node(firstline->children[0]);
-      if (tag == "id") {
+      for (iter_t firstline = p->children.begin() + 3;
+	   firstline != p->children.end();
+	   ++firstline) {
+	string tag = string_node(firstline->children[0]);
+	if (tag != "id") {
+	  break;
+	}
 	int id = int_node(firstline->children[1]);
 	//err << "saw bucket id " << id << std::endl;
 	id_item[id] = string();
@@ -1244,8 +1255,8 @@ int CrushCompiler::compile(istream& in, const char *infn)
   crush_grammar crushg;
   const char *start = big.c_str();
   //tree_parse_info<const char *> info = ast_parse(start, crushg, space_p);
-  tree_parse_info<> info = ast_parse(start, crushg, space_p);
-  
+  auto info = ast_parse(start, crushg, boost::spirit::space_p);
+
   // parse error?
   if (!info.full) {
     int cpos = info.stop - start;

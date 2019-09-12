@@ -4,6 +4,7 @@
 #include "include/rados/librados.hpp"
 #include "global/global_context.h"
 #include "test/librados/test.h"
+#include "test/librados/test_cxx.h"
 #include "gtest/gtest.h"
 #include <iostream>
 #include <string>
@@ -21,6 +22,7 @@ extern void register_test_mirroring();
 extern void register_test_mirroring_watcher();
 extern void register_test_object_map();
 extern void register_test_operations();
+extern void register_test_trash();
 #endif // TEST_LIBRBD_INTERNALS
 
 int main(int argc, char **argv)
@@ -40,6 +42,7 @@ int main(int argc, char **argv)
   register_test_mirroring_watcher();
   register_test_object_map();
   register_test_operations();
+  register_test_trash();
 #endif // TEST_LIBRBD_INTERNALS
 
   ::testing::InitGoogleTest(&argc, argv);

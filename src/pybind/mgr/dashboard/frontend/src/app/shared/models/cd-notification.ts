@@ -1,40 +1,41 @@
+import { IndividualConfig } from 'ngx-toastr';
+import { Icons } from '../enum/icons.enum';
 import { NotificationType } from '../enum/notification-type.enum';
 
-export class CdNotification {
-  message: string;
+export class CdNotificationConfig {
+  applicationClass: string;
+
+  private classes = {
+    Ceph: 'ceph-icon',
+    Prometheus: 'prometheus-icon'
+  };
+
+  constructor(
+    public type: NotificationType = NotificationType.info,
+    public title?: string,
+    public message?: string, // Use this for additional information only
+    public options?: any | IndividualConfig,
+    public application: string = 'Ceph'
+  ) {
+    this.applicationClass = this.classes[this.application];
+  }
+}
+
+export class CdNotification extends CdNotificationConfig {
   timestamp: string;
-  title: string;
-  type: NotificationType;
+  textClass: string;
+  iconClass: string;
 
-  constructor(type: NotificationType = NotificationType.info, title?: string, message?: string) {
-    this.type = type;
-    this.title = title;
-    this.message = message;
+  private textClasses = ['text-danger', 'text-info', 'text-success'];
+  private iconClasses = [Icons.warning, Icons.info, Icons.check];
 
+  constructor(private config: CdNotificationConfig = new CdNotificationConfig()) {
+    super(config.type, config.title, config.message, config.options, config.application);
+    delete this.config;
     /* string representation of the Date object so it can be directly compared
     with the timestamps parsed from localStorage */
     this.timestamp = new Date().toJSON();
-  }
-
-  textClass() {
-    switch (this.type) {
-      case NotificationType.error:
-        return 'text-danger';
-      case NotificationType.info:
-        return 'text-info';
-      case NotificationType.success:
-        return 'text-success';
-    }
-  }
-
-  iconClass() {
-    switch (this.type) {
-      case NotificationType.error:
-        return 'fa-exclamation-triangle';
-      case NotificationType.info:
-        return 'fa-info';
-      case NotificationType.success:
-        return 'fa-check';
-    }
+    this.iconClass = this.iconClasses[this.type];
+    this.textClass = this.textClasses[this.type];
   }
 }

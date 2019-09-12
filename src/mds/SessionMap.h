@@ -27,10 +27,10 @@ using std::set;
 #include "mdstypes.h"
 #include "mds/MDSAuthCaps.h"
 #include "common/perf_counters.h"
+#include "common/DecayCounter.h"
 
 class CInode;
 struct MDRequestImpl;
-class DecayCounter;
 
 #include "CInode.h"
 #include "Capability.h"
@@ -84,7 +84,7 @@ public:
     STATE_KILLING = 5
   };
 
-  const char *get_state_name(int s) const {
+  static std::string_view get_state_name(int s) {
     switch (s) {
     case STATE_CLOSED: return "closed";
     case STATE_OPENING: return "opening";
@@ -97,9 +97,9 @@ public:
   }
 
 private:
-  int state;
-  uint64_t state_seq;
-  int importing_count;
+  int state = STATE_CLOSED;
+  uint64_t state_seq = 0;
+  int importing_count = 0;
   friend class SessionMap;
 
   // Human (friendly) name is soft state generated from client metadata
@@ -112,6 +112,18 @@ private:
 
   // request load average for this session
   DecayCounter load_avg;
+
+  // Ephemeral state for tracking progress of capability recalls
+  // caps being recalled recently by this session; used for Beacon warnings
+  DecayCounter recall_caps;
+  // caps that have been released
+  DecayCounter release_caps;
+  // throttle on caps recalled
+  DecayCounter recall_caps_throttle;
+  // second order throttle that prevents recalling too quickly
+  DecayCounter recall_caps_throttle2o;
+  // New limit in SESSION_RECALL
+  uint32_t recall_limit = 0;
 
   // session start time -- used to track average session time
   // note that this is initialized in the constructor rather
@@ -144,14 +156,14 @@ public:
     }
   }
   void decode(bufferlist::const_iterator &p);
-  void set_client_metadata(const client_metadata_t& meta);
-  const std::string& get_human_name() const {return human_name;}
+  template<typename T>
+  void set_client_metadata(T&& meta)
+  {
+    info.client_metadata = std::forward<T>(meta);
+    _update_human_name();
+  }
 
-  // Ephemeral state for tracking progress of capability recalls
-  time recalled_at = clock::zero();  // When was I asked to SESSION_RECALL?
-  time last_recall_sent = clock::zero();
-  uint32_t recall_count;  // How many caps was I asked to SESSION_RECALL?
-  uint32_t recall_release_count;  // How many caps have I actually revoked?
+  const std::string& get_human_name() const {return human_name;}
 
   session_info_t info;                         ///< durable bits
 
@@ -163,7 +175,7 @@ public:
   entity_addr_t socket_addr;
   xlist<Session*>::item item_session_list;
 
-  list<Message::ref> preopen_out_queue;  ///< messages for client, queued before they connect
+  list<ref_t<Message>> preopen_out_queue;  ///< messages for client, queued before they connect
 
   elist<MDRequestImpl*> requests;
   size_t get_request_count();
@@ -171,8 +183,19 @@ public:
   interval_set<inodeno_t> pending_prealloc_inos; // journaling prealloc, will be added to prealloc_inos
 
   void notify_cap_release(size_t n_caps);
-  void notify_recall_sent(const size_t new_limit);
-  void clear_recalled_at();
+  uint64_t notify_recall_sent(size_t new_limit);
+  auto get_recall_caps_throttle() const {
+    return recall_caps_throttle.get();
+  }
+  auto get_recall_caps_throttle2o() const {
+    return recall_caps_throttle2o.get();
+  }
+  auto get_recall_caps() const {
+    return recall_caps.get();
+  }
+  auto get_release_caps() const {
+    return release_caps.get();
+  }
 
   inodeno_t next_ino() const {
     if (info.prealloc_inos.empty())
@@ -203,7 +226,7 @@ public:
     return info.get_client();
   }
 
-  const char *get_state_name() const { return get_state_name(state); }
+  std::string_view get_state_name() const { return get_state_name(state); }
   uint64_t get_state_seq() const { return state_seq; }
   bool is_closed() const { return state == STATE_CLOSED; }
   bool is_opening() const { return state == STATE_OPENING; }
@@ -243,23 +266,27 @@ public:
 
   // -- caps --
 private:
-  version_t cap_push_seq;        // cap push seq #
-  map<version_t, MDSInternalContextBase::vec > waitfor_flush; // flush session messages
+  uint32_t cap_gen = 0;
+  version_t cap_push_seq = 0;        // cap push seq #
+  map<version_t, MDSContext::vec > waitfor_flush; // flush session messages
 
 public:
   xlist<Capability*> caps;     // inodes with caps; front=most recently used
   xlist<ClientLease*> leases;  // metadata leases to clients
   time last_cap_renew = clock::zero();
+  time last_seen = clock::zero();
 
-public:
+  void inc_cap_gen() { ++cap_gen; }
+  uint32_t get_cap_gen() const { return cap_gen; }
+
   version_t inc_push_seq() { return ++cap_push_seq; }
   version_t get_push_seq() const { return cap_push_seq; }
 
-  version_t wait_for_flush(MDSInternalContextBase* c) {
+  version_t wait_for_flush(MDSContext* c) {
     waitfor_flush[get_push_seq()].push_back(c);
     return get_push_seq();
   }
-  void finish_flush(version_t seq, MDSInternalContextBase::vec& ls) {
+  void finish_flush(version_t seq, MDSContext::vec& ls) {
     while (!waitfor_flush.empty()) {
       auto it = waitfor_flush.begin();
       if (it->first > seq)
@@ -270,24 +297,33 @@ public:
     }
   }
 
-  void add_cap(Capability *cap) {
+  void touch_cap(Capability *cap) {
+    caps.push_front(&cap->item_session_caps);
+  }
+
+  void touch_cap_bottom(Capability *cap) {
     caps.push_back(&cap->item_session_caps);
   }
+
   void touch_lease(ClientLease *r) {
     leases.push_back(&r->item_session_lease);
   }
 
+  bool is_any_flush_waiter() {
+    return !waitfor_flush.empty();
+  }
+
   // -- leases --
-  uint32_t lease_seq;
+  uint32_t lease_seq = 0;
 
   // -- completed requests --
 private:
   // Has completed_requests been modified since the last time we
   // wrote this session out?
-  bool completed_requests_dirty;
+  bool completed_requests_dirty = false;
 
-  unsigned num_trim_flushes_warnings;
-  unsigned num_trim_requests_warnings;
+  unsigned num_trim_flushes_warnings = 0;
+  unsigned num_trim_requests_warnings = 0;
 public:
   void add_completed_request(ceph_tid_t t, inodeno_t created) {
     info.completed_requests[t] = created;
@@ -362,21 +398,18 @@ public:
   int check_access(CInode *in, unsigned mask, int caller_uid, int caller_gid,
 		   const vector<uint64_t> *gid_list, int new_uid, int new_gid);
 
-
-  Session(Connection *con) :
-    state(STATE_CLOSED), state_seq(0), importing_count(0),
-    birth_time(clock::now()), recall_count(0),
-    recall_release_count(0), auth_caps(g_ceph_context),
-    connection(NULL), item_session_list(this),
-    requests(0),  // member_offset passed to front() manually
-    cap_push_seq(0),
-    lease_seq(0),
-    completed_requests_dirty(false),
-    num_trim_flushes_warnings(0),
-    num_trim_requests_warnings(0) {
-    if (con) {
-      set_connection(con);
-    }
+  Session() = delete;
+  Session(ConnectionRef con) :
+    recall_caps(g_conf().get_val<double>("mds_recall_warning_decay_rate")),
+    release_caps(g_conf().get_val<double>("mds_recall_warning_decay_rate")),
+    recall_caps_throttle(g_conf().get_val<double>("mds_recall_max_decay_rate")),
+    recall_caps_throttle2o(0.5),
+    birth_time(clock::now()),
+    auth_caps(g_ceph_context),
+    item_session_list(this),
+    requests(0)  // member_offset passed to front() manually
+  {
+    set_connection(std::move(con));
   }
   ~Session() override {
     if (state == STATE_CLOSED) {
@@ -387,9 +420,11 @@ public:
     preopen_out_queue.clear();
   }
 
-  void set_connection(Connection *con) {
-    connection = con;
-    socket_addr = con->get_peer_socket_addr();
+  void set_connection(ConnectionRef con) {
+    connection = std::move(con);
+    if (connection) {
+      socket_addr = connection->get_peer_socket_addr();
+    }
   }
   const ConnectionRef& get_connection() const {
     return connection;
@@ -477,7 +512,7 @@ public:
     if (session_map_entry != session_map.end()) {
       s = session_map_entry->second;
     } else {
-      s = session_map[i.name] = new Session(nullptr);
+      s = session_map[i.name] = new Session(ConnectionRef());
       s->info.inst = i;
       s->last_cap_renew = Session::clock::now();
       if (logger) {
@@ -489,7 +524,7 @@ public:
     return s;
   }
 
-  static void generate_test_instances(list<SessionMapStore*>& ls);
+  static void generate_test_instances(std::list<SessionMapStore*>& ls);
 
   void reset_state()
   {
@@ -509,17 +544,15 @@ public:
   MDSRank *mds;
 
 protected:
-  version_t projected, committing, committed;
+  version_t projected = 0, committing = 0, committed = 0;
 public:
   map<int,xlist<Session*>* > by_state;
   uint64_t set_state(Session *session, int state);
-  map<version_t, MDSInternalContextBase::vec > commit_waiters;
+  map<version_t, MDSContext::vec > commit_waiters;
   void update_average_session_age();
 
-  explicit SessionMap(MDSRank *m) : mds(m),
-		       projected(0), committing(0), committed(0),
-                       loaded_legacy(false)
-  { }
+  SessionMap() = delete;
+  explicit SessionMap(MDSRank *m) : mds(m) {}
 
   ~SessionMap() override
   {
@@ -563,7 +596,7 @@ public:
   // sessions
   void decode_legacy(bufferlist::const_iterator& blp) override;
   bool empty() const { return session_map.empty(); }
-  const ceph::unordered_map<entity_name_t, Session*> &get_sessions() const
+  const ceph::unordered_map<entity_name_t, Session*>& get_sessions() const
   {
     return session_map;
   }
@@ -613,27 +646,20 @@ public:
 
   void dump();
 
-  void get_client_session_set(set<Session*>& s) const {
-    for (ceph::unordered_map<entity_name_t,Session*>::const_iterator p = session_map.begin();
-	 p != session_map.end();
-	 ++p)
-      if (p->second->info.inst.name.is_client())
-	s.insert(p->second);
-  }
-
-  void replay_open_sessions(map<client_t,entity_inst_t>& client_map,
-			    map<client_t,client_metadata_t>& client_metadata_map) {
-    for (map<client_t,entity_inst_t>::iterator p = client_map.begin(); 
-	 p != client_map.end(); 
-	 ++p) {
-      Session *s = get_or_add_session(p->second);
-      auto q = client_metadata_map.find(p->first);
-      if (q != client_metadata_map.end())
-	s->info.client_metadata.merge(q->second);
-
-      set_state(s, Session::STATE_OPEN);
-      replay_dirty_session(s);
+  template<typename F>
+  void get_client_sessions(F&& f) const {
+    for (const auto& p : session_map) {
+      auto& session = p.second;
+      if (session->info.inst.name.is_client())
+	f(session);
     }
+  }
+  template<typename C>
+  void get_client_session_set(C& c) const {
+    auto f = [&c](auto& s) {
+      c.insert(s);
+    };
+    get_client_sessions(f);
   }
 
   // helpers
@@ -659,11 +685,11 @@ public:
 
   // -- loading, saving --
   inodeno_t ino;
-  MDSInternalContextBase::vec waiting_for_load;
+  MDSContext::vec waiting_for_load;
 
   object_t get_object_name() const;
 
-  void load(MDSInternalContextBase *onload);
+  void load(MDSContext *onload);
   void _load_finish(
       int operation_r,
       int header_r,
@@ -676,14 +702,14 @@ public:
   void load_legacy();
   void _load_legacy_finish(int r, bufferlist &bl);
 
-  void save(MDSInternalContextBase *onsave, version_t needv=0);
+  void save(MDSContext *onsave, version_t needv=0);
   void _save_finish(version_t v);
 
 protected:
   std::set<entity_name_t> dirty_sessions;
   std::set<entity_name_t> null_sessions;
-  bool loaded_legacy;
-  void _mark_dirty(Session *session);
+  bool loaded_legacy = false;
+  void _mark_dirty(Session *session, bool may_save);
 public:
 
   /**
@@ -694,7 +720,7 @@ public:
    * to the backing store.  Must have called
    * mark_projected previously for this session.
    */
-  void mark_dirty(Session *session);
+  void mark_dirty(Session *session, bool may_save=true);
 
   /**
    * Advance the projected version, and mark this
@@ -721,6 +747,14 @@ public:
    * and `projected` to account for that.
    */
   void replay_advance_version();
+
+  /**
+   * During replay, open sessions, advance versions and
+   * mark these sessions as dirty.
+   */
+  void replay_open_sessions(version_t event_cmapv,
+			    map<client_t,entity_inst_t>& client_map,
+			    map<client_t,client_metadata_t>& client_metadata_map);
 
   /**
    * For these session IDs, if a session exists with this ID, and it has
@@ -760,8 +794,7 @@ private:
 
 public:
   void hit_session(Session *session);
-  void handle_conf_change(const ConfigProxy &conf,
-                          const std::set <std::string> &changed);
+  void handle_conf_change(const std::set <std::string> &changed);
 };
 
 std::ostream& operator<<(std::ostream &out, const Session &s);

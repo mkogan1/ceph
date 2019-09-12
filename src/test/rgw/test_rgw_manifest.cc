@@ -17,18 +17,8 @@
 #include "rgw/rgw_common.h"
 #include "rgw/rgw_rados.h"
 #include "test_rgw_common.h"
-#define GTEST
-#ifdef GTEST
 #include <gtest/gtest.h>
-#else
-#define TEST(x, y) void y()
-#define ASSERT_EQ(v, s) if(v != s)cout << "Error at " << __LINE__ << "(" << #v << "!= " << #s << "\n"; \
-                                else cout << "(" << #v << "==" << #s << ") PASSED\n";
-#define EXPECT_EQ(v, s) ASSERT_EQ(v, s)
-#define ASSERT_TRUE(c) if(c)cout << "Error at " << __LINE__ << "(" << #c << ")" << "\n"; \
-                          else cout << "(" << #c << ") PASSED\n";#define EXPECT_TRUE(c) ASSERT_TRUE(c) 
-#define EXPECT_TRUE(c) ASSERT_TRUE(c) 
-#endif
+
 using namespace std;
 
 struct OldObjManifestPart {
@@ -128,7 +118,7 @@ void append_stripes(list<rgw_obj> *objs, RGWObjManifest& manifest, uint64_t obj_
 }
 
 static void gen_obj(test_rgw_env& env, uint64_t obj_size, uint64_t head_max_size, uint64_t stripe_size,
-                    RGWObjManifest *manifest, const string& placement_id, rgw_bucket *bucket, rgw_obj *head, RGWObjManifest::generator *gen,
+                    RGWObjManifest *manifest, const rgw_placement_rule& placement_rule, rgw_bucket *bucket, rgw_obj *head, RGWObjManifest::generator *gen,
                     list<rgw_obj> *test_objs)
 {
   manifest->set_trivial_rule(head_max_size, stripe_size);
@@ -136,7 +126,7 @@ static void gen_obj(test_rgw_env& env, uint64_t obj_size, uint64_t head_max_size
   test_rgw_init_bucket(bucket, "buck");
 
   *head = rgw_obj(*bucket, "oid");
-  gen->create_begin(g_ceph_context, manifest, placement_id, *bucket, *head);
+  gen->create_begin(g_ceph_context, manifest, placement_rule, nullptr, *bucket, *head);
 
   append_head(test_objs, *head);
   cout << "test_objs.size()=" << test_objs->size() << std::endl;
@@ -313,7 +303,8 @@ TEST(TestRGWManifest, multipart) {
     rgw_obj head;
     for (ofs = 0; ofs < part_size; ofs += stripe_size) {
       if (ofs == 0) {
-        int r = gen.create_begin(g_ceph_context, &manifest, env.zonegroup.default_placement, bucket, head);
+        rgw_placement_rule rule(env.zonegroup.default_placement.name, RGW_STORAGE_CLASS_STANDARD);
+        int r = gen.create_begin(g_ceph_context, &manifest, rule, nullptr, bucket, head);
         ASSERT_EQ(r, 0);
         continue;
       }

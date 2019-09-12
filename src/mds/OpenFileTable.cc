@@ -208,10 +208,10 @@ class C_IO_OFT_Save : public MDSIOContextBase {
 protected:
   OpenFileTable *oft;
   uint64_t log_seq;
-  MDSInternalContextBase *fin;
+  MDSContext *fin;
   MDSRank *get_mds() override { return oft->mds; }
 public:
-  C_IO_OFT_Save(OpenFileTable *t, uint64_t s, MDSInternalContextBase *c) :
+  C_IO_OFT_Save(OpenFileTable *t, uint64_t s, MDSContext *c) :
     oft(t), log_seq(s), fin(c) {}
   void finish(int r) {
     oft->_commit_finish(r, log_seq, fin);
@@ -221,7 +221,7 @@ public:
   }
 };
 
-void OpenFileTable::_commit_finish(int r, uint64_t log_seq, MDSInternalContextBase *fin)
+void OpenFileTable::_commit_finish(int r, uint64_t log_seq, MDSContext *fin)
 {
   dout(10) << __func__ << " log_seq " << log_seq << dendl;
   if (r < 0) {
@@ -242,11 +242,11 @@ class C_IO_OFT_Journal : public MDSIOContextBase {
 protected:
   OpenFileTable *oft;
   uint64_t log_seq;
-  MDSInternalContextBase *fin;
+  MDSContext *fin;
   std::map<unsigned, std::vector<ObjectOperation> > ops_map;
   MDSRank *get_mds() override { return oft->mds; }
 public:
-  C_IO_OFT_Journal(OpenFileTable *t, uint64_t s, MDSInternalContextBase *c,
+  C_IO_OFT_Journal(OpenFileTable *t, uint64_t s, MDSContext *c,
 		   std::map<unsigned, std::vector<ObjectOperation> >& ops) :
     oft(t), log_seq(s), fin(c) {
     ops_map.swap(ops);
@@ -259,7 +259,7 @@ public:
   }
 };
 
-void OpenFileTable::_journal_finish(int r, uint64_t log_seq, MDSInternalContextBase *c,
+void OpenFileTable::_journal_finish(int r, uint64_t log_seq, MDSContext *c,
 				    std::map<unsigned, std::vector<ObjectOperation> >& ops_map)
 {
   dout(10) << __func__ << " log_seq " << log_seq << dendl;
@@ -286,7 +286,7 @@ void OpenFileTable::_journal_finish(int r, uint64_t log_seq, MDSInternalContextB
   return;
 }
 
-void OpenFileTable::commit(MDSInternalContextBase *c, uint64_t log_seq, int op_prio)
+void OpenFileTable::commit(MDSContext *c, uint64_t log_seq, int op_prio)
 {
   dout(10) << __func__ << " log_seq " << log_seq << dendl;
 
@@ -422,13 +422,13 @@ void OpenFileTable::commit(MDSInternalContextBase *c, uint64_t log_seq, int op_p
   }
 
   for (auto& it : dirty_items) {
-    list<frag_t> fgls;
+    frag_vec_t frags;
     auto p = anchor_map.find(it.first);
     if (p != anchor_map.end()) {
       for (auto q = dirfrags.lower_bound(dirfrag_t(it.first, 0));
 	   q != dirfrags.end() && q->ino == it.first;
 	   ++q)
-	fgls.push_back(q->frag);
+	frags.push_back(q->frag);
     }
 
     if (first_commit) {
@@ -439,7 +439,7 @@ void OpenFileTable::commit(MDSInternalContextBase *c, uint64_t log_seq, int op_p
 	bool same = p->second == q->second;
 	if (same) {
 	  auto r = loaded_dirfrags.lower_bound(dirfrag_t(it.first, 0));
-	  for (auto fg : fgls) {
+	  for (const auto& fg : frags) {
 	    if (r == loaded_dirfrags.end() || !(*r == dirfrag_t(it.first, fg))) {
 	      same = false;
 	      break;
@@ -494,7 +494,7 @@ void OpenFileTable::commit(MDSInternalContextBase *c, uint64_t log_seq, int op_p
     if (p != anchor_map.end()) {
       bufferlist bl;
       encode(p->second, bl);
-      encode(fgls, bl);
+      encode(frags, bl);
 
       ctl.write_size += bl.length() + len + 2 * sizeof(__u32);
       ctl.to_update[key].swap(bl);
@@ -537,7 +537,7 @@ void OpenFileTable::commit(MDSInternalContextBase *c, uint64_t log_seq, int op_p
   {
     size_t total_items = 0;
     unsigned used_objs = 1;
-    std::list<unsigned> objs_to_write;
+    std::vector<unsigned> objs_to_write;
     bool journaled = false;
     for (unsigned i = 0; i < omap_num_objs; i++) {
       total_items += omap_num_items[i];
@@ -711,9 +711,9 @@ void OpenFileTable::_load_finish(int op_r, int header_r, int values_r,
     anchor.omap_idx = idx;
     anchor.auth = MDS_RANK_NONE;
 
-    list<frag_t> fgls;
-    decode(fgls, p);
-    for (auto fg : fgls)
+    frag_vec_t frags;
+    decode(frags, p);
+    for (const auto& fg : frags)
       loaded_dirfrags.insert(loaded_dirfrags.end(), dirfrag_t(anchor.ino, fg));
 
     if (loaded_anchor_map.size() > count)
@@ -924,7 +924,7 @@ out:
   waiting_for_load.clear();
 }
 
-void OpenFileTable::load(MDSInternalContextBase *onload)
+void OpenFileTable::load(MDSContext *onload)
 {
   dout(10) << __func__ << dendl;
   ceph_assert(!load_done);
@@ -976,7 +976,7 @@ bool OpenFileTable::get_ancestors(inodeno_t ino, vector<inode_backpointer_t>& an
   return true;
 }
 
-class C_OFT_OpenInoFinish: public MDSInternalContextBase {
+class C_OFT_OpenInoFinish: public MDSContext {
   OpenFileTable *oft;
   inodeno_t ino;
   MDSRank *get_mds() override { return oft->mds; }
@@ -1021,7 +1021,7 @@ void OpenFileTable::_prefetch_dirfrags()
   ceph_assert(prefetch_state == DIRFRAGS);
 
   MDCache *mdcache = mds->mdcache;
-  list<CDir*> fetch_queue;
+  std::vector<CDir*> fetch_queue;
 
   CInode *last_in = nullptr;
   for (auto df : loaded_dirfrags) {
@@ -1042,13 +1042,13 @@ void OpenFileTable::_prefetch_dirfrags()
       if (dir->is_auth() && !dir->is_complete())
 	fetch_queue.push_back(dir);
     } else {
-      list<frag_t> fgls;
-      diri->dirfragtree.get_leaves_under(df.frag, fgls);
-      for (auto fg : fgls) {
+      frag_vec_t leaves;
+      diri->dirfragtree.get_leaves_under(df.frag, leaves);
+      for (const auto& leaf : leaves) {
 	if (diri->is_auth()) {
-	  dir = diri->get_or_open_dirfrag(mdcache, fg);
+	  dir = diri->get_or_open_dirfrag(mdcache, leaf);
 	} else {
-	  dir = diri->get_dirfrag(fg);
+	  dir = diri->get_dirfrag(leaf);
 	}
 	if (dir && dir->is_auth() && !dir->is_complete())
 	  fetch_queue.push_back(dir);
@@ -1058,7 +1058,7 @@ void OpenFileTable::_prefetch_dirfrags()
 
   MDSGatherBuilder gather(g_ceph_context);
   int num_opening_dirfrags = 0;
-  for (auto dir : fetch_queue) {
+  for (const auto& dir : fetch_queue) {
     if (dir->state_test(CDir::STATE_REJOINUNDEF))
       ceph_assert(dir->get_inode()->dirfragtree.is_leaf(dir->get_frag()));
     dir->fetch(gather.new_sub());

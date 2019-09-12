@@ -13,13 +13,13 @@ import { Observable, throwError as observableThrowError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
 import { NotificationType } from '../enum/notification-type.enum';
+import { CdNotificationConfig } from '../models/cd-notification';
 import { FinishedTask } from '../models/finished-task';
 import { AuthStorageService } from './auth-storage.service';
 import { NotificationService } from './notification.service';
-import { ServicesModule } from './services.module';
 
 @Injectable({
-  providedIn: ServicesModule
+  providedIn: 'root'
 })
 export class ApiInterceptorService implements HttpInterceptor {
   constructor(
@@ -32,7 +32,7 @@ export class ApiInterceptorService implements HttpInterceptor {
     return next.handle(request).pipe(
       catchError((resp) => {
         if (resp instanceof HttpErrorResponse) {
-          let showNotification = true;
+          let timeoutId: number;
           switch (resp.status) {
             case 400:
               const finishedTask = new FinishedTask();
@@ -49,8 +49,7 @@ export class ApiInterceptorService implements HttpInterceptor {
 
               finishedTask.success = false;
               finishedTask.exception = resp.error;
-              this.notificationService.notifyTask(finishedTask);
-              showNotification = false;
+              timeoutId = this.notificationService.notifyTask(finishedTask);
               break;
             case 401:
               this.authStorageService.remove();
@@ -59,23 +58,8 @@ export class ApiInterceptorService implements HttpInterceptor {
             case 403:
               this.router.navigate(['/403']);
               break;
-          }
-
-          let timeoutId;
-          if (showNotification) {
-            let message = '';
-            if (_.isPlainObject(resp.error) && _.isString(resp.error.detail)) {
-              message = resp.error.detail; // Error was triggered by the backend.
-            } else if (_.isString(resp.error)) {
-              message = resp.error;
-            } else if (_.isString(resp.message)) {
-              message = resp.message;
-            }
-            timeoutId = this.notificationService.show(
-              NotificationType.error,
-              `${resp.status} - ${resp.statusText}`,
-              message
-            );
+            default:
+              timeoutId = this.prepareNotification(resp);
           }
 
           /**
@@ -101,5 +85,25 @@ export class ApiInterceptorService implements HttpInterceptor {
         return observableThrowError(resp);
       })
     );
+  }
+
+  private prepareNotification(resp): number {
+    return this.notificationService.show(() => {
+      let message = '';
+      if (_.isPlainObject(resp.error) && _.isString(resp.error.detail)) {
+        message = resp.error.detail; // Error was triggered by the backend.
+      } else if (_.isString(resp.error)) {
+        message = resp.error;
+      } else if (_.isString(resp.message)) {
+        message = resp.message;
+      }
+      return new CdNotificationConfig(
+        NotificationType.error,
+        `${resp.status} - ${resp.statusText}`,
+        message,
+        undefined,
+        resp['application']
+      );
+    });
   }
 }

@@ -20,7 +20,6 @@
 #include "auth/Crypto.h"
 #include "client/Client.h"
 #include "librados/RadosClient.h"
-#include "common/Mutex.h"
 #include "common/ceph_argparse.h"
 #include "common/common_init.h"
 #include "common/config.h"
@@ -77,9 +76,12 @@ public:
 
   int init()
   {
-    common_init_finish(cct);
-
     int ret;
+
+    if (cct->_conf->log_early &&
+	!cct->_log->is_started()) {
+      cct->_log->start();
+    }
 
     {
       MonClient mc_bootstrap(cct);
@@ -87,6 +89,8 @@ public:
       if (ret < 0)
 	return ret;
     }
+
+    common_init_finish(cct);
 
     //monmap
     monclient = new MonClient(cct);
@@ -230,7 +234,7 @@ public:
     if (ret)
       return ret;
     cct->_conf.apply_changes(nullptr);
-    cct->_conf.complain_about_parse_errors(cct);
+    cct->_conf.complain_about_parse_error(cct);
     return 0;
   }
 
@@ -249,7 +253,7 @@ public:
   int conf_parse_env(const char *name)
   {
     auto& conf = cct->_conf;
-    conf.parse_env(name);
+    conf.parse_env(cct->get_module_type(), name);
     conf.apply_changes(nullptr);
     return 0;
   }
@@ -357,7 +361,7 @@ extern "C" const char *ceph_version(int *pmajor, int *pminor, int *ppatch)
     *pminor = (n >= 2) ? minor : 0;
   if (ppatch)
     *ppatch = (n >= 3) ? patch : 0;
-  return VERSION;
+  return PROJECT_VERSION;
 }
 
 extern "C" int ceph_create_with_context(struct ceph_mount_info **cmount, CephContext *cct)
@@ -382,7 +386,7 @@ extern "C" int ceph_create(struct ceph_mount_info **cmount, const char * const i
   }
 
   CephContext *cct = common_preinit(iparams, CODE_ENVIRONMENT_LIBRARY, 0);
-  cct->_conf.parse_env(); // environment variables coverride
+  cct->_conf.parse_env(cct->get_module_type()); // environment variables coverride
   cct->_conf.apply_changes(nullptr);
   int ret = ceph_create_with_context(cmount, cct);
   cct->put();
@@ -536,6 +540,13 @@ extern "C" int ceph_is_mounted(struct ceph_mount_info *cmount)
 extern "C" struct UserPerm *ceph_mount_perms(struct ceph_mount_info *cmount)
 {
   return &cmount->default_perms;
+}
+
+extern "C" int64_t ceph_get_fs_cid(struct ceph_mount_info *cmount)
+{
+  if (!cmount->is_mounted())
+    return -ENOTCONN;
+  return cmount->get_client()->get_fs_cid();
 }
 
 extern "C" int ceph_mount_perms_set(struct ceph_mount_info *cmount,
@@ -845,6 +856,27 @@ extern "C" int ceph_fsetxattr(struct ceph_mount_info *cmount, int fd, const char
 }
 /* end xattr support */
 
+extern "C" int ceph_stat(struct ceph_mount_info *cmount, const char *path, struct stat *stbuf)
+{
+  if (!cmount->is_mounted())
+    return -ENOTCONN;
+  return cmount->get_client()->stat(path, stbuf, cmount->default_perms);
+}
+
+extern "C" int ceph_fstat(struct ceph_mount_info *cmount, int fd, struct stat *stbuf)
+{
+  if (!cmount->is_mounted())
+    return -ENOTCONN;
+  return cmount->get_client()->fstat(fd, stbuf, cmount->default_perms);
+}
+
+extern int ceph_lstat(struct ceph_mount_info *cmount, const char *path, struct stat *stbuf)
+{
+   if (!cmount->is_mounted())
+    return -ENOTCONN;
+  return cmount->get_client()->lstat(path, stbuf, cmount->default_perms);
+}
+
 extern "C" int ceph_chmod(struct ceph_mount_info *cmount, const char *path, mode_t mode)
 {
   if (!cmount->is_mounted())
@@ -1052,7 +1084,6 @@ extern "C" int ceph_sync_fs(struct ceph_mount_info *cmount)
     return -ENOTCONN;
   return cmount->get_client()->sync_fs();
 }
-
 
 extern "C" int ceph_get_file_stripe_unit(struct ceph_mount_info *cmount, int fh)
 {

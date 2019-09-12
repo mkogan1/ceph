@@ -12,7 +12,13 @@ import * as _ from 'lodash';
 
 import { CellTemplate } from '../../enum/cell-template.enum';
 import { CdTableColumn } from '../../models/cd-table-column';
+import { CdDatePipe } from '../../pipes/cd-date.pipe';
 import { TableComponent } from '../table/table.component';
+
+class Item {
+  key: string;
+  value: any;
+}
 
 /**
  * Display the given data in a 2 column data table. The left column
@@ -28,7 +34,7 @@ import { TableComponent } from '../table/table.component';
   styleUrls: ['./table-key-value.component.scss']
 })
 export class TableKeyValueComponent implements OnInit, OnChanges {
-  @ViewChild(TableComponent)
+  @ViewChild(TableComponent, { static: true })
   table: TableComponent;
 
   @Input()
@@ -40,12 +46,15 @@ export class TableKeyValueComponent implements OnInit, OnChanges {
   // Only used if objects are rendered
   @Input()
   appendParentKey = true;
+  @Input()
+  hideEmpty = false;
+
+  // If set, the classAddingTpl is used to enable different css for different values
+  @Input()
+  customCss?: { [css: string]: number | string | ((any) => boolean) };
 
   columns: Array<CdTableColumn> = [];
-  tableData: {
-    key: string;
-    value: any;
-  }[];
+  tableData: Item[];
 
   /**
    * The function that will be called to update the input data.
@@ -53,7 +62,7 @@ export class TableKeyValueComponent implements OnInit, OnChanges {
   @Output()
   fetchData = new EventEmitter();
 
-  constructor() {}
+  constructor(private datePipe: CdDatePipe) {}
 
   ngOnInit() {
     this.columns = [
@@ -67,6 +76,9 @@ export class TableKeyValueComponent implements OnInit, OnChanges {
         flexGrow: 3
       }
     ];
+    if (this.customCss) {
+      this.columns[1].cellTransformation = CellTemplate.classAdding;
+    }
     // We need to subscribe the 'fetchData' event here and not in the
     // HTML template, otherwise the data table will display the loading
     // indicator infinitely if data is only bound via '[data]="xyz"'.
@@ -80,7 +92,7 @@ export class TableKeyValueComponent implements OnInit, OnChanges {
     this.useData();
   }
 
-  ngOnChanges(changes) {
+  ngOnChanges() {
     this.useData();
   }
 
@@ -91,76 +103,107 @@ export class TableKeyValueComponent implements OnInit, OnChanges {
     this.tableData = this._makePairs(this.data);
   }
 
-  _makePairs(data: any) {
+  _makePairs(data: any): Item[] {
     let temp = [];
     if (!data) {
       return; // Wait for data
     } else if (_.isArray(data)) {
       temp = this._makePairsFromArray(data);
-    } else if (_.isPlainObject(data)) {
+    } else if (_.isObject(data)) {
       temp = this._makePairsFromObject(data);
     } else {
       throw new Error('Wrong data format');
     }
     temp = temp.map((v) => this._convertValue(v)).filter((o) => o); // Filters out undefined
-    return this.renderObjects ? this._insertFlattenObjects(temp) : temp;
+    return _.sortBy(this.renderObjects ? this.insertFlattenObjects(temp) : temp, 'key');
   }
 
-  _makePairsFromArray(data: any[]) {
+  _makePairsFromArray(data: any[]): Item[] {
     let temp = [];
     const first = data[0];
-    if (_.isPlainObject(first)) {
+    if (_.isArray(first)) {
+      if (first.length === 2) {
+        temp = data.map((a) => ({
+          key: a[0],
+          value: a[1]
+        }));
+      } else {
+        throw new Error('Wrong array format: [string, any][]');
+      }
+    } else if (_.isObject(first)) {
       if (_.has(first, 'key') && _.has(first, 'value')) {
         temp = [...data];
       } else {
-        throw new Error('Wrong object array format: {key: string, value: any}[]');
-      }
-    } else {
-      if (_.isArray(first)) {
-        if (first.length === 2) {
-          temp = data.map((a) => ({
-            key: a[0],
-            value: a[1]
-          }));
-        } else {
-          throw new Error('Wrong array format: [string, any][]');
-        }
+        temp = data.reduce(
+          (previous: any[], item) => previous.concat(this._makePairsFromObject(item)),
+          temp
+        );
       }
     }
     return temp;
   }
 
-  _makePairsFromObject(data: object) {
+  _makePairsFromObject(data: object): Item[] {
     return Object.keys(data).map((k) => ({
       key: k,
       value: data[k]
     }));
   }
 
-  _insertFlattenObjects(temp: any[]) {
-    temp.forEach((v, i) => {
-      if (_.isPlainObject(v.value)) {
-        temp.splice(i, 1);
-        this._makePairs(v.value).forEach((item) => {
-          if (this.appendParentKey) {
-            item.key = v.key + ' ' + item.key;
+  private insertFlattenObjects(temp: Item[]): any[] {
+    return _.flattenDeep(
+      temp.map((item) => {
+        const value = item.value;
+        const isObject = _.isObject(value);
+        if (!isObject || _.isEmpty(value)) {
+          if (isObject) {
+            item.value = '';
           }
-          temp.splice(i, 0, item);
-          i++;
-        });
-      }
-    });
-    return temp;
+          return item;
+        }
+        return this.splitItemIntoItems(item);
+      })
+    );
   }
 
-  _convertValue(v: any) {
+  /**
+   * Split item into items will call _makePairs inside _makePairs (recursion), in oder to split
+   * the object item up into items as planned.
+   */
+  private splitItemIntoItems(v: { key: string; value: object }): Item[] {
+    return this._makePairs(v.value).map((item) => {
+      if (this.appendParentKey) {
+        item.key = v.key + ' ' + item.key;
+      }
+      return item;
+    });
+  }
+
+  _convertValue(v: Item): Item {
     if (_.isArray(v.value)) {
-      v.value = v.value
-        .map((item) => (_.isPlainObject(item) ? JSON.stringify(item) : item))
-        .join(', ');
-    } else if (_.isPlainObject(v.value) && !this.renderObjects) {
+      v.value = v.value.map((item) => (_.isObject(item) ? JSON.stringify(item) : item)).join(', ');
+    }
+    const isEmpty = _.isEmpty(v.value) && !_.isNumber(v.value);
+    if ((this.hideEmpty && isEmpty) || (_.isObject(v.value) && !this.renderObjects)) {
       return;
+    } else if (isEmpty && !this.hideEmpty && v.value !== '') {
+      v.value = '';
+    }
+    if (!isEmpty && _.isString(v.value)) {
+      v.value = this.convertString(v.value);
     }
     return v;
+  }
+
+  private convertString(s: string) {
+    const date = this.isDate(s) && this.datePipe.transform(s);
+    return date || s;
+  }
+
+  private isDate(s) {
+    const sep = '[ -:.TZ]';
+    const n = '\\d{2}' + sep;
+    //                            year     -    m - d - h : m : s . someRest  Z (if UTC)
+    return s.match(new RegExp('^\\d{4}' + sep + n + n + n + n + n + '\\d*' + 'Z?$'));
   }
 }

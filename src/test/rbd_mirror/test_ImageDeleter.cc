@@ -97,23 +97,21 @@ public:
     ASSERT_EQ(0, ctx.wait());
   }
 
-  void remove_image(bool force=false) {
-    if (!force) {
-      cls::rbd::MirrorImage mirror_image;
-      int r = cls_client::mirror_image_get(&m_local_io_ctx, m_local_image_id,
-                                           &mirror_image);
-      EXPECT_EQ(1, r == 0 || r == -ENOENT);
-      if (r != -ENOENT) {
-        mirror_image.state = MirrorImageState::MIRROR_IMAGE_STATE_ENABLED;
-        EXPECT_EQ(0, cls_client::mirror_image_set(&m_local_io_ctx,
-                                                  m_local_image_id,
-                                                  mirror_image));
-      }
-      promote_image();
+  void remove_image() {
+    cls::rbd::MirrorImage mirror_image;
+    int r = cls_client::mirror_image_get(&m_local_io_ctx, m_local_image_id,
+                                         &mirror_image);
+    EXPECT_EQ(1, r == 0 || r == -ENOENT);
+    if (r != -ENOENT) {
+      mirror_image.state = MirrorImageState::MIRROR_IMAGE_STATE_ENABLED;
+      EXPECT_EQ(0, cls_client::mirror_image_set(&m_local_io_ctx,
+                                                m_local_image_id,
+                                                mirror_image));
     }
+    promote_image();
+
     NoOpProgressContext ctx;
-    int r = librbd::api::Image<>::remove(m_local_io_ctx, m_image_name, "", ctx,
-                                         force);
+    r = librbd::api::Image<>::remove(m_local_io_ctx, m_image_name, ctx);
     EXPECT_EQ(1, r == 0 || r == -ENOENT);
   }
 
@@ -123,7 +121,7 @@ public:
     if (!ictx) {
       ictx = new ImageCtx("", m_local_image_id, "", m_local_io_ctx,
                           false);
-      r = ictx->state->open(false);
+      r = ictx->state->open(0);
       close = (r == 0);
     }
 
@@ -144,7 +142,7 @@ public:
     if (!ictx) {
       ictx = new ImageCtx("", m_local_image_id, "", m_local_io_ctx,
                           false);
-      EXPECT_EQ(0, ictx->state->open(false));
+      EXPECT_EQ(0, ictx->state->open(0));
       close = true;
     }
 
@@ -158,9 +156,9 @@ public:
   void create_snapshot(std::string snap_name="snap1", bool protect=false) {
     ImageCtx *ictx = new ImageCtx("", m_local_image_id, "", m_local_io_ctx,
                                   false);
-    EXPECT_EQ(0, ictx->state->open(false));
+    EXPECT_EQ(0, ictx->state->open(0));
     {
-      RWLock::WLocker snap_locker(ictx->snap_lock);
+      std::unique_lock image_locker{ictx->image_lock};
       ictx->set_journal_policy(new librbd::journal::DisabledPolicy());
     }
 
@@ -178,9 +176,9 @@ public:
   std::string create_clone() {
     ImageCtx *ictx = new ImageCtx("", m_local_image_id, "", m_local_io_ctx,
                                   false);
-    EXPECT_EQ(0, ictx->state->open(false));
+    EXPECT_EQ(0, ictx->state->open(0));
     {
-      RWLock::WLocker snap_locker(ictx->snap_lock);
+      std::unique_lock image_locker{ictx->image_lock};
       ictx->set_journal_policy(new librbd::journal::DisabledPolicy());
     }
 
@@ -210,7 +208,7 @@ public:
   void check_image_deleted() {
     ImageCtx *ictx = new ImageCtx("", m_local_image_id, "", m_local_io_ctx,
                                   false);
-    EXPECT_EQ(-ENOENT, ictx->state->open(false));
+    EXPECT_EQ(-ENOENT, ictx->state->open(0));
 
     cls::rbd::MirrorImage mirror_image;
     EXPECT_EQ(-ENOENT, cls_client::mirror_image_get(&m_local_io_ctx,

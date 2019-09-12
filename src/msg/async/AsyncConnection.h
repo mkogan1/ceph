@@ -120,7 +120,9 @@ class AsyncConnection : public Connection {
   void connect(const entity_addrvec_t& addrs, int type, entity_addr_t& target);
 
   // Only call when AsyncConnection first construct
-  void accept(ConnectedSocket socket, entity_addr_t &addr);
+  void accept(ConnectedSocket socket,
+	      const entity_addr_t &listen_addr,
+	      const entity_addr_t &peer_addr);
   int send_message(Message *m) override;
 
   void send_keepalive() override;
@@ -130,9 +132,11 @@ class AsyncConnection : public Connection {
     policy.lossy = true;
   }
 
- entity_addr_t get_peer_socket_addr() const override {
-   return target_addr;
- }
+  entity_addr_t get_peer_socket_addr() const override {
+    return target_addr;
+  }
+
+  int get_con_mode() const override;
 
  private:
   enum {
@@ -182,17 +186,21 @@ class AsyncConnection : public Connection {
   uint32_t recv_start;
   uint32_t recv_end;
   set<uint64_t> register_time_events; // need to delete it if stop
+  ceph::coarse_mono_clock::time_point last_connect_started;
   ceph::coarse_mono_clock::time_point last_active;
   ceph::mono_clock::time_point recv_start_time;
   uint64_t last_tick_id = 0;
+  const uint64_t connect_timeout_us;
   const uint64_t inactive_timeout_us;
 
   // Tis section are temp variables used by state transition
 
   // Accepting state
   bool msgr2 = false;
-  entity_addr_t socket_addr;
-  entity_addr_t target_addr;  // which of the peer_addrs we're using
+  entity_addr_t socket_addr;  ///< local socket addr
+  entity_addr_t target_addr;  ///< which of the peer_addrs we're connecting to (as clienet) or should reconnect to (as peer)
+
+  entity_addr_t _infer_target_addr(const entity_addrvec_t& av);
 
   // used only by "read_until"
   uint64_t state_offset;
@@ -220,8 +228,11 @@ class AsyncConnection : public Connection {
     return logger;
   }
 
+  bool is_msgr2() const override;
+
   friend class Protocol;
   friend class ProtocolV1;
+  friend class ProtocolV2;
 }; /* AsyncConnection */
 
 typedef boost::intrusive_ptr<AsyncConnection> AsyncConnectionRef;

@@ -57,8 +57,9 @@ void PGLog::IndexedLog::trim(
   auto earliest_dup_version =
     log.rbegin()->version.version < cct->_conf->osd_pg_log_dups_tracked
     ? 0u
-    : log.rbegin()->version.version - cct->_conf->osd_pg_log_dups_tracked;
+    : log.rbegin()->version.version - cct->_conf->osd_pg_log_dups_tracked + 1;
 
+  lgeneric_subdout(cct, osd, 20) << "earliest_dup_version = " << earliest_dup_version << dendl;
   while (!log.empty()) {
     const pg_log_entry_t &e = *log.begin();
     if (e.version > s)
@@ -70,7 +71,6 @@ void PGLog::IndexedLog::trim(
     unindex(e);         // remove from index,
 
     // add to dup list
-    lgeneric_subdout(cct, osd, 20) << "earliest_dup_version = " << earliest_dup_version << dendl;
     if (e.version.version >= earliest_dup_version) {
       if (write_from_dups != nullptr && *write_from_dups > e.version) {
 	lgeneric_subdout(cct, osd, 20) << "updating write_from_dups from " << *write_from_dups << " to " << e.version << dendl;
@@ -78,10 +78,20 @@ void PGLog::IndexedLog::trim(
       }
       dups.push_back(pg_log_dup_t(e));
       index(dups.back());
+      uint32_t idx = 0;
       for (const auto& extra : e.extra_reqids) {
+	int return_code = e.return_code;
+	if (return_code >= 0) {
+	  auto it = e.extra_reqid_return_codes.find(idx);
+	  if (it != e.extra_reqid_return_codes.end()) {
+	    return_code = it->second;
+	  }
+	}
+	++idx;
+
 	// note: extras have the same version as outer op
 	dups.push_back(pg_log_dup_t(e.version, extra.second,
-				    extra.first, e.return_code));
+				    extra.first, return_code));
 	index(dups.back());
       }
     }
@@ -259,6 +269,11 @@ void PGLog::proc_replica_log(
     limit :
     first_non_divergent->version;
 
+  // we merge and adjust the replica's log, rollback the rollbackable divergent entry, 
+  // remove the unrollbackable divergent entry and mark the according object as missing. 
+  // the rollback boundary must choose crt of the olog which going to be merged. 
+  // The replica log's(olog) crt will not be modified, so it could get passed
+  // to _merge_divergent_entries() directly.
   IndexedLog folog(olog);
   auto divergent = folog.rewind_from_head(lu);
   _merge_divergent_entries(
@@ -308,7 +323,11 @@ void PGLog::rewind_divergent_log(eversion_t newhead,
   dout(10) << "rewind_divergent_log truncate divergent future " <<
     newhead << dendl;
 
-
+  // We need to preserve the original crt before it gets updated in rewind_from_head().
+  // Later, in merge_object_divergent_entries(), we use it to check whether we can rollback
+  // a divergent entry or not.
+  eversion_t original_crt = log.get_can_rollback_to();
+  dout(20) << __func__ << " original_crt = " << original_crt << dendl;
   if (info.last_complete > newhead)
     info.last_complete = newhead;
 
@@ -325,7 +344,7 @@ void PGLog::rewind_divergent_log(eversion_t newhead,
     log,
     divergent,
     info,
-    log.get_can_rollback_to(),
+    original_crt,
     missing,
     rollbacker,
     this);
@@ -423,6 +442,11 @@ void PGLog::merge_log(pg_info_t &oinfo, pg_log_t &olog, pg_shard_t fromosd,
 	     << lower_bound << dendl;
     mark_dirty_from(lower_bound);
 
+    // We need to preserve the original crt before it gets updated in rewind_from_head().
+    // Later, in merge_object_divergent_entries(), we use it to check whether we can rollback
+    // a divergent entry or not.
+    eversion_t original_crt = log.get_can_rollback_to();
+    dout(20) << __func__ << " original_crt = " << original_crt << dendl;
     auto divergent = log.rewind_from_head(lower_bound);
     // move aside divergent items
     for (auto &&oe: divergent) {
@@ -434,7 +458,6 @@ void PGLog::merge_log(pg_info_t &oinfo, pg_log_t &olog, pg_shard_t fromosd,
     new_entries.splice(new_entries.end(), olog.log, from, to);
     append_log_entries_update_missing(
       info.last_backfill,
-      info.last_backfill_bitwise,
       new_entries,
       false,
       &log,
@@ -446,7 +469,7 @@ void PGLog::merge_log(pg_info_t &oinfo, pg_log_t &olog, pg_shard_t fromosd,
       log,
       divergent,
       info,
-      log.get_can_rollback_to(),
+      original_crt,
       missing,
       rollbacker,
       this);
@@ -545,12 +568,12 @@ bool PGLog::merge_log_dups(const pg_log_t& olog) {
   }
 
   // remove any dup entries that overlap with pglog
-  if (!log.dups.empty() && log.dups.back().version >= log.tail) {
-    dout(10) << "merge_log removed dups overlapping log entries [" <<
+  if (!log.dups.empty() && log.dups.back().version > log.tail) {
+    dout(10) << "merge_log removed dups overlapping log entries (" <<
       log.tail << "," << log.dups.back().version << "]" << dendl;
     changed = true;
 
-    while (!log.dups.empty() && log.dups.back().version >= log.tail) {
+    while (!log.dups.empty() && log.dups.back().version > log.tail) {
       log.unindex(log.dups.back());
       mark_dirty_from_dups(log.dups.back().version);
       log.dups.pop_back();
@@ -594,7 +617,7 @@ void PGLog::write_log_and_missing(
   const ghobject_t &log_oid,
   bool require_rollback)
 {
-  if (is_dirty()) {
+  if (needs_write()) {
     dout(6) << "write_log_and_missing with: "
 	     << "dirty_to: " << dirty_to
 	     << ", dirty_from: " << dirty_from
@@ -617,7 +640,7 @@ void PGLog::write_log_and_missing(
       dirty_to_dups,
       dirty_from_dups,
       write_from_dups,
-      &rebuilt_missing_with_deletes,
+      &may_include_deletes_in_missing_dirty,
       (pg_log_debug ? &log_keys_debug : nullptr));
     undirty();
   } else {
@@ -651,7 +674,7 @@ void PGLog::write_log_and_missing(
     const ghobject_t &log_oid,
     const pg_missing_tracker_t &missing,
     bool require_rollback,
-    bool *rebuilt_missing_with_deletes)
+    bool *may_include_deletes_in_missing_dirty)
 {
   _write_log_and_missing(
     t, km, log, coll, log_oid,
@@ -665,7 +688,7 @@ void PGLog::write_log_and_missing(
     eversion_t::max(),
     eversion_t(),
     eversion_t(),
-    rebuilt_missing_with_deletes, nullptr);
+    may_include_deletes_in_missing_dirty, nullptr);
 }
 
 // static
@@ -801,7 +824,7 @@ void PGLog::_write_log_and_missing(
   eversion_t dirty_to_dups,
   eversion_t dirty_from_dups,
   eversion_t write_from_dups,
-  bool *rebuilt_missing_with_deletes, // in/out param
+  bool *may_include_deletes_in_missing_dirty, // in/out param
   set<string> *log_keys_debug
   ) {
   set<string> to_remove;
@@ -904,9 +927,9 @@ void PGLog::_write_log_and_missing(
   }
   // since we encode individual missing items instead of a whole
   // missing set, we need another key to store this bit of state
-  if (*rebuilt_missing_with_deletes) {
+  if (*may_include_deletes_in_missing_dirty) {
     (*km)["may_include_deletes_in_missing"] = bufferlist();
-    *rebuilt_missing_with_deletes = false;
+    *may_include_deletes_in_missing_dirty = false;
   }
   missing.get_changed(
     [&](const hobject_t &obj) {
@@ -948,7 +971,6 @@ void PGLog::rebuild_missing_set_with_deletes(
     }
   }
   missing.clear();
-  missing.may_include_deletes = true;
 
   // go through the log and add items that are not present or older
   // versions on disk, just as if we were reading the log + metadata
@@ -987,5 +1009,6 @@ void PGLog::rebuild_missing_set_with_deletes(
   for (const auto& p : extra_missing) {
     missing.add(p.first, p.second.need, p.second.have, p.second.is_delete());
   }
-  rebuilt_missing_with_deletes = true;
+
+  set_missing_may_contain_deletes();
 }

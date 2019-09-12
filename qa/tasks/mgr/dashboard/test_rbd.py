@@ -89,9 +89,9 @@ class RbdTest(DashboardTestCase):
 
     # pylint: disable=too-many-arguments
     @classmethod
-    def edit_image(cls, pool, image, name=None, size=None, features=None):
-        return cls._task_put('/api/block/image/{}/{}'.format(pool, image),
-                             {'name': name, 'size': size, 'features': features})
+    def edit_image(cls, pool, image, name=None, size=None, features=None, **kwargs):
+        kwargs.update({'name': name, 'size': size, 'features': features})
+        return cls._task_put('/api/block/image/{}/{}'.format(pool, image), kwargs)
 
     @classmethod
     def flatten_image(cls, pool, image):
@@ -139,18 +139,19 @@ class RbdTest(DashboardTestCase):
                        '--yes-i-really-really-mean-it'])
 
     @classmethod
-    def create_image_in_trash(cls, pool, name, delay=0, **kwargs):
+    def create_image_in_trash(cls, pool, name, delay=0):
         cls.create_image(pool, name, 10240)
         img = cls._get('/api/block/image/{}/{}'.format(pool, name))
 
         cls._task_post("/api/block/image/{}/{}/move_trash".format(pool, name),
-                        {'delay': delay})
+                       {'delay': delay})
 
         return img['id']
 
     @classmethod
     def remove_trash(cls, pool, image_id, image_name, force=False):
-        return cls._task_delete('/api/block/image/trash/{}/{}/?image_name={}&force={}'.format('rbd', image_id, image_name, force))
+        return cls._task_delete('/api/block/image/trash/{}/{}/?image_name={}&force={}'.format(
+            'rbd', image_id, image_name, force))
 
     @classmethod
     def get_trash(cls, pool, image_id):
@@ -201,6 +202,11 @@ class RbdTest(DashboardTestCase):
             'timestamp': JLeaf(str, none=True),
             'disk_usage': JLeaf(int, none=True),
             'total_disk_usage': JLeaf(int, none=True),
+            'configuration': JList(JObj(sub_elems={
+                'name': JLeaf(str),
+                'source': JLeaf(int),
+                'value': JLeaf(str),
+            })),
         })
         self.assertSchema(img, schema)
 
@@ -288,6 +294,33 @@ class RbdTest(DashboardTestCase):
 
         self.remove_image('rbd', rbd_name)
 
+    def test_create_with_configuration(self):
+        pool = 'rbd'
+        image_name = 'image_with_config'
+        size = 10240
+        configuration = {
+            'rbd_qos_bps_limit': 10240,
+            'rbd_qos_bps_burst': 10240 * 2,
+        }
+        expected = [{
+            'name': 'rbd_qos_bps_limit',
+            'source': 2,
+            'value': str(10240),
+        }, {
+            'name': 'rbd_qos_bps_burst',
+            'source': 2,
+            'value': str(10240 * 2),
+        }]
+
+        self.create_image(pool, image_name, size, configuration=configuration)
+        self.assertStatus(201)
+        img = self._get('/api/block/image/rbd/{}'.format(image_name))
+        self.assertStatus(200)
+        for conf in expected:
+            self.assertIn(conf, img['configuration'])
+
+        self.remove_image(pool, image_name)
+
     def test_create_rbd_in_data_pool(self):
         if not self.bluestore_support:
             self.skipTest('requires bluestore cluster')
@@ -320,7 +353,7 @@ class RbdTest(DashboardTestCase):
         res = self.create_image('rbd', 'test_rbd_twice', 10240)
         self.assertStatus(400)
         self.assertEqual(res, {"code": '17', 'status': 400, "component": "rbd",
-                               "detail": "[errno 17] error creating image",
+                               "detail": "[errno 17] RBD image already exists (error creating image)",
                                'task': {'name': 'rbd/create',
                                         'metadata': {'pool_name': 'rbd',
                                                      'image_name': 'test_rbd_twice'}}})
@@ -379,7 +412,7 @@ class RbdTest(DashboardTestCase):
         res = self.remove_image('rbd', 'i_dont_exist')
         self.assertStatus(400)
         self.assertEqual(res, {u'code': u'2', "status": 400, "component": "rbd",
-                               "detail": "[errno 2] error removing image",
+                               "detail": "[errno 2] RBD image not found (error removing image)",
                                'task': {'name': 'rbd/delete',
                                         'metadata': {'pool_name': 'rbd',
                                                      'image_name': 'i_dont_exist'}}})
@@ -446,6 +479,7 @@ class RbdTest(DashboardTestCase):
         self._validate_image(img, features_name=["layering"])
         self.edit_image('rbd', 'edit_img',
                         features=["fast-diff", "object-map", "exclusive-lock"])
+        self.assertStatus(200)
         img = self._get('/api/block/image/rbd/edit_img')
         self.assertStatus(200)
         self._validate_image(img, features_name=['exclusive-lock',
@@ -453,11 +487,63 @@ class RbdTest(DashboardTestCase):
                                                  'object-map'])
         self.edit_image('rbd', 'edit_img',
                         features=["journaling", "exclusive-lock"])
+        self.assertStatus(200)
         img = self._get('/api/block/image/rbd/edit_img')
         self.assertStatus(200)
         self._validate_image(img, features_name=['exclusive-lock',
                                                  'journaling', 'layering'])
         self.remove_image('rbd', 'edit_img')
+        self.assertStatus(204)
+
+    def test_image_change_config(self):
+        pool = 'rbd'
+        image = 'image_with_config'
+        initial_conf = {
+            'rbd_qos_bps_limit': 10240,
+            'rbd_qos_write_iops_limit': None
+        }
+        initial_expect = [{
+            'name': 'rbd_qos_bps_limit',
+            'source': 2,
+            'value': '10240',
+        }, {
+            'name': 'rbd_qos_write_iops_limit',
+            'source': 0,
+            'value': '0',
+        }]
+        new_conf = {
+            'rbd_qos_bps_limit': 0,
+            'rbd_qos_bps_burst': 20480,
+            'rbd_qos_write_iops_limit': None
+        }
+        new_expect = [{
+            'name': 'rbd_qos_bps_limit',
+            'source': 2,
+            'value': '0',
+        }, {
+            'name': 'rbd_qos_bps_burst',
+            'source': 2,
+            'value': '20480',
+        }, {
+            'name': 'rbd_qos_write_iops_limit',
+            'source': 0,
+            'value': '0',
+        }]
+
+        self.create_image(pool, image, 2**30, configuration=initial_conf)
+        self.assertStatus(201)
+        img = self._get('/api/block/image/{}/{}'.format(pool, image))
+        self.assertStatus(200)
+        for conf in initial_expect:
+            self.assertIn(conf, img['configuration'])
+
+        self.edit_image(pool, image, configuration=new_conf)
+        img = self._get('/api/block/image/{}/{}'.format(pool, image))
+        self.assertStatus(200)
+        for conf in new_expect:
+            self.assertIn(conf, img['configuration'])
+
+        self.remove_image(pool, image)
         self.assertStatus(204)
 
     def test_update_snapshot(self):
@@ -604,9 +690,8 @@ class RbdTest(DashboardTestCase):
 
     def test_default_features(self):
         default_features = self._get('/api/block/image/default_features')
-        self.assertEqual(default_features, ['deep-flatten', 'exclusive-lock',
-                                             'fast-diff', 'layering',
-                                             'object-map'])
+        self.assertEqual(default_features, [
+            'deep-flatten', 'exclusive-lock', 'fast-diff', 'layering', 'object-map'])
 
     def test_image_with_special_name(self):
         rbd_name = 'test/rbd'
@@ -654,7 +739,8 @@ class RbdTest(DashboardTestCase):
     def test_restore_trash(self):
         id = self.create_image_in_trash('rbd', 'test_rbd')
 
-        self._task_post('/api/block/image/trash/{}/{}/restore'.format('rbd', id), {'new_image_name': 'test_rbd'})
+        self._task_post('/api/block/image/trash/{}/{}/restore'.format('rbd', id),
+                        {'new_image_name': 'test_rbd'})
 
         self._get('/api/block/image/rbd/test_rbd')
         self.assertStatus(200)
@@ -676,6 +762,8 @@ class RbdTest(DashboardTestCase):
         id = self.create_image_in_trash('rbd', 'test_rbd', 9999)
         self.remove_trash('rbd', id, 'test_rbd', False)
         self.assertStatus(400)
+
+        time.sleep(1)
 
         image = self.get_trash('rbd', id)
         self.assertIsNotNone(image)

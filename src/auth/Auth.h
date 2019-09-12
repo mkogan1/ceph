@@ -18,13 +18,24 @@
 #include "Crypto.h"
 #include "common/entity_name.h"
 
-class Cond;
+// The _MAX values are a bit wonky here because we are overloading the first
+// byte of the auth payload to identify both the type of authentication to be
+// used *and* the encoding version for the authenticator.  So, we define a
+// range.
+enum {
+  AUTH_MODE_NONE = 0,
+  AUTH_MODE_AUTHORIZER = 1,
+  AUTH_MODE_AUTHORIZER_MAX = 9,
+  AUTH_MODE_MON = 10,
+  AUTH_MODE_MON_MAX = 19,
+};
+
 
 struct EntityAuth {
   CryptoKey key;
-  map<string, bufferlist> caps;
+  std::map<std::string, ceph::buffer::list> caps;
 
-  void encode(bufferlist& bl) const {
+  void encode(ceph::buffer::list& bl) const {
     __u8 struct_v = 2;
     using ceph::encode;
     encode(struct_v, bl);
@@ -32,7 +43,7 @@ struct EntityAuth {
     encode(key, bl);
     encode(caps, bl);
   }
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
     using ceph::decode;
     __u8 struct_v;
     decode(struct_v, bl);
@@ -46,17 +57,17 @@ struct EntityAuth {
 };
 WRITE_CLASS_ENCODER(EntityAuth)
 
-static inline ostream& operator<<(ostream& out, const EntityAuth& a) {
+inline std::ostream& operator<<(std::ostream& out, const EntityAuth& a) {
   return out << "auth(key=" << a.key << ")";
 }
 
 struct AuthCapsInfo {
   bool allow_all;
-  bufferlist caps;
+  ceph::buffer::list caps;
 
   AuthCapsInfo() : allow_all(false) {}
 
-  void encode(bufferlist& bl) const {
+  void encode(ceph::buffer::list& bl) const {
     using ceph::encode;
     __u8 struct_v = 1;
     encode(struct_v, bl);
@@ -64,7 +75,7 @@ struct AuthCapsInfo {
     encode(a, bl);
     encode(caps, bl);
   }
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
     using ceph::decode;
     __u8 struct_v;
     decode(struct_v, bl);
@@ -98,7 +109,7 @@ struct AuthTicket {
     renew_after += ttl / 2.0;
   }
 
-  void encode(bufferlist& bl) const {
+  void encode(ceph::buffer::list& bl) const {
     using ceph::encode;
     __u8 struct_v = 2;
     encode(struct_v, bl);
@@ -110,7 +121,7 @@ struct AuthTicket {
     encode(caps, bl);
     encode(flags, bl);
   }
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
     using ceph::decode;
     __u8 struct_v;
     decode(struct_v, bl);
@@ -134,19 +145,54 @@ WRITE_CLASS_ENCODER(AuthTicket)
  */
 struct AuthAuthorizer {
   __u32 protocol;
-  bufferlist bl;
+  ceph::buffer::list bl;
   CryptoKey session_key;
 
   explicit AuthAuthorizer(__u32 p) : protocol(p) {}
   virtual ~AuthAuthorizer() {}
-  virtual bool verify_reply(bufferlist::const_iterator& reply) = 0;
-  virtual bool add_challenge(CephContext *cct, bufferlist& challenge) = 0;
+  virtual bool verify_reply(ceph::buffer::list::const_iterator& reply,
+			    std::string *connection_secret) = 0;
+  virtual bool add_challenge(CephContext *cct,
+			     const ceph::buffer::list& challenge) = 0;
 };
 
 struct AuthAuthorizerChallenge {
   virtual ~AuthAuthorizerChallenge() {}
 };
 
+struct AuthConnectionMeta {
+  uint32_t auth_method = CEPH_AUTH_UNKNOWN;  //< CEPH_AUTH_*
+
+  /// client: initial empty, but populated if server said bad method
+  std::vector<uint32_t> allowed_methods;
+
+  int auth_mode = AUTH_MODE_NONE;  ///< AUTH_MODE_*
+
+  int con_mode = 0;  ///< negotiated mode
+
+  bool is_mode_crc() const {
+    return con_mode == CEPH_CON_MODE_CRC;
+  }
+  bool is_mode_secure() const {
+    return con_mode == CEPH_CON_MODE_SECURE;
+  }
+
+  CryptoKey session_key;           ///< per-ticket key
+
+  size_t get_connection_secret_length() const {
+    switch (con_mode) {
+    case CEPH_CON_MODE_CRC:
+      return 0;
+    case CEPH_CON_MODE_SECURE:
+      return 16 * 4;
+    }
+    return 0;
+  }
+  std::string connection_secret;   ///< per-connection key
+
+  std::unique_ptr<AuthAuthorizer> authorizer;
+  std::unique_ptr<AuthAuthorizerChallenge> authorizer_challenge;
+};
 
 /*
  * Key management
@@ -157,14 +203,14 @@ struct ExpiringCryptoKey {
   CryptoKey key;
   utime_t expiration;
 
-  void encode(bufferlist& bl) const {
+  void encode(ceph::buffer::list& bl) const {
     using ceph::encode;
     __u8 struct_v = 1;
     encode(struct_v, bl);
     encode(key, bl);
     encode(expiration, bl);
   }
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
     using ceph::decode;
     __u8 struct_v;
     decode(struct_v, bl);
@@ -174,25 +220,25 @@ struct ExpiringCryptoKey {
 };
 WRITE_CLASS_ENCODER(ExpiringCryptoKey)
 
-static inline ostream& operator<<(ostream& out, const ExpiringCryptoKey& c)
+inline std::ostream& operator<<(std::ostream& out, const ExpiringCryptoKey& c)
 {
   return out << c.key << " expires " << c.expiration;
 }
 
 struct RotatingSecrets {
-  map<uint64_t, ExpiringCryptoKey> secrets;
+  std::map<uint64_t, ExpiringCryptoKey> secrets;
   version_t max_ver;
-  
+
   RotatingSecrets() : max_ver(0) {}
-  
-  void encode(bufferlist& bl) const {
+
+  void encode(ceph::buffer::list& bl) const {
     using ceph::encode;
     __u8 struct_v = 1;
     encode(struct_v, bl);
     encode(secrets, bl);
     encode(max_ver, bl);
   }
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
     using ceph::decode;
     __u8 struct_v;
     decode(struct_v, bl);
@@ -210,7 +256,7 @@ struct RotatingSecrets {
   bool need_new_secrets() const {
     return secrets.size() < KEY_ROTATE_NUM;
   }
-  bool need_new_secrets(utime_t now) const {
+  bool need_new_secrets(const utime_t& now) const {
     return secrets.size() < KEY_ROTATE_NUM || current().expiration <= now;
   }
 
@@ -218,12 +264,12 @@ struct RotatingSecrets {
     return secrets.begin()->second;
   }
   ExpiringCryptoKey& current() {
-    map<uint64_t, ExpiringCryptoKey>::iterator p = secrets.begin();
+    auto p = secrets.begin();
     ++p;
     return p->second;
   }
   const ExpiringCryptoKey& current() const {
-    map<uint64_t, ExpiringCryptoKey>::const_iterator p = secrets.begin();
+    auto p = secrets.begin();
     ++p;
     return p->second;
   }

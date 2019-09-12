@@ -23,8 +23,10 @@ class Scope(object):
     MANAGER = "manager"
     LOG = "log"
     GRAFANA = "grafana"
+    PROMETHEUS = "prometheus"
     USER = "user"
     DASHBOARD_SETTINGS = "dashboard-settings"
+    NFS_GANESHA = "nfs-ganesha"
 
     @classmethod
     def all_scopes(cls):

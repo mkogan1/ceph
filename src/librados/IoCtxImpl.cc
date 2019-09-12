@@ -16,6 +16,7 @@
 
 #include "IoCtxImpl.h"
 
+#include "librados/librados_c.h"
 #include "librados/AioCompletionImpl.h"
 #include "librados/PoolAsyncCompletionImpl.h"
 #include "librados/RadosClient.h"
@@ -106,10 +107,10 @@ struct C_aio_linger_Complete : public Context {
       c->io->client->finisher.queue(new C_aio_linger_cancel(c->io->objecter,
                                                             linger_op));
 
-    c->lock.Lock();
+    c->lock.lock();
     c->rval = r;
     c->complete = true;
-    c->cond.Signal();
+    c->cond.notify_all();
 
     if (c->callback_complete ||
 	c->callback_safe) {
@@ -120,26 +121,25 @@ struct C_aio_linger_Complete : public Context {
 };
 
 struct C_aio_notify_Complete : public C_aio_linger_Complete {
-  Mutex lock;
+  ceph::mutex lock = ceph::make_mutex("C_aio_notify_Complete::lock");
   bool acked = false;
   bool finished = false;
   int ret_val = 0;
 
   C_aio_notify_Complete(AioCompletionImpl *_c, Objecter::LingerOp *_linger_op)
-    : C_aio_linger_Complete(_c, _linger_op, false),
-      lock("C_aio_notify_Complete::lock") {
+    : C_aio_linger_Complete(_c, _linger_op, false) {
   }
 
   void handle_ack(int r) {
     // invoked by C_aio_notify_Ack
-    lock.Lock();
+    lock.lock();
     acked = true;
     complete_unlock(r);
   }
 
   void complete(int r) override {
     // invoked by C_notify_Finish
-    lock.Lock();
+    lock.lock();
     finished = true;
     complete_unlock(r);
   }
@@ -150,11 +150,11 @@ struct C_aio_notify_Complete : public C_aio_linger_Complete {
     }
 
     if (acked && finished) {
-      lock.Unlock();
+      lock.unlock();
       cancel = true;
       C_aio_linger_Complete::complete(ret_val);
     } else {
-      lock.Unlock();
+      lock.unlock();
     }
   }
 };
@@ -189,10 +189,10 @@ struct C_aio_selfmanaged_snap_op_Complete : public Context {
   }
 
   void finish(int r) override {
-    c->lock.Lock();
+    c->lock.lock();
     c->rval = r;
     c->complete = true;
-    c->cond.Signal();
+    c->cond.notify_all();
 
     if (c->callback_complete || c->callback_safe) {
       client->finisher.queue(new librados::C_AioComplete(c));
@@ -223,19 +223,13 @@ struct C_aio_selfmanaged_snap_create_Complete : public C_aio_selfmanaged_snap_op
 } // anonymous namespace
 } // namespace librados
 
-librados::IoCtxImpl::IoCtxImpl() :
-  ref_cnt(0), client(NULL), poolid(0), assert_ver(0), last_objver(0),
-  notify_timeout(30), aio_write_list_lock("librados::IoCtxImpl::aio_write_list_lock"),
-  aio_write_seq(0), objecter(NULL)
-{
-}
+librados::IoCtxImpl::IoCtxImpl() = default;
 
 librados::IoCtxImpl::IoCtxImpl(RadosClient *c, Objecter *objecter,
 			       int64_t poolid, snapid_t s)
-  : ref_cnt(0), client(c), poolid(poolid), snap_seq(s),
-    assert_ver(0), last_objver(0),
+  : client(c), poolid(poolid), snap_seq(s),
     notify_timeout(c->cct->_conf->client_notify_timeout),
-    oloc(poolid), aio_write_list_lock("librados::IoCtxImpl::aio_write_list_lock"),
+    oloc(poolid),
     aio_write_seq(0), objecter(objecter)
 {
 }
@@ -284,19 +278,18 @@ int librados::IoCtxImpl::get_object_pg_hash_position(
 void librados::IoCtxImpl::queue_aio_write(AioCompletionImpl *c)
 {
   get();
-  aio_write_list_lock.Lock();
+  std::scoped_lock l{aio_write_list_lock};
   ceph_assert(c->io == this);
   c->aio_write_seq = ++aio_write_seq;
   ldout(client->cct, 20) << "queue_aio_write " << this << " completion " << c
 			 << " write_seq " << aio_write_seq << dendl;
   aio_write_list.push_back(&c->aio_write_list_item);
-  aio_write_list_lock.Unlock();
 }
 
 void librados::IoCtxImpl::complete_aio_write(AioCompletionImpl *c)
 {
   ldout(client->cct, 20) << "complete_aio_write " << c << dendl;
-  aio_write_list_lock.Lock();
+  aio_write_list_lock.lock();
   ceph_assert(c->io == this);
   c->aio_write_list_item.remove_myself();
 
@@ -318,8 +311,8 @@ void librados::IoCtxImpl::complete_aio_write(AioCompletionImpl *c)
     aio_write_waiters.erase(waiters++);
   }
 
-  aio_write_cond.Signal();
-  aio_write_list_lock.Unlock();
+  aio_write_cond.notify_all();
+  aio_write_list_lock.unlock();
   put();
 }
 
@@ -344,12 +337,11 @@ void librados::IoCtxImpl::flush_aio_writes_async(AioCompletionImpl *c)
 void librados::IoCtxImpl::flush_aio_writes()
 {
   ldout(client->cct, 20) << "flush_aio_writes" << dendl;
-  aio_write_list_lock.Lock();
-  ceph_tid_t seq = aio_write_seq;
-  while (!aio_write_list.empty() &&
-	 aio_write_list.front()->aio_write_seq <= seq)
-    aio_write_cond.Wait(aio_write_list_lock);
-  aio_write_list_lock.Unlock();
+  std::unique_lock l{aio_write_list_lock};
+  aio_write_cond.wait(l, [seq=aio_write_seq, this] {
+    return (aio_write_list.empty() ||
+	    aio_write_list.front()->aio_write_seq > seq);
+  });
 }
 
 string librados::IoCtxImpl::get_cached_pool_name()
@@ -366,19 +358,17 @@ int librados::IoCtxImpl::snap_create(const char *snapName)
   int reply;
   string sName(snapName);
 
-  Mutex mylock ("IoCtxImpl::snap_create::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::snap_create::mylock");
+  ceph::condition_variable cond;
   bool done;
-  Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
+  Context *onfinish = new C_SafeCond(mylock, cond, &done, &reply);
   reply = objecter->create_pool_snap(poolid, sName, onfinish);
 
   if (reply < 0) {
     delete onfinish;
   } else {
-    mylock.Lock();
-    while (!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
+    std::unique_lock l{mylock};
+    cond.wait(l, [&done] { return done; });
   }
   return reply;
 }
@@ -387,20 +377,20 @@ int librados::IoCtxImpl::selfmanaged_snap_create(uint64_t *psnapid)
 {
   int reply;
 
-  Mutex mylock("IoCtxImpl::selfmanaged_snap_create::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::selfmanaged_snap_create::mylock");
+  ceph::condition_variable cond;
   bool done;
-  Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
+  Context *onfinish = new C_SafeCond(mylock, cond, &done, &reply);
   snapid_t snapid;
   reply = objecter->allocate_selfmanaged_snap(poolid, &snapid, onfinish);
 
   if (reply < 0) {
     delete onfinish;
   } else {
-    mylock.Lock();
-    while (!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
+    {
+      std::unique_lock l{mylock};
+      cond.wait(l, [&done] { return done; });
+    }
     if (reply == 0)
       *psnapid = snapid;
   }
@@ -424,19 +414,17 @@ int librados::IoCtxImpl::snap_remove(const char *snapName)
   int reply;
   string sName(snapName);
 
-  Mutex mylock ("IoCtxImpl::snap_remove::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::snap_remove::mylock");
+  ceph::condition_variable cond;
   bool done;
-  Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
+  Context *onfinish = new C_SafeCond(mylock, cond, &done, &reply);
   reply = objecter->delete_pool_snap(poolid, sName, onfinish);
 
   if (reply < 0) {
     delete onfinish; 
   } else {
-    mylock.Lock();
-    while(!done)
-      cond.Wait(mylock);
-    mylock.Unlock();
+    unique_lock l{mylock};
+    cond.wait(l, [&done] { return done; });
   }
   return reply;
 }
@@ -447,10 +435,10 @@ int librados::IoCtxImpl::selfmanaged_snap_rollback_object(const object_t& oid,
 {
   int reply;
 
-  Mutex mylock("IoCtxImpl::snap_rollback::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::snap_rollback::mylock");
+  ceph::condition_variable cond;
   bool done;
-  Context *onack = new C_SafeCond(&mylock, &cond, &done, &reply);
+  Context *onack = new C_SafeCond(mylock, cond, &done, &reply);
 
   ::ObjectOperation op;
   prepare_assert_ops(&op);
@@ -459,9 +447,8 @@ int librados::IoCtxImpl::selfmanaged_snap_rollback_object(const object_t& oid,
 		   op, snapc, ceph::real_clock::now(), 0,
 		   onack, NULL);
 
-  mylock.Lock();
-  while (!done) cond.Wait(mylock);
-  mylock.Unlock();
+  std::unique_lock l{mylock};
+  cond.wait(l, [&done] { return done; });
   return reply;
 }
 
@@ -481,15 +468,14 @@ int librados::IoCtxImpl::selfmanaged_snap_remove(uint64_t snapid)
 {
   int reply;
 
-  Mutex mylock("IoCtxImpl::selfmanaged_snap_remove::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::selfmanaged_snap_remove::mylock");
+  ceph::condition_variable cond;
   bool done;
   objecter->delete_selfmanaged_snap(poolid, snapid_t(snapid),
-				    new C_SafeCond(&mylock, &cond, &done, &reply));
+				    new C_SafeCond(mylock, cond, &done, &reply));
 
-  mylock.Lock();
-  while (!done) cond.Wait(mylock);
-  mylock.Unlock();
+  std::unique_lock l{mylock};
+  cond.wait(l, [&done] { return done; });
   return (int)reply;
 }
 
@@ -537,10 +523,10 @@ int librados::IoCtxImpl::snap_get_stamp(uint64_t snapid, time_t *t)
 
 int librados::IoCtxImpl::nlist(Objecter::NListContext *context, int max_entries)
 {
-  Cond cond;
   bool done;
   int r = 0;
-  Mutex mylock("IoCtxImpl::nlist::mylock");
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::nlist::mylock");
+  ceph::condition_variable cond;
 
   if (context->at_end())
     return 0;
@@ -548,13 +534,10 @@ int librados::IoCtxImpl::nlist(Objecter::NListContext *context, int max_entries)
   context->max_entries = max_entries;
   context->nspace = oloc.nspace;
 
-  objecter->list_nobjects(context, new C_SafeCond(&mylock, &cond, &done, &r));
+  objecter->list_nobjects(context, new C_SafeCond(mylock, cond, &done, &r));
 
-  mylock.Lock();
-  while(!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
-
+  std::unique_lock l{mylock};
+  cond.wait(l, [&done] { return done; });
   return r;
 }
 
@@ -672,13 +655,13 @@ int librados::IoCtxImpl::operate(const object_t& oid, ::ObjectOperation *o,
   if (!o->size())
     return 0;
 
-  Mutex mylock("IoCtxImpl::operate::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::operate::mylock");
+  ceph::condition_variable cond;
   bool done;
   int r;
   version_t ver;
 
-  Context *oncommit = new C_SafeCond(&mylock, &cond, &done, &r);
+  Context *oncommit = new C_SafeCond(mylock, cond, &done, &r);
 
   int op = o->ops[0].op.op;
   ldout(client->cct, 10) << ceph_osd_op_name(op) << " oid=" << oid
@@ -688,10 +671,10 @@ int librados::IoCtxImpl::operate(const object_t& oid, ::ObjectOperation *o,
 							  oncommit, &ver);
   objecter->op_submit(objecter_op);
 
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
+  {
+    std::unique_lock l{mylock};
+    cond.wait(l, [&done] { return done;});
+  }
   ldout(client->cct, 10) << "Objecter returned from "
 	<< ceph_osd_op_name(op) << " r=" << r << dendl;
 
@@ -708,13 +691,13 @@ int librados::IoCtxImpl::operate_read(const object_t& oid,
   if (!o->size())
     return 0;
 
-  Mutex mylock("IoCtxImpl::operate_read::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::operate_read::mylock");
+  ceph::condition_variable cond;
   bool done;
   int r;
   version_t ver;
 
-  Context *onack = new C_SafeCond(&mylock, &cond, &done, &r);
+  Context *onack = new C_SafeCond(mylock, cond, &done, &r);
 
   int op = o->ops[0].op.op;
   ldout(client->cct, 10) << ceph_osd_op_name(op) << " oid=" << oid << " nspace=" << oloc.nspace << dendl;
@@ -723,10 +706,10 @@ int librados::IoCtxImpl::operate_read(const object_t& oid,
 	                                      onack, &ver);
   objecter->op_submit(objecter_op);
 
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
+  {
+    std::unique_lock l{mylock};
+    cond.wait(l, [&done] { return done; });
+  }
   ldout(client->cct, 10) << "Objecter returned from "
 	<< ceph_osd_op_name(op) << " r=" << r << dendl;
 
@@ -1299,7 +1282,7 @@ int librados::IoCtxImpl::get_inconsistent_objects(const pg_t& pg,
   c->io = this;
 
   ::ObjectOperation op;
-  op.scrub_ls(start_after, max_to_get, objects, interval, nullptr);
+  op.scrub_ls(start_after, max_to_get, objects, interval, &c->rval);
   object_locator_t oloc{poolid, pg.ps()};
   Objecter::Op *o = objecter->prepare_pg_read_op(
     oloc.hash, oloc, op, nullptr, CEPH_OSD_FLAG_PGOP, oncomplete,
@@ -1320,7 +1303,7 @@ int librados::IoCtxImpl::get_inconsistent_snapsets(const pg_t& pg,
   c->io = this;
 
   ::ObjectOperation op;
-  op.scrub_ls(start_after, max_to_get, snapsets, interval, nullptr);
+  op.scrub_ls(start_after, max_to_get, snapsets, interval, &c->rval);
   object_locator_t oloc{poolid, pg.ps()};
   Objecter::Op *o = objecter->prepare_pg_read_op(
     oloc.hash, oloc, op, nullptr, CEPH_OSD_FLAG_PGOP, oncomplete,
@@ -1334,30 +1317,6 @@ int librados::IoCtxImpl::tmap_update(const object_t& oid, bufferlist& cmdbl)
   ::ObjectOperation wr;
   prepare_assert_ops(&wr);
   wr.tmap_update(cmdbl);
-  return operate(oid, &wr, NULL);
-}
-
-int librados::IoCtxImpl::tmap_put(const object_t& oid, bufferlist& bl)
-{
-  ::ObjectOperation wr;
-  prepare_assert_ops(&wr);
-  wr.tmap_put(bl);
-  return operate(oid, &wr, NULL);
-}
-
-int librados::IoCtxImpl::tmap_get(const object_t& oid, bufferlist& bl)
-{
-  ::ObjectOperation rd;
-  prepare_assert_ops(&rd);
-  rd.tmap_get(&bl, NULL);
-  return operate_read(oid, &rd, NULL);
-}
-
-int librados::IoCtxImpl::tmap_to_omap(const object_t& oid, bool nullok)
-{
-  ::ObjectOperation wr;
-  prepare_assert_ops(&wr);
-  wr.tmap_to_omap(nullok);
   return operate(oid, &wr, NULL);
 }
 
@@ -1459,20 +1418,20 @@ int librados::IoCtxImpl::mapext(const object_t& oid,
 {
   bufferlist bl;
 
-  Mutex mylock("IoCtxImpl::read::mylock");
-  Cond cond;
+  ceph::mutex mylock = ceph::make_mutex("IoCtxImpl::read::mylock");
+  ceph::condition_variable cond;
   bool done;
   int r;
-  Context *onack = new C_SafeCond(&mylock, &cond, &done, &r);
+  Context *onack = new C_SafeCond(mylock, cond, &done, &r);
 
   objecter->mapext(oid, oloc,
 		   off, len, snap_seq, &bl, 0,
 		   onack);
 
-  mylock.Lock();
-  while (!done)
-    cond.Wait(mylock);
-  mylock.Unlock();
+  {
+    unique_lock l{mylock};
+    cond.wait(l, [&done] { return done;});
+  }
   ldout(client->cct, 10) << "Objecter returned from read r=" << r << dendl;
 
   if (r < 0)
@@ -1947,10 +1906,10 @@ librados::IoCtxImpl::C_aio_stat_Ack::C_aio_stat_Ack(AioCompletionImpl *_c,
 
 void librados::IoCtxImpl::C_aio_stat_Ack::finish(int r)
 {
-  c->lock.Lock();
+  c->lock.lock();
   c->rval = r;
   c->complete = true;
-  c->cond.Signal();
+  c->cond.notify_all();
 
   if (r >= 0 && pmtime) {
     *pmtime = real_clock::to_time_t(mtime);
@@ -1975,10 +1934,10 @@ librados::IoCtxImpl::C_aio_stat2_Ack::C_aio_stat2_Ack(AioCompletionImpl *_c,
 
 void librados::IoCtxImpl::C_aio_stat2_Ack::finish(int r)
 {
-  c->lock.Lock();
+  c->lock.lock();
   c->rval = r;
   c->complete = true;
-  c->cond.Signal();
+  c->cond.notify_all();
 
   if (r >= 0 && pts) {
     *pts = real_clock::to_timespec(mtime);
@@ -2001,15 +1960,20 @@ librados::IoCtxImpl::C_aio_Complete::C_aio_Complete(AioCompletionImpl *_c)
 
 void librados::IoCtxImpl::C_aio_Complete::finish(int r)
 {
-  c->lock.Lock();
-  c->rval = r;
+  c->lock.lock();
+  // Leave an existing rval unless r != 0
+  if (r)
+    c->rval = r; // This clears the error set in C_ObjectOperation_scrub_ls::finish()
   c->complete = true;
-  c->cond.Signal();
+  c->cond.notify_all();
 
   if (r == 0 && c->blp && c->blp->length() > 0) {
     if (c->out_buf && !c->blp->is_contiguous()) {
       c->rval = -ERANGE;
     } else {
+      if (c->out_buf && !c->blp->is_provided_buffer(c->out_buf))
+        c->blp->copy(0, c->blp->length(), c->out_buf);
+
       c->rval = c->blp->length();
     }
   }
@@ -2105,7 +2069,7 @@ void librados::IoCtxImpl::application_enable_async(const std::string& app_name,
       << "\"pool\": \"" << get_cached_pool_name() << "\","
       << "\"app\": \"" << app_name << "\"";
   if (force) {
-    cmd << ",\"force\":\"--yes-i-really-mean-it\"";
+    cmd << ",\"yes_i_really_mean_it\": true";
   }
   cmd << "}";
 

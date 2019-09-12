@@ -36,7 +36,40 @@ enum {
   l_bluefs_bytes_written_wal,
   l_bluefs_bytes_written_sst,
   l_bluefs_bytes_written_slow,
+  l_bluefs_max_bytes_wal,
+  l_bluefs_max_bytes_db,
+  l_bluefs_max_bytes_slow,
+  l_bluefs_read_random_count,
+  l_bluefs_read_random_bytes,
+  l_bluefs_read_random_disk_count,
+  l_bluefs_read_random_disk_bytes,
+  l_bluefs_read_random_buffer_count,
+  l_bluefs_read_random_buffer_bytes,
+  l_bluefs_read_count,
+  l_bluefs_read_bytes,
+  l_bluefs_read_prefetch_count,
+  l_bluefs_read_prefetch_bytes,
+
   l_bluefs_last,
+};
+
+class BlueFSDeviceExpander {
+protected:
+  ~BlueFSDeviceExpander() {}
+public:
+  virtual uint64_t get_recommended_expansion_delta(uint64_t bluefs_free,
+    uint64_t bluefs_total) = 0;
+  virtual int allocate_freespace(
+    uint64_t min_size,
+    uint64_t size,
+    PExtentVector& extents) = 0;
+  /** Reports amount of space that can be transferred to BlueFS.
+   * This gives either current state, when alloc_size is currently used
+   * BlueFS's size, or simulation when alloc_size is different.
+   * @params
+   * alloc_size - allocation unit size to check
+   */
+  virtual size_t available_freespace(uint64_t alloc_size) = 0;
 };
 
 class BlueFS {
@@ -126,6 +159,7 @@ public:
     bufferlist tail_block;  ///< existing partial block at end of file, if any
     bufferlist::page_aligned_appender buffer_appender;  //< for const char* only
     int writer_type = 0;    ///< WRITER_*
+    int write_hint = WRITE_LIFE_NOT_SET;
 
     ceph::mutex lock = ceph::make_mutex("BlueFS::FileWriter::lock");
     std::array<IOContext*,MAX_BDEV> iocv; ///< for each bdev
@@ -139,6 +173,9 @@ public:
       ++file->num_writers;
       iocv.fill(nullptr);
       dirty_devs.fill(false);
+      if (f->fnode.ino == 1) {
+	write_hint = WRITE_LIFE_MEDIUM;
+      }
     }
     // NOTE: caller must call BlueFS::close_writer()
     ~FileWriter() {
@@ -201,6 +238,11 @@ public:
     bool random;
     bool ignore_eof;        ///< used when reading our log file
 
+    ceph::shared_mutex lock {
+     ceph::make_shared_mutex(std::string(), false, false, false)
+    };
+
+
     FileReader(FileRef f, uint64_t mpf, bool rand, bool ie)
       : file(f),
 	buf(mpf),
@@ -224,6 +266,13 @@ private:
   ceph::mutex lock = ceph::make_mutex("BlueFS::lock");
 
   PerfCounters *logger = nullptr;
+
+  uint64_t max_bytes[MAX_BDEV] = {0};
+  uint64_t max_bytes_pcounters[MAX_BDEV] = {
+    l_bluefs_max_bytes_wal,
+    l_bluefs_max_bytes_db,
+    l_bluefs_max_bytes_slow,
+  };
 
   // cache
   mempool::bluefs::map<string, DirRef> dir_map;              ///< dirname -> Dir
@@ -257,9 +306,15 @@ private:
   vector<IOContext*> ioc;                     ///< IOContexts for bdevs
   vector<interval_set<uint64_t> > block_all;  ///< extents in bdev we own
   vector<Allocator*> alloc;                   ///< allocators for bdevs
+  vector<uint64_t> alloc_size;                ///< alloc size for each device
   vector<interval_set<uint64_t>> pending_release; ///< extents to release
 
   BlockDevice::aio_callback_t discard_cb[3]; //discard callbacks for each dev
+
+  BlueFSDeviceExpander* slow_dev_expander = nullptr;
+
+  class SocketHook;
+  SocketHook* asok_hook = nullptr;
 
   void _init_logger();
   void _shutdown_logger();
@@ -273,6 +328,9 @@ private:
   FileRef _get_file(uint64_t ino);
   void _drop_link(FileRef f);
 
+  int _get_slow_device_id() { return bdev[BDEV_SLOW] ? BDEV_SLOW : BDEV_DB; }
+  const char* get_device_name(unsigned id);
+  int _expand_slow_device(uint64_t min_size, PExtentVector& extents);
   int _allocate(uint8_t bdev, uint64_t len,
 		bluefs_fnode_t* node);
   int _allocate_without_fallback(uint8_t id, uint64_t len,
@@ -329,7 +387,7 @@ private:
   int _read_random(
     FileReader *h,   ///< [in] read from here
     uint64_t offset, ///< [in] offset
-    size_t len,      ///< [in] this many bytes
+    uint64_t len,    ///< [in] this many bytes
     char *out);      ///< [out] optional: or copy it here
 
   void _invalidate_cache(FileRef f, uint64_t offset, uint64_t length);
@@ -350,13 +408,16 @@ private:
     return 4096;
   }
 
+  void _add_block_extent(unsigned bdev, uint64_t offset, uint64_t len);
+
 public:
   BlueFS(CephContext* cct);
   ~BlueFS();
 
   // the super is always stored on bdev 0
-  int mkfs(uuid_d osd_uuid);
+  int mkfs(uuid_d osd_uuid, const bluefs_layout_t& layout);
   int mount();
+  int maybe_verify_layout(const bluefs_layout_t& layout) const;
   void umount();
   int prepare_new_device(int id);
   
@@ -364,6 +425,9 @@ public:
 
   void collect_metadata(map<string,string> *pm, unsigned skip_bdev_id);
   void get_devices(set<string> *ls);
+  uint64_t get_alloc_size(int id) {
+    return alloc_size[id];
+  }
   int fsck();
 
   int device_migrate_to_new(
@@ -426,12 +490,21 @@ public:
   /// sync any uncommitted state to disk
   void sync_metadata();
 
-  int add_block_device(unsigned bdev, const string& path, bool trim);
+  void set_slow_device_expander(BlueFSDeviceExpander* a) {
+    slow_dev_expander = a;
+  }
+  int add_block_device(unsigned bdev, const string& path, bool trim,
+		       bool shared_with_bluestore=false);
   bool bdev_support_label(unsigned id);
   uint64_t get_block_device_size(unsigned bdev);
 
   /// gift more block space
-  void add_block_extent(unsigned bdev, uint64_t offset, uint64_t len);
+  void add_block_extent(unsigned bdev, uint64_t offset, uint64_t len) {
+    std::unique_lock l(lock);
+    _add_block_extent(bdev, offset, len);
+    int r = _flush_and_sync_log(l);
+    ceph_assert(r == 0);
+  }
 
   /// reclaim block space
   int reclaim_blocks(unsigned bdev, uint64_t want,

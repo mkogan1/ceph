@@ -1,6 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
+#include <algorithm>
 #include "bluefs_types.h"
 #include "common/Formatter.h"
 #include "include/uuid.h"
@@ -29,27 +30,58 @@ ostream& operator<<(ostream& out, const bluefs_extent_t& e)
 	     << std::dec;
 }
 
+// bluefs_layout_t
+
+void bluefs_layout_t::encode(bufferlist& bl) const
+{
+  ENCODE_START(1, 1, bl);
+  encode(shared_bdev, bl);
+  encode(dedicated_db, bl);
+  encode(dedicated_wal, bl);
+  ENCODE_FINISH(bl);
+}
+
+void bluefs_layout_t::decode(bufferlist::const_iterator& p)
+{
+  DECODE_START(1, p);
+  decode(shared_bdev, p);
+  decode(dedicated_db, p);
+  decode(dedicated_wal, p);
+  DECODE_FINISH(p);
+}
+
+void bluefs_layout_t::dump(Formatter *f) const
+{
+  f->dump_stream("shared_bdev") << shared_bdev;
+  f->dump_stream("dedicated_db") << dedicated_db;
+  f->dump_stream("dedicated_wal") << dedicated_wal;
+}
+
 // bluefs_super_t
 
 void bluefs_super_t::encode(bufferlist& bl) const
 {
-  ENCODE_START(1, 1, bl);
+  ENCODE_START(2, 1, bl);
   encode(uuid, bl);
   encode(osd_uuid, bl);
   encode(version, bl);
   encode(block_size, bl);
   encode(log_fnode, bl);
+  encode(memorized_layout, bl);
   ENCODE_FINISH(bl);
 }
 
 void bluefs_super_t::decode(bufferlist::const_iterator& p)
 {
-  DECODE_START(1, p);
+  DECODE_START(2, p);
   decode(uuid, p);
   decode(osd_uuid, p);
   decode(version, p);
   decode(block_size, p);
   decode(log_fnode, p);
+  if (struct_v >= 2) {
+    decode(memorized_layout, p);
+  }
   DECODE_FINISH(p);
 }
 
@@ -86,6 +118,17 @@ mempool::bluefs::vector<bluefs_extent_t>::iterator bluefs_fnode_t::seek(
   uint64_t offset, uint64_t *x_off)
 {
   auto p = extents.begin();
+
+  if (extents_index.size() > 4) {
+    auto it = std::upper_bound(extents_index.begin(), extents_index.end(),
+      offset);
+    assert(it != extents_index.begin());
+    --it;
+    assert(offset >= *it);
+    p += it - extents_index.begin();
+    offset -= *it;
+  }
+
   while (p != extents.end()) {
     if ((int64_t) offset >= p->length) {
       offset -= p->length;

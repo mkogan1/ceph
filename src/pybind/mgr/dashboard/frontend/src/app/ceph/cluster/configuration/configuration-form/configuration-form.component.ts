@@ -1,16 +1,17 @@
 import { Component, OnInit } from '@angular/core';
-import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ValidatorFn } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 
+import { I18n } from '@ngx-translate/i18n-polyfill';
 import * as _ from 'lodash';
 
 import { ConfigurationService } from '../../../../shared/api/configuration.service';
+import { ConfigFormModel } from '../../../../shared/components/config-option/config-option.model';
+import { ConfigOptionTypes } from '../../../../shared/components/config-option/config-option.types';
 import { NotificationType } from '../../../../shared/enum/notification-type.enum';
 import { CdFormGroup } from '../../../../shared/forms/cd-form-group';
-import { CdValidators } from '../../../../shared/forms/cd-validators';
 import { NotificationService } from '../../../../shared/services/notification.service';
 import { ConfigFormCreateRequestModel } from './configuration-form-create-request.model';
-import { ConfigFormModel } from './configuration-form.model';
 
 @Component({
   selector: 'cd-configuration-form',
@@ -32,7 +33,8 @@ export class ConfigurationFormComponent implements OnInit {
     private route: ActivatedRoute,
     private router: Router,
     private configService: ConfigurationService,
-    private notificationService: NotificationService
+    private notificationService: NotificationService,
+    private i18n: I18n
   ) {
     this.createForm();
   }
@@ -53,9 +55,6 @@ export class ConfigurationFormComponent implements OnInit {
     });
 
     this.configForm = new CdFormGroup(formControls);
-    this.configForm._filterValue = (value) => {
-      return value;
-    };
   }
 
   ngOnInit() {
@@ -67,140 +66,25 @@ export class ConfigurationFormComponent implements OnInit {
     });
   }
 
-  getType(type: string): any {
-    const knownTypes = [
-      {
-        name: 'uint64_t',
-        inputType: 'number',
-        humanReadable: 'Positive integer value',
-        defaultMin: 0,
-        patternHelpText: 'The entered value needs to be a positive number.',
-        isNumberType: true,
-        allowsNegative: false
-      },
-      {
-        name: 'int64_t',
-        inputType: 'number',
-        humanReadable: 'Integer value',
-        patternHelpText: 'The entered value needs to be a number.',
-        isNumberType: true,
-        allowsNegative: true
-      },
-      {
-        name: 'size_t',
-        inputType: 'number',
-        humanReadable: 'Positive integer value (size)',
-        defaultMin: 0,
-        patternHelpText: 'The entered value needs to be a positive number.',
-        isNumberType: true,
-        allowsNegative: false
-      },
-      {
-        name: 'secs',
-        inputType: 'number',
-        humanReadable: 'Positive integer value (secs)',
-        defaultMin: 1,
-        patternHelpText: 'The entered value needs to be a positive number.',
-        isNumberType: true,
-        allowsNegative: false
-      },
-      {
-        name: 'double',
-        inputType: 'number',
-        humanReadable: 'Decimal value',
-        patternHelpText: 'The entered value needs to be a number or decimal.',
-        isNumberType: true,
-        allowsNegative: true
-      },
-      { name: 'std::string', inputType: 'text', humanReadable: 'Text', isNumberType: false },
-      {
-        name: 'entity_addr_t',
-        inputType: 'text',
-        humanReadable: 'IPv4 or IPv6 address',
-        patternHelpText: 'The entered value needs to be a valid IP address.',
-        isNumberType: false
-      },
-      {
-        name: 'uuid_d',
-        inputType: 'text',
-        humanReadable: 'UUID',
-        patternHelpText:
-          'The entered value is not a valid UUID, e.g.: 67dcac9f-2c03-4d6c-b7bd-1210b3a259a8',
-        isNumberType: false
-      },
-      { name: 'bool', inputType: 'checkbox', humanReadable: 'Boolean value', isNumberType: false }
-    ];
-
-    let currentType = null;
-
-    knownTypes.forEach((knownType) => {
-      if (knownType.name === type) {
-        currentType = knownType;
-      }
-    });
-
-    if (currentType !== null) {
-      return currentType;
-    }
-
-    throw new Error('Found unknown type "' + type + '" for config option.');
-  }
-
   getValidators(configOption: any): ValidatorFn[] {
-    const typeParams = this.getType(configOption.type);
-    this.patternHelpText = typeParams.patternHelpText;
+    const typeValidators = ConfigOptionTypes.getTypeValidators(configOption);
+    if (typeValidators) {
+      this.patternHelpText = typeValidators.patternHelpText;
 
-    if (typeParams.isNumberType) {
-      const validators = [];
-
-      if (configOption.max && configOption.max !== '') {
-        this.maxValue = configOption.max;
-        validators.push(Validators.max(configOption.max));
+      if ('max' in typeValidators && typeValidators.max !== '') {
+        this.maxValue = typeValidators.max;
       }
 
-      if ('min' in configOption && configOption.min !== '') {
-        this.minValue = configOption.min;
-        validators.push(Validators.min(configOption.min));
-      } else if ('defaultMin' in typeParams) {
-        this.minValue = typeParams.defaultMin;
-        validators.push(Validators.min(typeParams.defaultMin));
+      if ('min' in typeValidators && typeValidators.min !== '') {
+        this.minValue = typeValidators.min;
       }
 
-      if (configOption.type === 'double') {
-        validators.push(CdValidators.decimalNumber());
-      } else {
-        validators.push(CdValidators.number(typeParams.allowsNegative));
-      }
-
-      return validators;
-    } else if (configOption.type === 'entity_addr_t') {
-      return [CdValidators.ip()];
-    } else if (configOption.type === 'uuid_d') {
-      return [CdValidators.uuid()];
+      return typeValidators.validators;
     }
   }
 
   getStep(type: string, value: number): number | undefined {
-    const numberTypes = ['uint64_t', 'int64_t', 'size_t', 'secs'];
-
-    if (numberTypes.includes(type)) {
-      return 1;
-    }
-
-    if (type === 'double') {
-      if (value !== null) {
-        const stringVal = value.toString();
-        if (stringVal.indexOf('.') !== -1) {
-          // Value type double and contains decimal characters
-          const decimal = value.toString().split('.');
-          return Math.pow(10, -decimal[1].length);
-        }
-      }
-
-      return 0.1;
-    }
-
-    return undefined;
+    return ConfigOptionTypes.getTypeStep(type, value);
   }
 
   setResponse(response: ConfigFormModel) {
@@ -240,7 +124,7 @@ export class ConfigurationFormComponent implements OnInit {
         .setValidators(validators);
     });
 
-    const currentType = this.getType(response.type);
+    const currentType = ConfigOptionTypes.getType(response.type);
     this.type = currentType.name;
     this.inputType = currentType.inputType;
     this.humanReadableType = currentType.humanReadable;
@@ -274,8 +158,7 @@ export class ConfigurationFormComponent implements OnInit {
         () => {
           this.notificationService.show(
             NotificationType.success,
-            'Config option ' + request.name + ' has been updated.',
-            'Update config option'
+            this.i18n('Updated config option {{name}}', { name: request.name })
           );
           this.router.navigate(['/configuration']);
         },

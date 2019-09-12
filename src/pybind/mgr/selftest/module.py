@@ -1,5 +1,5 @@
 
-from mgr_module import MgrModule, CommandResult
+from mgr_module import MgrModule, CommandResult, PersistentStoreDict
 import threading
 import random
 import json
@@ -28,10 +28,18 @@ class Module(MgrModule):
 
     # The test code in qa/ relies on these options existing -- they
     # are of course not really used for anything in the module
-    OPTIONS = [
-            {'name': 'testkey'},
-            {'name': 'testlkey'},
-            {'name': 'testnewline'}
+    MODULE_OPTIONS = [
+        {'name': 'testkey'},
+        {'name': 'testlkey'},
+        {'name': 'testnewline'},
+        {'name': 'roption1'},
+        {'name': 'roption2', 'type': 'str', 'default': 'xyz'},
+        {'name': 'rwoption1'},
+        {'name': 'rwoption2', 'type': 'int'},
+        {'name': 'rwoption3', 'type': 'float'},
+        {'name': 'rwoption4', 'type': 'str'},
+        {'name': 'rwoption5', 'type': 'bool'},
+        {'name': 'rwoption6', 'type': 'bool', 'default': True}
     ]
 
     COMMANDS = [
@@ -124,9 +132,9 @@ class Module(MgrModule):
             else:
                 return 0, '', 'No background workload was running'
         elif command['prefix'] == 'mgr self-test config get':
-            return 0, str(self.get_config(command['key'])), ''
+            return 0, str(self.get_module_option(command['key'])), ''
         elif command['prefix'] == 'mgr self-test config get_localized':
-            return 0, str(self.get_localized_config(command['key'])), ''
+            return 0, str(self.get_localized_module_option(command['key'])), ''
         elif command['prefix'] == 'mgr self-test remote':
             self._test_remote_calls()
             return 0, '', 'Successfully called'
@@ -134,7 +142,7 @@ class Module(MgrModule):
             try:
                 r = self.remote(command['module'], "self_test")
             except RuntimeError as e:
-                return -1, '', "Test failed: {0}".format(e.message)
+                return -1, '', "Test failed: {0}".format(e)
             else:
                 return 0, str(r), "Self-test OK"
         elif command['prefix'] == 'mgr self-test health set':
@@ -162,17 +170,18 @@ class Module(MgrModule):
         try:
             checks = json.loads(command["checks"])
         except Exception as e:
-            return -1, "", "Failed to decode JSON input: {}".format(e.message)
+            return -1, "", "Failed to decode JSON input: {}".format(e)
 
         try:
             for check, info in six.iteritems(checks):
                 self._health[check] = {
                     "severity": str(info["severity"]),
                     "summary": str(info["summary"]),
+                    "count": 123,
                     "detail": [str(m) for m in info["detail"]]
                 }
         except Exception as e:
-            return -1, "", "Invalid health check format: {}".format(e.message)
+            return -1, "", "Invalid health check format: {}".format(e)
 
         self.set_health_checks(self._health)
         return 0, "", ""
@@ -190,9 +199,9 @@ class Module(MgrModule):
 
     def _insights_set_now_offset(self, inbuf, command):
         try:
-            hours = long(command["hours"])
+            hours = int(command["hours"])
         except Exception as e:
-            return -1, "", "Timestamp must be numeric: {}".format(e.message)
+            return -1, "", "Timestamp must be numeric: {}".format(e)
 
         self.remote("insights", "testing_set_now_time_offset", hours)
         return 0, "", ""
@@ -206,6 +215,7 @@ class Module(MgrModule):
         self._self_test_store()
         self._self_test_misc()
         self._self_test_perf_counters()
+        self._self_persistent_store_dict()
 
     def _self_test_getters(self):
         self.version
@@ -254,11 +264,83 @@ class Module(MgrModule):
         # This is not a strong test (can't tell if values really
         # persisted), it's just for the python interface bit.
 
-        self.set_config("testkey", "testvalue")
-        assert self.get_config("testkey") == "testvalue"
+        self.set_module_option("testkey", "testvalue")
+        assert self.get_module_option("testkey") == "testvalue"
 
-        self.set_localized_config("testkey", "testvalue")
-        assert self.get_localized_config("testkey") == "testvalue"
+        self.set_localized_module_option("testkey", "foo")
+        assert self.get_localized_module_option("testkey") == "foo"
+
+        # Must return the default value defined in MODULE_OPTIONS.
+        value = self.get_localized_module_option("rwoption6")
+        assert isinstance(value, bool)
+        assert value is True
+
+        # Use default value.
+        assert self.get_module_option("roption1") is None
+        assert self.get_module_option("roption1", "foobar") == "foobar"
+        assert self.get_module_option("roption2") == "xyz"
+        assert self.get_module_option("roption2", "foobar") == "xyz"
+
+        # Option type is not defined => return as string.
+        self.set_module_option("rwoption1", 8080)
+        value = self.get_module_option("rwoption1")
+        assert isinstance(value, str)
+        assert value == "8080"
+
+        # Option type is defined => return as integer.
+        self.set_module_option("rwoption2", 10)
+        value = self.get_module_option("rwoption2")
+        assert isinstance(value, int)
+        assert value == 10
+
+        # Option type is defined => return as float.
+        self.set_module_option("rwoption3", 1.5)
+        value = self.get_module_option("rwoption3")
+        assert isinstance(value, float)
+        assert value == 1.5
+
+        # Option type is defined => return as string.
+        self.set_module_option("rwoption4", "foo")
+        value = self.get_module_option("rwoption4")
+        assert isinstance(value, str)
+        assert value == "foo"
+
+        # Option type is defined => return as bool.
+        self.set_module_option("rwoption5", False)
+        value = self.get_module_option("rwoption5")
+        assert isinstance(value, bool)
+        assert value is False
+
+        # Specified module does not exist => return None.
+        assert self.get_module_option_ex("foo", "bar") is None
+
+        # Specified key does not exist => return None.
+        assert self.get_module_option_ex("dashboard", "bar") is None
+
+        self.set_module_option_ex("telemetry", "contact", "test@test.com")
+        assert self.get_module_option_ex("telemetry", "contact") == "test@test.com"
+
+        # No option default value, so use the specified one.
+        assert self.get_module_option_ex("dashboard", "password") is None
+        assert self.get_module_option_ex("dashboard", "password", "foobar") == "foobar"
+
+        # Option type is not defined => return as string.
+        self.set_module_option_ex("selftest", "rwoption1", 1234)
+        value = self.get_module_option_ex("selftest", "rwoption1")
+        assert isinstance(value, str)
+        assert value == "1234"
+
+        # Option type is defined => return as integer.
+        self.set_module_option_ex("telemetry", "interval", 60)
+        value = self.get_module_option_ex("telemetry", "interval")
+        assert isinstance(value, int)
+        assert value == 60
+
+        # Option type is defined => return as bool.
+        self.set_module_option_ex("telemetry", "leaderboard", True)
+        value = self.get_module_option_ex("telemetry", "leaderboard")
+        assert isinstance(value, bool)
+        assert value is True
 
     def _self_test_store(self):
         existing_keys = set(self.get_store_prefix("test").keys())
@@ -305,6 +387,25 @@ class Module(MgrModule):
         #inc.set_crush_compat_weight_set_weights
 
         self.log.info("Finished self-test procedure.")
+
+    def _self_persistent_store_dict(self):
+        self.test_dict = PersistentStoreDict(self, 'test_dict')
+        for i in "abcde":
+            self.test_dict[i] = {i:1}
+        assert self.test_dict.keys() == set("abcde")
+        assert 'a' in self.test_dict
+        del self.test_dict['a']
+        assert self.test_dict.keys() == set("bcde"), self.test_dict.keys()
+        assert 'a' not in self.test_dict
+        self.test_dict.clear()
+        assert not self.test_dict, dict(self.test_dict.items())
+        self.set_store('test_dict.a', 'invalid json')
+        try:
+            self.test_dict['a']
+            assert False
+        except ValueError:
+            pass
+        assert not self.test_dict, dict(self.test_dict.items())
 
     def _test_remote_calls(self):
         # Test making valid call

@@ -3,6 +3,8 @@
 #ifndef CEPH_OS_BLUESTORE_BLUEFS_TYPES_H
 #define CEPH_OS_BLUESTORE_BLUEFS_TYPES_H
 
+#include <optional>
+
 #include "bluestore_types.h"
 #include "include/utime.h"
 #include "include/encoding.h"
@@ -40,6 +42,11 @@ struct bluefs_fnode_t {
   utime_t mtime;
   uint8_t prefer_bdev;
   mempool::bluefs::vector<bluefs_extent_t> extents;
+
+  // precalculated logical offsets for extents vector entries
+  // allows fast lookup for extent index by the offset value via upper_bound()
+  mempool::bluefs::vector<uint64_t> extents_index;
+
   uint64_t allocated;
 
   bluefs_fnode_t() : ino(0), size(0), prefer_bdev(0), allocated(0) {}
@@ -50,8 +57,11 @@ struct bluefs_fnode_t {
 
   void recalc_allocated() {
     allocated = 0;
-    for (auto& p : extents)
+    extents_index.reserve(extents.size());
+    for (auto& p : extents) {
+      extents_index.emplace_back(allocated);
       allocated += p.length;
+    }
   }
 
   DENC_HELPERS
@@ -61,7 +71,6 @@ struct bluefs_fnode_t {
   void encode(bufferlist::contiguous_appender& p) const {
     DENC_DUMP_PRE(bluefs_fnode_t);
     _denc_friend(*this, p);
-    DENC_DUMP_POST(bluefs_fnode_t);
   }
   void decode(buffer::ptr::const_iterator& p) {
     _denc_friend(*this, p);
@@ -80,25 +89,34 @@ struct bluefs_fnode_t {
   }
 
   void append_extent(const bluefs_extent_t& ext) {
-    extents.push_back(ext);
+    if (!extents.empty() &&
+	extents.back().end() == ext.offset &&
+	(uint64_t)extents.back().length + (uint64_t)ext.length < 0xffffffff) {
+      extents.back().length += ext.length;
+    } else {
+      extents_index.emplace_back(allocated);
+      extents.push_back(ext);
+    }
     allocated += ext.length;
   }
 
   void pop_front_extent() {
     auto it = extents.begin();
     allocated -= it->length;
+    extents_index.erase(extents_index.begin());
+    for (auto& i: extents_index) {
+      i -= it->length;
+    }
     extents.erase(it);
   }
   
   void swap_extents(bluefs_fnode_t& other) {
     other.extents.swap(extents);
+    other.extents_index.swap(extents_index);
     std::swap(allocated, other.allocated);
   }
-  void swap_extents(mempool::bluefs::vector<bluefs_extent_t>& swap_to, uint64_t& new_allocated) {
-    swap_to.swap(extents);
-    std::swap(allocated, new_allocated);
-  }
   void clear_extents() {
+    extents_index.clear();
     extents.clear();
     allocated = 0;
   }
@@ -114,6 +132,26 @@ WRITE_CLASS_DENC(bluefs_fnode_t)
 
 ostream& operator<<(ostream& out, const bluefs_fnode_t& file);
 
+struct bluefs_layout_t {
+  unsigned shared_bdev = 0;         ///< which bluefs bdev we are sharing
+  bool dedicated_db = false;        ///< whether block.db is present
+  bool dedicated_wal = false;       ///< whether block.wal is present
+
+  bool single_shared_device() const {
+    return !dedicated_db && !dedicated_wal;
+  }
+
+  bool operator==(const bluefs_layout_t& other) const {
+    return shared_bdev == other.shared_bdev &&
+           dedicated_db == other.dedicated_db &&
+           dedicated_wal == other.dedicated_wal;
+  }
+
+  void encode(ceph::bufferlist& bl) const;
+  void decode(ceph::bufferlist::const_iterator& p);
+  void dump(Formatter *f) const;
+};
+WRITE_CLASS_ENCODER(bluefs_layout_t)
 
 struct bluefs_super_t {
   uuid_d uuid;      ///< unique to this bluefs instance
@@ -122,6 +160,8 @@ struct bluefs_super_t {
   uint32_t block_size;
 
   bluefs_fnode_t log_fnode;
+
+  std::optional<bluefs_layout_t> memorized_layout;
 
   bluefs_super_t()
     : version(0),
@@ -231,6 +271,9 @@ struct bluefs_transaction_t {
     using ceph::encode;
     encode((__u8)OP_JUMP_SEQ, op_bl);
     encode(next_seq, op_bl);
+  }
+  void claim_ops(bluefs_transaction_t& from) {
+    op_bl.claim_append(from.op_bl);
   }
 
   void encode(bufferlist& bl) const;

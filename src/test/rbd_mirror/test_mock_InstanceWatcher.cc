@@ -3,7 +3,7 @@
 
 #include "librados/AioCompletionImpl.h"
 #include "librbd/ManagedLock.h"
-#include "test/librados/test.h"
+#include "test/librados/test_cxx.h"
 #include "test/librados_test_stub/MockTestMemIoCtxImpl.h"
 #include "test/librados_test_stub/MockTestMemRadosClient.h"
 #include "test/librbd/mock/MockImageCtx.h"
@@ -64,7 +64,7 @@ namespace mirror {
 
 template <>
 struct Threads<librbd::MockTestImageCtx> {
-  Mutex &timer_lock;
+  ceph::mutex &timer_lock;
   SafeTimer *timer;
   ContextWQ *work_queue;
 
@@ -947,7 +947,7 @@ TEST_F(TestMockInstanceWatcher_NotifySync, StartedOnNonLeaderAcquireLeader) {
   expect_throttler_destroy();
   instance_watcher2->handle_release_leader();
   instance_watcher1->handle_acquire_leader();
-  instance_watcher2->handle_update_leader(instance_id2);
+  instance_watcher2->handle_update_leader(instance_id1);
 
   instance_watcher1->notify_sync_complete("sync_id");
 }

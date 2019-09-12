@@ -64,7 +64,7 @@ target_link_libraries(unittest_rbd_mirror
   librados
   osdc
   global
-  radostest
+  radostest-cxx
   )
 
 add_executable(ceph_test_rbd_mirror
@@ -82,7 +82,7 @@ target_link_libraries(ceph_test_rbd_mirror
   cls_journal_client
   rbd_types
   librados
-  radostest
+  radostest-cxx
   ${UNITTEST_LIBS}
   )
 

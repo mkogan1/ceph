@@ -15,10 +15,8 @@
 #ifndef CEPH_MTIMECHECK_H
 #define CEPH_MTIMECHECK_H
 
-class MTimeCheck : public MessageInstance<MTimeCheck> {
+class MTimeCheck : public Message {
 public:
-  friend factory;
-
   static constexpr int HEAD_VERSION = 1;
 
   enum {
@@ -35,17 +33,17 @@ public:
   map<entity_inst_t, double> skews;
   map<entity_inst_t, double> latencies;
 
-  MTimeCheck() : MessageInstance(MSG_TIMECHECK, HEAD_VERSION) { }
+  MTimeCheck() : Message{MSG_TIMECHECK, HEAD_VERSION} {}
   MTimeCheck(int op) :
-    MessageInstance(MSG_TIMECHECK, HEAD_VERSION),
+    Message{MSG_TIMECHECK, HEAD_VERSION},
     op(op)
-  { }
+  {}
 
 private:
-  ~MTimeCheck() override { }
+  ~MTimeCheck() override {}
 
 public:
-  const char *get_type_name() const override { return "time_check"; }
+  std::string_view get_type_name() const override { return "time_check"; }
   const char *get_op_name() const {
     switch (op) {
     case OP_PING: return "ping";
@@ -85,6 +83,9 @@ public:
     encode(skews, payload, features);
     encode(latencies, payload, features);
   }
+private:
+  template<class T, typename... Args>
+  friend boost::intrusive_ptr<T> ceph::make_message(Args&&... args);
 };
 
 #endif /* CEPH_MTIMECHECK_H */

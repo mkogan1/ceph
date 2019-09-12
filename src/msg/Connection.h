@@ -24,9 +24,11 @@
 #include "common/RefCountedObj.h"
 #include "common/config.h"
 #include "common/debug.h"
+#include "common/ceph_mutex.h"
 #include "include/ceph_assert.h" // Because intusive_ptr clobbers our assert...
 #include "include/buffer.h"
 #include "include/types.h"
+#include "common/item_history.h"
 #include "msg/MessageRef.h"
 
 
@@ -36,20 +38,26 @@
 
 class Messenger;
 
+#ifdef UNIT_TESTS_BUILT
+class Interceptor;
+#endif
+
 struct Connection : public RefCountedObject {
-  mutable Mutex lock;
+  mutable ceph::mutex lock = ceph::make_mutex("Connection::lock");
   Messenger *msgr;
   RefCountedPtr priv;
   int peer_type;
-  entity_addrvec_t peer_addrs;
+  int64_t peer_id = -1;  // [msgr2 only] the 0 of osd.0, 4567 or client.4567
+  safe_item_history<entity_addrvec_t> peer_addrs;
   utime_t last_keepalive, last_keepalive_ack;
 private:
   uint64_t features;
 public:
+  bool is_loopback;
   bool failed; // true if we are a lossy connection that has failed.
 
   int rx_buffers_version;
-  map<ceph_tid_t,pair<bufferlist,int> > rx_buffers;
+  std::map<ceph_tid_t,std::pair<ceph::buffer::list, int>> rx_buffers;
 
   // authentication state
   // FIXME make these private after ms_handle_authorizer is removed
@@ -57,6 +65,10 @@ public:
   AuthCapsInfo peer_caps_info;
   EntityName peer_name;
   uint64_t peer_global_id = 0;
+
+#ifdef UNIT_TESTS_BUILT
+  Interceptor *interceptor;
+#endif
 
   friend class boost::intrusive_ptr<Connection>;
   friend class PipeConnection;
@@ -66,10 +78,10 @@ public:
     // we are managed exclusively by ConnectionRef; make it so you can
     //   ConnectionRef foo = new Connection;
     : RefCountedObject(cct, 0),
-      lock("Connection::lock"),
       msgr(m),
       peer_type(-1),
       features(0),
+      is_loopback(false),
       failed(false),
       rx_buffers_version(0) {
   }
@@ -79,13 +91,18 @@ public:
   }
 
   void set_priv(const RefCountedPtr& o) {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     priv = o;
   }
 
   RefCountedPtr get_priv() {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     return priv;
+  }
+
+  void clear_priv() {
+    std::lock_guard l{lock};
+    priv.reset(nullptr);
   }
 
   /**
@@ -96,6 +113,10 @@ public:
    * @return true if ready to send, or false otherwise
    */
   virtual bool is_connected() = 0;
+
+  virtual bool is_msgr2() const {
+    return false;
+  }
 
   Messenger *get_messenger() {
     return msgr;
@@ -152,6 +173,7 @@ public:
    */
   virtual void mark_disposable() = 0;
 
+  // WARNING / FIXME: this is not populated for loopback connections
   AuthCapsInfo& get_peer_caps_info() {
     return peer_caps_info;
   }
@@ -165,6 +187,10 @@ public:
   int get_peer_type() const { return peer_type; }
   void set_peer_type(int t) { peer_type = t; }
 
+  // peer_id is only defined for msgr2
+  int64_t get_peer_id() const { return peer_id; }
+  void set_peer_id(int64_t t) { peer_id = t; }
+
   bool peer_is_mon() const { return peer_type == CEPH_ENTITY_TYPE_MON; }
   bool peer_is_mgr() const { return peer_type == CEPH_ENTITY_TYPE_MGR; }
   bool peer_is_mds() const { return peer_type == CEPH_ENTITY_TYPE_MDS; }
@@ -175,10 +201,10 @@ public:
   virtual entity_addr_t get_peer_socket_addr() const = 0;
 
   entity_addr_t get_peer_addr() const {
-    return peer_addrs.front();
+    return peer_addrs->front();
   }
   const entity_addrvec_t& get_peer_addrs() const {
-    return peer_addrs;
+    return *peer_addrs;
   }
   void set_peer_addr(const entity_addr_t& a) {
     peer_addrs = entity_addrvec_t(a);
@@ -193,31 +219,39 @@ public:
   void set_features(uint64_t f) { features = f; }
   void set_feature(uint64_t f) { features |= f; }
 
-  void post_rx_buffer(ceph_tid_t tid, bufferlist& bl) {
-    Mutex::Locker l(lock);
+  virtual int get_con_mode() const {
+    return CEPH_CON_MODE_CRC;
+  }
+
+  void post_rx_buffer(ceph_tid_t tid, ceph::buffer::list& bl) {
+#if 0
+    std::lock_guard l{lock};
     ++rx_buffers_version;
     rx_buffers[tid] = pair<bufferlist,int>(bl, rx_buffers_version);
+#endif
   }
 
   void revoke_rx_buffer(ceph_tid_t tid) {
-    Mutex::Locker l(lock);
+#if 0
+    std::lock_guard l{lock};
     rx_buffers.erase(tid);
+#endif
   }
 
   utime_t get_last_keepalive() const {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     return last_keepalive;
   }
   void set_last_keepalive(utime_t t) {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     last_keepalive = t;
   }
   utime_t get_last_keepalive_ack() const {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     return last_keepalive_ack;
   }
   void set_last_keepalive_ack(utime_t t) {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     last_keepalive_ack = t;
   }
 

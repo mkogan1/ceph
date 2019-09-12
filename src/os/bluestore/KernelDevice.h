@@ -22,11 +22,15 @@
 #include "common/Thread.h"
 #include "include/utime.h"
 
-#include "aio.h"
+#include "ceph_aio.h"
 #include "BlockDevice.h"
 
+#define RW_IO_MAX (INT_MAX & CEPH_PAGE_MASK)
+
+
 class KernelDevice : public BlockDevice {
-  int fd_direct, fd_buffered;
+  std::vector<int> fd_directs, fd_buffereds;
+  bool enable_wrt = true;
   std::string path;
   bool aio, dio;
 
@@ -87,7 +91,7 @@ class KernelDevice : public BlockDevice {
   void _aio_log_start(IOContext *ioc, uint64_t offset, uint64_t length);
   void _aio_log_finish(IOContext *ioc, uint64_t offset, uint64_t length);
 
-  int _sync_write(uint64_t off, bufferlist& bl, bool buffered);
+  int _sync_write(uint64_t off, bufferlist& bl, bool buffered, int write_hint);
 
   int _lock();
 
@@ -102,6 +106,7 @@ class KernelDevice : public BlockDevice {
   void debug_aio_unlink(aio_t& aio);
 
   void _detect_vdo();
+  int choose_fd(bool buffered, int write_hint) const;
 
 public:
   KernelDevice(CephContext* cct, aio_callback_t cb, void *cbpriv, aio_callback_t d_cb, void *d_cbpriv);
@@ -110,14 +115,14 @@ public:
   void discard_drain() override;
 
   int collect_metadata(const std::string& prefix, map<std::string,std::string> *pm) const override;
-  int get_devname(std::string *s) override {
+  int get_devname(std::string *s) const override {
     if (devname.empty()) {
       return -ENOENT;
     }
     *s = devname;
     return 0;
   }
-  int get_devices(std::set<std::string> *ls) override;
+  int get_devices(std::set<std::string> *ls) const override;
 
   bool get_thin_utilization(uint64_t *total, uint64_t *avail) const override;
 
@@ -128,10 +133,11 @@ public:
 	       IOContext *ioc) override;
   int read_random(uint64_t off, uint64_t len, char *buf, bool buffered) override;
 
-  int write(uint64_t off, bufferlist& bl, bool buffered) override;
+  int write(uint64_t off, bufferlist& bl, bool buffered, int write_hint = WRITE_LIFE_NOT_SET) override;
   int aio_write(uint64_t off, bufferlist& bl,
 		IOContext *ioc,
-		bool buffered) override;
+		bool buffered,
+		int write_hint = WRITE_LIFE_NOT_SET) override;
   int flush() override;
   int discard(uint64_t offset, uint64_t len) override;
 

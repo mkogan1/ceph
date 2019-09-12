@@ -121,6 +121,12 @@ class BlueRocksRandomAccessFile : public rocksdb::RandomAccessFile {
 		    (unsigned long long)h->file->fnode.ino);
   };
 
+  // Readahead the file starting from offset by n bytes for caching.
+  rocksdb::Status Prefetch(uint64_t offset, size_t n) override {
+    fs->read(h, &h->buf, offset, n, nullptr, nullptr);
+    return rocksdb::Status::OK();
+  }
+
   //enum AccessPattern { NORMAL, RANDOM, SEQUENTIAL, WILLNEED, DONTNEED };
 
   void Hint(AccessPattern pattern) override {
@@ -225,6 +231,10 @@ class BlueRocksWritableFile : public rocksdb::WritableFile {
   // uses direct IO.
   bool UseDirectIO() const {
     return false;
+  }
+
+  void SetWriteLifeTimeHint(rocksdb::Env::WriteLifeTimeHint hint) override {
+    h->write_hint = (const int)hint;
   }
 
   /*
@@ -391,7 +401,7 @@ rocksdb::Status BlueRocksEnv::NewDirectory(
   std::unique_ptr<rocksdb::Directory>* result)
 {
   if (!fs->dir_exists(name))
-    return rocksdb::Status::IOError(name, strerror(ENOENT));
+    return rocksdb::Status::NotFound(name, strerror(ENOENT));
   result->reset(new BlueRocksDirectory(fs));
   return rocksdb::Status::OK();
 }
@@ -414,7 +424,7 @@ rocksdb::Status BlueRocksEnv::GetChildren(
   result->clear();
   int r = fs->readdir(dir, result);
   if (r < 0)
-    return rocksdb::Status::IOError(dir, strerror(ENOENT));//    return err_to_status(r);
+    return rocksdb::Status::NotFound(dir, strerror(ENOENT));//    return err_to_status(r);
   return rocksdb::Status::OK();
 }
 
@@ -543,6 +553,7 @@ rocksdb::Status BlueRocksEnv::UnlockFile(rocksdb::FileLock* lock)
   if (r < 0)
     return err_to_status(r);
   delete lock;
+  lock = nullptr;
   return rocksdb::Status::OK();
 }
 

@@ -143,7 +143,7 @@ int PMEMDevice::collect_metadata(const string& prefix, map<string,string> *pm) c
   if (S_ISBLK(st.st_mode)) {
     (*pm)[prefix + "access_mode"] = "blk";
     char buffer[1024] = {0};
-    BlkDev blkdev(fd_buffered);
+    BlkDev blkdev(fd);
 
     blkdev.model(buffer, sizeof(buffer));
     (*pm)[prefix + "model"] = buffer;
@@ -184,7 +184,7 @@ void PMEMDevice::aio_submit(IOContext *ioc)
   return;
 }
 
-int PMEMDevice::write(uint64_t off, bufferlist& bl, bool buffered)
+int PMEMDevice::write(uint64_t off, bufferlist& bl, bool buffered, int write_hint)
 {
   uint64_t len = bl.length();
   dout(20) << __func__ << " " << off << "~" << len  << dendl;
@@ -218,7 +218,8 @@ int PMEMDevice::aio_write(
   uint64_t off,
   bufferlist &bl,
   IOContext *ioc,
-  bool buffered)
+  bool buffered,
+  int write_hint)
 {
   return write(off, bl, buffered);
 }

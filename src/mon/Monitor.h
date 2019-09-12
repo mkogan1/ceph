@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <cmath>
+#include <string>
 
 #include "include/types.h"
 #include "include/health.h"
@@ -42,6 +43,8 @@
 
 #include "common/config_obs.h"
 #include "common/LogClient.h"
+#include "auth/AuthClient.h"
+#include "auth/AuthServer.h"
 #include "auth/cephx/CephxKeyServer.h"
 #include "auth/AuthMethodList.h"
 #include "auth/KeyRing.h"
@@ -99,18 +102,6 @@ class PaxosService;
 class PerfCounters;
 class AdminSocketHook;
 
-class MMonGetMap;
-class MMonGetVersion;
-class MMonMetadata;
-class MMonSync;
-class MMonScrub;
-class MMonProbe;
-struct MMonSubscribe;
-struct MRoute;
-struct MForward;
-struct MTimeCheck2;
-struct MMonHealth;
-
 #define COMPAT_SET_LOC "feature_set"
 
 class C_MonContext final : public FunctionContext {
@@ -122,18 +113,25 @@ public:
 };
 
 class Monitor : public Dispatcher,
+		public AuthClient,
+		public AuthServer,
                 public md_config_obs_t {
 public:
+  int orig_argc = 0;
+  const char **orig_argv = nullptr;
+
   // me
   string name;
   int rank;
   Messenger *messenger;
   ConnectionRef con_self;
-  Mutex lock;
+  ceph::mutex lock = ceph::make_mutex("Monitor::lock");
   SafeTimer timer;
   Finisher finisher;
   ThreadPool cpu_tp;  ///< threadpool for CPU intensive work
-  
+
+  ceph::mutex auth_lock = ceph::make_mutex("Monitor::auth_lock");
+
   /// true if we have ever joined a quorum.  if false, we are either a
   /// new cluster, a newly joining monitor, or a just-upgraded
   /// monitor.
@@ -148,7 +146,7 @@ public:
   MonMap *monmap;
   uuid_d fingerprint;
 
-  set<entity_addr_t> extra_probe_peers;
+  set<entity_addrvec_t> extra_probe_peers;
 
   LogClient log_client;
   LogChannelRef clog;
@@ -165,9 +163,13 @@ public:
   vector<MonCommand> local_mon_commands;  // commands i support
   bufferlist local_mon_commands_bl;       // encoded version of above
 
+  vector<MonCommand> prenautilus_local_mon_commands;
+  bufferlist prenautilus_local_mon_commands_bl;
+
   Messenger *mgr_messenger;
   MgrClient mgr_client;
   uint64_t mgr_proxy_bytes = 0;  // in-flight proxied mgr command message bytes
+  std::string gss_ktfile_client{};
 
 private:
   void new_tick();
@@ -181,14 +183,15 @@ public:
   // -- monitor state --
 private:
   enum {
-    STATE_PROBING = 1,
+    STATE_INIT = 1,
+    STATE_PROBING,
     STATE_SYNCHRONIZING,
     STATE_ELECTING,
     STATE_LEADER,
     STATE_PEON,
     STATE_SHUTDOWN
   };
-  int state;
+  int state = STATE_INIT;
 
 public:
   static const char *get_state_name(int s) {
@@ -206,6 +209,7 @@ public:
     return get_state_name(state);
   }
 
+  bool is_init() const { return state == STATE_INIT; }
   bool is_shutdown() const { return state == STATE_SHUTDOWN; }
   bool is_probing() const { return state == STATE_PROBING; }
   bool is_synchronizing() const { return state == STATE_SYNCHRONIZING; }
@@ -246,6 +250,8 @@ private:
    * Intersection of quorum members mon-specific feature bits
    */
   mon_feature_t quorum_mon_features;
+
+  ceph_release_t quorum_min_mon_release{ceph_release_t::unknown};
 
   set<string> outside_quorum;
 
@@ -297,7 +303,7 @@ private:
    * @} // provider state
    */
   struct SyncProvider {
-    entity_inst_t entity;  ///< who
+    entity_addrvec_t addrs;
     uint64_t cookie;       ///< unique cookie for this sync attempt
     utime_t timeout;       ///< when we give up and expire this attempt
     version_t last_committed; ///< last paxos version on peer
@@ -319,7 +325,7 @@ private:
   /**
    * @} // requester state
    */
-  entity_inst_t sync_provider;   ///< who we are syncing from
+  entity_addrvec_t sync_provider;  ///< who we are syncing from
   uint64_t sync_cookie;          ///< 0 if we are starting, non-zero otherwise
   bool sync_full;                ///< true if we are a full sync, false for recent catch-up
   version_t sync_start_version;  ///< last_committed at sync start
@@ -393,7 +399,7 @@ private:
    * @param entity where to pull committed state from
    * @param full whether to do a full sync or just catch up on recent paxos
    */
-  void sync_start(entity_inst_t &entity, bool full);
+  void sync_start(entity_addrvec_t &addrs, bool full);
 
 public:
   /**
@@ -588,19 +594,22 @@ private:
   void _reset();   ///< called from bootstrap, start_, or join_election
   void wait_for_paxos_write();
   void _finish_svc_election(); ///< called by {win,lose}_election
+  void respawn();
 public:
   void bootstrap();
   void join_election();
   void start_election();
   void win_standalone_election();
   // end election (called by Elector)
-  void win_election(epoch_t epoch, set<int>& q,
+  void win_election(epoch_t epoch, const set<int>& q,
 		    uint64_t features,
                     const mon_feature_t& mon_features,
+		    ceph_release_t min_mon_release,
 		    const map<int,Metadata>& metadata);
   void lose_election(epoch_t epoch, set<int>& q, int l,
 		     uint64_t features,
-                     const mon_feature_t& mon_features);
+                     const mon_feature_t& mon_features,
+		     ceph_release_t min_mon_release);
   // end election (called by Elector)
   void finish_election();
 
@@ -658,7 +667,7 @@ public:
 
   // -- sessions --
   MonSessionMap session_map;
-  Mutex session_map_lock{"Monitor::session_map_lock"};
+  ceph::mutex session_map_lock = ceph::make_mutex("Monitor::session_map_lock");
   AdminSocketHook *admin_hook;
 
   template<typename Func, typename...Args>
@@ -718,7 +727,7 @@ public:
 
   void health_tick_start();
   void health_tick_stop();
-  utime_t health_interval_calc_next_update();
+  ceph::real_clock::time_point health_interval_calc_next_update();
   void health_interval_start();
   void health_interval_stop();
   void health_events_cleanup();
@@ -728,12 +737,6 @@ public:
   void do_health_to_clog_interval();
   void do_health_to_clog(bool force = false);
 
-  health_status_t get_health_status(
-    bool want_detail,
-    Formatter *f,
-    std::string *plain,
-    const char *sep1 = " ",
-    const char *sep2 = "; ");
   void log_health(
     const health_check_map_t& updated,
     const health_check_map_t& previous,
@@ -824,7 +827,7 @@ public:
       C_MonOp(_op), mon(_mm), rc(r), rs(s), rdata(rd), version(v){}
 
     void _finish(int r) override {
-      MMonCommand *m = static_cast<MMonCommand*>(op->get_req());
+      auto m = op->get_req<MMonCommand>();
       if (r >= 0) {
         ostringstream ss;
         if (!op->get_req()->get_connection()) {
@@ -875,22 +878,59 @@ public:
   //on forwarded messages, so we create a non-locking version for this class
   void _ms_dispatch(Message *m);
   bool ms_dispatch(Message *m) override {
-    lock.Lock();
+    std::lock_guard l{lock};
     _ms_dispatch(m);
-    lock.Unlock();
     return true;
   }
   void dispatch_op(MonOpRequestRef op);
   //mon_caps is used for un-connected messages from monitors
   MonCap mon_caps;
-  bool ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer, bool force_new) override;
-  KeyStore *ms_get_auth1_authorizer_keystore();
+  bool get_authorizer(int dest_type, AuthAuthorizer **authorizer);
 public: // for AuthMonitor msgr1:
   int ms_handle_authentication(Connection *con) override;
 private:
+  void ms_handle_accept(Connection *con) override;
   bool ms_handle_reset(Connection *con) override;
   void ms_handle_remote_reset(Connection *con) override {}
   bool ms_handle_refused(Connection *con) override;
+
+  // AuthClient
+  int get_auth_request(
+    Connection *con,
+    AuthConnectionMeta *auth_meta,
+    uint32_t *method,
+    vector<uint32_t> *preferred_modes,
+    bufferlist *out) override;
+  int handle_auth_reply_more(
+    Connection *con,
+    AuthConnectionMeta *auth_meta,
+   const bufferlist& bl,
+    bufferlist *reply) override;
+  int handle_auth_done(
+    Connection *con,
+    AuthConnectionMeta *auth_meta,
+    uint64_t global_id,
+    uint32_t con_mode,
+    const bufferlist& bl,
+    CryptoKey *session_key,
+    std::string *connection_secret) override;
+  int handle_auth_bad_method(
+    Connection *con,
+    AuthConnectionMeta *auth_meta,
+    uint32_t old_auth_method,
+    int result,
+    const std::vector<uint32_t>& allowed_methods,
+    const std::vector<uint32_t>& allowed_modes) override;
+  // /AuthClient
+  // AuthServer
+  int handle_auth_request(
+    Connection *con,
+    AuthConnectionMeta *auth_meta,
+    bool more,
+    uint32_t auth_method,
+    const bufferlist& bl,
+    bufferlist *reply) override;
+  // /AuthServer
 
   int write_default_keyring(bufferlist& bl);
   void extract_save_mon_key(KeyRing& keyring);
@@ -963,19 +1003,28 @@ private:
 public:
   static void format_command_descriptions(const std::vector<MonCommand> &commands,
 					  Formatter *f,
+					  uint64_t features,
 					  bufferlist *rdata);
 
   const std::vector<MonCommand> &get_local_commands(mon_feature_t f) {
-    return local_mon_commands;
+    if (f.contains_all(ceph::features::mon::FEATURE_NAUTILUS)) {
+      return local_mon_commands;
+    } else {
+      return prenautilus_local_mon_commands;
+    }
   }
   const bufferlist& get_local_commands_bl(mon_feature_t f) {
-    return local_mon_commands_bl;
+    if (f.contains_all(ceph::features::mon::FEATURE_NAUTILUS)) {
+      return local_mon_commands_bl;
+    } else {
+      return prenautilus_local_mon_commands_bl;
+    }
   }
   void set_leader_commands(const std::vector<MonCommand>& cmds) {
     leader_mon_commands = cmds;
   }
 
-  static bool is_keyring_required();
+  bool is_keyring_required();
 };
 
 #define CEPH_MON_FEATURE_INCOMPAT_BASE CompatSet::Feature (1, "initial feature set (~v.18)")
@@ -989,6 +1038,7 @@ public:
 #define CEPH_MON_FEATURE_INCOMPAT_LUMINOUS CompatSet::Feature(9, "luminous ondisk layout")
 #define CEPH_MON_FEATURE_INCOMPAT_MIMIC CompatSet::Feature(10, "mimic ondisk layout")
 #define CEPH_MON_FEATURE_INCOMPAT_NAUTILUS CompatSet::Feature(11, "nautilus ondisk layout")
+#define CEPH_MON_FEATURE_INCOMPAT_OCTOPUS CompatSet::Feature(12, "octopus ondisk layout")
 // make sure you add your feature to Monitor::get_supported_features
 
 

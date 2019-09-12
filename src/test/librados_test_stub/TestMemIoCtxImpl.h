@@ -21,14 +21,15 @@ public:
 
   TestIoCtxImpl *clone() override;
 
-  int aio_remove(const std::string& oid, AioCompletionImpl *c) override;
+  int aio_remove(const std::string& oid, AioCompletionImpl *c, int flags = 0) override;
 
   int append(const std::string& oid, const bufferlist &bl,
              const SnapContext &snapc) override;
 
   int assert_exists(const std::string &oid) override;
 
-  int create(const std::string& oid, bool exclusive) override;
+  int create(const std::string& oid, bool exclusive,
+             const SnapContext &snapc) override;
   int list_snaps(const std::string& o, snap_set_t *out_snaps) override;
   int omap_get_vals(const std::string& oid,
                     const std::string& start_after,

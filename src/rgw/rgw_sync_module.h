@@ -1,3 +1,6 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// vim: ts=8 sw=2 smarttab ft=cpp
+
 #ifndef CEPH_RGW_SYNC_MODULE_H
 #define CEPH_RGW_SYNC_MODULE_H
 
@@ -22,6 +25,9 @@ public:
     return nullptr;
   }
 
+  virtual RGWCoroutine *start_sync(RGWDataSyncEnv *sync_env) {
+    return nullptr;
+  }
   virtual RGWCoroutine *sync_object(RGWDataSyncEnv *sync_env, RGWBucketInfo& bucket_info, rgw_obj_key& key, std::optional<uint64_t> versioned_epoch, rgw_zone_set *zones_trace) = 0;
   virtual RGWCoroutine *remove_object(RGWDataSyncEnv *sync_env, RGWBucketInfo& bucket_info, rgw_obj_key& key, real_time& mtime,
                                       bool versioned, uint64_t versioned_epoch, rgw_zone_set *zones_trace) = 0;
@@ -30,6 +36,7 @@ public:
 };
 
 class RGWRESTMgr;
+class RGWMetadataHandler;
 
 class RGWSyncModuleInstance {
 public:
@@ -38,6 +45,17 @@ public:
   virtual RGWDataSyncModule *get_data_handler() = 0;
   virtual RGWRESTMgr *get_rest_filter(int dialect, RGWRESTMgr *orig) {
     return orig;
+  }
+  virtual bool supports_user_writes() {
+    return false;
+  }
+  virtual RGWMetadataHandler *alloc_bucket_meta_handler();
+  virtual RGWMetadataHandler *alloc_bucket_instance_meta_handler();
+
+  // indication whether the sync module start with full sync (default behavior)
+  // incremental sync would follow anyway
+  virtual bool should_full_sync() const {
+      return true;
   }
 };
 
@@ -51,6 +69,9 @@ public:
   RGWSyncModule() {}
   virtual ~RGWSyncModule() {}
 
+  virtual bool supports_writes() {
+    return false;
+  }
   virtual bool supports_data_export() = 0;
   virtual int create_instance(CephContext *cct, const JSONFormattable& config, RGWSyncModuleInstanceRef *instance) = 0;
 };
@@ -59,14 +80,14 @@ typedef std::shared_ptr<RGWSyncModule> RGWSyncModuleRef;
 
 
 class RGWSyncModulesManager {
-  Mutex lock;
+  ceph::mutex lock = ceph::make_mutex("RGWSyncModulesManager");
 
   map<string, RGWSyncModuleRef> modules;
 public:
-  RGWSyncModulesManager() : lock("RGWSyncModulesManager") {}
+  RGWSyncModulesManager() = default;
 
   void register_module(const string& name, RGWSyncModuleRef& module, bool is_default = false) {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     modules[name] = module;
     if (is_default) {
       modules[string()] = module;
@@ -74,7 +95,7 @@ public:
   }
 
   bool get_module(const string& name, RGWSyncModuleRef *module) {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     auto iter = modules.find(name);
     if (iter == modules.end()) {
       return false;

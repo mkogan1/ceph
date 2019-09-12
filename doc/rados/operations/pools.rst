@@ -240,6 +240,10 @@ To show a pool's utilization statistics, execute::
 
 	rados df
 
+Additionally, to obtain I/O information for a specific pool or all, execute::
+
+        ceph osd pool stats [{pool-name}]
+
 
 Make a Snapshot of a Pool
 =========================
@@ -341,7 +345,7 @@ You may set values for the following keys:
 ``crush_rule``
 
 :Description: The rule to use for mapping object placement in the cluster.
-:Type: Integer
+:Type: String
 
 .. _allow_ec_overwrites:
 
@@ -593,6 +597,29 @@ You may set values for the following keys:
 :Default: ``0``
 
 
+.. _recovery_priority:
+
+``recovery_priority``
+
+:Description: When a value is set it will increase or decrease the computed
+              reservation priority. This value must be in the range -10 to
+              10.  Use a negative priority for less important pools so they
+              have lower priority than any new pools.
+
+:Type: Integer
+:Default: ``0``
+
+
+.. _recovery_op_priority:
+
+``recovery_op_priority``
+
+:Description: Specify the recovery operation priority for this pool instead of ``osd_recovery_op_priority``.
+
+:Type: Integer
+:Default: ``0``
+
+
 Get Pool Values
 ===============
 
@@ -745,6 +772,20 @@ You may get values for the following keys:
 :Description: see allow_ec_overwrites_
 
 :Type: Boolean
+
+
+``recovery_priority``
+
+:Description: see recovery_priority_
+
+:Type: Integer
+
+
+``recovery_op_priority``
+
+:Description: see recovery_op_priority_
+
+:Type: Integer
 
 
 Set the Number of Object Replicas

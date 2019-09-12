@@ -220,15 +220,24 @@ int MemStore::mkfs()
   return 0;
 }
 
-int MemStore::statfs(struct store_statfs_t *st)
+int MemStore::statfs(struct store_statfs_t *st, osd_alert_list_t* alerts)
 {
-   dout(10) << __func__ << dendl;
+  dout(10) << __func__ << dendl;
+  if (alerts) {
+    alerts->clear(); // returns nothing for now
+  }
   st->reset();
   st->total = cct->_conf->memstore_device_bytes;
   st->available = std::max<int64_t>(st->total - used_bytes, 0);
   dout(10) << __func__ << ": used_bytes: " << used_bytes
 	   << "/" << cct->_conf->memstore_device_bytes << dendl;
   return 0;
+}
+
+int MemStore::pool_statfs(uint64_t pool_id, struct store_statfs_t *buf,
+			  bool *per_pool_omap)
+{
+  return -ENOTSUP;
 }
 
 objectstore_perf_stat_t MemStore::get_cur_stats()
@@ -239,7 +248,7 @@ objectstore_perf_stat_t MemStore::get_cur_stats()
 
 MemStore::CollectionRef MemStore::get_collection(const coll_t& cid)
 {
-  RWLock::RLocker l(coll_lock);
+  std::shared_lock l{coll_lock};
   ceph::unordered_map<coll_t,CollectionRef>::iterator cp = coll_map.find(cid);
   if (cp == coll_map.end())
     return CollectionRef();
@@ -248,7 +257,7 @@ MemStore::CollectionRef MemStore::get_collection(const coll_t& cid)
 
 ObjectStore::CollectionHandle MemStore::create_new_collection(const coll_t& cid)
 {
-  RWLock::WLocker l(coll_lock);
+  std::lock_guard l{coll_lock};
   Collection *c = new Collection(cct, cid);
   new_coll_map[cid] = c;
   return c;
@@ -367,7 +376,7 @@ int MemStore::getattr(CollectionHandle &c_, const ghobject_t& oid,
   if (!o)
     return -ENOENT;
   string k(name);
-  std::lock_guard<std::mutex> lock(o->xattr_mutex);
+  std::lock_guard lock{o->xattr_mutex};
   if (!o->xattr.count(k)) {
     return -ENODATA;
   }
@@ -386,7 +395,7 @@ int MemStore::getattrs(CollectionHandle &c_, const ghobject_t& oid,
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->xattr_mutex);
+  std::lock_guard lock{o->xattr_mutex};
   aset = o->xattr;
   return 0;
 }
@@ -394,7 +403,7 @@ int MemStore::getattrs(CollectionHandle &c_, const ghobject_t& oid,
 int MemStore::list_collections(vector<coll_t>& ls)
 {
   dout(10) << __func__ << dendl;
-  RWLock::RLocker l(coll_lock);
+  std::shared_lock l{coll_lock};
   for (ceph::unordered_map<coll_t,CollectionRef>::iterator p = coll_map.begin();
        p != coll_map.end();
        ++p) {
@@ -406,7 +415,7 @@ int MemStore::list_collections(vector<coll_t>& ls)
 bool MemStore::collection_exists(const coll_t& cid)
 {
   dout(10) << __func__ << " " << cid << dendl;
-  RWLock::RLocker l(coll_lock);
+  std::shared_lock l{coll_lock};
   return coll_map.count(cid);
 }
 
@@ -414,7 +423,7 @@ int MemStore::collection_empty(CollectionHandle& ch, bool *empty)
 {
   dout(10) << __func__ << " " << ch->cid << dendl;
   CollectionRef c = static_cast<Collection*>(ch.get());
-  RWLock::RLocker l(c->lock);
+  std::shared_lock l{c->lock};
   *empty = c->object_map.empty();
   return 0;
 }
@@ -423,7 +432,7 @@ int MemStore::collection_bits(CollectionHandle& ch)
 {
   dout(10) << __func__ << " " << ch->cid << dendl;
   Collection *c = static_cast<Collection*>(ch.get());
-  RWLock::RLocker l(c->lock);
+  std::shared_lock l{c->lock};
   return c->bits;
 }
 
@@ -434,7 +443,7 @@ int MemStore::collection_list(CollectionHandle& ch,
 			      vector<ghobject_t> *ls, ghobject_t *next)
 {
   Collection *c = static_cast<Collection*>(ch.get());
-  RWLock::RLocker l(c->lock);
+  std::shared_lock l{c->lock};
 
   dout(10) << __func__ << " cid " << ch->cid << " start " << start
 	   << " end " << end << dendl;
@@ -468,7 +477,7 @@ int MemStore::omap_get(
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   *header = o->omap_header;
   *out = o->omap;
   return 0;
@@ -486,7 +495,7 @@ int MemStore::omap_get_header(
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   *header = o->omap_header;
   return 0;
 }
@@ -502,7 +511,7 @@ int MemStore::omap_get_keys(
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   for (map<string,bufferlist>::iterator p = o->omap.begin();
        p != o->omap.end();
        ++p)
@@ -522,7 +531,7 @@ int MemStore::omap_get_values(
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   for (set<string>::const_iterator p = keys.begin();
        p != keys.end();
        ++p) {
@@ -545,7 +554,7 @@ int MemStore::omap_check_keys(
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   for (set<string>::const_iterator p = keys.begin();
        p != keys.end();
        ++p) {
@@ -565,35 +574,35 @@ public:
     : c(c), o(o), it(o->omap.begin()) {}
 
   int seek_to_first() override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+    std::lock_guard lock{o->omap_mutex};
     it = o->omap.begin();
     return 0;
   }
   int upper_bound(const string &after) override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+    std::lock_guard lock{o->omap_mutex};
     it = o->omap.upper_bound(after);
     return 0;
   }
   int lower_bound(const string &to) override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+    std::lock_guard lock{o->omap_mutex};
     it = o->omap.lower_bound(to);
     return 0;
   }
   bool valid() override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+    std::lock_guard lock{o->omap_mutex};
     return it != o->omap.end();
   }
-  int next(bool validate=true) override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+  int next() override {
+    std::lock_guard lock{o->omap_mutex};
     ++it;
     return 0;
   }
   string key() override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+    std::lock_guard lock{o->omap_mutex};
     return it->first;
   }
   bufferlist value() override {
-    std::lock_guard<std::mutex> lock(o->omap_mutex);
+    std::lock_guard lock{o->omap_mutex};
     return it->second;
   }
   int status() override {
@@ -627,8 +636,7 @@ int MemStore::queue_transactions(
   // Sequencer with a mutex. this guarantees ordering on a given sequencer,
   // while allowing operations on different sequencers to happen in parallel
   Collection *c = static_cast<Collection*>(ch.get());
-  std::unique_lock<std::mutex> lock;
-  lock = std::unique_lock<std::mutex>(c->sequencer_mutex);
+  std::unique_lock lock{c->sequencer_mutex};
 
   for (vector<Transaction>::iterator p = tls.begin(); p != tls.end(); ++p) {
     // poke the TPHandle heartbeat just to exercise that code path
@@ -663,6 +671,7 @@ void MemStore::_do_transaction(Transaction& t)
     case Transaction::OP_NOP:
       break;
     case Transaction::OP_TOUCH:
+    case Transaction::OP_CREATE:
       {
         coll_t cid = i.get_cid(op->cid);
         ghobject_t oid = i.get_oid(op->oid);
@@ -955,6 +964,12 @@ void MemStore::_do_transaction(Transaction& t)
       }
       break;
 
+    case Transaction::OP_COLL_SET_BITS:
+      {
+        r = 0;
+      }
+      break;
+
     default:
       derr << "bad op " << op->op << dendl;
       ceph_abort();
@@ -1032,7 +1047,7 @@ int MemStore::_write(const coll_t& cid, const ghobject_t& oid,
     return -ENOENT;
 
   ObjectRef o = c->get_or_create_object(oid);
-  if (len > 0) {
+  if (len > 0 && !cct->_conf->memstore_debug_omit_block_device_write) {
     const ssize_t old_size = o->get_size();
     o->write(offset, bl);
     used_bytes += (o->get_size() - old_size);
@@ -1061,6 +1076,8 @@ int MemStore::_truncate(const coll_t& cid, const ghobject_t& oid, uint64_t size)
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
+  if (cct->_conf->memstore_debug_omit_block_device_write)
+    return 0;
   const ssize_t old_size = o->get_size();
   int r = o->truncate(size);
   used_bytes += (o->get_size() - old_size);
@@ -1073,7 +1090,7 @@ int MemStore::_remove(const coll_t& cid, const ghobject_t& oid)
   CollectionRef c = get_collection(cid);
   if (!c)
     return -ENOENT;
-  RWLock::WLocker l(c->lock);
+  std::lock_guard l{c->lock};
 
   auto i = c->object_hash.find(oid);
   if (i == c->object_hash.end())
@@ -1096,7 +1113,7 @@ int MemStore::_setattrs(const coll_t& cid, const ghobject_t& oid,
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->xattr_mutex);
+  std::lock_guard lock{o->xattr_mutex};
   for (map<string,bufferptr>::const_iterator p = aset.begin(); p != aset.end(); ++p)
     o->xattr[p->first] = p->second;
   return 0;
@@ -1112,7 +1129,7 @@ int MemStore::_rmattr(const coll_t& cid, const ghobject_t& oid, const char *name
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->xattr_mutex);
+  std::lock_guard lock{o->xattr_mutex};
   auto i = o->xattr.find(name);
   if (i == o->xattr.end())
     return -ENODATA;
@@ -1130,7 +1147,7 @@ int MemStore::_rmattrs(const coll_t& cid, const ghobject_t& oid)
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->xattr_mutex);
+  std::lock_guard lock{o->xattr_mutex};
   o->xattr.clear();
   return 0;
 }
@@ -1152,12 +1169,10 @@ int MemStore::_clone(const coll_t& cid, const ghobject_t& oldoid,
   no->clone(oo.get(), 0, oo->get_size(), 0);
 
   // take xattr and omap locks with std::lock()
-  std::unique_lock<std::mutex>
-      ox_lock(oo->xattr_mutex, std::defer_lock),
-      nx_lock(no->xattr_mutex, std::defer_lock),
-      oo_lock(oo->omap_mutex, std::defer_lock),
-      no_lock(no->omap_mutex, std::defer_lock);
-  std::lock(ox_lock, nx_lock, oo_lock, no_lock);
+  std::scoped_lock l{oo->xattr_mutex,
+		     no->xattr_mutex,
+		     oo->omap_mutex,
+		     no->omap_mutex};
 
   no->omap_header = oo->omap_header;
   no->omap = oo->omap;
@@ -1203,7 +1218,7 @@ int MemStore::_omap_clear(const coll_t& cid, const ghobject_t &oid)
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   o->omap.clear();
   o->omap_header.clear();
   return 0;
@@ -1220,7 +1235,7 @@ int MemStore::_omap_setkeys(const coll_t& cid, const ghobject_t &oid,
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   auto p = aset_bl.cbegin();
   __u32 num;
   decode(num, p);
@@ -1243,7 +1258,7 @@ int MemStore::_omap_rmkeys(const coll_t& cid, const ghobject_t &oid,
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   auto p = keys_bl.cbegin();
   __u32 num;
   decode(num, p);
@@ -1267,7 +1282,7 @@ int MemStore::_omap_rmkeyrange(const coll_t& cid, const ghobject_t &oid,
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   map<string,bufferlist>::iterator p = o->omap.lower_bound(first);
   map<string,bufferlist>::iterator e = o->omap.lower_bound(last);
   o->omap.erase(p, e);
@@ -1285,7 +1300,7 @@ int MemStore::_omap_setheader(const coll_t& cid, const ghobject_t &oid,
   ObjectRef o = c->get_object(oid);
   if (!o)
     return -ENOENT;
-  std::lock_guard<std::mutex> lock(o->omap_mutex);
+  std::lock_guard lock{o->omap_mutex};
   o->omap_header = bl;
   return 0;
 }
@@ -1293,7 +1308,7 @@ int MemStore::_omap_setheader(const coll_t& cid, const ghobject_t &oid,
 int MemStore::_create_collection(const coll_t& cid, int bits)
 {
   dout(10) << __func__ << " " << cid << dendl;
-  RWLock::WLocker l(coll_lock);
+  std::lock_guard l{coll_lock};
   auto result = coll_map.insert(std::make_pair(cid, CollectionRef()));
   if (!result.second)
     return -EEXIST;
@@ -1308,12 +1323,12 @@ int MemStore::_create_collection(const coll_t& cid, int bits)
 int MemStore::_destroy_collection(const coll_t& cid)
 {
   dout(10) << __func__ << " " << cid << dendl;
-  RWLock::WLocker l(coll_lock);
+  std::lock_guard l{coll_lock};
   ceph::unordered_map<coll_t,CollectionRef>::iterator cp = coll_map.find(cid);
   if (cp == coll_map.end())
     return -ENOENT;
   {
-    RWLock::RLocker l2(cp->second->lock);
+    std::shared_lock l2{cp->second->lock};
     if (!cp->second->object_map.empty())
       return -ENOTEMPTY;
     cp->second->exists = false;
@@ -1332,8 +1347,9 @@ int MemStore::_collection_add(const coll_t& cid, const coll_t& ocid, const ghobj
   CollectionRef oc = get_collection(ocid);
   if (!oc)
     return -ENOENT;
-  RWLock::WLocker l1(std::min(&(*c), &(*oc))->lock);
-  RWLock::WLocker l2(std::max(&(*c), &(*oc))->lock);
+
+  std::scoped_lock l{std::min(&(*c), &(*oc))->lock,
+		     std::max(&(*c), &(*oc))->lock};
 
   if (c->object_hash.count(oid))
     return -EEXIST;
@@ -1359,14 +1375,12 @@ int MemStore::_collection_move_rename(const coll_t& oldcid, const ghobject_t& ol
 
   // note: c and oc may be the same
   ceph_assert(&(*c) == &(*oc));
-  c->lock.get_write();
 
-  int r = -EEXIST;
+  std::lock_guard l{c->lock};
   if (c->object_hash.count(oid))
-    goto out;
-  r = -ENOENT;
+    return -EEXIST;
   if (oc->object_hash.count(oldoid) == 0)
-    goto out;
+    return -ENOENT;
   {
     ObjectRef o = oc->object_hash[oldoid];
     c->object_map[oid] = o;
@@ -1374,10 +1388,7 @@ int MemStore::_collection_move_rename(const coll_t& oldcid, const ghobject_t& ol
     oc->object_map.erase(oldoid);
     oc->object_hash.erase(oldoid);
   }
-  r = 0;
- out:
-  c->lock.put_write();
-  return r;
+  return 0;
 }
 
 int MemStore::_split_collection(const coll_t& cid, uint32_t bits, uint32_t match,
@@ -1391,8 +1402,9 @@ int MemStore::_split_collection(const coll_t& cid, uint32_t bits, uint32_t match
   CollectionRef dc = get_collection(dest);
   if (!dc)
     return -ENOENT;
-  RWLock::WLocker l1(std::min(&(*sc), &(*dc))->lock);
-  RWLock::WLocker l2(std::max(&(*sc), &(*dc))->lock);
+
+  std::scoped_lock l{std::min(&(*sc), &(*dc))->lock,
+                     std::max(&(*sc), &(*dc))->lock};
 
   map<ghobject_t,ObjectRef>::iterator p = sc->object_map.begin();
   while (p != sc->object_map.end()) {
@@ -1424,8 +1436,8 @@ int MemStore::_merge_collection(const coll_t& cid, uint32_t bits, coll_t dest)
   if (!dc)
     return -ENOENT;
   {
-    RWLock::WLocker l1(std::min(&(*sc), &(*dc))->lock);
-    RWLock::WLocker l2(std::max(&(*sc), &(*dc))->lock);
+    std::scoped_lock l{std::min(&(*sc), &(*dc))->lock,
+                       std::max(&(*sc), &(*dc))->lock};
 
     map<ghobject_t,ObjectRef>::iterator p = sc->object_map.begin();
     while (p != sc->object_map.end()) {
@@ -1440,7 +1452,7 @@ int MemStore::_merge_collection(const coll_t& cid, uint32_t bits, coll_t dest)
   }
 
   {
-    RWLock::WLocker l(coll_lock);
+    std::lock_guard l{coll_lock};
     ceph::unordered_map<coll_t,CollectionRef>::iterator cp = coll_map.find(cid);
     ceph_assert(cp != coll_map.end());
     used_bytes -= cp->second->used_bytes();

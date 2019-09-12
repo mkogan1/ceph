@@ -71,7 +71,7 @@ struct OpRequest : public TrackedOp {
     return classes_;
   }
 
-  void _dump(Formatter *f) const override;
+  void _dump(ceph::Formatter *f) const override;
 
   bool has_feature(uint64_t f) const {
     return request->get_connection()->has_feature(f);
@@ -96,9 +96,9 @@ private:
   OpRequest(Message *req, OpTracker *tracker);
 
 protected:
-  void _dump_op_descriptor_unlocked(ostream& stream) const override;
+  void _dump_op_descriptor_unlocked(std::ostream& stream) const override;
   void _unregistered() override;
-  bool filter_out(const set<string>& filters) override;
+  bool filter_out(const std::set<std::string>& filters) override;
 
 public:
   ~OpRequest() override {
@@ -110,6 +110,10 @@ public:
   epoch_t min_epoch = 0;      ///< min epoch needed to handle this msg
 
   bool hitset_inserted;
+
+  template<class T>
+  const T* get_req() const { return static_cast<const T*>(request); }
+
   const Message *get_req() const { return request; }
   Message *get_nonconst_req() { return request; }
 
@@ -121,7 +125,7 @@ public:
     }
   }
 
-  const char *state_string() const override {
+  std::string_view state_string() const override {
     switch(latest_flag_point) {
     case flag_queued_for_pg: return "queued for pg";
     case flag_reached_pg: return "reached pg";
@@ -140,13 +144,13 @@ public:
   void mark_reached_pg() {
     mark_flag_point(flag_reached_pg, "reached_pg");
   }
-  void mark_delayed(const string& s) {
+  void mark_delayed(const std::string& s) {
     mark_flag_point_string(flag_delayed, s);
   }
   void mark_started() {
     mark_flag_point(flag_started, "started");
   }
-  void mark_sub_op_sent(const string& s) {
+  void mark_sub_op_sent(const std::string& s) {
     mark_flag_point_string(flag_sub_op_sent, s);
   }
   void mark_commit_sent() {
@@ -169,11 +173,11 @@ public:
 private:
   void set_rmw_flags(int flags);
   void mark_flag_point(uint8_t flag, const char *s);
-  void mark_flag_point_string(uint8_t flag, const string& s);
+  void mark_flag_point_string(uint8_t flag, const std::string& s);
 };
 
 typedef OpRequest::Ref OpRequestRef;
 
-ostream& operator<<(ostream& out, const OpRequest::ClassInfo& i);
+std::ostream& operator<<(std::ostream& out, const OpRequest::ClassInfo& i);
 
 #endif /* OPREQUEST_H_ */

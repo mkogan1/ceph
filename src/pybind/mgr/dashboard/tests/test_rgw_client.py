@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 import unittest
 
+try:
+    from mock import patch
+except ImportError:
+    from unittest.mock import patch
+
 from .. import mgr
 from ..services.rgw_client import RgwClient
 
@@ -14,27 +19,118 @@ class RgwClientTest(unittest.TestCase):
     }
 
     @classmethod
-    def mock_set_config(cls, key, val):
+    def mock_set_module_option(cls, key, val):
         cls.settings[key] = val
 
     @classmethod
-    def mock_get_config(cls, key, default):
+    def mock_get_module_option(cls, key, default):
         return cls.settings.get(key, default)
 
     @classmethod
     def setUpClass(cls):
-        mgr.get_config.side_effect = cls.mock_get_config
-        mgr.set_config.side_effect = cls.mock_set_config
+        mgr.get_module_option.side_effect = cls.mock_get_module_option
+        mgr.set_module_option.side_effect = cls.mock_set_module_option
 
     def setUp(self):
         RgwClient._user_instances.clear()  # pylint: disable=protected-access
 
     def test_ssl_verify(self):
-        mgr.set_config('RGW_API_SSL_VERIFY', True)
+        mgr.set_module_option('RGW_API_SSL_VERIFY', True)
         instance = RgwClient.admin_instance()
         self.assertTrue(instance.session.verify)
 
     def test_no_ssl_verify(self):
-        mgr.set_config('RGW_API_SSL_VERIFY', False)
+        mgr.set_module_option('RGW_API_SSL_VERIFY', False)
         instance = RgwClient.admin_instance()
         self.assertFalse(instance.session.verify)
+
+    @patch.object(RgwClient, '_get_daemon_zone_info')
+    def test_get_placement_targets_from_default_zone(self, zone_info):
+        zone_info.return_value = {
+            'placement_pools': [
+                {
+                    'key': 'default-placement',
+                    'val': {
+                        'index_pool': 'default.rgw.buckets.index',
+                        'storage_classes': {
+                            'STANDARD': {
+                                'data_pool': 'default.rgw.buckets.data'
+                            }
+                        },
+                        'data_extra_pool': 'default.rgw.buckets.non-ec',
+                        'index_type': 0
+                    }
+                }
+            ],
+            'realm_id': ''
+        }
+
+        instance = RgwClient.admin_instance()
+        expected_result = {
+            'zonegroup': 'default',
+            'placement_targets': [
+                {
+                    'name': 'default-placement',
+                    'data_pool': 'default.rgw.buckets.data'
+                }
+            ]
+        }
+        self.assertEqual(expected_result, instance.get_placement_targets())
+
+    @patch.object(RgwClient, '_get_daemon_zone_info')
+    @patch.object(RgwClient, '_get_daemon_zonegroup_map')
+    def test_get_placement_targets_from_realm_zone(self, zonegroup_map, zone_info):
+        zone_info.return_value = {
+            'id': 'a0df30ea-4b5b-4830-b143-2bedf684663d',
+            'placement_pools': [
+                {
+                    'key': 'default-placement',
+                    'val': {
+                        'index_pool': 'default.rgw.buckets.index',
+                        'storage_classes': {
+                            'STANDARD': {
+                                'data_pool': 'default.rgw.buckets.data'
+                            }
+                        }
+                    }
+                }
+            ],
+            'realm_id': 'b5a25d1b-e7ed-4fe5-b461-74f24b8e759b'
+        }
+
+        zonegroup_map.return_value = [
+            {
+                'api_name': 'zonegroup1-realm1',
+                'zones': [
+                    {
+                        'id': '2ef7d0ef-7616-4e9c-8553-b732ebf0592b'
+                    },
+                    {
+                        'id': 'b1d15925-6c8e-408e-8485-5a62cbccfe1f'
+                    }
+                ]
+            },
+            {
+                'api_name': 'zonegroup2-realm1',
+                'zones': [
+                    {
+                        'id': '645f0f59-8fcc-4e11-95d5-24f289ee8e25'
+                    },
+                    {
+                        'id': 'a0df30ea-4b5b-4830-b143-2bedf684663d'
+                    }
+                ]
+            }
+        ]
+
+        instance = RgwClient.admin_instance()
+        expected_result = {
+            'zonegroup': 'zonegroup2-realm1',
+            'placement_targets': [
+                {
+                    'name': 'default-placement',
+                    'data_pool': 'default.rgw.buckets.data'
+                }
+            ]
+        }
+        self.assertEqual(expected_result, instance.get_placement_targets())

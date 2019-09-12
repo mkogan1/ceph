@@ -30,6 +30,9 @@ namespace ceph {
       ObjectSection(Formatter& f, const char *name) : formatter(f) {
         formatter.open_object_section(name);
       }
+      ObjectSection(Formatter& f, const char *name, const char *ns) : formatter(f) {
+        formatter.open_object_section_in_ns(name, ns);
+      }
       ~ObjectSection() {
         formatter.close_section();
       }
@@ -40,6 +43,9 @@ namespace ceph {
     public:
       ArraySection(Formatter& f, const char *name) : formatter(f) {
         formatter.open_array_section(name);
+      }
+      ArraySection(Formatter& f, const char *name, const char *ns) : formatter(f) {
+        formatter.open_array_section_in_ns(name, ns);
       }
       ~ArraySection() {
         formatter.close_section();
@@ -110,6 +116,18 @@ namespace ceph {
     }
   };
 
+  class copyable_sstream : public std::stringstream {
+  public:
+    copyable_sstream() {}
+    copyable_sstream(const copyable_sstream& rhs) {
+      str(rhs.str());
+    }
+    copyable_sstream& operator=(const copyable_sstream& rhs) {
+      str(rhs.str());
+      return *this;
+    }
+  };
+
   class JSONFormatter : public Formatter {
   public:
     explicit JSONFormatter(bool p = false);
@@ -127,13 +145,26 @@ namespace ceph {
     void open_object_section_in_ns(const char *name, const char *ns) override;
     void close_section() override;
     void dump_unsigned(const char *name, uint64_t u) override;
-    void dump_int(const char *name, int64_t u) override;
+    void dump_int(const char *name, int64_t s) override;
     void dump_float(const char *name, double d) override;
     void dump_string(const char *name, std::string_view s) override;
     std::ostream& dump_stream(const char *name) override;
     void dump_format_va(const char *name, const char *ns, bool quoted, const char *fmt, va_list ap) override;
     int get_len() const override;
     void write_raw_data(const char *data) override;
+
+  protected:
+    virtual bool handle_value(const char *name, std::string_view s, bool quoted) {
+      return false; /* is handling done? */
+    }
+
+    virtual bool handle_open_section(const char *name, const char *ns, bool is_array) {
+      return false; /* is handling done? */
+    }
+
+    virtual bool handle_close_section() {
+      return false; /* is handling done? */
+    }
 
   private:
 
@@ -144,17 +175,26 @@ namespace ceph {
     };
 
     bool m_pretty;
-    void open_section(const char *name, bool is_array);
+    void open_section(const char *name, const char *ns, bool is_array);
     void print_quoted_string(std::string_view s);
     void print_name(const char *name);
     void print_comma(json_formatter_stack_entry_d& entry);
     void finish_pending_string();
 
-    std::stringstream m_ss, m_pending_string;
+    template <class T>
+    void add_value(const char *name, T val);
+    void add_value(const char *name, std::string_view val, bool quoted);
+
+    copyable_sstream m_ss;
+    copyable_sstream m_pending_string;
+    std::string m_pending_name;
     std::list<json_formatter_stack_entry_d> m_stack;
     bool m_is_pending_string;
     bool m_line_break_enabled = false;
   };
+
+  template <class T>
+  void add_value(const char *name, T val);
 
   class XMLFormatter : public Formatter {
   public:
@@ -175,7 +215,7 @@ namespace ceph {
     void open_object_section_in_ns(const char *name, const char *ns) override;
     void close_section() override;
     void dump_unsigned(const char *name, uint64_t u) override;
-    void dump_int(const char *name, int64_t u) override;
+    void dump_int(const char *name, int64_t s) override;
     void dump_float(const char *name, double d) override;
     void dump_string(const char *name, std::string_view s) override;
     std::ostream& dump_stream(const char *name) override;
@@ -203,6 +243,9 @@ namespace ceph {
     std::string m_pending_string_name;
     bool m_header_done;
     bool m_line_break_enabled = false;
+  private:
+    template <class T>
+    void add_value(const char *name, T val);
   };
 
   class TableFormatter : public Formatter {
@@ -226,7 +269,7 @@ namespace ceph {
 
     void close_section() override;
     void dump_unsigned(const char *name, uint64_t u) override;
-    void dump_int(const char *name, int64_t u) override;
+    void dump_int(const char *name, int64_t s) override;
     void dump_float(const char *name, double d) override;
     void dump_string(const char *name, std::string_view s) override;
     void dump_format_va(const char *name, const char *ns, bool quoted, const char *fmt, va_list ap) override;
@@ -238,6 +281,8 @@ namespace ceph {
     void get_attrs_str(const FormatterAttrs *attrs, std::string& attrs_str);
 
   private:
+    template <class T>
+    void add_value(const char *name, T val);
     void open_section_in_ns(const char *name, const char *ns, const FormatterAttrs *attrs);
     std::vector< std::vector<std::pair<std::string, std::string> > > m_vec;
     std::stringstream m_ss;
@@ -254,6 +299,7 @@ namespace ceph {
     std::vector< std::string > m_column_name;
   };
 
-
+  std::string fixed_to_string(int64_t num, int scale);
+  std::string fixed_u_to_string(uint64_t num, int scale);
 }
 #endif

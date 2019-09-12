@@ -24,6 +24,7 @@
 #include <memory>
 
 #include "include/ceph_assert.h"
+#include "common/ceph_mutex.h"
 
 #define mydout(cct, v) lgeneric_subdout(cct, context, v)
 
@@ -174,18 +175,17 @@ public:
 
 
 struct C_Lock : public Context {
-  Mutex *lock;
+  ceph::mutex *lock;
   Context *fin;
-  C_Lock(Mutex *l, Context *c) : lock(l), fin(c) {}
+  C_Lock(ceph::mutex *l, Context *c) : lock(l), fin(c) {}
   ~C_Lock() override {
     delete fin;
   }
   void finish(int r) override {
     if (fin) {
-      lock->Lock();
+      std::lock_guard l{*lock};
       fin->complete(r);
       fin = NULL;
-      lock->Unlock();
     }
   }
 };
@@ -260,21 +260,22 @@ typedef C_ContextsBase<Context, Context> C_Contexts;
  * BUG:? only reports error from last sub to have an error return
  */
 template <class ContextType, class ContextInstanceType>
-class C_GatherBase : public ContextType {
+class C_GatherBase {
 private:
   CephContext *cct;
-  int result;
+  int result = 0;
   ContextType *onfinish;
 #ifdef DEBUG_GATHER
   std::set<ContextType*> waitfor;
 #endif
-  int sub_created_count;
-  int sub_existing_count;
-  mutable Mutex lock;
-  bool activated;
+  int sub_created_count = 0;
+  int sub_existing_count = 0;
+  mutable ceph::recursive_mutex lock =
+    ceph::make_recursive_mutex("C_GatherBase::lock"); // disable lockdep
+  bool activated = false;
 
   void sub_finish(ContextType* sub, int r) {
-    lock.Lock();
+    lock.lock();
 #ifdef DEBUG_GATHER
     ceph_assert(waitfor.count(sub));
     waitfor.erase(sub);
@@ -288,10 +289,10 @@ private:
     if (r < 0 && result == 0)
       result = r;
     if ((activated == false) || (sub_existing_count != 0)) {
-      lock.Unlock();
+      lock.unlock();
       return;
     }
-    lock.Unlock();
+    lock.unlock();
     delete_me();
   }
 
@@ -326,34 +327,31 @@ private:
 
 public:
   C_GatherBase(CephContext *cct_, ContextType *onfinish_)
-    : cct(cct_), result(0), onfinish(onfinish_),
-      sub_created_count(0), sub_existing_count(0),
-      lock("C_GatherBase::lock", true, false), //disable lockdep
-      activated(false)
+    : cct(cct_), onfinish(onfinish_)
   {
     mydout(cct,10) << "C_GatherBase " << this << ".new" << dendl;
   }
-  ~C_GatherBase() override {
+  ~C_GatherBase() {
     mydout(cct,10) << "C_GatherBase " << this << ".delete" << dendl;
   }
   void set_finisher(ContextType *onfinish_) {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     ceph_assert(!onfinish);
     onfinish = onfinish_;
   }
   void activate() {
-    lock.Lock();
+    lock.lock();
     ceph_assert(activated == false);
     activated = true;
     if (sub_existing_count != 0) {
-      lock.Unlock();
+      lock.unlock();
       return;
     }
-    lock.Unlock();
+    lock.unlock();
     delete_me();
   }
   ContextType *new_sub() {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     ceph_assert(activated == false);
     sub_created_count++;
     sub_existing_count++;
@@ -364,17 +362,14 @@ public:
     mydout(cct,10) << "C_GatherBase " << this << ".new_sub is " << sub_created_count << " " << s << dendl;
     return s;
   }
-  void finish(int r) override {
-    ceph_abort();    // nobody should ever call me.
-  }
 
   inline int get_sub_existing_count() const {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     return sub_existing_count;
   }
 
   inline int get_sub_created_count() const {
-    Mutex::Locker l(lock);
+    std::lock_guard l{lock};
     return sub_created_count;
   }
 };

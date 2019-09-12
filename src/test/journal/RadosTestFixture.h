@@ -2,7 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include "test/librados/test.h"
-#include "common/Mutex.h"
+#include "common/ceph_mutex.h"
 #include "common/Timer.h"
 #include "journal/JournalMetadata.h"
 #include "cls/journal/cls_journal_types.h"
@@ -26,7 +26,6 @@ public:
   journal::JournalMetadataPtr create_metadata(const std::string &oid,
                                               const std::string &client_id = "client",
                                               double commit_internal = 0.1,
-                                              uint64_t max_fetch_bytes = 0,
                                               int max_concurrent_object_sets = 0);
   int append(const std::string &oid, const bufferlist &bl);
 
@@ -39,17 +38,17 @@ public:
 
   struct Listener : public journal::JournalMetadataListener {
     RadosTestFixture *test_fixture;
-    Mutex mutex;
-    Cond cond;
+    ceph::mutex mutex = ceph::make_mutex("mutex");
+    ceph::condition_variable cond;
     std::map<journal::JournalMetadata*, uint32_t> updates;
 
     Listener(RadosTestFixture *_test_fixture)
-      : test_fixture(_test_fixture), mutex("mutex") {}
+      : test_fixture(_test_fixture) {}
 
     void handle_update(journal::JournalMetadata *metadata) override {
-      Mutex::Locker locker(mutex);
+      std::lock_guard locker{mutex};
       ++updates[metadata];
-      cond.Signal();
+      cond.notify_all();
     }
   };
 
@@ -66,8 +65,8 @@ public:
 
   ContextWQ *m_work_queue = nullptr;
 
-  Mutex m_timer_lock;
-  SafeTimer *m_timer;
+  ceph::mutex m_timer_lock;
+  SafeTimer *m_timer = nullptr;
 
   Listener m_listener;
 

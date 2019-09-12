@@ -108,7 +108,7 @@ class FSStatus(object):
         """
         fs = self.get_fsmap(fscid)
         for info in fs['mdsmap']['info'].values():
-            if info['rank'] >= 0:
+            if info['rank'] >= 0 and info['state'] != 'up:standby-replay':
                 yield info
 
     def get_rank(self, fscid, rank):
@@ -139,6 +139,28 @@ class FSStatus(object):
         else:
             log.warn(json.dumps(list(self.get_all()), indent=2))  # dump for debugging
             raise RuntimeError("MDS id '{0}' not found in map".format(name))
+
+    def get_mds_gid(self, gid):
+        """
+        Get the info for the given MDS gid.
+        """
+        for info in self.get_all():
+            if info['gid'] == gid:
+                return info
+        return None
+
+    def hadfailover(self, status):
+        """
+        Compares two statuses for mds failovers.
+        Returns True if there is a failover.
+        """
+        for fs in status.map['filesystems']:
+            for info in fs['mdsmap']['info'].values():
+                oldinfo = self.get_mds_gid(info['gid'])
+                if oldinfo is None or oldinfo['incarnation'] != info['incarnation']:
+                    return True
+        #all matching
+        return False
 
 class CephCluster(object):
     @property
@@ -283,12 +305,6 @@ class MDSCluster(CephCluster):
     def status(self):
         return FSStatus(self.mon_manager)
 
-    def set_down(self, down=True):
-        self.mon_manager.raw_cluster_cmd("fs", "set", str(self.name), "down", str(down).lower())
-
-    def set_joinable(self, joinable=True):
-        self.mon_manager.raw_cluster_cmd("fs", "set", str(self.name), "joinable", str(joinable).lower())
-
     def delete_all_filesystems(self):
         """
         Remove all filesystems that exist, and any pools in use by them.
@@ -301,16 +317,13 @@ class MDSCluster(CephCluster):
         # mark cluster down for each fs to prevent churn during deletion
         status = self.status()
         for fs in status.get_filesystems():
-            self.mon_manager.raw_cluster_cmd("fs", "set", str(fs['mdsmap']['fs_name']), "joinable", "false")
+            self.mon_manager.raw_cluster_cmd("fs", "fail", str(fs['mdsmap']['fs_name']))
 
         # get a new copy as actives may have since changed
         status = self.status()
         for fs in status.get_filesystems():
             mdsmap = fs['mdsmap']
             metadata_pool = pool_id_name[mdsmap['metadata_pool']]
-
-            for gid in mdsmap['up'].values():
-                self.mon_manager.raw_cluster_cmd('mds', 'fail', gid.__str__())
 
             self.mon_manager.raw_cluster_cmd('fs', 'rm', mdsmap['fs_name'], '--yes-i-really-mean-it')
             self.mon_manager.raw_cluster_cmd('osd', 'pool', 'delete',
@@ -417,6 +430,9 @@ class Filesystem(MDSCluster):
         if not hasattr(self._ctx, "filesystem"):
             self._ctx.filesystem = self
 
+    def get_task_status(self, status_key):
+        return self.mon_manager.get_service_task_status("mds", status_key)
+
     def getinfo(self, refresh = False):
         status = self.status()
         if self.id is not None:
@@ -477,12 +493,24 @@ class Filesystem(MDSCluster):
         assert(mds_map['max_mds'] == max_mds)
         assert(mds_map['in'] == list(range(0, max_mds)))
 
+    def fail(self):
+        self.mon_manager.raw_cluster_cmd("fs", "fail", str(self.name))
+
     def set_var(self, var, *args):
         a = map(str, args)
         self.mon_manager.raw_cluster_cmd("fs", "set", self.name, var, *a)
 
+    def set_down(self, down=True):
+        self.set_var("down", str(down).lower())
+
+    def set_joinable(self, joinable=True):
+        self.set_var("joinable", str(joinable).lower())
+
     def set_max_mds(self, max_mds):
         self.set_var("max_mds", "%d" % max_mds)
+
+    def set_allow_standby_replay(self, yes):
+        self.set_var("allow_standby_replay", str(yes).lower())
 
     def set_allow_new_snaps(self, yes):
         self.set_var("allow_new_snaps", str(yes).lower(), '--yes-i-really-mean-it')
@@ -602,8 +630,8 @@ class Filesystem(MDSCluster):
             status = self.status()
         return status.get_fsmap(self.id)['mdsmap']
 
-    def get_var(self, var):
-        return self.status().get_fsmap(self.id)['mdsmap'][var]
+    def get_var(self, var, status=None):
+        return self.get_mds_map(status=status)[var]
 
     def add_data_pool(self, name):
         self.mon_manager.raw_cluster_cmd('osd', 'pool', 'create', name, self.get_pgs_per_fs_pool().__str__())
@@ -782,10 +810,35 @@ class Filesystem(MDSCluster):
             status = self.getinfo()
         return status.get_rank(self.id, rank)
 
+    def rank_restart(self, rank=0, status=None):
+        name = self.get_rank(rank=rank, status=status)['name']
+        self.mds_restart(mds_id=name)
+
+    def rank_signal(self, signal, rank=0, status=None):
+        name = self.get_rank(rank=rank, status=status)['name']
+        self.mds_signal(name, signal)
+
+    def rank_freeze(self, yes, rank=0):
+        self.mon_manager.raw_cluster_cmd("mds", "freeze", "{}:{}".format(self.id, rank), str(yes).lower())
+
+    def rank_fail(self, rank=0):
+        self.mon_manager.raw_cluster_cmd("mds", "fail", "{}:{}".format(self.id, rank))
+
     def get_ranks(self, status=None):
         if status is None:
             status = self.getinfo()
         return status.get_ranks(self.id)
+
+    def get_replays(self, status=None):
+        if status is None:
+            status = self.getinfo()
+        return status.get_replays(self.id)
+
+    def get_replay(self, rank=0, status=None):
+        for replay in self.get_replays(status=status):
+            if replay['rank'] == rank:
+                return replay
+        return None
 
     def get_rank_names(self, status=None):
         """
@@ -920,6 +973,10 @@ class Filesystem(MDSCluster):
     def rank_asok(self, command, rank=0, status=None, timeout=None):
         info = self.get_rank(rank=rank, status=status)
         return self.json_asok(command, 'mds', info['name'], timeout=timeout)
+
+    def rank_tell(self, command, rank=0, status=None):
+        info = self.get_rank(rank=rank, status=status)
+        return json.loads(self.mon_manager.raw_cluster_cmd("tell", 'mds.{0}'.format(info['name']), *command))
 
     def read_cache(self, path, depth=None):
         cmd = ["dump", "tree", path]
