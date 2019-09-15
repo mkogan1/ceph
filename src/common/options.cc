@@ -6883,7 +6883,7 @@ std::vector<Option> get_rgw_options() {
     .set_description("Number of seconds the timeout on the reshard locks (bucket reshard lock and reshard log lock) are set to. As a reshard proceeds these locks can be renewed/extended. If too short, reshards cannot complete and will fail, causing a future reshard attempt. If too long a hung or crashed reshard attempt will keep the bucket locked for an extended period, not allowing RGW to detect the failed reshard attempt and recover.")
     .add_tag("performance")
     .add_service("rgw"),
-
+    
     Option("rgw_reshard_batch_size", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(64)
     .set_min(8)
@@ -6998,12 +6998,6 @@ std::vector<Option> get_rgw_options() {
         "If true, RGW will dynamicall increase the number of shards in buckets that have "
         "a high number of objects per shard.")
     .add_see_also("rgw_max_objs_per_shard"),
-
-
-
-
-
-
 
     Option("rgw_max_objs_per_shard", Option::TYPE_UINT, Option::LEVEL_BASIC)
     .set_default(100000)
