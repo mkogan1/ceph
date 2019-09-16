@@ -29,14 +29,15 @@ struct ListObjectImpl;
 class NObjectIteratorImpl;
 struct ObjListCtx;
 class ObjectOperationImpl;
-  class CacheRequest;
-  struct PlacementGroupImpl;
+struct PlacementGroupImpl;
 struct PoolAsyncCompletionImpl;
 
 typedef struct rados_cluster_stat_t cluster_stat_t;
-  struct L2CacheRequest;
-  struct L1CacheRequest;
 typedef struct rados_pool_stat_t pool_stat_t;
+
+class CacheRequest;
+struct L2CacheRequest;
+struct L1CacheRequest;
 
 typedef void *list_ctx_t;
 typedef uint64_t auid_t;
