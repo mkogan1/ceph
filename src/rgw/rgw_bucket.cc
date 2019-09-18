@@ -319,6 +319,8 @@ int rgw_link_bucket(RGWRados* const store,
   cls_user_bucket_entry new_bucket;
 
   RGWBucketEntryPoint ep;
+  RGWObjVersionTracker objv;
+  RGWObjVersionTracker* pobjv = &objv;
 
   bucket.convert(&new_bucket.bucket);
   new_bucket.size = 0;
@@ -333,11 +335,12 @@ int rgw_link_bucket(RGWRados* const store,
     if (pinfo) {
       ep = pinfo->ep;
       pattrs = &pinfo->attrs;
+      pobjv = &pinfo->ep_objv;
     } else {
       RGWObjectCtx obj_ctx(store);
 
       ret = store->get_bucket_entrypoint_info(obj_ctx,
-		tenant_name, bucket_name, ep, &pinfo->ep_objv, NULL, &attrs);
+		tenant_name, bucket_name, ep, pobjv, NULL, &attrs);
       if (ret < 0 && ret != -ENOENT) {
 	ldout(store->ctx(), 0) << "ERROR: store->get_bucket_entrypoint_info() returned: "
 			       << cpp_strerror(-ret) << dendl;
@@ -364,7 +367,7 @@ int rgw_link_bucket(RGWRados* const store,
   ep.owner = user_id;
   ep.bucket = bucket;
   ret = store->put_bucket_entrypoint_info(tenant_name, bucket_name, ep, false,
-					  pinfo->ep_objv, real_time(), pattrs);
+					  *pobjv, real_time(), pattrs);
   if (ret < 0)
     goto done_err;
 
