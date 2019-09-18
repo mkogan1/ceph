@@ -5304,7 +5304,12 @@ int RGWRados::Object::complete_atomic_modification()
   }
 
   string tag = (state->tail_tag.length() > 0 ? state->tail_tag.to_str() : state->obj_tag.to_str());
-  return store->gc->send_chain(chain, tag);  // do it sync
+  auto ret = store->gc->send_chain(chain, tag); // do it synchronously
+  if (ret < 0) {
+    //Delete objects inline if send chain to gc fails
+    store->delete_objs_inline(chain, tag);
+  }
+  return 0;
 }
 
 void RGWRados::update_gc_chain(rgw_obj& head_obj, RGWObjManifest& manifest, cls_rgw_obj_chain *chain)
@@ -5432,6 +5437,37 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
   get_bucket_index_object(bucket_oid_base, bucket_info.num_shards,
                           shard_id, bucket_obj);
   return 0;
+}
+
+void RGWRados::delete_objs_inline(cls_rgw_obj_chain& chain, const string& tag)
+{
+  string last_pool;
+  std::unique_ptr<IoCtx> ctx(new IoCtx);
+  int ret = 0;
+  for (auto liter = chain.objs.begin(); liter != chain.objs.end(); ++liter) {
+    cls_rgw_obj& obj = *liter;
+    if (obj.pool != last_pool) {
+      ctx.reset(new IoCtx);
+      ret = rgw_init_ioctx(get_rados_handle(), obj.pool, *ctx);
+      if (ret < 0) {
+        last_pool = "";
+        ldout(cct, 0) << "ERROR: failed to create ioctx pool=" <<
+        obj.pool << dendl;
+        continue;
+      }
+      last_pool = obj.pool;
+    }
+    ctx->locator_set_key(obj.loc);
+    const string& oid = obj.key.name; /* just stored raw oid there */
+    ldout(cct, 5) << "delete_objs_inline: removing " << obj.pool <<
+    ":" << obj.key.name << dendl;
+    ObjectWriteOperation op;
+    cls_refcount_put(op, tag, true);
+    ret = ctx->operate(oid, &op);
+    if (ret < 0) {
+      ldout(cct, 5) << "delete_objs_inline: refcount put returned error " << ret << dendl;
+    }
+  }
 }
 
 static void accumulate_raw_stats(const rgw_bucket_dir_header& header,
