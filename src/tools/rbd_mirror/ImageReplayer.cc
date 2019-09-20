@@ -1372,7 +1372,7 @@ void ImageReplayer<I>::send_mirror_status_update(const OptionalState &opt_state)
     state = *opt_state;
   }
 
-  cls::rbd::MirrorImageStatus status;
+  cls::rbd::MirrorImageSiteStatus status;
   status.up = true;
   switch (state) {
   case STATE_STARTING:
