@@ -277,7 +277,7 @@ int abort_multipart_upload(RGWRados *store, CephContext *cct,
   } while (truncated);
 
   /* use upload id as tag and do it asynchronously */
-  ret = store->send_chain_to_gc(chain, mp_obj.get_upload_id(), false);
+  ret = store->send_chain_to_gc(chain, mp_obj.get_upload_id());
   if (ret < 0) {
     ldout(cct, 5) << __func__ << ": gc->send_chain() returned " << ret << dendl;
     return (ret == -ENOENT) ? -ERR_NO_SUCH_UPLOAD : ret;

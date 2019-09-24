@@ -5304,7 +5304,7 @@ int RGWRados::Object::complete_atomic_modification()
   }
 
   string tag = (state->tail_tag.length() > 0 ? state->tail_tag.to_str() : state->obj_tag.to_str());
-  return store->gc->send_chain(chain, tag, false);  // do it async
+  return store->gc->send_chain(chain, tag);  // do it sync
 }
 
 void RGWRados::update_gc_chain(rgw_obj& head_obj, RGWObjManifest& manifest, cls_rgw_obj_chain *chain)
@@ -5321,9 +5321,9 @@ void RGWRados::update_gc_chain(rgw_obj& head_obj, RGWObjManifest& manifest, cls_
   }
 }
 
-int RGWRados::send_chain_to_gc(cls_rgw_obj_chain& chain, const string& tag, bool sync)
+int RGWRados::send_chain_to_gc(cls_rgw_obj_chain& chain, const string& tag)
 {
-  return gc->send_chain(chain, tag, sync);
+  return gc->send_chain(chain, tag);
 }
 
 int RGWRados::open_bucket_index(const RGWBucketInfo& bucket_info,
@@ -5541,7 +5541,7 @@ int RGWRados::defer_gc(void *ctx, const RGWBucketInfo& bucket_info, const rgw_ob
 
   cls_rgw_obj_chain chain;
   update_gc_chain(state->obj, state->manifest, &chain);
-  return gc->defer_chain(tag, chain, true);
+  return gc->async_defer_chain(tag, chain);
 }
 
 void RGWRados::remove_rgw_head_obj(ObjectWriteOperation& op)
@@ -9137,16 +9137,10 @@ int RGWRados::gc_operate(string& oid, librados::ObjectWriteOperation *op)
   return gc_pool_ctx.operate(oid, op);
 }
 
-int RGWRados::gc_aio_operate(string& oid, librados::ObjectWriteOperation *op, AioCompletion **pc)
+int RGWRados::gc_aio_operate(const string& oid, librados::AioCompletion *c,
+                             librados::ObjectWriteOperation *op)
 {
-  AioCompletion *c = librados::Rados::aio_create_completion(NULL, NULL, NULL);
-  int r = gc_pool_ctx.aio_operate(oid, c, op);
-  if (!pc) {
-    c->release();
-  } else {
-    *pc = c;
-  }
-  return r;
+  return gc_pool_ctx.aio_operate(oid, c, op);
 }
 
 int RGWRados::gc_operate(string& oid, librados::ObjectReadOperation *op, bufferlist *pbl)
