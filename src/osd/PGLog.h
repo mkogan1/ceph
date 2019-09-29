@@ -260,7 +260,8 @@ public:
       const osd_reqid_t &r,
       eversion_t *version,
       version_t *user_version,
-      int *return_code) const
+      int *return_code,
+      vector<pg_log_op_return_item_t> *op_returns) const
     {
       ceph_assert(version);
       ceph_assert(user_version);
@@ -274,6 +275,7 @@ public:
 	*version = p->second->version;
 	*user_version = p->second->user_version;
 	*return_code = p->second->return_code;
+	*op_returns = p->second->op_returns;
 	return true;
       }
 
@@ -292,6 +294,7 @@ public:
 	    *version = p->second->version;
 	    *user_version = i->second;
 	    *return_code = p->second->return_code;
+	    *op_returns = p->second->op_returns;
 	    if (*return_code >= 0) {
 	      auto it = p->second->extra_reqid_return_codes.find(idx);
 	      if (it != p->second->extra_reqid_return_codes.end()) {
@@ -312,6 +315,7 @@ public:
 	*version = q->second->version;
 	*user_version = q->second->user_version;
 	*return_code = q->second->return_code;
+	*op_returns = q->second->op_returns;
 	return true;
       }
 

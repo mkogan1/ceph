@@ -1745,11 +1745,12 @@ OSDMapRef OSDService::try_get_map(epoch_t epoch)
 
 void OSDService::reply_op_error(OpRequestRef op, int err)
 {
-  reply_op_error(op, err, eversion_t(), 0);
+  reply_op_error(op, err, eversion_t(), 0, {});
 }
 
 void OSDService::reply_op_error(OpRequestRef op, int err, eversion_t v,
-                                version_t uv)
+                                version_t uv,
+				vector<pg_log_op_return_item_t> op_returns)
 {
   const MOSDOp *m = static_cast<const MOSDOp*>(op->get_req());
   ceph_assert(m->get_type() == CEPH_MSG_OSD_OP);
@@ -1758,6 +1759,7 @@ void OSDService::reply_op_error(OpRequestRef op, int err, eversion_t v,
 
   MOSDOpReply *reply = new MOSDOpReply(m, err, osdmap->get_epoch(), flags, true);
   reply->set_reply_versions(v, uv);
+  reply->set_op_returns(op_returns);
   m->get_connection()->send_message(reply);
 }
 
