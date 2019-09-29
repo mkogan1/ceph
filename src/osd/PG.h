@@ -1396,7 +1396,9 @@ protected:
   map<hobject_t, list<Context*>> callbacks_for_degraded_object;
 
   map<eversion_t,
-      list<tuple<OpRequestRef, version_t, int> > > waiting_for_ondisk;
+      list<
+	tuple<OpRequestRef, version_t, int,
+	      vector<pg_log_op_return_item_t>>>> waiting_for_ondisk;
 
   void requeue_object_waiters(map<hobject_t, list<OpRequestRef>>& m);
   void requeue_op(OpRequestRef op);
@@ -3063,7 +3065,8 @@ protected:
     const osd_reqid_t &r,
     eversion_t *version,
     version_t *user_version,
-    int *return_code) const;
+    int *return_code,
+    vector<pg_log_op_return_item_t> *op_returns) const;
   eversion_t projected_last_update;
   eversion_t get_next_version() const {
     eversion_t at_version(
