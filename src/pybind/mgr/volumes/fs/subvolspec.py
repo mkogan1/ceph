@@ -90,7 +90,7 @@ class SubvolumeSpec(object):
         """
         return the subvolume snapshot path for a given snapshot name
         """
-        return os.path.join(self.subvolume_path, snapdir, snapname)
+        return os.path.join(self.subvolume_path, snapdir.encode('utf-8'), snapname.encode('utf-8'))
 
     def make_subvol_snapdir_path(self, snapdir):
         """
@@ -102,7 +102,7 @@ class SubvolumeSpec(object):
         """
         return the group snapshot path for a given snapshot name
         """
-        return os.path.join(self.group_path, snapdir, snapname)
+        return os.path.join(self.group_path, snapdir.encode('utf-8'), snapname.encode('utf-8'))
 
     def make_group_snapdir_path(self, snapdir):
         """
