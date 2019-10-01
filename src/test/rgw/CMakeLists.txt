@@ -203,3 +203,7 @@ add_ceph_unittest(unittest_rgw_url)
 target_link_libraries(unittest_rgw_url ${rgw_libs})
 add_ceph_test(test-ceph-diff-sorted.sh
   ${CMAKE_CURRENT_SOURCE_DIR}/test-ceph-diff-sorted.sh)
+
+add_executable(ceph_test_rgw_gc_log test_rgw_gc_log.cc $<TARGET_OBJECTS:unit-main>)
+add_ceph_unittest(ceph_test_rgw_gc_log)
+target_link_libraries(ceph_test_rgw_gc_log radostest-cxx ${rgw_libs})
