@@ -954,17 +954,21 @@ int RGWRadosList::handle_stat_result(RGWRados::Object::Stat::Result& result,
 
   rgw_bucket& bucket = result.obj.bucket;
 
-  ldout(store->ctx(), 20) << "RRGWRadosList::" << __func__ <<
+  ldout(store->ctx(), 20) << "RGWRadosList::" << __func__ <<
       " bucket=" << bucket << ", has_manifest=" << result.has_manifest <<
       dendl;
 
   // iterator to store result of dlo/slo attribute find
   decltype(result.attrs)::iterator attr_it = result.attrs.end();
+  const std::string oid = bucket.marker + "_" + result.obj.get_object();
+  if (visited_oids.find(oid) != visited_oids.end()) {
+    // apparently we hit a loop; don't continue with this oid
+    return 0;
+  }
 
   if (!result.has_manifest) {
     /* a very very old object, or part of a multipart upload during upload */
-    const string loc = bucket.marker + "_" + result.obj.get_object();
-    obj_oids.insert(loc);
+    obj_oids.insert(oid);
 
     /*
      * multipart parts don't have manifest on them, it's in the meta
@@ -980,13 +984,13 @@ int RGWRadosList::handle_stat_result(RGWRados::Object::Stat::Result& result,
      * impact. Perhaps a future version can consult the meta object
      * and produce an absolutely correct output. */
 
-    obj_oids.insert(obj_force_ns(loc, "shadow"));
+    obj_oids.insert(obj_force_ns(oid, "shadow"));
   } else if ((attr_it = result.attrs.find(RGW_ATTR_USER_MANIFEST)) !=
 	     result.attrs.end()) {
     // *** handle DLO object
 
-    const std::string s = bucket.marker + "_" + result.obj.get_object();
-    obj_oids.insert(s);
+    obj_oids.insert(oid);
+    visited_oids.insert(oid); // prevent dlo loops
 
     char* prefix_path_c = attr_it->second.c_str();
     const std::string& prefix_path = prefix_path_c;
@@ -1004,8 +1008,8 @@ int RGWRadosList::handle_stat_result(RGWRados::Object::Stat::Result& result,
 	     result.attrs.end()) {
     // *** handle SLO object
 
-    const std::string s = bucket.marker + "_" + result.obj.get_object();
-    obj_oids.insert(s);
+    obj_oids.insert(oid);
+    visited_oids.insert(oid); // prevent slo loops
 
     RGWSLOInfo slo_info;
     bufferlist::const_iterator bliter = attr_it->second.begin();
@@ -1013,7 +1017,7 @@ int RGWRadosList::handle_stat_result(RGWRados::Object::Stat::Result& result,
       ::decode(slo_info, bliter);
     } catch (buffer::error& err) {
       ldout(store->ctx(), 0) <<
-	"ERROR: failed to decode slo manifest for " << s << dendl;
+	"ERROR: failed to decode slo manifest for " << oid << dendl;
       return -EIO;
     }
 
@@ -1044,8 +1048,7 @@ int RGWRadosList::handle_stat_result(RGWRados::Object::Stat::Result& result,
     if (0 == manifest.get_max_head_size()) {
       // in multipart, the head object contains no data and just has
       // the manifest
-      const std::string s = bucket.marker + "_" + result.obj.get_object();
-      obj_oids.insert(s);
+      obj_oids.insert(oid);
       first_insert = true;
     }
 
