@@ -971,7 +971,7 @@ HashiCorp Vault Settings
 
 ``rgw crypt vault addr``
 
-:Description: Provide a URL to the Vault server secret path.
+:Description: Base URL to the Vault server.
 :Type: String
 :Default: None
 
