@@ -359,15 +359,7 @@ int RGWBucketReshard::create_new_bucket_instance(int new_num_shards,
 
 int RGWBucketReshard::cancel()
 {
-  int ret = reshard_lock.lock();
-  if (ret < 0) {
-    return ret;
-  }
-
-  ret = clear_resharding();
-
-  reshard_lock.unlock();
-  return ret;
+  return clear_resharding();
 }
 
 class BucketInfoReshardUpdate
