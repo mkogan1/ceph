@@ -87,6 +87,15 @@ add_executable(unittest_rgw_crypto
   )
 add_ceph_unittest(unittest_rgw_crypto ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/unittest_rgw_crypto)
 
+# ceph_test_rgw_reshard
+set(test_rgw_reshard_srcs test_rgw_reshard.cc)
+add_executable(unittest_rgw_reshard
+  ${test_rgw_reshard_srcs}
+  )
+add_ceph_unittest(unittest_rgw_reshard ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/unittest_rgw_reshard)
+target_link_libraries(unittest_rgw_reshard rgw_a)
+
+
 target_link_libraries(unittest_rgw_crypto
   rgw_a
   cls_rgw_client
