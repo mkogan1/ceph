@@ -1702,10 +1702,11 @@ int RGWDefaultSyncModule::create_instance(CephContext *cct, const JSONFormattabl
 
 RGWCoroutine *RGWDefaultDataSyncModule::sync_object(RGWDataSyncEnv *sync_env, RGWBucketInfo& bucket_info, rgw_obj_key& key, std::optional<uint64_t> versioned_epoch, rgw_zone_set *zones_trace)
 {
+  bool stat_follow_olh = false;
   return new RGWFetchRemoteObjCR(sync_env->async_rados, sync_env->store, sync_env->source_zone, bucket_info,
 				 std::nullopt,
                                  key, std::nullopt, versioned_epoch,
-                                 true, zones_trace, sync_env->counters);
+                                 true, zones_trace, sync_env->counters, sync_env->dpp, stat_follow_olh);
 }
 
 RGWCoroutine *RGWDefaultDataSyncModule::remove_object(RGWDataSyncEnv *sync_env, RGWBucketInfo& bucket_info, rgw_obj_key& key,
@@ -1770,8 +1771,10 @@ RGWCoroutine *RGWArchiveDataSyncModule::sync_object(RGWDataSyncEnv *sync_env, RG
   }
 
   std::optional<rgw_obj_key> dest_key;
+  bool stat_follow_olh = false;
 
   if (versioned_epoch.value_or(0) == 0) { /* force version if not set */
+    stat_follow_olh = true;
     versioned_epoch = 0;
     dest_key = key;
     if (key.instance.empty()) {
@@ -1782,7 +1785,7 @@ RGWCoroutine *RGWArchiveDataSyncModule::sync_object(RGWDataSyncEnv *sync_env, RG
   return new RGWFetchRemoteObjCR(sync_env->async_rados, sync_env->store, sync_env->source_zone,
                                  bucket_info, std::nullopt,
                                  key, dest_key, versioned_epoch,
-                                 true, zones_trace, nullptr);
+                                 true, zones_trace, nullptr, sync_env->dpp, stat_follow_olh);
 }
 
 RGWCoroutine *RGWArchiveDataSyncModule::remove_object(RGWDataSyncEnv *sync_env, RGWBucketInfo& bucket_info, rgw_obj_key& key,
