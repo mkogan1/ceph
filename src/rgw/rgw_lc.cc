@@ -2181,9 +2181,10 @@ std::string s3_expiration_header(
     // update earliest expiration
     if (rule_expiration_date) {
       if ((! expiration_date) ||
-	  (*expiration_date < *rule_expiration_date)) {
+	  (*expiration_date > *rule_expiration_date)) {
       expiration_date =
 	boost::optional<ceph::real_time>(rule_expiration_date);
+      rule_id = boost::optional<std::string>(id);
       }
     }
   }
