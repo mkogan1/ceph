@@ -2447,8 +2447,20 @@ int RGWRados::Bucket::List::list_objects_ordered(
     }
   }
 
+  constexpr int allowed_read_attempts = 2;
   string skip_after_delim;
-  while (truncated && count <= max) {
+  for (int attempt = 0; attempt < allowed_read_attempts; ++attempt) {
+    // this loop is generally expected only to have a single
+    // iteration; see bottom of loop for early exit
+
+    if (skip_after_delim > cur_marker.name) {
+      cur_marker = skip_after_delim;
+
+      ldout(cct, 20) << "setting cur_marker="
+		     << cur_marker.name
+		     << "[" << cur_marker.instance << "]"
+		     << dendl;
+    }
     std::map<string, rgw_bucket_dir_entry> ent_map;
     int r = store->cls_bucket_list_ordered(target->get_bucket_info(),
 					   shard_id,
@@ -2544,26 +2556,19 @@ int RGWRados::Bucket::List::list_objects_ordered(
 
       result->emplace_back(std::move(entry));
       count++;
+    } // eiter for loop
+
+    // if we finished listing, or if we're returning at least half the
+    // requested entries, that's enough; S3 and swift protocols allow
+    // returning fewer than max entries
+    if (!truncated || count >= max / 2) {
+      break;
     }
 
-    if (!params.delim.empty()) {
-      int marker_delim_pos = cur_marker.name.find(params.delim, cur_prefix.size());
-      if (marker_delim_pos >= 0) {
-        skip_after_delim = cur_marker.name.substr(0, marker_delim_pos);
-        skip_after_delim.append(after_delim_s);
-
-        ldout(cct, 20) << "skip_after_delim=" << skip_after_delim << dendl;
-
-        if (skip_after_delim > cur_marker.name) {
-          cur_marker = skip_after_delim;
-          ldout(cct, 20) << "setting cur_marker="
-                         << cur_marker.name
-                         << "[" << cur_marker.instance << "]"
-                         << dendl;
-        }
-      }
-    }
-  }
+    ldout(cct, 1) << "RGWRados::Bucket::List::" << __func__ <<
+      " INFO ordered bucket listing requires read #" << (2 + attempt) <<
+      dendl;
+  } // read attempt loop
 
 done:
   if (is_truncated)
@@ -9085,6 +9090,21 @@ int RGWRados::cls_obj_set_bucket_tag_timeout(RGWBucketInfo& bucket_info, uint64_
 }
 
 
+uint32_t RGWRados::calc_ordered_bucket_list_per_shard(uint32_t num_entries,
+						      uint32_t num_shards)
+{
+  constexpr uint32_t min_read = 8;
+  constexpr double excess_factor = 0.1; // read 10% extra
+
+  const uint32_t safety_per_shard =
+    uint32_t((1.0 + excess_factor) * num_entries / num_shards);
+  const uint32_t goal_per_shard = std::min(num_entries, safety_per_shard);
+  const uint32_t num_entries_per_shard = std::max(goal_per_shard, min_read);
+
+  return num_entries_per_shard;
+}
+
+
 int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 				      int shard_id,
 				      const rgw_obj_index_key& start,
@@ -9105,17 +9125,27 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
   // value - list result for the corresponding oid (shard), it is filled by
   //         the AIO callback
   map<int, string> oids;
-  map<int, struct rgw_cls_list_ret> list_results;
   int r = open_bucket_index(bucket_info, index_ctx, oids, shard_id);
-  if (r < 0)
+  if (r < 0) {
     return r;
+  }
 
+  const uint32_t shard_count = oids.size();
+  const uint32_t num_entries_per_shard =
+    calc_ordered_bucket_list_per_shard(num_entries, shard_count);
+
+  ldout(cct, 10) << __func__ << " request from each of " << shard_count <<
+    " shard(s) for " << num_entries_per_shard << " entries to get " <<
+    num_entries << " total entries" << dendl;
+
+  map<int, struct rgw_cls_list_ret> list_results;
   cls_rgw_obj_key start_key(start.name, start.instance);
-  r = CLSRGWIssueBucketList(index_ctx, start_key, prefix, num_entries,
+  r = CLSRGWIssueBucketList(index_ctx, start_key, prefix, num_entries_per_shard,
 			    list_versions, oids, list_results,
 			    cct->_conf->rgw_bucket_index_max_aio)();
-  if (r < 0)
+  if (r < 0) {
     return r;
+  }
 
   // Create a list of iterators that are used to iterate each shard
   vector<map<string, struct rgw_bucket_dir_entry>::iterator> vcurrents;
@@ -9124,18 +9154,15 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
   vcurrents.reserve(list_results.size());
   vends.reserve(list_results.size());
   vnames.reserve(list_results.size());
-  map<int, struct rgw_cls_list_ret>::iterator iter = list_results.begin();
-  *is_truncated = false;
-  for (; iter != list_results.end(); ++iter) {
-    vcurrents.push_back(iter->second.dir.m.begin());
-    vends.push_back(iter->second.dir.m.end());
-    vnames.push_back(oids[iter->first]);
-    *is_truncated = (*is_truncated || iter->second.is_truncated);
+  for (auto& iter : list_results) {
+    vcurrents.push_back(iter.second.dir.m.begin());
+    vends.push_back(iter.second.dir.m.end());
+    vnames.push_back(oids[iter.first]);
   }
 
-  // Create a map to track the next candidate entry from each shard, if the entry
-  // from a specified shard is selected/erased, the next entry from that shard will
-  // be inserted for next round selection
+  // create a map to track the next candidate entry from each shard,
+  // if the entry from a specified shard is selected/erased, the next
+  // entry from that shard will be inserted for next round selection
   map<string, size_t> candidates;
   for (size_t i = 0; i < vcurrents.size(); ++i) {
     if (vcurrents[i] != vends[i]) {
@@ -9147,7 +9174,7 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
   uint32_t count = 0;
   while (count < num_entries && !candidates.empty()) {
     r = 0;
-    // Select the next one
+    // select the next one
     int pos = candidates.begin()->second;
     const string& name = vcurrents[pos]->first;
     struct rgw_bucket_dir_entry& dirent = vcurrents[pos]->second;
@@ -9157,17 +9184,18 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
     if ((!dirent.exists && !dirent.is_delete_marker()) ||
         !dirent.pending_map.empty() ||
         force_check) {
-      /* there are uncommitted ops. We need to check the current state,
-       * and if the tags are old we need to do cleanup as well. */
+      /* there are uncommitted ops. We need to check the current
+       * state, and if the tags are old we need to do clean-up as
+       * well. */
       librados::IoCtx sub_ctx;
       sub_ctx.dup(index_ctx);
       r = check_disk_state(sub_ctx, bucket_info, dirent, dirent,
 			   updates[vnames[pos]]);
       if (r < 0 && r != -ENOENT) {
-          return r;
+	return r;
       }
     } else {
-        r = 0;
+      r = 0;
     }
     if (r >= 0) {
       ldout(cct, 10) << "RGWRados::cls_bucket_list_ordered: got " <<
@@ -9176,36 +9204,49 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
       ++count;
     }
 
-    // Refresh the candidates map
+    // refresh the candidates map
     candidates.erase(candidates.begin());
-    ++vcurrents[pos];
-    if (vcurrents[pos] != vends[pos]) {
+    if (++vcurrents[pos] != vends[pos]) { // note: pre-increment
       candidates[vcurrents[pos]->first] = pos;
+    } else if (list_results[pos].is_truncated) {
+      // once we exhaust one shard that is truncated, we need to stop,
+      // as we cannot be certain that one of the next entries needs to
+      // come from that shard; S3 and swift protocols allow returning
+      // fewer than what was requested
+      break;
     }
-  }
+  } // while we haven't provided requested # of result entries
 
-  // Suggest updates if there is any
-  map<string, bufferlist>::iterator miter = updates.begin();
-  for (; miter != updates.end(); ++miter) {
-    if (miter->second.length()) {
+  // suggest updates if there is any
+  for (auto& miter : updates) {
+    if (miter.second.length()) {
       ObjectWriteOperation o;
-      cls_rgw_suggest_changes(o, miter->second);
+      cls_rgw_suggest_changes(o, miter.second);
       // we don't care if we lose suggested updates, send them off blindly
       AioCompletion *c = librados::Rados::aio_create_completion(NULL, NULL, NULL);
-      index_ctx.aio_operate(miter->first, c, &o);
+      index_ctx.aio_operate(miter.first, c, &o);
       c->release();
     }
-  }
+  } // updates loop
 
-  // Check if all the returned entries are consumed or not
+  *is_truncated = false;
+  // check if all the returned entries are consumed or not
   for (size_t i = 0; i < vcurrents.size(); ++i) {
-    if (vcurrents[i] != vends[i]) {
+    if (vcurrents[i] != vends[i] || list_results[i].is_truncated) {
       *is_truncated = true;
       break;
     }
   }
-  if (!m.empty())
+
+  if (*is_truncated && count < num_entries) {
+    ldout(cct, 10) << "RGWRados::" << __func__ <<
+      ": INFO requested " << num_entries << " entries but returning " <<
+      count << ", which is truncated" << dendl;
+  }
+
+  if (!m.empty()) {
     *last_entry = m.rbegin()->first;
+  }
 
   return 0;
 }
