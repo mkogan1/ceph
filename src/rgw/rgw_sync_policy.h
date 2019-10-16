@@ -173,16 +173,19 @@ WRITE_CLASS_ENCODER(rgw_sync_policy_info)
 #endif
 
 struct rgw_sync_symmetric_group {
+  string id;
   std::set<string> zones;
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
+    encode(id, bl);
     encode(zones, bl);
     ENCODE_FINISH(bl);
   }
 
   void decode(bufferlist::const_iterator& bl) {
     DECODE_START(1, bl);
+    decode(id, bl);
     decode(zones, bl);
     DECODE_FINISH(bl);
   }
@@ -194,19 +197,19 @@ WRITE_CLASS_ENCODER(rgw_sync_symmetric_group)
 
 struct rgw_sync_directional_rule {
   string source_zone;
-  string target_zone;
+  string dest_zone;
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
     encode(source_zone, bl);
-    encode(target_zone, bl);
+    encode(dest_zone, bl);
     ENCODE_FINISH(bl);
   }
 
   void decode(bufferlist::const_iterator& bl) {
     DECODE_START(1, bl);
     decode(source_zone, bl);
-    decode(target_zone, bl);
+    decode(dest_zone, bl);
     DECODE_FINISH(bl);
   }
 
@@ -226,6 +229,8 @@ private:
 public:
   std::optional<rgw_bucket> bucket; /* define specific bucket */
   std::optional<std::set<string> > zones; /* define specific zones, if not set then all zones */
+
+  bool all_zones{false};
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
@@ -258,9 +263,22 @@ public:
             match_str(bucket->bucket_id, b->bucket_id));
   }
 
+  void add_zones(const std::vector<string>& new_zones);
+  void remove_zones(const std::vector<string>& rm_zones);
+  void set_bucket(std::optional<string> tenant,
+                  std::optional<string> bucket_name,
+                  std::optional<string> bucket_id);
+  void remove_bucket(std::optional<string> tenant,
+                     std::optional<string> bucket_name,
+                     std::optional<string> bucket_id);
+
   bool match_zone(const string& zone) const {
+    if (all_zones) {
+      return  true;
+    }
+
     if (!zones) { /* all zones */
-      return true;
+      return false;
     }
 
     return (zones->find(zone) != zones->end());
@@ -269,7 +287,6 @@ public:
   rgw_bucket get_bucket() const {
     return bucket.value_or(rgw_bucket());
   }
-    
 };
 WRITE_CLASS_ENCODER(rgw_sync_bucket_entity)
 
@@ -284,42 +301,45 @@ private:
   }
 
 public:
+  string id;
   rgw_sync_bucket_entity source;
-  rgw_sync_bucket_entity target;
+  rgw_sync_bucket_entity dest;
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
+    encode(id, bl);
     encode(source, bl);
-    encode(target, bl);
+    encode(dest, bl);
     ENCODE_FINISH(bl);
   }
 
   void decode(bufferlist::const_iterator& bl) {
     DECODE_START(1, bl);
+    decode(id, bl);
     decode(source, bl);
-    decode(target, bl);
+    decode(dest, bl);
     DECODE_FINISH(bl);
   }
 
   bool contains_bucket(std::optional<rgw_bucket> b) const {
-    return (source.match_bucket(b) || target.match_bucket(b));
+    return (source.match_bucket(b) || dest.match_bucket(b));
   }
   bool contains_zone(const string& zone) const {
-    return (source.match_zone(zone) || target.match_zone(zone));
+    return (source.match_zone(zone) || dest.match_zone(zone));
   }
 
   void dump(ceph::Formatter *f) const;
   void decode_json(JSONObj *obj);
 
   void get_bucket_pair(rgw_bucket *source_bucket,
-                       rgw_bucket *target_bucket) const {
+                       rgw_bucket *dest_bucket) const {
     *source_bucket = source.get_bucket();
-    *target_bucket = target.get_bucket();
+    *dest_bucket = dest.get_bucket();
 
-    symmetrical_copy_if_empty(source_bucket->tenant, target_bucket->tenant);
-    symmetrical_copy_if_empty(source_bucket->name, target_bucket->name);
-    if (source_bucket->name == target_bucket->name) { /* doesn't make sense to copy bucket id if not same bucket name */
-      symmetrical_copy_if_empty(source_bucket->bucket_id, target_bucket->bucket_id);
+    symmetrical_copy_if_empty(source_bucket->tenant, dest_bucket->tenant);
+    symmetrical_copy_if_empty(source_bucket->name, dest_bucket->name);
+    if (source_bucket->name == dest_bucket->name) { /* doesn't make sense to copy bucket id if not same bucket name */
+      symmetrical_copy_if_empty(source_bucket->bucket_id, dest_bucket->bucket_id);
     }
   }
 };
@@ -349,6 +369,16 @@ struct rgw_sync_data_flow_group {
 
   void dump(ceph::Formatter *f) const;
   void decode_json(JSONObj *obj);
+
+  bool empty() const {
+    return ((!symmetrical || symmetrical->empty()) &&
+            (!directional || directional->empty()));
+  }
+
+  bool find_symmetrical(const string& flow_id, bool create, rgw_sync_symmetric_group **flow_group);
+  void remove_symmetrical(const string& flow_id, std::optional<std::vector<string> > zones);
+  bool find_directional(const string& source_zone, const string& dest_zone, bool create, rgw_sync_directional_rule **flow_group);
+  void remove_directional(const string& source_zone, const string& dest_zone);
 };
 WRITE_CLASS_ENCODER(rgw_sync_data_flow_group)
 
@@ -356,9 +386,9 @@ WRITE_CLASS_ENCODER(rgw_sync_data_flow_group)
 struct rgw_sync_policy_group {
   string id;
 
-  std::optional<rgw_sync_data_flow_group> data_flow; /* override data flow, howver, will not be able to
+  rgw_sync_data_flow_group data_flow; /* override data flow, howver, will not be able to
                                                         add new flows that don't exist at higher level */
-  std::optional<std::vector<rgw_sync_bucket_pipe> > pipes; /* if not defined then applies to all
+  std::vector<rgw_sync_bucket_pipe> pipes; /* if not defined then applies to all
                                                               buckets (DR sync) */
 
   enum Status {
@@ -405,6 +435,9 @@ struct rgw_sync_policy_group {
 
     return true;
   }
+
+  bool find_pipe(const string& pipe_id, bool create, rgw_sync_bucket_pipe **pipe);
+  void remove_pipe(const string& pipe_id);
 };
 WRITE_CLASS_ENCODER(rgw_sync_policy_group)
 
