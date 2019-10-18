@@ -1085,7 +1085,7 @@ int RGWBucket::link(RGWBucketAdminOpState& op_state,
     set_err_msg(err_msg, "failed to relink bucket");
     return r;
   }
-  if (bucket.tenant != old_bucket.tenant) {
+  if (!(rgw_bucket::full_equal(bucket, old_bucket))) {
     // like RGWRados::delete_bucket -- excepting no bucket_index work.
     r = rgw_bucket_delete_bucket_obj(store,
 	old_bucket.tenant, old_bucket.name, ep_data.ep_objv);
