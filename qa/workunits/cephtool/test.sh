@@ -1185,6 +1185,10 @@ function test_mon_mon()
   # don't check output, just ensure it does not fail.
   ceph mon stat
   ceph mon stat -f json | jq '.'
+
+  ceph mon set election_strategy DISALLOW
+  ceph mon set election_strategy CONNECTIVITY
+  ceph mon set election_strategy CLASSIC
 }
 
 function gen_secrets_file()
