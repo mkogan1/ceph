@@ -10914,6 +10914,8 @@ int RGWRados::get_sync_policy_handler(const rgw_bucket& bucket,
     ldout(cct, 20) << "couldn't put bucket_sync_policy cache entry, might have raced with data changes" << dendl;
   }
 
+  *handler = e.handler;
+
   return 0;
 }
 
