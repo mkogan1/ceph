@@ -590,11 +590,12 @@ $extra_conf
         ; needed for passing lc time based s3-tests (can be verbose)
         ; rgw lc debug interval = 10
         ; The following settings are for SSE-KMS with Vault
-        ; rgw crypt s3 kms backend = vault
-        ; rgw crypt vault auth = token
-        ; rgw crypt vault addr = http://127.0.0.1:8200
-        ; rgw crypt vault prefix = /v1/secret/data
-        ; rgw crypt vault token file = $CEPH_CONF_PATH/vault.token
+        ;rgw crypt s3 kms backend = vault
+        ;rgw crypt vault auth = token
+        ;rgw crypt vault addr = http://127.0.0.1:8200
+        ;rgw crypt vault prefix = /v1/transit/export/encryption-key/
+        ;rgw crypt vault token file = $CEPH_CONF_PATH/vault.token
+        ;rgw crypt vault secret engine = transit
 
 [mds]
 $DAEMONOPTS
