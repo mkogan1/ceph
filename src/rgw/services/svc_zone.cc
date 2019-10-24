@@ -5,6 +5,7 @@
 
 #include "rgw/rgw_zone.h"
 #include "rgw/rgw_rest_conn.h"
+#include "rgw/rgw_bucket_sync.h"
 
 #include "common/errno.h"
 #include "include/random.h"
@@ -34,6 +35,7 @@ void RGWSI_Zone::init(RGWSI_SysObj *_sysobj_svc,
 
 RGWSI_Zone::~RGWSI_Zone()
 {
+  delete sync_flow_mgr;
   delete realm;
   delete zonegroup;
   delete zone_public_config;
@@ -150,6 +152,18 @@ int RGWSI_Zone::do_start()
   }
 
   zone_short_id = current_period->get_map().get_zone_short_id(zone_params->get_id());
+
+  sync_flow_mgr = new RGWBucketSyncFlowManager(zone_params->get_name(),
+                                               nullopt,
+                                               nullptr);
+
+  sync_flow_mgr->init(zonegroup->sync_policy);
+
+
+  ret = sync_modules_svc->start();
+  if (ret < 0) {
+    return ret;
+  }
 
   RGWSyncModuleRef sm;
   if (!sync_modules_svc->get_manager()->get_module(zone_public_config->tier_type, &sm)) {
