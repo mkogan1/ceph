@@ -898,7 +898,12 @@ void RGWOp_BILog_Status::execute()
     ldout(s->cct, 4) << "failed to read bucket info: " << cpp_strerror(http_ret) << dendl;
     return;
   }
-  http_ret = rgw_bucket_sync_status(this, store, source_zone, info, &status);
+  rgw_sync_bucket_pipe pipe;
+  pipe.source.zone = source_zone;
+  pipe.source.bucket = info.bucket;
+  pipe.dest.zone = store->svc.zone->zone_id();
+  pipe.dest.bucket = info.bucket;
+  http_ret = rgw_bucket_sync_status(this, store, pipe, info, &status);
 }
 
 void RGWOp_BILog_Status::send_response()
