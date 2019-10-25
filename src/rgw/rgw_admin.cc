@@ -2513,7 +2513,6 @@ static int bucket_source_sync_status(RGWRados *store, const RGWZone& zone,
   return 0;
 }
 
-
 static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
                               const std::string& source_zone_id,
                               std::ostream& out)

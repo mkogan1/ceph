@@ -10902,13 +10902,7 @@ int RGWRados::get_sync_policy_handler(const rgw_bucket& bucket,
   }
 
   bucket_sync_policy_cache_entry e;
-  e.handler = std::make_shared<RGWBucketSyncPolicyHandler>(svc.zone, bucket_info);
-
-  r = e.handler->init();
-  if (r < 0) {
-    ldout(cct, 0) << "ERROR: RGWBucketSyncPolicyHandler::init() returned r=" << r << dendl;
-    return r;
-  }
+  e.handler.reset(svc.zone->get_sync_policy_handler()->alloc_child(bucket_info));
 
   if (!sync_policy_cache->put(svc.cache, cache_key, &e, {&cache_info})) {
     ldout(cct, 20) << "couldn't put bucket_sync_policy cache entry, might have raced with data changes" << dendl;
