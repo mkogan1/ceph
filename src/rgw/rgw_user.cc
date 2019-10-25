@@ -229,7 +229,7 @@ int rgw_store_user_info(RGWRados *store,
     map<string, RGWAccessKey>::iterator iter = info.access_keys.begin();
     for (; iter != info.access_keys.end(); ++iter) {
       RGWAccessKey& k = iter->second;
-      if (old_info && old_info->access_keys.count(iter->first) && !renamed != 0)
+      if (old_info && old_info->access_keys.count(iter->first) != 0 && !renamed)
 	 continue;
 
       ret = rgw_put_system_obj(store, store->svc.zone->get_zone_params().user_keys_pool, k.id,
@@ -242,7 +242,7 @@ int rgw_store_user_info(RGWRados *store,
   map<string, RGWAccessKey>::iterator siter;
   for (siter = info.swift_keys.begin(); siter != info.swift_keys.end(); ++siter) {
     RGWAccessKey& k = siter->second;
-    if (old_info && old_info->swift_keys.count(siter->first) && !renamed != 0)
+    if (old_info && old_info->swift_keys.count(siter->first) != 0 && !renamed)
       continue;
 
     ret = rgw_put_system_obj(store, store->svc.zone->get_zone_params().user_swift_pool, k.id,
@@ -2079,7 +2079,7 @@ int RGWUser::execute_user_rename(RGWUserAdminOpState& op_state, std::string *err
   ldout(store->ctx(), 10) << "removing user buckets index" << dendl;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(uid_bucks);
-  ret = sysobj.wop().remove(null_yield);
+  ret = sysobj.wop().remove();
   if (ret < 0 && ret != -ENOENT) {
     ldout(store->ctx(), 0) << "ERROR: could not remove " << old_uid << ":" << uid_bucks << ", should be fixed (err=" << ret << ")" << dendl;
     return ret;

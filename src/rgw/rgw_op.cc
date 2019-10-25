@@ -322,7 +322,7 @@ vector<Policy> get_iam_user_policy_from_attr(CephContext* cct,
   return policies;
 }
 
-int get_obj_attrs(RGWRados *store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, map<string, bufferlist>& attrs, rgw_obj *target_obj)
+int get_obj_attrs(RGWRados *store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, map<string, bufferlist>& attrs, rgw_obj* target_obj)
 {
   RGWRados::Object op_target(store, bucket_info, obj_ctx, obj);
   RGWRados::Object::Read read_op(&op_target);
@@ -442,7 +442,7 @@ static int get_multipart_info(RGWRados *store, struct req_state *s,
   return get_multipart_info(store, s, meta_obj, policy, attrs, upload_info);
 }
 
-int modify_obj_attr(RGWRados *store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, const char* attr_name, bufferlist& attr_val)
+int modify_obj_attr(RGWRados* store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, const char* attr_name, bufferlist& attr_val)
 {
   map<string, bufferlist> attrs;
   RGWRados::Object op_target(store, bucket_info, obj_ctx, obj);
@@ -1100,7 +1100,8 @@ void RGWPutObjTags::execute()
   rgw_obj obj;
   obj = rgw_obj(s->bucket, s->object);
   store->set_atomic(s->obj_ctx, obj);
-  op_ret = modify_obj_attr(store, *(s->obj_ctx), s->bucket_info, obj, RGW_ATTR_TAGS, tags_bl);
+  op_ret = modify_obj_attr(store, *(s->obj_ctx), s->bucket_info, obj,
+			   RGW_ATTR_TAGS, tags_bl);
   if (op_ret == -ECANCELED){
     op_ret = -ERR_TAG_CONFLICT;
   }
@@ -5270,7 +5271,8 @@ void RGWPutACLs::execute()
     obj = rgw_obj(s->bucket, s->object);
     store->set_atomic(s->obj_ctx, obj);
     //if instance is empty, we should modify the latest object
-    op_ret = modify_obj_attr(store, *(s->obj_ctx), s->bucket_info, obj, RGW_ATTR_ACL, bl);
+    op_ret = modify_obj_attr(store, *(s->obj_ctx), s->bucket_info, obj,
+			     RGW_ATTR_ACL, bl);
   } else {
     attrs = s->bucket_attrs;
     attrs[RGW_ATTR_ACL] = bl;
