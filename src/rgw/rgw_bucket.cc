@@ -215,7 +215,7 @@ int rgw_set_bucket_acl(RGWRados* store, ACLOwner& owner, rgw_bucket& bucket, RGW
   auto inst_sysobj = obj_ctx.get_obj(obj_bucket_instance);
   r = inst_sysobj.wop()
             .set_objv_tracker(&objv_tracker)
-            .write_attr(RGW_ATTR_ACL, bl, null_yield);
+            .write_attr(RGW_ATTR_ACL, bl);
   if (r < 0) {
     cerr << "failed to set new acl: " << cpp_strerror(-r) << std::endl;
     return r;
@@ -256,8 +256,12 @@ int rgw_bucket_chown(RGWRados* const store, RGWUserInfo& user_info, RGWBucketInf
 
       for (const auto& obj : objs) {
 
-        const rgw_obj r_obj(bucket_info.bucket, obj.key);
-        ret = get_obj_attrs(store, obj_ctx, bucket_info, r_obj, attrs);
+        rgw_obj r_obj(bucket_info.bucket, obj.key);
+        RGWRados::Object op_target(store, bucket_info, obj_ctx, r_obj);
+        RGWRados::Object::Read read_op(&op_target);
+
+        read_op.params.attrs = &attrs;
+        ret = read_op.prepare();
         if (ret < 0){
           ldout(store->ctx(), 0) << "ERROR: failed to read object " << obj.key.name << cpp_strerror(-ret) << dendl;
           continue;
@@ -297,7 +301,8 @@ int rgw_bucket_chown(RGWRados* const store, RGWUserInfo& user_info, RGWBucketInf
           bl.clear();
           encode(policy, bl);
 
-          ret = modify_obj_attr(store, obj_ctx, bucket_info, r_obj, RGW_ATTR_ACL, bl);
+          obj_ctx.set_atomic(r_obj);
+          ret = store->set_attr(&obj_ctx, bucket_info, r_obj, RGW_ATTR_ACL, bl);
           if (ret < 0) {
             ldout(store->ctx(), 0) << "ERROR: modify attr failed " << cpp_strerror(-ret) << dendl;
             return ret;
@@ -331,7 +336,7 @@ int rgw_link_bucket(RGWRados* const store,
   else
     new_bucket.creation_time = creation_time;
 
-  map<string, bufferlist> attrs, *pattrs;
+  map<string, bufferlist> attrs, *pattrs{nullptr};
 
   if (update_entrypoint) {
     if (pinfo) {
