@@ -274,7 +274,7 @@ struct rgw_bucket_entry_owner {
 
 class RGWSyncErrorLogger;
 class RGWRESTConn;
-class RGWServices;
+struct RGWServices;
 
 struct RGWDataSyncEnv {
   const DoutPrefixProvider *dpp{nullptr};
@@ -294,7 +294,7 @@ struct RGWDataSyncEnv {
             RGWSyncErrorLogger *_error_logger, RGWSyncTraceManager *_sync_tracer,
             RGWSyncModuleInstanceRef& _sync_module,
             PerfCounters* _counters) {
-    dpp = _dpp;
+     dpp = _dpp;
     cct = _cct;
     store = _store;
     async_rados = _async_rados;
@@ -555,43 +555,35 @@ struct rgw_bucket_index_marker_info {
 };
 
 
-class RGWRemoteBucketLog : public RGWCoroutinesManager {
+class RGWRemoteBucketManager {
   const DoutPrefixProvider *dpp;
-  RGWRados *store;
+
+  RGWDataSyncEnv *sync_env;
+
   RGWRESTConn *conn{nullptr};
   string source_zone;
 
-  rgw_bucket_sync_pair_info sync_pair;
+  vector<rgw_bucket_sync_pair_info> sync_pairs;
 
-  RGWAsyncRadosProcessor *async_rados;
-  RGWHTTPManager *http_manager;
-
-  RGWDataSyncEnv sync_env;
   RGWDataSyncCtx sc;
   rgw_bucket_shard_sync_info init_status;
 
   RGWBucketSyncCR *sync_cr{nullptr};
 
 public:
-  RGWRemoteBucketLog(const DoutPrefixProvider *_dpp, RGWRados *_store,
-                     RGWAsyncRadosProcessor *_async_rados,
-                     RGWHTTPManager *_http_manager)
-    : RGWCoroutinesManager(_store->ctx(), _store->get_cr_registry()),
-      dpp(_dpp), store(_store),
-      async_rados(_async_rados), http_manager(_http_manager)
-  {}
+  RGWRemoteBucketManager(const DoutPrefixProvider *_dpp,
+                     RGWDataSyncEnv *_sync_env,
+                     const string& _source_zone, RGWRESTConn *_conn,
+                     const RGWBucketInfo& source_bucket_info,
+                     const rgw_bucket& dest_bucket);
 
-  int init(const string& _source_zone, RGWRESTConn *_conn,
-           const rgw_bucket& source_bucket, int shard_id,
-           const rgw_bucket& dest_bucket,
-           RGWSyncErrorLogger *_error_logger,
-           RGWSyncTraceManager *_sync_tracer,
-           RGWSyncModuleInstanceRef& _sync_module);
-  void finish();
+  RGWCoroutine *read_sync_status_cr(int num, rgw_bucket_shard_sync_info *sync_status);
+  RGWCoroutine *init_sync_status_cr(int num);
+  RGWCoroutine *run_sync_cr(int num);
 
-  RGWCoroutine *read_sync_status_cr(rgw_bucket_shard_sync_info *sync_status);
-  RGWCoroutine *init_sync_status_cr();
-  RGWCoroutine *run_sync_cr();
+  int num_pipes() {
+    return sync_pairs.size();
+  }
 
   void wakeup();
 };
@@ -599,18 +591,22 @@ public:
 class RGWBucketPipeSyncStatusManager : public DoutPrefixProvider {
   RGWRados *store;
 
+  RGWDataSyncEnv sync_env;
+
   RGWCoroutinesManager cr_mgr;
 
   RGWHTTPManager http_manager;
 
-  string source_zone;
+  std::optional<string> source_zone;
+  std::optional<rgw_bucket> source_bucket;
+
   RGWRESTConn *conn;
   RGWSyncErrorLogger *error_logger;
   RGWSyncModuleInstanceRef sync_module;
 
   rgw_bucket dest_bucket;
 
-  map<int, RGWRemoteBucketLog *> source_logs;
+  vector<RGWRemoteBucketManager *> source_mgrs;
 
   string source_status_oid;
   string source_shard_status_oid_prefix;
@@ -622,8 +618,9 @@ class RGWBucketPipeSyncStatusManager : public DoutPrefixProvider {
 
 public:
   RGWBucketPipeSyncStatusManager(RGWRados *_store,
-                             const string& _source_zone,
-                             const rgw_bucket& dest_bucket);
+				 std::optional<string> _source_zone,
+				 std::optional<rgw_bucket> _source_bucket,
+				 const rgw_bucket& dest_bucket);
   ~RGWBucketPipeSyncStatusManager();
 
   int init();
