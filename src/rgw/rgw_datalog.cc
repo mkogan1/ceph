@@ -706,7 +706,7 @@ int DataLogBackends::list(int shard, int max_entries,
     for (auto& g : gentries) {
       g.log_id = gencursor(gen_id, g.log_id);
     }
-    if (gentries.size() > max_entries)
+    if (max_entries < 0 || gentries.size() > unsigned(max_entries))
       max_entries = 0;
     else
       max_entries -= gentries.size();
