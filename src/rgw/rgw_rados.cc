@@ -13560,8 +13560,8 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
   }
 
   // create a list of iterators that are used to iterate each shard
-  vector<map<string, struct rgw_bucket_dir_entry>::iterator> vcurrents(list_results.size());
-  vector<map<string, struct rgw_bucket_dir_entry>::iterator> vends(list_results.size());
+  vector<map<string, struct rgw_bucket_dir_entry>::iterator> vcurrents;
+  vector<map<string, struct rgw_bucket_dir_entry>::iterator> vends;
   vector<string> vnames;
   vcurrents.reserve(list_results.size());
   vends.reserve(list_results.size());
