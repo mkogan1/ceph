@@ -2534,7 +2534,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
 
   RGWBucketSyncPolicyHandlerRef handler;
 
-  int r = store->get_sync_policy_handler(info.bucket, &handler);
+  int r = store->get_sync_policy_handler(std::nullopt, info.bucket, &handler);
   if (r < 0) {
     lderr(store->ctx()) << "ERROR: failed to get policy handler for bucket (" << info.bucket << "): r=" << r << ": " << cpp_strerror(-r) << dendl;
     return r;

@@ -2517,7 +2517,8 @@ public:
   static uint32_t calc_ordered_bucket_list_per_shard(uint32_t num_entries,
 						     uint32_t num_shards);
 public:
-  int get_sync_policy_handler(const rgw_bucket& bucket,
+  int get_sync_policy_handler(std::optional<std::string>,
+			      std::optional<rgw_bucket> bucket,
 			      RGWBucketSyncPolicyHandlerRef *phandler);
   int bucket_exports_data(const rgw_bucket& bucket);
   int bucket_imports_data(const rgw_bucket& bucket);

@@ -1072,8 +1072,9 @@ public:
     if (!binfo ||
         binfo->bucket != *e.bucket) {
       bucket_info.bucket = *e.bucket;
+    } else {
+      set_bucket_info(*binfo);
     }
-    set_bucket_info(*binfo);
   }
 
   void update_empty_bucket_info(const std::map<rgw_bucket, RGWBucketInfo>& buckets_info) {
@@ -3810,6 +3811,7 @@ int RGWRunBucketSourcesSyncCR::operate()
         } else {
           sync_pair.source_bs.bucket = siter->source.get_bucket();
         }
+        sync_pair.dest_bs.bucket = siter->target.get_bucket();
 
         if (sync_pair.source_bs.shard_id >= 0) {
           num_shards = 1;
@@ -3984,6 +3986,7 @@ int RGWGetBucketPeersCR::operate()
         return set_cr_error(retcode);
       }
 
+      get_policy_params.zone = nullopt;
       get_policy_params.bucket = *target_bucket;
       yield call(new RGWBucketGetSyncPolicyHandlerCR(sync_env->async_rados,
                                                      sync_env->store,
@@ -4005,6 +4008,7 @@ int RGWGetBucketPeersCR::operate()
         return set_cr_error(retcode);
       }
 
+      get_policy_params.zone = source_zone;
       get_policy_params.bucket = *source_bucket;
       yield call(new RGWBucketGetSyncPolicyHandlerCR(sync_env->async_rados,
                                                      sync_env->store,
