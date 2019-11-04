@@ -8541,6 +8541,11 @@ int RGWRados::_get_bucket_info(RGWSysObjectCtx& obj_ctx,
       binfo_cache->invalidate(bucket_entry);
     } else {
       info = e->info;
+      if (info.sync_policy) { /* fork policy off cache */
+	auto policy = make_shared<rgw_sync_policy_info>(*info.sync_policy);
+	info.sync_policy = std::const_pointer_cast<const rgw_sync_policy_info>(policy);
+      }
+
       if (pattrs)
 	*pattrs = e->attrs;
       if (pmtime)
@@ -8653,7 +8658,8 @@ int RGWRados::put_bucket_entrypoint_info(const string& tenant_name, const string
 }
 
 int RGWRados::put_bucket_instance_info(RGWBucketInfo& info, bool exclusive,
-                              real_time mtime, map<string, bufferlist> *pattrs)
+				       real_time mtime, map<string, bufferlist> *pattrs,
+				       RGWBucketInfo* orig_info)
 {
   info.has_instance_obj = true;
   bufferlist bl;
@@ -8662,7 +8668,12 @@ int RGWRados::put_bucket_instance_info(RGWBucketInfo& info, bool exclusive,
 
   string key = info.bucket.get_key(); /* when we go through meta api, we don't use oid directly */
   int ret = rgw_bucket_instance_store_info(this, key, bl, exclusive, pattrs, &info.objv_tracker, mtime);
-  if (ret == -EEXIST) {
+  if (ret >= 0) {
+    int r = handle_bi_update(info, orig_info);
+    if (r < 0) {
+      return r;
+    }
+  } else if (ret == -EEXIST) {
     /* well, if it's exclusive we shouldn't overwrite it, because we might race with another
      * bucket operation on this specific bucket (e.g., being synced from the master), but
      * since bucket instace meta object is unique for this specific bucket instace, we don't
@@ -9049,7 +9060,7 @@ int RGWRados::trim_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id, stri
 			      cct->_conf->rgw_bucket_index_max_aio)();
 }
 
-int RGWRados::resync_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id)
+int RGWRados::resync_bi_log_entries(const RGWBucketInfo& bucket_info, int shard_id)
 {
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
@@ -9060,7 +9071,7 @@ int RGWRados::resync_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id)
   return CLSRGWIssueResyncBucketBILog(index_ctx, bucket_objs, cct->_conf->rgw_bucket_index_max_aio)();
 }
 
-int RGWRados::stop_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id)
+int RGWRados::stop_bi_log_entries(const RGWBucketInfo& bucket_info, int shard_id)
 {
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
@@ -10951,4 +10962,108 @@ int RGWRados::bucket_imports_data(const rgw_bucket& bucket)
   }
 
   return handler->bucket_imports_data();
+}
+
+int RGWRados::handle_overwrite(const RGWBucketInfo& info,
+			       const RGWBucketInfo& orig_info) {
+  int ret = 0;
+#warning needs to be done differently
+  bool new_sync_enabled = info.datasync_flag_enabled();
+  bool old_sync_enabled = orig_info.datasync_flag_enabled();
+
+  if (old_sync_enabled != new_sync_enabled) {
+    int shards_num = info.num_shards ? info.num_shards : 1;
+    int shard_id = info.num_shards? 0 : -1;
+
+    if (!new_sync_enabled) {
+      ret = stop_bi_log_entries(info, -1);
+      if (ret < 0) {
+	lderr(cct) << "ERROR: failed writing bilog" << dendl;
+	return ret;
+      }
+    } else {
+      ret = resync_bi_log_entries(info, -1);
+      if (ret < 0) {
+	lderr(cct) << "ERROR: failed writing bilog" << dendl;
+	return ret;
+      }
+    }
+
+    for (int i = 0; i < shards_num; ++i, ++shard_id) {
+      ret = data_log->add_entry(info, shard_id);
+      if (ret < 0) {
+	lderr(cct) << "ERROR: failed writing data log" << dendl;
+	return ret;
+      }
+    }
+  }
+  return ret;
+}
+
+static void diff_sets(std::set<rgw_bucket>& orig_set,
+		      std::set<rgw_bucket>& new_set,
+		      vector<rgw_bucket> *added,
+		      vector<rgw_bucket> *removed)
+{
+  auto oiter = orig_set.begin();
+  auto niter = new_set.begin();
+
+  while (oiter != orig_set.end() &&
+         niter != new_set.end()) {
+    if (*oiter == *niter) {
+      ++oiter;
+      ++niter;
+      continue;
+    }
+    while (*oiter < *niter) {
+      removed->push_back(*oiter);
+      ++oiter;
+    }
+    while (*niter < *oiter) {
+      added->push_back(*niter);
+      ++niter;
+    }
+  }
+  for (; oiter != orig_set.end(); ++oiter) {
+    removed->push_back(*oiter);
+  }
+  for (; niter != new_set.end(); ++niter) {
+    added->push_back(*niter);
+  }
+}
+
+int RGWRados::handle_bi_update(RGWBucketInfo& bucket_info,
+			       RGWBucketInfo* orig_bucket_info)
+{
+  std::set<rgw_bucket> orig_sources;
+  std::set<rgw_bucket> orig_dests;
+
+  if (orig_bucket_info &&
+      orig_bucket_info->sync_policy) {
+    orig_bucket_info->sync_policy->get_potential_related_buckets(bucket_info.bucket,
+                                                                &orig_sources,
+                                                                &orig_dests);
+  }
+
+  std::set<rgw_bucket> sources;
+  std::set<rgw_bucket> dests;
+  if (bucket_info.sync_policy) {
+    bucket_info.sync_policy->get_potential_related_buckets(bucket_info.bucket,
+                                                           &sources,
+                                                           &dests);
+  }
+
+  std::vector<rgw_bucket> removed_sources;
+  std::vector<rgw_bucket> added_sources;
+  diff_sets(orig_sources, sources, &added_sources, &removed_sources);
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ": orig_sources=" << orig_sources << " new_sources=" << sources << dendl;
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ":  potential sources added=" << added_sources << " removed=" << removed_sources << dendl;
+
+  std::vector<rgw_bucket> removed_dests;
+  std::vector<rgw_bucket> added_dests;
+  diff_sets(orig_dests, dests, &added_dests, &removed_dests);
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ": orig_dests=" << orig_dests << " new_dests=" << dests << dendl;
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ":  potential dests added=" << added_dests << " removed=" << removed_dests << dendl;
+
+  return 0;
 }

@@ -2166,7 +2166,8 @@ public:
   int put_bucket_entrypoint_info(const string& tenant_name, const string& bucket_name, RGWBucketEntryPoint& entry_point,
                                  bool exclusive, RGWObjVersionTracker& objv_tracker, ceph::real_time mtime,
                                  map<string, bufferlist> *pattrs);
-  int put_bucket_instance_info(RGWBucketInfo& info, bool exclusive, ceph::real_time mtime, map<string, bufferlist> *pattrs);
+  int put_bucket_instance_info(RGWBucketInfo& info, bool exclusive, ceph::real_time mtime, map<string, bufferlist> *pattrs,
+			       RGWBucketInfo* orig_info = nullptr);
   int get_bucket_entrypoint_info(RGWSysObjectCtx& obj_ctx, const string& tenant_name, const string& bucket_name,
                                  RGWBucketEntryPoint& entry_point, RGWObjVersionTracker *objv_tracker,
                                  ceph::real_time *pmtime, map<string, bufferlist> *pattrs, rgw_cache_entry_info *cache_info = NULL,
@@ -2265,8 +2266,8 @@ public:
   int cls_bucket_head_async(const RGWBucketInfo& bucket_info, int shard_id, RGWGetDirHeader_CB *ctx, int *num_aio);
   int list_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id, string& marker, uint32_t max, std::list<rgw_bi_log_entry>& result, bool *truncated);
   int trim_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id, string& marker, string& end_marker);
-  int resync_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id);
-  int stop_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id);
+  int resync_bi_log_entries(const RGWBucketInfo& bucket_info, int shard_id);
+  int stop_bi_log_entries(const RGWBucketInfo& bucket_info, int shard_id);
   int get_bi_log_status(RGWBucketInfo& bucket_info, int shard_id, map<int, string>& max_marker);
 
   int bi_get_instance(const RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_bucket_dir_entry *dirent);
@@ -2522,6 +2523,10 @@ public:
 			      RGWBucketSyncPolicyHandlerRef *phandler);
   int bucket_exports_data(const rgw_bucket& bucket);
   int bucket_imports_data(const rgw_bucket& bucket);
+  int handle_overwrite(const RGWBucketInfo& info,
+		       const RGWBucketInfo& orig_info);
+  int handle_bi_update(RGWBucketInfo& bucket_info,
+		       RGWBucketInfo* orig_info);
 };
 
 class RGWStoreManager {
