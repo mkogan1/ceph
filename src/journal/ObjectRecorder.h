@@ -128,25 +128,30 @@ private:
   uint64_t m_pending_bytes = 0;
   utime_t m_last_flush_time;
 
-  uint64_t m_append_tid;
+  uint64_t m_append_tid = 0;
 
   InFlightTids m_in_flight_tids;
   InFlightAppends m_in_flight_appends;
   uint64_t m_object_bytes = 0;
-  bool m_overflowed;
-  bool m_object_closed;
+
+  bool m_overflowed = false;
+
+  bool m_object_closed = false;
+  bool m_object_closed_notify = false;
 
   bufferlist m_prefetch_bl;
 
-  bool m_in_flight_flushes;
-  ceph::condition_variable m_in_flight_flushes_cond;
+  bool m_in_flight_callbacks = false;
+  ceph::condition_variable m_in_flight_callbacks_cond;
   uint64_t m_in_flight_bytes = 0;
 
   bool send_appends(bool force, FutureImplPtr flush_sentinal);
   void handle_append_flushed(uint64_t tid, int r);
   void append_overflowed();
 
-  void notify_handler_unlock();
+  void wake_up_flushes();
+  void notify_handler_unlock(std::unique_lock<ceph::mutex>& locker,
+                             bool notify_overflowed);
 };
 
 } // namespace journal
