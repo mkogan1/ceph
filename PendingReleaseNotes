@@ -43,3 +43,5 @@
   Alternatively, the warning can be silenced with::
 
     ceph config set global mon_warn_on_pool_pg_num_not_power_of_two false
+
+* The format of MDSs in `ceph fs dump` has changed.
