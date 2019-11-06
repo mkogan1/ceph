@@ -54,12 +54,14 @@ class RGWSI_SyncModules;
 class RGWSI_SysObj;
 class RGWSI_SysObj_Core;
 class RGWSI_SysObj_Cache;
+class RGWRados;
 
 struct RGWServices_Def
 {
   bool can_shutdown{false};
   bool has_shutdown{false};
 
+  RGWRados* store;
   std::unique_ptr<RGWSI_Finisher> finisher;
   std::unique_ptr<RGWSI_Notify> notify;
   std::unique_ptr<RGWSI_RADOS> rados;
@@ -74,7 +76,8 @@ struct RGWServices_Def
   RGWServices_Def();
   ~RGWServices_Def();
 
-  int init(CephContext *cct, bool have_cache, bool raw_storage);
+  int init(CephContext *cct, bool have_cache, bool raw_storage,
+	   RGWRados* store);
   void shutdown();
 };
 
@@ -94,14 +97,15 @@ struct RGWServices
   RGWSI_SysObj_Cache *cache{nullptr};
   RGWSI_SysObj_Core *core{nullptr};
 
-  int do_init(CephContext *cct, bool have_cache, bool raw_storage);
+  int do_init(CephContext *cct, bool have_cache, bool raw_storage,
+	      RGWRados* store);
 
-  int init(CephContext *cct, bool have_cache) {
-    return do_init(cct, have_cache, false);
+  int init(CephContext *cct, bool have_cache, RGWRados* store) {
+    return do_init(cct, have_cache, false, store);
   }
 
-  int init_raw(CephContext *cct, bool have_cache) {
-    return do_init(cct, have_cache, true);
+  int init_raw(CephContext *cct, bool have_cache, RGWRados* store) {
+    return do_init(cct, have_cache, true, store);
   }
   void shutdown() {
     _svc.shutdown();

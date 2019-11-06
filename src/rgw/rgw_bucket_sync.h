@@ -1,4 +1,3 @@
-
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
@@ -174,6 +173,7 @@ public:
 class RGWBucketSyncPolicyHandler {
   const RGWBucketSyncPolicyHandler *parent{nullptr};
   RGWSI_Zone *zone_svc;
+  RGWRados *store;
   string zone_name;
   std::optional<RGWBucketInfo> bucket_info;
   std::optional<rgw_bucket> bucket;
@@ -189,6 +189,9 @@ class RGWBucketSyncPolicyHandler {
   std::set<string> source_zones; /* source zones by name */
   std::set<string> target_zones; /* target zones by name */
 
+  std::set<rgw_bucket> source_hints;
+  std::set<rgw_bucket> target_hints;
+
   bool bucket_is_sync_source() const {
     return !targets.empty();
   }
@@ -196,8 +199,6 @@ class RGWBucketSyncPolicyHandler {
   bool bucket_is_sync_target() const {
     return !sources.empty();
   }
-
-  void init();
 
   RGWBucketSyncPolicyHandler(const RGWBucketSyncPolicyHandler *_parent,
                              const RGWBucketInfo& _bucket_info);
@@ -208,11 +209,14 @@ class RGWBucketSyncPolicyHandler {
 public:
   RGWBucketSyncPolicyHandler(RGWSI_Zone *_zone_svc,
                              RGWSI_SyncModules *sync_modules_svc,
+			     RGWRados *store,
                              std::optional<string> effective_zone = std::nullopt);
 
   RGWBucketSyncPolicyHandler *alloc_child(const RGWBucketInfo& bucket_info) const;
   RGWBucketSyncPolicyHandler *alloc_child(const rgw_bucket& bucket,
                                           std::optional<rgw_sync_policy_info> sync_policy) const;
+
+  int init();
 
   void reflect(RGWBucketSyncFlowManager::pipe_set *psources_by_name,
                RGWBucketSyncFlowManager::pipe_set *ptargets_by_name,
@@ -245,6 +249,16 @@ public:
   void get_pipes(RGWBucketSyncFlowManager::pipe_set **sources, RGWBucketSyncFlowManager::pipe_set **targets) { /* return raw pipes (with zone name) */
     *sources = &sources_by_name;
     *targets = &targets_by_name;
+  }
+  void get_pipes(RGWBucketSyncFlowManager::pipe_set *sources, RGWBucketSyncFlowManager::pipe_set *targets,
+		 std::optional<rgw_sync_bucket_entity> filter_peer);
+
+  const std::set<rgw_bucket>& get_source_hints() const {
+    return source_hints;
+  }
+
+  const std::set<rgw_bucket>& get_target_hints() const {
+    return target_hints;
   }
 
   bool bucket_exports_data() const;

@@ -458,8 +458,22 @@ int rgw_bucket_instance_store_info(RGWRados *store, string& entry, bufferlist& b
 }
 
 int rgw_bucket_instance_remove_entry(RGWRados *store, const string& entry,
+				     const RGWBucketInfo& bucket_info,
                                      RGWObjVersionTracker *objv_tracker) {
-  return store->meta_mgr->remove_entry(bucket_instance_meta_handler, entry, objv_tracker);
+  auto ret = store->meta_mgr->remove_entry(bucket_instance_meta_handler, entry, objv_tracker);
+  if (ret < 0 &&
+      ret != -ENOENT) {
+    return ret;
+  }
+
+  int r = store->handle_bi_removal(bucket_info);
+  if (r < 0) {
+    ldout(store->ctx(), 0) << "ERROR: failed to update bucket instance sync index: r=" << r << dendl;
+    /* returning success as index is just keeping hints, so will keep extra hints,
+     * but bucket removal succeeded
+     */
+  }
+  return 0;
 }
 
 // 'tenant/' is used in bucket instance keys for sync to avoid parsing ambiguity
@@ -1147,7 +1161,9 @@ int RGWBucket::link(RGWBucketAdminOpState& op_state,
       return r;
     }
     string entry = old_bucket.get_key();
-    r = rgw_bucket_instance_remove_entry(store, entry, &ep_data.ep_objv);
+    r = rgw_bucket_instance_remove_entry(store, entry,
+					 ep_data.ep.old_bucket_info,
+					 &ep_data.ep_objv);
     if (r < 0) {
       set_err_msg(err_msg, "failed to unlink old bucket info " + entry);
       return r;
@@ -2881,7 +2897,7 @@ public:
     if (ret < 0 && ret != -ENOENT)
       return ret;
 
-    return rgw_bucket_instance_remove_entry(store, entry,
+    return rgw_bucket_instance_remove_entry(store, entry, info,
 					    &info.objv_tracker);
   }
 

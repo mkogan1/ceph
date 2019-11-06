@@ -807,6 +807,7 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
 
   ret = rgw_bucket_instance_remove_entry(store,
 					 bucket_info.bucket.get_key(),
+					 bucket_info,
 					 nullptr);
   if (ret < 0) {
     lderr(store->ctx()) << "Error: " << __func__ <<
@@ -839,6 +840,7 @@ error_out:
 
   ret2 = rgw_bucket_instance_remove_entry(store,
 					  new_bucket_info.bucket.get_key(),
+					  new_bucket_info,
 					  nullptr);
   if (ret2 < 0) {
     lderr(store->ctx()) << "Error: " << __func__ <<

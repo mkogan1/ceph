@@ -2527,6 +2527,20 @@ public:
 		       const RGWBucketInfo& orig_info);
   int handle_bi_update(RGWBucketInfo& bucket_info,
 		       RGWBucketInfo* orig_info);
+
+  int handle_bi_removal(const RGWBucketInfo& bucket_info);
+  int get_bucket_sync_hints(const rgw_bucket& bucket,
+                            std::set<rgw_bucket> *sources,
+                            std::set<rgw_bucket> *dests);
+
+private:
+  rgw_raw_obj get_sources_obj(const rgw_bucket& bucket) const;
+  rgw_raw_obj get_dests_obj(const rgw_bucket& bucket) const;
+  int do_update_hints(const RGWBucketInfo& bucket_info,
+		      std::vector<rgw_bucket>& added_dests,
+		      std::vector<rgw_bucket>& removed_dests,
+		      std::vector<rgw_bucket>& added_sources,
+		      std::vector<rgw_bucket>& removed_sources);
 };
 
 class RGWStoreManager {

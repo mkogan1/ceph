@@ -36,7 +36,7 @@ struct obj_version {
     tag.clear();
   }
 
-  bool empty() {
+  bool empty() const {
     return tag.empty();
   }
 

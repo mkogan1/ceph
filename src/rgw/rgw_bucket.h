@@ -36,6 +36,7 @@ extern int rgw_bucket_parse_bucket_key(CephContext *cct, const string& key,
                                        rgw_bucket* bucket, int *shard_id);
 
 extern int rgw_bucket_instance_remove_entry(RGWRados *store, const string& entry,
+					    const RGWBucketInfo& bucket_info,
 					    RGWObjVersionTracker *objv_tracker);
 extern void rgw_bucket_instance_key_to_oid(string& key);
 extern void rgw_bucket_instance_oid_to_key(string& oid);

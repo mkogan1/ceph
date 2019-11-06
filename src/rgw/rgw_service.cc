@@ -13,6 +13,7 @@
 #include "services/svc_sys_obj.h"
 #include "services/svc_sys_obj_cache.h"
 #include "services/svc_sys_obj_core.h"
+#include "rgw/rgw_rados.h"
 
 #include "common/errno.h"
 
@@ -27,8 +28,10 @@ RGWServices_Def::~RGWServices_Def()
 
 int RGWServices_Def::init(CephContext *cct,
 			  bool have_cache,
-                          bool raw)
+                          bool raw,
+			  RGWRados* _store)
 {
+  store = _store;
   finisher = std::make_unique<RGWSI_Finisher>(cct);
   notify = std::make_unique<RGWSI_Notify>(cct);
   rados = std::make_unique<RGWSI_RADOS>(cct);
@@ -42,10 +45,26 @@ int RGWServices_Def::init(CephContext *cct,
   if (have_cache) {
     sysobj_cache = std::make_unique<RGWSI_SysObj_Cache>(cct);
   }
+
+
+  // This is a hack to get around a dependency problem created by
+  // backporting code written post metadata-“refactor” to
+  // 4.3. Specifically, RGWSI_Zone's initialization code calling into
+  // RGWRados, while RGWRados::svc isn't populated until after all the
+  // services are initialized and started.
+  store->svc.finisher = finisher.get();
+  store->svc.notify = notify.get();
+  store->svc.rados = rados.get();
+  store->svc.zone = zone.get();
+  store->svc.zone_utils = zone_utils.get();
+  store->svc.quota = quota.get();
+  store->svc.sync_modules = sync_modules.get();
+  store->svc.sysobj = sysobj.get();
+
   finisher->init();
   notify->init(zone.get(), rados.get(), finisher.get());
   rados->init();
-  zone->init(sysobj.get(), rados.get(), sync_modules.get());
+  zone->init(sysobj.get(), rados.get(), sync_modules.get(), store);
   zone_utils->init(rados.get(), zone.get());
   quota->init(zone.get());
   sync_modules->init();
@@ -150,9 +169,10 @@ void RGWServices_Def::shutdown()
 }
 
 
-int RGWServices::do_init(CephContext *cct, bool have_cache, bool raw)
+int RGWServices::do_init(CephContext *cct, bool have_cache, bool raw,
+			 RGWRados* store)
 {
-  int r = _svc.init(cct, have_cache, raw);
+  int r = _svc.init(cct, have_cache, raw, store);
   if (r < 0) {
     return r;
   }
