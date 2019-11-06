@@ -30,6 +30,12 @@ if(WITH_RADOSGW)
     list(APPEND DENCODER_EXTRALIBS
       rdkafka)
   endif()
+
+  if(WITH_BOOST_CONTEXT)
+    list(APPEND DENCODER_EXTRALIBS
+      Boost::coroutine
+      Boost::context)
+  endif()
 endif()
 
 if(WITH_RBD)

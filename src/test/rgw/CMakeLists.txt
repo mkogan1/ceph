@@ -1,4 +1,10 @@
 
+if(WITH_BOOST_CONTEXT)
+  set(BOOST_CONTEXT_LIBS
+    Boost::coroutine
+    Boost::context)
+endif()
+
 if(WITH_RADOSGW_AMQP_ENDPOINT)
   # amqp mock library
   set(amqp_mock_src
@@ -21,7 +27,9 @@ target_link_libraries(unittest_rgw_bencode ${rgw_libs})
 #unitttest_rgw_period_history
 add_executable(unittest_rgw_period_history test_rgw_period_history.cc)
 add_ceph_unittest(unittest_rgw_period_history)
-target_link_libraries(unittest_rgw_period_history ${rgw_libs})
+target_link_libraries(unittest_rgw_period_history
+  ${rgw_libs}
+  ${BOOST_CONTEXT_LIBS})
 
 # unitttest_rgw_compression
 add_executable(unittest_rgw_compression
@@ -33,12 +41,16 @@ target_link_libraries(unittest_rgw_compression ${rgw_libs})
 # unitttest_http_manager
 add_executable(unittest_http_manager test_http_manager.cc)
 add_ceph_unittest(unittest_http_manager)
-target_link_libraries(unittest_http_manager ${rgw_libs})
+target_link_libraries(unittest_http_manager
+  ${rgw_libs}
+  ${BOOST_CONTEXT_LIBS})
 
 # unitttest_rgw_reshard_wait
 add_executable(unittest_rgw_reshard_wait test_rgw_reshard_wait.cc)
 add_ceph_unittest(unittest_rgw_reshard_wait)
-target_link_libraries(unittest_rgw_reshard_wait ${rgw_libs})
+target_link_libraries(unittest_rgw_reshard_wait
+  ${rgw_libs}
+  ${BOOST_CONTEXT_LIBS})
 
 set(test_rgw_a_src
   test_rgw_common.cc)
@@ -66,7 +78,8 @@ target_link_libraries(ceph_test_rgw_manifest
   ${EXPAT_LIBRARIES}
   ${CMAKE_DL_LIBS}
   ${UNITTEST_LIBS}
-  ${CRYPTO_LIBS})
+  ${CRYPTO_LIBS}
+  ${BOOST_CONTEXT_LIBS})
 
 set(test_rgw_obj_srcs test_rgw_obj.cc)
 add_executable(ceph_test_rgw_obj
@@ -88,6 +101,7 @@ target_link_libraries(ceph_test_rgw_obj
   ${CMAKE_DL_LIBS}
   ${UNITTEST_LIBS}
   ${CRYPTO_LIBS}
+  ${BOOST_CONTEXT_LIBS}
   )
 
 set(test_rgw_crypto_srcs test_rgw_crypto.cc)
@@ -110,6 +124,7 @@ target_link_libraries(unittest_rgw_crypto
   ${CMAKE_DL_LIBS}
   ${UNITTEST_LIBS}
   ${CRYPTO_LIBS}
+  ${BOOST_CONTEXT_LIBS}
   )
 
 set(test_rgw_reshard_srcs test_rgw_reshard.cc)
@@ -119,6 +134,7 @@ add_executable(unittest_rgw_reshard
 add_ceph_unittest(unittest_rgw_reshard)
 target_link_libraries(unittest_rgw_reshard
   ${rgw_libs}
+  ${BOOST_CONTEXT_LIBS}
   )
 
 add_executable(unittest_rgw_putobj test_rgw_putobj.cc)
@@ -129,7 +145,7 @@ add_executable(ceph_test_rgw_throttle
   test_rgw_throttle.cc
   $<TARGET_OBJECTS:unit-main>)
 target_link_libraries(ceph_test_rgw_throttle ${rgw_libs}
-  librados global ${UNITTEST_LIBS})
+  librados global ${UNITTEST_LIBS} ${BOOST_CONTEXT_LIBS})
 
 add_executable(unittest_rgw_iam_policy test_rgw_iam_policy.cc)
 add_ceph_unittest(unittest_rgw_iam_policy)
@@ -148,6 +164,7 @@ target_link_libraries(unittest_rgw_iam_policy
   ${CMAKE_DL_LIBS}
   ${UNITTEST_LIBS}
   ${CRYPTO_LIBS}
+  ${BOOST_CONTEXT_LIBS}
   )
 
 add_executable(unittest_rgw_string test_rgw_string.cc)
