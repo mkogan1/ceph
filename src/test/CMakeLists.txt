@@ -217,6 +217,11 @@ if(${WITH_RADOSGW})
     ${CURL_LIBRARIES}
     ${EXPAT_LIBRARIES}
     ${CMAKE_DL_LIBS} ${UNITTEST_LIBS} ${CRYPTO_LIBS})
+  if(WITH_BOOST_CONTEXT)
+    target_link_libraries(ceph_test_cls_rgw_meta
+      Boost::coroutine
+      Boost::context)
+  endif()
 
   install(TARGETS
     ceph_test_cls_rgw_meta
@@ -247,6 +252,11 @@ if(${WITH_RADOSGW})
     ${EXTRALIBS}
     ${CRYPTO_LIBS}
     )
+  if(WITH_BOOST_CONTEXT)
+    target_link_libraries(ceph_test_cls_rgw_log
+      Boost::coroutine
+      Boost::context)
+  endif()
 
 # ceph_test_librgw_file (nfs-like RGW interface)
 add_executable(ceph_test_librgw_file
