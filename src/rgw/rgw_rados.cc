@@ -6039,7 +6039,8 @@ struct get_obj_data {
 };
 
 static void _get_obj_aio_completion_cb(completion_t cb, void *arg);
-
+// FIXME: #CACHEREBASE
+/*
 get_obj_data::get_obj_data(CephContext *_cct)
   : cct(_cct),
   rados(NULL), ctx(NULL),
@@ -6065,27 +6066,27 @@ int get_obj_data::get_err_code() {
 }
 
 int get_obj_data::wait_next_io(bool *done) {
-  lock.Lock();
+  lock.lock();
   map<off_t, librados::AioCompletion *>::iterator iter = completion_map.begin();
   if (iter == completion_map.end()) {
     *done = true;
-    lock.Unlock();
+    lock.unlock();
     return 0;
   }
   off_t cur_ofs = iter->first;
   librados::AioCompletion *c = iter->second;
-  lock.Unlock();
+  lock.unlock();
 
   c->wait_for_safe_and_cb();
   int r = c->get_return_value();
 
-  lock.Lock();
+  lock.lock();
   completion_map.erase(cur_ofs);
 
   if (completion_map.empty()) {
     *done = true;
   }
-  lock.Unlock();
+  lock.unlock();
 
   c->release();
 
@@ -6093,7 +6094,7 @@ int get_obj_data::wait_next_io(bool *done) {
 }
 
 void get_obj_data::add_io(off_t ofs, off_t len, bufferlist **pbl, AioCompletion **pc) {
-  Mutex::Locker l(lock);
+  std::lock_guard l{lock};
 
   const auto& io_iter = io_map.insert(
       map<off_t, get_obj_io>::value_type(ofs, get_obj_io()));
@@ -6110,22 +6111,22 @@ void get_obj_data::add_io(off_t ofs, off_t len, bufferlist **pbl, AioCompletion 
 
   aio_data.push_back(aio);
 
-  struct get_obj_aio_data *paio_data =  &aio_data.back(); /* last element */
+  struct get_obj_aio_data *paio_data =  &aio_data.back(); // last element
 
   librados::AioCompletion *c = librados::Rados::aio_create_completion((void *)paio_data, NULL, _get_obj_aio_completion_cb);
   completion_map[ofs] = c;
 
   *pc = c;
 
-  /* we have a reference per IO, plus one reference for the calling function.
-   * reference is dropped for each callback, plus when we're done iterating
-   * over the parts */
+  // we have a reference per IO, plus one reference for the calling function.
+  // reference is dropped for each callback, plus when we're done iterating
+  // over the parts
   get();
 }
 
 void get_obj_data::cancel_io(off_t ofs) {
   ldout(cct, 20) << "get_obj_data::cancel_io() ofs=" << ofs << dendl;
-  lock.Lock();
+  lock.lock();
   map<off_t, AioCompletion *>::iterator iter = completion_map.find(ofs);
   if (iter != completion_map.end()) {
     AioCompletion *c = iter->second;
@@ -6133,16 +6134,16 @@ void get_obj_data::cancel_io(off_t ofs) {
     completion_map.erase(ofs);
     io_map.erase(ofs);
   }
-  lock.Unlock();
+  lock.unlock();
 
-  /* we don't drop a reference here -- e.g., not calling d->put(), because we still
-   * need IoCtx to live, as io callback may still be called
-   */
+  // we don't drop a reference here -- e.g., not calling d->put(), because we still
+  // need IoCtx to live, as io callback may still be called
+  //
 }
 
 void get_obj_data::cancel_all_io() {
   ldout(cct, 20) << "get_obj_data::cancel_all_io()" << dendl;
-  Mutex::Locker l(lock);
+  std::lock_guard l{lock};
   for (map<off_t, librados::AioCompletion *>::iterator iter = completion_map.begin();
       iter != completion_map.end(); ++iter) {
     librados::AioCompletion  *c = iter->second;
@@ -6151,7 +6152,7 @@ void get_obj_data::cancel_all_io() {
 }
 
 int get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list) {
-  Mutex::Locker l(lock);
+  std::lock_guard l{lock};
 
   map<off_t, get_obj_io>::iterator liter = io_map.begin();
 
@@ -6163,7 +6164,7 @@ int get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list) {
   map<off_t, librados::AioCompletion *>::iterator aiter;
   aiter = completion_map.find(ofs);
   if (aiter == completion_map.end()) {
-    /* completion map does not hold this io, it was cancelled */
+    // completion map does not hold this io, it was cancelled
     return 0;
   }
 
@@ -6175,13 +6176,13 @@ int get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list) {
   for (; aiter != completion_map.end(); ++aiter) {
     completion = aiter->second;
     if (!completion->is_safe()) {
-      /* reached a request that is not yet complete, stop */
+      // reached a request that is not yet complete, stop
         break;
     }
 
     r = completion->get_return_value();
     if (r < 0) {
-      set_cancelled(r); /* mark it as cancelled, so that we don't continue processing next operations */
+      set_cancelled(r); // mark it as cancelled, so that we don't continue processing next operations
       return r;
     }
 
@@ -6253,12 +6254,12 @@ int get_obj_data::add_l2_request(struct librados::L2CacheRequest **cc, bufferlis
   l2request->lc = lc;
   l2request->op_data = this;
   l2request->pbl = pbl;
-  /*FIXME calcuclate the destination for L2 and update l2request->dest*/
+  //FIXME calcuclate the destination for L2 and update l2request->dest
   l2request->dest=deterministic_hash(oid);
   //ldout(cct, 0) << "INFO::REMOTE_IO :"<< dest << dendl;
-  cache_lock.Lock();
+  cache_lock.lock();
   cache_aio_map[obj_ofs] = l2request;
-  cache_lock.Unlock();
+  cache_lock.unlock();
   *cc = l2request;
   return 0;
 }
@@ -6296,9 +6297,9 @@ int get_obj_data::add_l1_request(struct librados::L1CacheRequest **cc, bufferlis
   cb->aio_sigevent.sigev_value.sival_ptr = (void*)c;
   c->paiocb = cb;
 
-  cache_lock.Lock();
+  cache_lock.lock();
   cache_aio_map[ofs] = c;
-  cache_lock.Unlock();
+  cache_lock.unlock();
   *cc = c;
   return 0;
 }
@@ -6345,23 +6346,23 @@ void get_obj_data::cache_aio_completion_cb(librados::CacheRequest *c){
     return;
   } else if (status == 0) {
     cache_unmap_io(c->ofs);
-    l2_lock.Lock();
+    l2_lock.lock();
     ldout(cct, 0) << "engage1: cache_aio_completion_cb,inside the finish lock- oid : " << c->oid << ", len:" << std::hex << c->len << "plb->len" << std::hex << c->pbl->length()  << dendl;
     c->finish();
-    l2_lock.Unlock();
+    l2_lock.unlock();
   }
 }
 
 void get_obj_data::cache_unmap_io(off_t ofs){
 	
-  cache_lock.Lock();
+  cache_lock.lock();
   map<off_t, struct librados::CacheRequest *>::iterator iter = cache_aio_map.find(ofs);
   if (iter == cache_aio_map.end()) {
-    cache_lock.Unlock();
+    cache_lock.unlock();
     return;
   }
   cache_aio_map.erase(ofs);
-  cache_lock.Unlock();
+  cache_lock.unlock();
 }
 
 int get_obj_data::add_cache_notifier(std::string oid, librados::AioCompletion *lc) {
@@ -6369,7 +6370,7 @@ int get_obj_data::add_cache_notifier(std::string oid, librados::AioCompletion *l
   //librados::IoCtxImpl::C_aio_Complete *m_safe = new librados::IoCtxImpl::C_aio_Complete(lc->pc);
   return 0;
 }
-
+*/
 
 static int _get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                off_t read_ofs, off_t len, bool is_head_obj,
@@ -8868,6 +8869,8 @@ uint64_t RGWRados::next_bucket_id()
   return ++max_bucket_id;
 }
 
+// FIXME: #CACHEREBASE
+/*
 RGWRados *RGWStoreManager::init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread,
 						 bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metacache, bool use_datacache)
 {
@@ -8913,7 +8916,7 @@ void RGWStoreManager::close_storage(RGWRados *store)
 
   delete store;
 }
-
+*/
 librados::Rados* RGWRados::get_rados_handle()
 {
   return &rados;

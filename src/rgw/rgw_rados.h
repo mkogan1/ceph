@@ -374,110 +374,6 @@ using tombstone_cache_t = lru_map<rgw_obj, tombstone_entry>;
 
 class RGWIndexCompletionManager;
 
-
-struct get_obj_aio_data {
-  struct get_obj_data *op_data;
-  off_t ofs;
-  off_t len;
-};
-
-struct get_obj_io {
-  off_t len;
-  bufferlist bl;
-};
-
-class librados::CacheRequest {
-  public:
-    ceph::mutex lock;
-    int sequence;
-    bufferlist *pbl;
-    struct get_obj_data *op_data;
-    std::string oid;
-    off_t ofs;
-    off_t len;
-    librados::AioCompletion *lc;
-    std::string key;
-    off_t read_ofs;
-    Context *onack;
-    CephContext *cct;
-    CacheRequest(CephContext *_cct) : lock("CacheRequest"), sequence(0), pbl(NULL), op_data(NULL), ofs(0), lc(NULL), read_ofs(0), cct(_cct) {};
-    virtual ~CacheRequest(){};
-    virtual void release()=0;
-    virtual void cancel_io()=0;
-    virtual int status()=0;
-    virtual void finish()=0;
-};
-
-struct librados::L1CacheRequest : public librados::CacheRequest{
-  int stat;
-  struct aiocb *paiocb;
-  L1CacheRequest(CephContext *_cct) :  CacheRequest(_cct), stat(-1), paiocb(NULL) {}
-  ~L1CacheRequest(){}
-  void release (){
-    lock.lock();
-    free((void *)paiocb->aio_buf);
-    paiocb->aio_buf = NULL;
-    ::close(paiocb->aio_fildes);
-    free(paiocb);
-    lock.unlock();
-    delete this;
-					    }
-
-  void cancel_io(){
-    lock.lock();
-    stat = ECANCELED;
-    lock.unlock();
-  }
-
-  int status(){
-    lock.lock();
-    if (stat != EINPROGRESS) {
-      lock.unlock();
-      if (stat == ECANCELED){
-	release();
-	return ECANCELED;
-      }
-    }
-    stat = aio_error(paiocb);
-    lock.unlock();
-    return stat;
-  }
-
-  void finish(){
-    pbl->append((char*)paiocb->aio_buf, paiocb->aio_nbytes);
-    onack->complete(0);
-    release();
-  }
-};
-
-struct librados::L2CacheRequest : public librados::CacheRequest {
-  size_t read;
-  int stat;
-  void *tp;
-  string dest;
-  L2CacheRequest(CephContext *_cct) : CacheRequest(_cct), read(0), stat(-1) {}
-  ~L2CacheRequest(){}
-  void release (){
-    lock.lock();
-    lock.unlock();
-  }
-
-  void cancel_io(){
-    lock.lock();
-    stat = ECANCELED;
-    lock.unlock();
-  }
-
-  void finish(){
-    onack->complete(0);
-    release();
-  }
-
-  int status(){
-    return 0;
-  }
-};
-
 class RGWRados
 {
   friend class RGWGC;
@@ -1340,7 +1236,8 @@ public:
                   uint64_t max_chunk_size, iterate_obj_cb cb, void *arg,
                   optional_yield y);
 
-  virtual int flush_read_list(struct get_obj_data *d);
+  // FIXME: #CACHEREBASE
+  //virtual int flush_read_list(struct get_obj_data *d);
 
   virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                          off_t read_ofs, off_t len, bool is_head_obj,
@@ -1604,6 +1501,116 @@ public:
 
   uint64_t next_bucket_id();
 };
+
+
+// ANCHOR: #CACHEREBASE
+
+struct get_obj_aio_data {
+  struct get_obj_data *op_data;
+  off_t ofs;
+  off_t len;
+};
+
+struct get_obj_io {
+  off_t len;
+  bufferlist bl;
+};
+
+class librados::CacheRequest {
+  public:
+    ceph::mutex lock;
+    int sequence;
+    bufferlist *pbl;
+    struct get_obj_data *op_data;
+    std::string oid;
+    off_t ofs;
+    off_t len;
+    librados::AioCompletion *lc;
+    std::string key;
+    off_t read_ofs;
+    Context *onack;
+    CephContext *cct;
+    CacheRequest(CephContext *_cct) : lock("CacheRequest"), sequence(0), pbl(NULL), op_data(NULL), ofs(0), lc(NULL), read_ofs(0), cct(_cct) {};
+    virtual ~CacheRequest(){};
+    virtual void release()=0;
+    virtual void cancel_io()=0;
+    virtual int status()=0;
+    virtual void finish()=0;
+};
+
+struct librados::L1CacheRequest : public librados::CacheRequest{
+  int stat;
+  struct aiocb *paiocb;
+  L1CacheRequest(CephContext *_cct) :  CacheRequest(_cct), stat(-1), paiocb(NULL) {}
+  ~L1CacheRequest(){}
+  void release (){
+    lock.lock();
+    free((void *)paiocb->aio_buf);
+    paiocb->aio_buf = NULL;
+    ::close(paiocb->aio_fildes);
+    free(paiocb);
+    lock.unlock();
+    delete this;
+	}
+
+  void cancel_io(){
+    lock.lock();
+    stat = ECANCELED;
+    lock.unlock();
+  }
+
+  int status(){
+    lock.lock();
+    if (stat != EINPROGRESS) {
+      lock.unlock();
+      if (stat == ECANCELED){
+        release();
+        return ECANCELED;
+      }
+    }
+    stat = aio_error(paiocb);
+    lock.unlock();
+    return stat;
+  }
+
+  void finish(){
+    pbl->append((char*)paiocb->aio_buf, paiocb->aio_nbytes);
+    onack->complete(0);
+    release();
+  }
+};
+
+struct librados::L2CacheRequest : public librados::CacheRequest {
+  size_t read;
+  int stat;
+  void *tp;
+  string dest;
+  L2CacheRequest(CephContext *_cct) : CacheRequest(_cct), read(0), stat(-1) {}
+  ~L2CacheRequest(){}
+  void release (){
+    lock.lock();
+    lock.unlock();
+  }
+
+  void cancel_io(){
+    lock.lock();
+    stat = ECANCELED;
+    lock.unlock();
+  }
+
+  void finish(){
+    onack->complete(0);
+    release();
+  }
+
+  int status(){
+    return 0;
+  }
+};
+
+
+// FIXME: #CACHEREBASE
+/*
 struct get_obj_data : public RefCountedObject {
   CephContext *cct;
   RGWRados *rados;
@@ -1654,5 +1661,5 @@ struct get_obj_data : public RefCountedObject {
   int submit_l1_aio_read(librados::L1CacheRequest *cc);
   int submit_l1_io_read(bufferlist *bl, int len, string oid);
 };
-
+*/
 #endif
