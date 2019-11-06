@@ -219,7 +219,13 @@ if(WITH_CURL_OPENSSL)
 endif()
 
 if(WITH_BOOST_CONTEXT)
-  target_link_libraries(rgw_a PRIVATE Boost::coroutine Boost::context)
+  target_link_libraries(rgw_a PRIVATE spawn)
+endif()
+
+if(WITH_BOOST_CONTEXT)
+  set(BOOST_CONTEXT_LIBS
+    Boost::coroutine
+    Boost::context)
 endif()
 
 set(rgw_libs rgw_a)
@@ -267,7 +273,7 @@ target_link_libraries(radosgw radosgw_a librados
   global dmclock::dmclock
   ${FCGI_LIBRARY} ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
-  ${ALLOC_LIBS})
+  ${ALLOC_LIBS} ${BOOST_CONTEXT_LIBS})
 install(TARGETS radosgw DESTINATION bin)
 
 set(radosgw_admin_srcs
@@ -279,7 +285,8 @@ target_link_libraries(radosgw-admin ${rgw_libs} librados
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
   global ${FCGI_LIBRARY} ${LIB_RESOLV}
-  ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES})
+  ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
+  ${BOOST_CONTEXT_LIBS})
 install(TARGETS radosgw-admin DESTINATION bin)
 
 set(radosgw_es_srcs
@@ -308,7 +315,7 @@ target_link_libraries(radosgw-object-expirer ${rgw_libs} librados
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
   global ${FCGI_LIBRARY} ${LIB_RESOLV}
-  ${CURL_LIBRARIES} ${EXPAT_LIBRARIES})
+  ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BOOST_CONTEXT_LIBS})
 install(TARGETS radosgw-object-expirer DESTINATION bin)
 
 set(librgw_srcs
@@ -331,6 +338,7 @@ target_link_libraries(rgw
   ${LIB_RESOLV}
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
+  ${BOOST_CONTEXT_LIBS}
   PUBLIC
   dmclock::dmclock)
 
@@ -370,6 +378,7 @@ target_link_libraries(rgw_admin_user PRIVATE
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
   ${OPENLDAP_LIBRARIES}
+  ${BOOST_CONTEXT_LIBS}
   dmclock::dmclock)
 set_target_properties(rgw_admin_user PROPERTIES OUTPUT_NAME rgw_admin_user VERSION 1.0.0
   SOVERSION 0)
@@ -380,21 +389,20 @@ endif()
 if(WITH_RADOSGW_KAFKA_ENDPOINT)
   target_link_libraries(rgw_admin_user PRIVATE RDKafka::RDKafka)
 endif()
-if(WITH_BOOST_CONTEXT)
-  target_link_libraries(rgw_admin_user PRIVATE Boost::coroutine Boost::context)
-endif()
 
 if(WITH_TESTS)
   add_executable(ceph_rgw_jsonparser
     rgw_jsonparser.cc)
   target_link_libraries(ceph_rgw_jsonparser
     ${rgw_libs}
+    ${BOOST_CONTEXT_LIBS}
     global)
 
   add_executable(ceph_rgw_multiparser
     rgw_multiparser.cc)
   target_link_libraries(ceph_rgw_multiparser
     ${rgw_libs}
+    ${BOOST_CONTEXT_LIBS}
     global)
 
   install(TARGETS
