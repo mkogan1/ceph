@@ -11022,11 +11022,13 @@ static bool diff_sets(std::set<rgw_bucket>& orig_set,
       ++niter;
       continue;
     }
-    while (*oiter < *niter) {
+    while (*oiter < *niter &&
+	   oiter != orig_set.end()) {
       removed->push_back(*oiter);
       ++oiter;
     }
-    while (*niter < *oiter) {
+    while (*niter < *oiter
+	   && niter != new_set.end()) {
       added->push_back(*niter);
       ++niter;
     }
@@ -11039,51 +11041,6 @@ static bool diff_sets(std::set<rgw_bucket>& orig_set,
   }
 
   return !(removed->empty() && added->empty());
-}
-
-int RGWRados::handle_bi_update(RGWBucketInfo& bucket_info,
-			       RGWBucketInfo* orig_bucket_info)
-{
-  std::set<rgw_bucket> orig_sources;
-  std::set<rgw_bucket> orig_dests;
-
-  if (orig_bucket_info &&
-      orig_bucket_info->sync_policy) {
-    orig_bucket_info->sync_policy->get_potential_related_buckets(bucket_info.bucket,
-                                                                &orig_sources,
-                                                                &orig_dests);
-  }
-
-  std::set<rgw_bucket> sources;
-  std::set<rgw_bucket> dests;
-  if (bucket_info.sync_policy) {
-    bucket_info.sync_policy->get_potential_related_buckets(bucket_info.bucket,
-                                                           &sources,
-                                                           &dests);
-  }
-
-  std::vector<rgw_bucket> removed_sources;
-  std::vector<rgw_bucket> added_sources;
-  bool found = diff_sets(orig_sources, sources, &added_sources, &removed_sources);
-  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ": orig_sources=" << orig_sources << " new_sources=" << sources << dendl;
-  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ":  potential sources added=" << added_sources << " removed=" << removed_sources << dendl;
-
-  std::vector<rgw_bucket> removed_dests;
-  std::vector<rgw_bucket> added_dests;
-  found = found || diff_sets(orig_dests, dests, &added_dests, &removed_dests);
-
-  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ": orig_dests=" << orig_dests << " new_dests=" << dests << dendl;
-  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ":  potential dests added=" << added_dests << " removed=" << removed_dests << dendl;
-
-  if (!found) {
-    return 0;
-  }
-
-  return do_update_hints(bucket_info,
-                         added_dests,
-                         removed_dests,
-                         added_sources,
-                         removed_sources);
 }
 
 class HintIndexObj
@@ -11262,10 +11219,10 @@ public:
       obj(obj),
       sysobj(obj_ctx.get_obj(obj)) {}
 
+  template<typename C1, typename C2>
   int update(const rgw_bucket& entity,
              const RGWBucketInfo& info_source,
-             std::optional<std::vector<rgw_bucket>> add,
-             std::optional<std::vector<rgw_bucket>> remove) {
+             C1* add, C2* remove) {
     int r = 0;
 
     auto& info_source_ver = info_source.objv_tracker.read_version;
@@ -11308,10 +11265,10 @@ public:
   }
 
 private:
+  template<typename C1, typename C2>
   void update_entries(const rgw_bucket& info_source,
                       const obj_version& info_source_ver,
-                      std::optional<std::vector<rgw_bucket> > add,
-                      std::optional<std::vector<rgw_bucket> > remove,
+                      C1* add, C2* remove,
                       single_instance_info *instance) {
     if (remove) {
       for (auto& bucket : *remove) {
@@ -11412,94 +11369,143 @@ rgw_raw_obj RGWRados::get_dests_obj(const rgw_bucket& bucket) const
                      bucket_sync_targets_oid_prefix + "." + b.get_key());
 }
 
-int RGWRados::do_update_hints(const RGWBucketInfo& bucket_info,
-			      std::vector<rgw_bucket>& added_dests,
-			      std::vector<rgw_bucket>& removed_dests,
-			      std::vector<rgw_bucket>& added_sources,
-			      std::vector<rgw_bucket>& removed_sources)
+
+template<typename C1, typename C2>
+int update_hints(RGWRados* store,
+		 const RGWBucketInfo& bucket_info,
+		 C1& added_dests,
+		 C2& removed_dests,
+		 C1& added_sources,
+		 C2& removed_sources)
 {
-  std::vector<rgw_bucket> self_entity;
-  self_entity.push_back(bucket_info.bucket);
+  C1 self_entity = { bucket_info.bucket };
 
   if (!added_dests.empty() ||
       !removed_dests.empty()) {
     /* update our dests */
-    HintIndexObj index(this, get_dests_obj(bucket_info.bucket));
+    HintIndexObj index(store, store->get_dests_obj(bucket_info.bucket));
     int r = index.update(bucket_info.bucket,
                          bucket_info,
-                         added_dests,
-                         removed_dests);
+                         &added_dests,
+                         &removed_dests);
     if (r < 0) {
-      ldout(cct, 0) << "ERROR: failed to update targets index for bucket=" << bucket_info.bucket << " r=" << r << dendl;
+      ldout(store->ctx(), 0) << "ERROR: failed to update targets index for bucket=" << bucket_info.bucket << " r=" << r << dendl;
       return r;
     }
 
-    /* update added dest buckets */
+    /* update dest buckets */
     for (auto& dest_bucket : added_dests) {
-      HintIndexObj dep_index(this, get_sources_obj(dest_bucket));
+      HintIndexObj dep_index(store, store->get_sources_obj(dest_bucket));
       int r = dep_index.update(dest_bucket,
                                bucket_info,
-                               self_entity,
-                               std::nullopt);
+                               &self_entity,
+                               static_cast<C2 *>(nullptr));
       if (r < 0) {
-        ldout(cct, 0) << "ERROR: failed to update targets index for bucket=" << dest_bucket << " r=" << r << dendl;
+        ldout(store->ctx(), 0) << "ERROR: failed to update targets index for bucket=" << dest_bucket << " r=" << r << dendl;
         return r;
       }
     }
     /* update removed dest buckets */
     for (auto& dest_bucket : removed_dests) {
-      HintIndexObj dep_index(this, get_sources_obj(dest_bucket));
+      HintIndexObj dep_index(store, store->get_sources_obj(dest_bucket));
       int r = dep_index.update(dest_bucket,
                                bucket_info,
-                               std::nullopt,
-                               self_entity);
+                               static_cast<C1 *>(nullptr),
+                               &self_entity);
       if (r < 0) {
-        ldout(cct, 0) << "ERROR: failed to update targets index for bucket=" << dest_bucket << " r=" << r << dendl;
+        ldout(store->ctx(), 0) << "ERROR: failed to update targets index for bucket=" << dest_bucket << " r=" << r << dendl;
         return r;
       }
     }
   }
 
-  if (!added_dests.empty() ||
-      !removed_dests.empty()) {
-    HintIndexObj index(this, get_sources_obj(bucket_info.bucket));
+  if (!added_sources.empty() ||
+      !removed_sources.empty()) {
+    HintIndexObj index(store, store->get_sources_obj(bucket_info.bucket));
     /* update our sources */
     int r = index.update(bucket_info.bucket,
                          bucket_info,
-                         added_sources,
-                         removed_sources);
+                         &added_sources,
+                         &removed_sources);
     if (r < 0) {
-      ldout(cct, 0) << "ERROR: failed to update targets index for bucket=" << bucket_info.bucket << " r=" << r << dendl;
+      ldout(store->ctx(), 0) << "ERROR: failed to update targets index for bucket=" << bucket_info.bucket << " r=" << r << dendl;
       return r;
     }
 
     /* update added sources buckets */
     for (auto& source_bucket : added_sources) {
-      HintIndexObj dep_index(this, get_dests_obj(source_bucket));
+      HintIndexObj dep_index(store, store->get_dests_obj(source_bucket));
       int r = dep_index.update(source_bucket,
                                bucket_info,
-                               self_entity,
-                               std::nullopt);
+                               &self_entity,
+                               static_cast<C2 *>(nullptr));
       if (r < 0) {
-        ldout(cct, 0) << "ERROR: failed to update targets index for bucket=" << source_bucket << " r=" << r << dendl;
+        ldout(store->ctx(), 0) << "ERROR: failed to update targets index for bucket=" << source_bucket << " r=" << r << dendl;
         return r;
       }
     }
     /* update removed dest buckets */
     for (auto& source_bucket : removed_sources) {
-      HintIndexObj dep_index(this, get_dests_obj(source_bucket));
+      HintIndexObj dep_index(store, store->get_dests_obj(source_bucket));
       int r = dep_index.update(source_bucket,
                                bucket_info,
-                               std::nullopt,
-                               self_entity);
+                               static_cast<C1 *>(nullptr),
+                               &self_entity);
       if (r < 0) {
-        ldout(cct, 0) << "ERROR: failed to update targets index for bucket=" << source_bucket << " r=" << r << dendl;
+        ldout(store->ctx(), 0) << "ERROR: failed to update targets index for bucket=" << source_bucket << " r=" << r << dendl;
         return r;
       }
     }
   }
 
   return 0;
+}
+
+
+int RGWRados::handle_bi_update(RGWBucketInfo& bucket_info,
+			       RGWBucketInfo* orig_bucket_info)
+{
+  std::set<rgw_bucket> orig_sources;
+  std::set<rgw_bucket> orig_dests;
+
+  if (orig_bucket_info &&
+      orig_bucket_info->sync_policy) {
+    orig_bucket_info->sync_policy->get_potential_related_buckets(bucket_info.bucket,
+                                                                &orig_sources,
+                                                                &orig_dests);
+  }
+
+  std::set<rgw_bucket> sources;
+  std::set<rgw_bucket> dests;
+  if (bucket_info.sync_policy) {
+    bucket_info.sync_policy->get_potential_related_buckets(bucket_info.bucket,
+                                                           &sources,
+                                                           &dests);
+  }
+
+  std::vector<rgw_bucket> removed_sources;
+  std::vector<rgw_bucket> added_sources;
+  bool found = diff_sets(orig_sources, sources, &added_sources, &removed_sources);
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ": orig_sources=" << orig_sources << " new_sources=" << sources << dendl;
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ":  potential sources added=" << added_sources << " removed=" << removed_sources << dendl;
+
+  std::vector<rgw_bucket> removed_dests;
+  std::vector<rgw_bucket> added_dests;
+  found = found || diff_sets(orig_dests, dests, &added_dests, &removed_dests);
+
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ": orig_dests=" << orig_dests << " new_dests=" << dests << dendl;
+  ldout(cct, 20) << __func__ << "(): bucket=" << bucket_info.bucket << ":  potential dests added=" << added_dests << " removed=" << removed_dests << dendl;
+
+  if (!found) {
+    return 0;
+  }
+
+  return update_hints(this,
+		      bucket_info,
+		      added_dests,
+		      removed_dests,
+		      added_sources,
+		      removed_sources);
 }
 
 int RGWRados::handle_bi_removal(const RGWBucketInfo& bucket_info)
@@ -11528,11 +11534,12 @@ int RGWRados::handle_bi_removal(const RGWBucketInfo& bucket_info)
   std::vector<rgw_bucket> added_sources;
   std::vector<rgw_bucket> added_dests;
 
-  return do_update_hints(bucket_info,
-                         added_dests,
-                         removed_dests,
-                         added_sources,
-                         removed_sources);
+  return update_hints(this,
+		      bucket_info,
+		      added_dests,
+		      removed_dests,
+		      added_sources,
+		      removed_sources);
 }
 
 int RGWRados::get_bucket_sync_hints(const rgw_bucket& bucket,

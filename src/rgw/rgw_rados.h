@@ -2536,11 +2536,14 @@ public:
 private:
   rgw_raw_obj get_sources_obj(const rgw_bucket& bucket) const;
   rgw_raw_obj get_dests_obj(const rgw_bucket& bucket) const;
-  int do_update_hints(const RGWBucketInfo& bucket_info,
-		      std::vector<rgw_bucket>& added_dests,
-		      std::vector<rgw_bucket>& removed_dests,
-		      std::vector<rgw_bucket>& added_sources,
-		      std::vector<rgw_bucket>& removed_sources);
+
+  template<typename C1, typename C2>
+  friend int update_hints(RGWRados* store,
+			  const RGWBucketInfo& bucket_info,
+			  C1& added_dests,
+			  C2& removed_dests,
+			  C1& added_sources,
+			  C2& removed_sources);
 };
 
 class RGWStoreManager {
