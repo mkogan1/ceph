@@ -2513,6 +2513,18 @@ static int bucket_source_sync_status(RGWRados *store, const RGWZone& zone,
   return 0;
 }
 
+void encode_json(const char *name, const RGWBucketSyncFlowManager::pipe_set& pset, Formatter *f)
+{
+  Formatter::ObjectSection top_section(*f, name);
+  Formatter::ArraySection as(*f, "entries");
+
+  for (auto& pipe_handler : pset) {
+    Formatter::ObjectSection hs(*f, "handler");
+    encode_json("source", pipe_handler.source, f);
+    encode_json("dest", pipe_handler.dest, f);
+  }
+}
+
 static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
                               const std::string& source_zone_id,
                               std::ostream& out)
@@ -2579,7 +2591,8 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
     }
 
     for (auto& m : sources) {
-      for (auto& pipe : m.second.pipes) {
+      for (auto& entry : m.second.pipe_map) {
+        auto& pipe = entry.second;
         if (pipe.source.zone.value_or("") == z->second.id) {
           bucket_source_sync_status(store, zone, z->second,
                                     c->second,
