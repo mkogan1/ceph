@@ -3164,7 +3164,7 @@ class RGWBucketShardFullSyncCR : public RGWCoroutine {
       return true;
     }
 
-    bool check_key(const rgw_obj_key& key) {
+    bool check_key_handled(const rgw_obj_key& key) {
       if (!rules) {
         return false;
       }
@@ -3219,6 +3219,8 @@ int RGWBucketShardFullSyncCR::operate()
       tn->log(20, "listing bucket for full sync");
 
       if (!prefix_handler.revalidate_marker(&list_marker)) {
+        set_status() << "finished iterating over all available prefixes: last marker=" << list_marker;
+        tn->log(20, SSTR("finished iterating over all available prefixes: last marker=" << list_marker));
         break;
       }
 
@@ -3242,7 +3244,9 @@ int RGWBucketShardFullSyncCR::operate()
             << bucket_shard_str{bs} << "/" << entries_iter->key));
         entry = &(*entries_iter);
         list_marker = entries_iter->key;
-        if (!prefix_handler.check_key(entries_iter->key)) {
+        if (!prefix_handler.check_key_handled(entries_iter->key)) {
+          set_status() << "skipping entry due to policy rules: " << entries_iter->key;
+          tn->log(20, SSTR("skipping entry due to policy rules: " << entries_iter->key));
           continue;
         }
         total_entries++;
@@ -3325,6 +3329,7 @@ class RGWBucketShardIncrementalSyncCR : public RGWCoroutine {
   RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
   rgw_bucket_sync_pipe& sync_pipe;
+  RGWBucketSyncFlowManager::pipe_rules_ref rules;
   rgw_bucket_shard& bs;
   boost::intrusive_ptr<RGWContinuousLeaseCR> lease_cr;
   list<rgw_bi_log_entry> list_result;
@@ -3344,6 +3349,7 @@ class RGWBucketShardIncrementalSyncCR : public RGWCoroutine {
   bool syncstopped{false};
 
   RGWSyncTraceNodeRef tn;
+
 public:
   RGWBucketShardIncrementalSyncCR(RGWDataSyncCtx *_sc,
                                   rgw_bucket_sync_pipe& _sync_pipe,
@@ -3363,6 +3369,18 @@ public:
         << bucket_shard_str{bs};
     set_status("init");
     marker_tracker.set_tn(tn);
+    rules = sync_pipe.get_rules();
+  }
+
+  bool check_key_handled(const rgw_obj_key& key) {
+    if (!rules) {
+      return false;
+    }
+    auto iter = rules->prefix_search(key.name);
+    if (iter == rules->prefix_end()) {
+      return false;
+    }
+    return boost::starts_with(key.name, iter->first);
   }
 
   int operate() override;
@@ -3455,6 +3473,13 @@ int RGWBucketShardIncrementalSyncCR::operate()
         if (!key.ns.empty()) {
           set_status() << "skipping entry in namespace: " << entry->object;
           tn->log(20, SSTR("skipping entry in namespace: " << entry->object));
+          marker_tracker.try_update_high_marker(cur_id, 0, entry->timestamp);
+          continue;
+        }
+
+        if (!check_key_handled(key)) {
+          set_status() << "skipping entry due to policy rules: " << entry->object;
+          tn->log(20, SSTR("skipping entry due to policy rules: " << entry->object));
           marker_tracker.try_update_high_marker(cur_id, 0, entry->timestamp);
           continue;
         }
