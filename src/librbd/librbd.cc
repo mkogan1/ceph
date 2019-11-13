@@ -2105,7 +2105,7 @@ namespace librbd {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_remove_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, snap_name);
     librbd::NoOpProgressContext prog_ctx;
-    int r = librbd::snap_remove(ictx, snap_name, 0, prog_ctx);
+    int r = librbd::api::Snapshot<>::remove(ictx, snap_name, 0, prog_ctx);
     tracepoint(librbd, snap_remove_exit, r);
     return r;
   }
@@ -2114,7 +2114,7 @@ namespace librbd {
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_remove2_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, snap_name, flags);
-    int r = librbd::snap_remove(ictx, snap_name, flags, pctx);
+    int r = librbd::api::Snapshot<>::remove(ictx, snap_name, flags, pctx);
     tracepoint(librbd, snap_remove_exit, r);
     return r;
   }
@@ -2176,7 +2176,7 @@ namespace librbd {
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_is_protected_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, snap_name);
-    int r = librbd::snap_is_protected(ictx, snap_name, is_protected);
+    int r = librbd::api::Snapshot<>::is_protected(ictx, snap_name, is_protected);
     tracepoint(librbd, snap_is_protected_exit, r, *is_protected ? 1 : 0);
     return r;
   }
@@ -2185,7 +2185,7 @@ namespace librbd {
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_list_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, &snaps);
-    int r = librbd::snap_list(ictx, snaps);
+    int r = librbd::api::Snapshot<>::list(ictx, snaps);
     if (r >= 0) {
       for (int i = 0, n = snaps.size(); i < n; i++) {
 	tracepoint(librbd, snap_list_entry, snaps[i].id, snaps[i].size, snaps[i].name.c_str());
@@ -2207,7 +2207,7 @@ namespace librbd {
     tracepoint(librbd, snap_exists_enter, ictx, ictx->name.c_str(), 
       ictx->snap_name.c_str(), ictx->read_only, snap_name);
     bool exists; 
-    int r = librbd::snap_exists(ictx, cls::rbd::UserSnapshotNamespace(), snap_name, &exists);
+    int r = librbd::api::Snapshot<>::exists(ictx, cls::rbd::UserSnapshotNamespace(), snap_name, &exists);
     tracepoint(librbd, snap_exists_exit, r, exists);
     if (r < 0) {
       // lie to caller since we don't know the real answer yet.
@@ -2222,7 +2222,7 @@ namespace librbd {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_exists_enter, ictx, ictx->name.c_str(), 
       ictx->snap_name.c_str(), ictx->read_only, snap_name);
-    int r = librbd::snap_exists(ictx, cls::rbd::UserSnapshotNamespace(), snap_name, exists);
+    int r = librbd::api::Snapshot<>::exists(ictx, cls::rbd::UserSnapshotNamespace(), snap_name, exists);
     tracepoint(librbd, snap_exists_exit, r, *exists);
     return r;
   }
@@ -2231,7 +2231,7 @@ namespace librbd {
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_get_timestamp_enter, ictx, ictx->name.c_str());
-    int r = librbd::snap_get_timestamp(ictx, snap_id, timestamp);
+    int r = librbd::api::Snapshot<>::get_timestamp(ictx, snap_id, timestamp);
     tracepoint(librbd, snap_get_timestamp_exit, r);
     return r;
   }
@@ -2240,7 +2240,7 @@ namespace librbd {
   {
     ImageCtx *ictx = (ImageCtx *)ctx;
     tracepoint(librbd, snap_get_limit_enter, ictx, ictx->name.c_str());
-    int r = librbd::snap_get_limit(ictx, limit);
+    int r = librbd::api::Snapshot<>::get_limit(ictx, limit);
     tracepoint(librbd, snap_get_limit_exit, r, *limit);
     return r;
   }
@@ -5012,7 +5012,7 @@ extern "C" int rbd_snap_remove(rbd_image_t image, const char *snap_name)
   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
   tracepoint(librbd, snap_remove_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, snap_name);
   librbd::NoOpProgressContext prog_ctx;
-  int r = librbd::snap_remove(ictx, snap_name, 0, prog_ctx);
+  int r = librbd::api::Snapshot<>::remove(ictx, snap_name, 0, prog_ctx);
   tracepoint(librbd, snap_remove_exit, r);
   return r;
 }
@@ -5023,7 +5023,7 @@ extern "C" int rbd_snap_remove2(rbd_image_t image, const char *snap_name, uint32
   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
   tracepoint(librbd, snap_remove2_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, snap_name, flags);
   librbd::CProgressContext prog_ctx(cb, cbdata);
-  int r = librbd::snap_remove(ictx, snap_name, flags, prog_ctx);
+  int r = librbd::api::Snapshot<>::remove(ictx, snap_name, flags, prog_ctx);
   tracepoint(librbd, snap_remove_exit, r);
   return r;
 }
@@ -5071,7 +5071,7 @@ extern "C" int rbd_snap_list(rbd_image_t image, rbd_snap_info_t *snaps,
   // FIPS zeroization audit 20191117: this memset is not security related.
   memset(snaps, 0, sizeof(*snaps) * *max_snaps);
 
-  int r = librbd::snap_list(ictx, cpp_snaps);
+  int r = librbd::api::Snapshot<>::list(ictx, cpp_snaps);
   if (r == -ENOENT) {
     tracepoint(librbd, snap_list_exit, 0, *max_snaps);
     return 0;
@@ -5143,7 +5143,7 @@ extern "C" int rbd_snap_is_protected(rbd_image_t image, const char *snap_name,
   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
   tracepoint(librbd, snap_is_protected_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, snap_name);
   bool protected_snap;
-  int r = librbd::snap_is_protected(ictx, snap_name, &protected_snap);
+  int r = librbd::api::Snapshot<>::is_protected(ictx, snap_name, &protected_snap);
   if (r < 0) {
     tracepoint(librbd, snap_is_protected_exit, r, *is_protected ? 1 : 0);
     return r;
@@ -5157,7 +5157,7 @@ extern "C" int rbd_snap_get_limit(rbd_image_t image, uint64_t *limit)
 {
   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
   tracepoint(librbd, snap_get_limit_enter, ictx, ictx->name.c_str());
-  int r = librbd::snap_get_limit(ictx, limit);
+  int r = librbd::api::Snapshot<>::get_limit(ictx, limit);
   tracepoint(librbd, snap_get_limit_exit, r, *limit);
   return r;
 }
@@ -5166,7 +5166,7 @@ extern "C" int rbd_snap_get_timestamp(rbd_image_t image, uint64_t snap_id, struc
 {
   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
   tracepoint(librbd, snap_get_timestamp_enter, ictx, ictx->name.c_str());
-  int r = librbd::snap_get_timestamp(ictx, snap_id, timestamp);
+  int r = librbd::api::Snapshot<>::get_timestamp(ictx, snap_id, timestamp);
   tracepoint(librbd, snap_get_timestamp_exit, r);
   return r;
 }
@@ -5175,7 +5175,7 @@ extern "C" int rbd_snap_set_limit(rbd_image_t image, uint64_t limit)
 {
   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
   tracepoint(librbd, snap_set_limit_enter, ictx, ictx->name.c_str(), limit);
-  int r = librbd::snap_set_limit(ictx, limit);
+  int r = librbd::api::Snapshot<>::set_limit(ictx, limit);
   tracepoint(librbd, snap_set_limit_exit, r);
   return r;
 }
