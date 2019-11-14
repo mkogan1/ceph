@@ -10877,9 +10877,91 @@ int RGWRados::list_mfa(const string& oid, list<rados::cls::otp::otp_info_t> *res
   return 0;
 }
 
-int RGWRados::get_sync_policy_handler(std::optional<std::string> zone,
-				      std::optional<rgw_bucket> _bucket,
-				      RGWBucketSyncPolicyHandlerRef *handler)
+void RGWRados::get_hint_entities(const std::set<string>& zone_names,
+				 const std::set<rgw_bucket>& buckets,
+				 std::set<rgw_sync_bucket_entity> *hint_entities)
+{
+  for (auto& zone : zone_names) {
+    for (auto& b : buckets) {
+      string zid;
+      if (!svc.zone->find_zone_id_by_name(zone, &zid)) {
+	cerr << "WARNING: cannot find zone id for zone=" << zone << ", skippping" << std::endl;
+	continue;
+      }
+
+      RGWBucketInfo hint_bucket_info;
+      RGWSysObjectCtx obj_ctx = svc.sysobj->init_obj_ctx();
+      int ret = get_bucket_info(obj_ctx, b.tenant, b.name, hint_bucket_info,
+				nullptr, nullptr);
+      if (ret < 0) {
+	ldout(cct, 20) << "could not init bucket info for hint bucket=" << b << " ... skipping" << dendl;
+	continue;
+      }
+
+      hint_entities->insert(rgw_sync_bucket_entity(zid, hint_bucket_info.bucket));
+    }
+  }
+}
+
+int RGWRados::resolve_policy_hints(rgw_sync_bucket_entity& self_entity,
+				   RGWBucketSyncPolicyHandlerRef& handler,
+				   RGWBucketSyncPolicyHandlerRef& zone_policy_handler,
+				   std::map<optional_zone_bucket, RGWBucketSyncPolicyHandlerRef>& temp_map)
+{
+  set<string> source_zones;
+  set<string> target_zones;
+
+  zone_policy_handler->reflect(nullptr, nullptr,
+                               nullptr, nullptr,
+                               &source_zones,
+                               &target_zones,
+                               false); /* relaxed: also get all zones that we allow to sync to/from */
+
+  std::set<rgw_sync_bucket_entity> hint_entities;
+
+  get_hint_entities(source_zones, handler->get_source_hints(), &hint_entities);
+  get_hint_entities(target_zones, handler->get_target_hints(), &hint_entities);
+
+  std::set<rgw_sync_bucket_pipe> resolved_sources;
+  std::set<rgw_sync_bucket_pipe> resolved_dests;
+
+  for (auto& hint_entity : hint_entities) {
+    if (!hint_entity.zone ||
+	!hint_entity.bucket) {
+      continue; /* shouldn't really happen */
+    }
+
+    auto& zid = *hint_entity.zone;
+    auto& hint_bucket = *hint_entity.bucket;
+
+    RGWBucketSyncPolicyHandlerRef hint_bucket_handler;
+
+    auto iter = temp_map.find(optional_zone_bucket(zid, hint_bucket));
+    if (iter != temp_map.end()) {
+      hint_bucket_handler = iter->second;
+    } else {
+      int r = do_get_sync_policy_handler(zid, hint_bucket, temp_map, &hint_bucket_handler);
+      if (r < 0) {
+        ldout(cct, 20) << "could not get bucket sync policy handler for hint bucket=" << hint_bucket << " ... skipping" << dendl;
+        continue;
+      }
+    }
+
+    hint_bucket_handler->get_pipes(&resolved_dests,
+                                   &resolved_sources,
+                                   self_entity); /* flipping resolved dests and sources as these are
+                                                    relative to the remote entity */
+  }
+
+  handler->set_resolved_hints(std::move(resolved_sources), std::move(resolved_dests));
+
+  return 0;
+}
+
+int RGWRados::do_get_sync_policy_handler(std::optional<string> zone,
+					 std::optional<rgw_bucket> _bucket,
+					 std::map<optional_zone_bucket, RGWBucketSyncPolicyHandlerRef>& temp_map,
+					 RGWBucketSyncPolicyHandlerRef *handler)
 {
   if (!_bucket) {
     *handler = svc.zone->get_sync_policy_handler(zone);
@@ -10929,10 +11011,26 @@ int RGWRados::get_sync_policy_handler(std::optional<std::string> zone,
   }
 
   bucket_sync_policy_cache_entry e;
-  e.handler.reset(svc.zone->get_sync_policy_handler(zone)->alloc_child(bucket_info));
+
+  auto zone_policy_handler = svc.zone->get_sync_policy_handler(zone);
+  e.handler.reset(zone_policy_handler->alloc_child(bucket_info));
+
   r = e.handler->init();
   if (r < 0) {
     ldout(cct, 20) << "ERROR: failed to init bucket sync policy handler: r=" << r << dendl;
+    return r;
+  }
+
+  temp_map.emplace(optional_zone_bucket{zone, bucket}, e.handler);
+
+  rgw_sync_bucket_entity self_entity(zone.value_or(svc.zone->zone_id()), bucket);
+
+  r = resolve_policy_hints(self_entity,
+                           e.handler,
+                           zone_policy_handler,
+                           temp_map);
+  if (r < 0) {
+    ldout(cct, 20) << "ERROR: failed to resolve policy hints: bucket_key=" << bucket_key << ", r=" << r << dendl;
     return r;
   }
 
@@ -10944,6 +11042,15 @@ int RGWRados::get_sync_policy_handler(std::optional<std::string> zone,
 
   return 0;
 }
+
+int RGWRados::get_sync_policy_handler(std::optional<string> zone,
+				      std::optional<rgw_bucket> _bucket,
+				      RGWBucketSyncPolicyHandlerRef *handler)
+{
+  std::map<optional_zone_bucket, RGWBucketSyncPolicyHandlerRef> temp_map;
+  return do_get_sync_policy_handler(zone, _bucket, temp_map, handler);
+}
+
 
 int RGWRados::bucket_exports_data(const rgw_bucket& bucket)
 {

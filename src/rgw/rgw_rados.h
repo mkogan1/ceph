@@ -49,6 +49,7 @@ struct RGWZoneGroup;
 struct RGWZoneParams;
 class RGWReshard;
 class RGWReshardWait;
+class rgw_sync_bucket_entity;
 
 class RGWSysObjectCtx;
 class RGWBucketSyncPolicyHandler;
@@ -2518,9 +2519,24 @@ public:
   static uint32_t calc_ordered_bucket_list_per_shard(uint32_t num_entries,
 						     uint32_t num_shards);
 public:
-  int get_sync_policy_handler(std::optional<std::string>,
-			      std::optional<rgw_bucket> bucket,
-			      RGWBucketSyncPolicyHandlerRef *phandler);
+  void get_hint_entities(const std::set<string>& zone_names,
+			 const std::set<rgw_bucket>& buckets,
+			 std::set<rgw_sync_bucket_entity> *hint_entities);
+
+  using optional_zone_bucket = std::pair<std::optional<std::string>,
+					 std::optional<rgw_bucket>>;
+  int resolve_policy_hints(rgw_sync_bucket_entity& self_entity,
+			   RGWBucketSyncPolicyHandlerRef& handler,
+			   RGWBucketSyncPolicyHandlerRef& zone_policy_handler,
+			   std::map<optional_zone_bucket, RGWBucketSyncPolicyHandlerRef>& temp_map);
+  int do_get_sync_policy_handler(std::optional<string> zone,
+				 std::optional<rgw_bucket> _bucket,
+				 std::map<optional_zone_bucket, RGWBucketSyncPolicyHandlerRef>& temp_map,
+				 RGWBucketSyncPolicyHandlerRef *handler);
+  int get_sync_policy_handler(std::optional<string> zone,
+			      std::optional<rgw_bucket> _bucket,
+			      RGWBucketSyncPolicyHandlerRef *handler);
+
   int bucket_exports_data(const rgw_bucket& bucket);
   int bucket_imports_data(const rgw_bucket& bucket);
   int handle_overwrite(const RGWBucketInfo& info,
