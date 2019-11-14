@@ -72,14 +72,14 @@ class RGWRESTConn
   vector<string> endpoints;
   RGWAccessKey key;
   string self_zone_group;
-  string remote_id;
+  rgw_zone_id remote_id;
   HostStyle host_style;
   std::atomic<int64_t> counter = { 0 };
 
 public:
 
-  RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc, const string& _remote_id, const list<string>& endpoints, HostStyle _host_style = PathStyle);
-  RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc, const string& _remote_id, const list<string>& endpoints, RGWAccessKey _cred, HostStyle _host_style = PathStyle);
+  RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc, const rgw_zone_id& _remote_id, const list<string>& endpoints, HostStyle _host_style = PathStyle);
+  RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc, const rgw_zone_id& _remote_id, const list<string>& endpoints, RGWAccessKey _cred, HostStyle _host_style = PathStyle);
 
   // custom move needed for atomic
   RGWRESTConn(RGWRESTConn&& other);
@@ -91,7 +91,7 @@ public:
   const string& get_self_zonegroup() {
     return self_zone_group;
   }
-  const string& get_remote_id() {
+  const rgw_zone_id& get_remote_id() {
     return remote_id;
   }
   RGWAccessKey& get_key() {

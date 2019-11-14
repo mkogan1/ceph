@@ -78,18 +78,18 @@ class RGWSyncErrorLogger {
   std::atomic<int64_t> counter = { 0 };
 public:
   RGWSyncErrorLogger(RGWRados *_store, const string &oid_prefix, int _num_shards);
-  RGWCoroutine *log_error_cr(const string& source_zone, const string& section, const string& name, uint32_t error_code, const string& message);
+  RGWCoroutine *log_error_cr(const rgw_zone_id& source_zone, const string& section, const string& name, uint32_t error_code, const string& message);
 
   static string get_shard_oid(const string& oid_prefix, int shard_id);
 };
 
 struct rgw_sync_error_info {
-  string source_zone;
+  rgw_zone_id source_zone;
   uint32_t error_code;
   string message;
 
   rgw_sync_error_info() : error_code(0) {}
-  rgw_sync_error_info(const string& _source_zone, uint32_t _error_code, const string& _message) : source_zone(_source_zone), error_code(_error_code), message(_message) {}
+  rgw_sync_error_info(const rgw_zone_id& _source_zone, uint32_t _error_code, const string& _message) : source_zone(_source_zone), error_code(_error_code), message(_message) {}
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);

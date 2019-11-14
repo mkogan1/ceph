@@ -10,7 +10,7 @@
 #define dout_subsys ceph_subsys_rgw
 
 RGWRESTConn::RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc,
-                         const string& _remote_id,
+                         const rgw_zone_id& _remote_id,
                          const list<string>& remote_endpoints,
                          HostStyle _host_style)
   : cct(_cct),
@@ -24,7 +24,7 @@ RGWRESTConn::RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc,
 }
 
 RGWRESTConn::RGWRESTConn(CephContext *_cct, RGWSI_Zone *zone_svc,
-                         const string& _remote_id,
+                         const rgw_zone_id& _remote_id,
                          const list<string>& remote_endpoints,
                          RGWAccessKey _cred,
                          HostStyle _host_style)

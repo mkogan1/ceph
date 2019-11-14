@@ -1821,13 +1821,13 @@ static int commit_period(RGWRealm& realm, RGWPeriod& period,
                          const string& access, const string& secret,
                          bool force)
 {
-  const string& master_zone = period.get_master_zone();
+  auto& master_zone = period.get_master_zone();
   if (master_zone.empty()) {
     cerr << "cannot commit period: period does not have a master zone of a master zonegroup" << std::endl;
     return -EINVAL;
   }
   // are we the period's master zone?
-  if (store->svc.zone->get_zone_params().get_id() == master_zone) {
+  if (store->svc.zone->zone_id() == master_zone) {
     // read the current period
     RGWPeriod current_period;
     int ret = current_period.init(g_ceph_context, store->svc.sysobj, realm.get_id());
@@ -1846,7 +1846,7 @@ static int commit_period(RGWRealm& realm, RGWPeriod& period,
 
   if (remote.empty() && url.empty()) {
     // use the new master zone's connection
-    remote = master_zone;
+    remote = master_zone.id;
     cout << "Sending period to new master zone " << remote << std::endl;
   }
   boost::optional<RGWRESTConn> conn;
@@ -1862,7 +1862,7 @@ static int commit_period(RGWRealm& realm, RGWPeriod& period,
   }
 
   // push period to the master with an empty period id
-  period.set_id("");
+  period.set_id(string());
 
   RGWEnv env;
   req_info info(g_ceph_context, &env);
@@ -2198,13 +2198,13 @@ static void get_md_sync_status(list<string>& status)
   flush_ss(ss, status);
 }
 
-static void get_data_sync_status(const string& source_zone, list<string>& status, int tab)
+static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& status, int tab)
 {
   stringstream ss;
 
   RGWZone *sz;
 
-  if (!store->svc.zone->find_zone_by_id(source_zone, &sz)) {
+  if (!store->svc.zone->find_zone(source_zone, &sz)) {
     push_ss(ss, status, tab) << string("zone not found");
     flush_ss(ss, status);
     return;
@@ -2396,11 +2396,11 @@ static void sync_status(Formatter *formatter)
   auto& zone_conn_map = store->svc.zone->get_zone_conn_map();
 
   for (auto iter : zone_conn_map) {
-    const string& source_id = iter.first;
+    const rgw_zone_id& source_id = iter.first;
     string source_str = "source: ";
-    string s = source_str + source_id;
+    string s = source_str + source_id.id;
     RGWZone *sz;
-    if (store->svc.zone->find_zone_by_id(source_id, &sz)) {
+    if (store->svc.zone->find_zone(source_id, &sz)) {
       s += string(" (") + sz->name + ")";
     }
     data_status.push_back(s);
@@ -2525,8 +2525,28 @@ void encode_json(const char *name, const RGWBucketSyncFlowManager::pipe_set& pse
   }
 }
 
+static rgw_zone_id resolve_zone_id(const string& s)
+{
+  rgw_zone_id result;
+
+  RGWZone *zone;
+  if (store->svc.zone->find_zone(s, &zone)) {
+    return rgw_zone_id(s);
+  }
+  if (store->svc.zone->find_zone_id_by_name(s, &result)) {
+    return result;
+  }
+  return rgw_zone_id(s);
+}
+
+rgw_zone_id validate_zone_id(const rgw_zone_id& zone_id)
+{
+  return resolve_zone_id(zone_id.id);
+}
+
+
 static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
-                              const std::string& source_zone_id,
+                              const rgw_zone_id& source_zone_id,
                               std::ostream& out)
 {
   const RGWRealm& realm = store->svc.zone->get_realm();
@@ -2555,7 +2575,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
   auto& sources = handler->get_sources();
 
   auto& zone_conn_map = store->svc.zone->get_zone_conn_map();
-  set<string> zone_ids;
+  set<rgw_zone_id> zone_ids;
 
   if (!source_zone_id.empty()) {
     auto z = zonegroup.zones.find(source_zone_id);
@@ -2581,7 +2601,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
   }
 
   for (auto& zone_id : zone_ids) {
-    auto z = zonegroup.zones.find(zone_id);
+    auto z = zonegroup.zones.find(zone_id.id);
     if (z == zonegroup.zones.end()) { /* should't happen */
       continue;
     }
@@ -2593,7 +2613,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
     for (auto& m : sources) {
       for (auto& entry : m.second.pipe_map) {
         auto& pipe = entry.second;
-        if (pipe.source.zone.value_or("") == z->second.id) {
+        if (pipe.source.zone.value_or(rgw_zone_id()) == z->second.id) {
           bucket_source_sync_status(store, zone, z->second,
                                     c->second,
                                     info, pipe,
@@ -2806,6 +2826,34 @@ const string& get_tier_type(RGWRados *store) {
   return store->svc.zone->get_zone().tier_type;
 }
 
+void resolve_zone_id_opt(std::optional<string>& zone_name, std::optional<rgw_zone_id>& zone_id)
+{
+  if (!zone_name || zone_id) {
+    return;
+  }
+  zone_id.emplace();
+  if (!store->svc.zone->find_zone_id_by_name(*zone_name, &(*zone_id))) {
+    cerr << "WARNING: cannot find source zone id for name=" << *zone_name << std::endl;
+    zone_id = rgw_zone_id(*zone_name);
+  }
+}
+
+void resolve_zone_ids_opt(std::optional<vector<string> >& names, std::optional<vector<rgw_zone_id> >& ids)
+{
+  if (!names || ids) {
+    return;
+  }
+  ids.emplace();
+  for (auto& name : *names) {
+    rgw_zone_id zid;
+    if (!store->svc.zone->find_zone_id_by_name(name, &zid)) {
+      cerr << "WARNING: cannot find source zone id for name=" << name << std::endl;
+      zid = rgw_zone_id(name);
+    }
+    ids->push_back(zid);
+  }
+}
+
 int main(int argc, const char **argv)
 {
   vector<const char*> args;
@@ -2956,7 +3004,7 @@ int main(int argc, const char **argv)
   string err;
 
   string source_zone_name;
-  string source_zone; /* zone id */
+  rgw_zone_id source_zone; /* zone id */
 
   string tier_type;
   bool tier_type_specified = false;
@@ -3706,7 +3754,7 @@ int main(int argc, const char **argv)
           }
           if (remote.empty()) {
             // use realm master zone as remote
-            remote = current_period.get_master_zone();
+            remote = current_period.get_master_zone().id;
           }
           conn = get_remote_conn(store, current_period.get_map(), remote);
           if (!conn) {
@@ -5080,7 +5128,7 @@ int main(int argc, const char **argv)
   }
 
   bool non_master_cmd = (!store->svc.zone->is_meta_master() && !yes_i_really_mean_it);
-  std::set<int> non_master_ops_list = {OPT_USER_CREATE, OPT_USER_RM, 
+  std::set<int> non_master_ops_list = {OPT_USER_CREATE, OPT_USER_RM,
                                         OPT_USER_MODIFY, OPT_USER_ENABLE,
                                         OPT_USER_SUSPEND, OPT_SUBUSER_CREATE,
                                         OPT_SUBUSER_MODIFY, OPT_SUBUSER_RM,

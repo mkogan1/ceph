@@ -49,7 +49,7 @@ string RGWSyncErrorLogger::get_shard_oid(const string& oid_prefix, int shard_id)
   return string(buf);
 }
 
-RGWCoroutine *RGWSyncErrorLogger::log_error_cr(const string& source_zone, const string& section, const string& name, uint32_t error_code, const string& message) {
+RGWCoroutine *RGWSyncErrorLogger::log_error_cr(const rgw_zone_id& source_zone, const string& section, const string& name, uint32_t error_code, const string& message) {
   cls_log_entry entry;
 
   rgw_sync_error_info info(source_zone, error_code, message);
@@ -1277,7 +1277,7 @@ int RGWMetaSyncSingleEntryCR::operate() {
       if (sync_status < 0) {
         tn->log(10, SSTR("failed to send read remote metadata entry: section=" << section << " key=" << key << " status=" << sync_status));
         log_error() << "failed to send read remote metadata entry: section=" << section << " key=" << key << " status=" << sync_status << std::endl;
-        yield call(sync_env->error_logger->log_error_cr(sync_env->conn->get_remote_id(), section, key, -sync_status,
+        yield call(sync_env->error_logger->log_error_cr(sync_env->conn->get_remote_id().id, section, key, -sync_status,
                                                         string("failed to read remote metadata entry: ") + cpp_strerror(-sync_status)));
         return set_cr_error(sync_status);
       }
@@ -2564,7 +2564,7 @@ int PurgePeriodLogsCR::operate()
 
 namespace {
 
-using connection_map = std::map<std::string, std::unique_ptr<RGWRESTConn>>;
+using connection_map = std::map<rgw_zone_id, std::unique_ptr<RGWRESTConn>>;
 
 /// construct a RGWRESTConn for each zone in the realm
 template <typename Zonegroups>
