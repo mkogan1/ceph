@@ -2854,6 +2854,37 @@ void resolve_zone_ids_opt(std::optional<vector<string> >& names, std::optional<v
   }
 }
 
+class JSONFormatter_PrettyZone : public JSONFormatter {
+  class Handler : public JSONEncodeFilter::Handler<rgw_zone_id> {
+    void encode_json(const char *name, const void *pval, ceph::Formatter *f) const override {
+      auto zone_id = *(static_cast<const rgw_zone_id *>(pval));
+      string zone_name;
+      RGWZone *zone;
+      if (store->svc.zone->find_zone(zone_id, &zone)) {
+        zone_name = zone->name;
+      } else {
+        cerr << "WARNING: cannot find zone name for id=" << zone_id << std::endl;
+        zone_name = zone_id.id;
+      }
+
+      ::encode_json(name, zone_name, f);
+    }
+  } zone_id_type_handler;
+
+  JSONEncodeFilter encode_filter;
+public:
+  JSONFormatter_PrettyZone(bool pretty_format) : JSONFormatter(pretty_format) {
+    encode_filter.register_type(&zone_id_type_handler);
+  }
+
+  void *get_external_feature_handler(const std::string& feature) override {
+    if (feature != "JSONEncodeFilter") {
+      return nullptr;
+    }
+    return &encode_filter;
+  }
+};
+
 int main(int argc, const char **argv)
 {
   vector<const char*> args;
@@ -2925,6 +2956,7 @@ int main(int argc, const char **argv)
   string bucket_id;
   string new_bucket_name;
   Formatter *formatter = NULL;
+  Formatter *zone_formatter = nullptr;
   int purge_data = false;
   int pretty_format = false;
   int show_log_entries = true;
@@ -3502,6 +3534,8 @@ int main(int argc, const char **argv)
     cerr << "unrecognized format: " << format << std::endl;
     exit(1);
   }
+
+  zone_formatter = new JSONFormatter_PrettyZone(pretty_format);
 
   realm_name = g_conf()->rgw_realm;
   zone_name = g_conf()->rgw_zone;
