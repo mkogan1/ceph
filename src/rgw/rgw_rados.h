@@ -952,6 +952,32 @@ struct RGWObjState {
   }
 };
 
+class RGWFetchObjFilter {
+public:
+  virtual ~RGWFetchObjFilter() {}
+
+  virtual int filter(CephContext *cct,
+                     const rgw_obj_key& source_key,
+                     const RGWBucketInfo& dest_bucket_info,
+                     std::optional<rgw_placement_rule> dest_placement_rule,
+                     const map<string, bufferlist>& obj_attrs,
+                     const rgw_placement_rule **prule) = 0;
+};
+
+class RGWFetchObjFilter_Default : public RGWFetchObjFilter {
+protected:
+  rgw_placement_rule dest_rule;
+public:
+  RGWFetchObjFilter_Default() {}
+
+  int filter(CephContext *cct,
+             const rgw_obj_key& source_key,
+             const RGWBucketInfo& dest_bucket_info,
+             std::optional<rgw_placement_rule> dest_placement_rule,
+             const map<string, bufferlist>& obj_attrs,
+             const rgw_placement_rule **prule) override;
+};
+
 struct RGWRawObjState {
   rgw_raw_obj obj;
   bool has_attrs{false};
@@ -1127,7 +1153,7 @@ public:
     }
     bool is_atomic = iter->second.is_atomic;
     bool prefetch_data = iter->second.prefetch_data;
-  
+
     objs_state.erase(iter);
 
     if (is_atomic || prefetch_data) {
@@ -1957,6 +1983,7 @@ public:
                        void *progress_data,
                        bool stat_follow_olh,
                        const rgw_obj& stat_dest_obj,
+                       RGWFetchObjFilter *filter,
                        rgw_zone_set *zones_trace= nullptr,
                        std::optional<uint64_t>* bytes_transferred = 0);
   /**

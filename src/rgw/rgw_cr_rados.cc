@@ -623,6 +623,7 @@ int RGWAsyncFetchRemoteObj::_send_request()
                        NULL, /* void *progress_data*); */
                        stat_follow_olh,
                        stat_dest_obj,
+                       filter.get(),
                        &zones_trace,
                        &bytes_transferred);
 
