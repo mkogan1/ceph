@@ -578,7 +578,6 @@ int RGWAsyncFetchRemoteObj::_send_request()
 {
   RGWObjectCtx obj_ctx(store);
 
-  string user_id;
   char buf[16];
   snprintf(buf, sizeof(buf), ".%lld", (long long)store->instance_id());
   map<string, bufferlist> attrs;
@@ -596,7 +595,7 @@ int RGWAsyncFetchRemoteObj::_send_request()
 
   std::optional<uint64_t> bytes_transferred;
   int r = store->fetch_remote_obj(obj_ctx,
-                       user_id,
+                       user_id.value_or(rgw_user()),
                        NULL, /* req_info */
                        source_zone,
                        dest_obj,
