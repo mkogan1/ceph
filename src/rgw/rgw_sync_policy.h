@@ -237,6 +237,7 @@ struct rgw_sync_pipe_filter {
 
   bool is_subset_of(const rgw_sync_pipe_filter& f) const;
 
+  bool has_tags() const;
   bool check_tag(const string& s) const;
   bool check_tag(const string& k, const string& v) const;
   bool check_tags(const std::vector<string>& tags) const;
@@ -261,6 +262,10 @@ struct rgw_sync_pipe_acl_translation {
 
   void dump(ceph::Formatter *f) const;
   void decode_json(JSONObj *obj);
+
+  bool operator==(const rgw_sync_pipe_acl_translation& aclt) const {
+    return (owner == aclt.owner);
+  }
 };
 WRITE_CLASS_ENCODER(rgw_sync_pipe_acl_translation)
 
