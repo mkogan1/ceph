@@ -1587,8 +1587,11 @@ int rgw_rest_read_all_input(struct req_state *s, char **pdata, int *plen,
   int len = 0;
   char *data = NULL;
 
-  if (s->length)
+  if (s->length) {
     cl = atoll(s->length);
+    if (!cl)
+      return -ERR_LENGTH_REQUIRED;
+  }
   else if (!allow_chunked)
     return -ERR_LENGTH_REQUIRED;
 
