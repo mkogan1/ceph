@@ -21,7 +21,11 @@ namespace rgw {
 namespace auth {
 
 std::unique_ptr<rgw::auth::Identity>
-transform_old_authinfo(const req_state* const s)
+transform_old_authinfo(CephContext* const cct,
+                       const rgw_user& auth_id,
+                       const int perm_mask,
+                       const bool is_admin,
+                       const uint32_t type)
 {
   /* This class is not intended for public use. Should be removed altogether
    * with this function after moving all our APIs to the new authentication
@@ -100,13 +104,23 @@ transform_old_authinfo(const req_state* const s)
   };
 
   return std::unique_ptr<rgw::auth::Identity>(
-        new DummyIdentityApplier(s->cct,
-                                 s->user->user_id,
-                                 s->perm_mask,
+        new DummyIdentityApplier(cct,
+                                 auth_id,
+                                 perm_mask,
+                                 is_admin,
+                                 type));
+}
+
+std::unique_ptr<rgw::auth::Identity>
+transform_old_authinfo(const req_state* const s)
+{
+  return transform_old_authinfo(s->cct,
+                                s->user->user_id,
+                                s->perm_mask,
   /* System user has admin permissions by default - it's supposed to pass
    * through any security check. */
-                                 s->system_request,
-                                 s->user->type));
+                                s->system_request,
+                                s->user->type);
 }
 
 } /* namespace auth */
