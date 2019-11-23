@@ -11020,11 +11020,12 @@ int RGWRados::do_get_sync_policy_handler(std::optional<rgw_zone_id> zone,
     oid = bucket.oid;
   }
 
+  std::map<std::string, bufferlist> attrs;
   int r = get_bucket_instance_from_oid(ctx,
 				       oid,
 				       bucket_info,
 				       nullptr,
-				       nullptr,
+				       &attrs,
 				       &cache_info);
   if (r < 0) {
     if (r != -ENOENT) {
@@ -11040,7 +11041,8 @@ int RGWRados::do_get_sync_policy_handler(std::optional<rgw_zone_id> zone,
     ldout(cct, 20) << "ERROR: could not find policy handler for zone=" << zone << dendl;
     return -ENOENT;
   }
-  e.handler.reset(zone_policy_handler->alloc_child(bucket_info));
+  e.handler.reset(zone_policy_handler->alloc_child(bucket_info,
+						   std::move(attrs)));
 
   r = e.handler->init();
   if (r < 0) {

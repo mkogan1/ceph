@@ -853,6 +853,7 @@ public:
     : RGWAsyncRadosRequest(caller, cn), store(_store), oid(oid) {}
 
   RGWBucketInfo bucket_info;
+  map<string, bufferlist> attrs;
 };
 
 class RGWGetBucketInstanceInfoCR : public RGWSimpleCoroutine {
@@ -860,22 +861,25 @@ class RGWGetBucketInstanceInfoCR : public RGWSimpleCoroutine {
   RGWRados *store;
   const std::string oid;
   RGWBucketInfo *bucket_info;
+  map<string, bufferlist> *pattrs;
 
   RGWAsyncGetBucketInstanceInfo *req{nullptr};
   
 public:
   // metadata key constructor
   RGWGetBucketInstanceInfoCR(RGWAsyncRadosProcessor *_async_rados, RGWRados *_store,
-                             const std::string& meta_key, RGWBucketInfo *_bucket_info)
+                             const std::string& meta_key, RGWBucketInfo *_bucket_info,
+			     map<string, bufferlist> *_pattrs)
     : RGWSimpleCoroutine(_store->ctx()), async_rados(_async_rados), store(_store),
       oid(RGW_BUCKET_INSTANCE_MD_PREFIX + meta_key),
-      bucket_info(_bucket_info) {}
+      bucket_info(_bucket_info), pattrs(_pattrs) {}
   // rgw_bucket constructor
   RGWGetBucketInstanceInfoCR(RGWAsyncRadosProcessor *_async_rados, RGWRados *_store,
-                             const rgw_bucket& bucket, RGWBucketInfo *_bucket_info)
+                             const rgw_bucket& bucket, RGWBucketInfo *_bucket_info,
+			     map<string, bufferlist> *_pattrs)
     : RGWSimpleCoroutine(_store->ctx()), async_rados(_async_rados), store(_store),
       oid(RGW_BUCKET_INSTANCE_MD_PREFIX + bucket.get_key(':')),
-      bucket_info(_bucket_info) {}
+      bucket_info(_bucket_info), pattrs(_pattrs) {}
   ~RGWGetBucketInstanceInfoCR() override {
     request_cleanup();
   }
@@ -894,6 +898,9 @@ public:
   int request_complete() override {
     if (bucket_info) {
       *bucket_info = std::move(req->bucket_info);
+    }
+    if (pattrs) {
+      *pattrs = std::move(req->attrs);
     }
     return req->get_ret_status();
   }

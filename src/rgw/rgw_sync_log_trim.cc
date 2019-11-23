@@ -464,7 +464,7 @@ int BucketTrimInstanceCR::operate()
       }
       // in parallel, read the local bucket instance info
       spawn(new RGWGetBucketInstanceInfoCR(store->get_async_rados(), store,
-                                           bucket_instance, &bucket_info),
+                                           bucket_instance, &bucket_info, nullptr),
             false);
     }
     // wait for a response from each peer. all must respond to attempt trim
