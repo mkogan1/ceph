@@ -2164,6 +2164,7 @@ public:
              const RGWBucketInfo& dest_bucket_info,
              std::optional<rgw_placement_rule> dest_placement_rule,
              const map<string, bufferlist>& obj_attrs,
+             std::optional<rgw_user> *poverride_owner,
              const rgw_placement_rule **prule) override;
 };
 
@@ -2172,6 +2173,7 @@ int RGWFetchObjFilter_Sync::filter(CephContext *cct,
                                    const RGWBucketInfo& dest_bucket_info,
                                    std::optional<rgw_placement_rule> dest_placement_rule,
                                    const map<string, bufferlist>& obj_attrs,
+                                   std::optional<rgw_user> *poverride_owner,
                                    const rgw_placement_rule **prule)
 {
   int abort_err = -ERR_PRECONDITION_FAILED;
@@ -2198,6 +2200,18 @@ int RGWFetchObjFilter_Sync::filter(CephContext *cct,
 
   std::optional<std::map<string, bufferlist> > new_attrs;
 
+  if (params.dest.acl_translation) {
+    rgw_user& acl_translation_owner = params.dest.acl_translation->owner;
+    if (!acl_translation_owner.empty()) {
+      if (params.mode == rgw_sync_pipe_params::MODE_USER &&
+          acl_translation_owner != dest_bucket_info.owner) {
+        ldout(cct, 0) << "ERROR: " << __func__ << ": acl translation was requested, but user (" << acl_translation_owner
+          << ") is not dest bucket owner (" << dest_bucket_info.owner << ")" << dendl;
+        return -EPERM;
+      }
+      *poverride_owner = acl_translation_owner;
+    }
+  }
   if (params.mode == rgw_sync_pipe_params::MODE_USER) {
     if (!bucket_perms->verify_object_permission(obj_attrs, RGW_PERM_READ)) {
       ldout(cct, 0) << "ERROR: " << __func__ << ": permission check failed: user not allowed to fetch object" << dendl;
@@ -2218,6 +2232,7 @@ int RGWFetchObjFilter_Sync::filter(CephContext *cct,
                                            dest_bucket_info,
                                            dest_placement_rule,
                                            obj_attrs,
+                                           poverride_owner,
                                            prule);
 }
 

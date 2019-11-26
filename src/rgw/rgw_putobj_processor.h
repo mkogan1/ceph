@@ -115,7 +115,7 @@ class ManifestObjectProcessor : public HeadObjectProcessor,
   RGWRados *const store;
   const RGWBucketInfo& bucket_info;
   rgw_placement_rule tail_placement_rule;
-  const rgw_user& owner;
+  rgw_user owner;
   RGWObjectCtx& obj_ctx;
   rgw_obj head_obj;
 
@@ -144,6 +144,10 @@ class ManifestObjectProcessor : public HeadObjectProcessor,
           tail_placement_rule = *ptail_placement_rule;
         }
       }
+
+  void set_owner(const rgw_user& _owner) {
+    owner = _owner;
+  }
 
   void set_tail_placement(const rgw_placement_rule& tpr) {
     tail_placement_rule = tpr;
