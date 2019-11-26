@@ -11157,7 +11157,6 @@ int RGWRados::bucket_imports_data(const rgw_bucket& bucket)
 int RGWRados::handle_overwrite(const RGWBucketInfo& info,
 			       const RGWBucketInfo& orig_info) {
   int ret = 0;
-#warning needs to be done differently
   bool new_sync_enabled = info.datasync_flag_enabled();
   bool old_sync_enabled = orig_info.datasync_flag_enabled();
 
