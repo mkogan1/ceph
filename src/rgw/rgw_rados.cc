@@ -1552,6 +1552,11 @@ int RGWRados::init_complete()
     return ret;
   }
 
+  data_log->set_bucket_filter([this](const rgw_bucket& bucket,
+				     optional_yield) -> bool {
+    return bucket_exports_data(bucket);
+  });
+
   if (svc.zone->is_meta_master()) {
     auto md_log = meta_mgr->get_log(current_period.get_id());
     meta_notifier = new RGWMetaNotifier(this, md_log);

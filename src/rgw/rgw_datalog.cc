@@ -575,14 +575,20 @@ std::string RGWDataChangesLog::get_oid(uint64_t gen_id, int i) const {
 	  fmt::format("{}.{}", prefix, i));
 }
 
+bool RGWDataChangesLog::filter_bucket(const rgw_bucket& bucket,
+				      optional_yield y) const
+{
+  if (!bucket_filter) {
+    return true;
+  }
+  return bucket_filter(bucket, y);
+}
+
 int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id) {
-#warning FIXME
-#if 0
-  if (!bucket_info->bucket_exports_data(bucket_info.bucket, null_yield)) {
-     return 0;
-   }
-#endif
   auto& bucket = bucket_info.bucket;
+  if (!filter_bucket(bucket, null_yield)) {
+    return 0;
+  }
 
   if (observer) {
     observer->on_bucket_changed(bucket.get_key());

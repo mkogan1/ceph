@@ -2509,7 +2509,6 @@ RGWCoroutine *RGWArchiveDataSyncModule::sync_object(RGWDataSyncCtx *sc, rgw_buck
   }
 
   std::optional<rgw_obj_key> dest_key;
-  bool stat_follow_olh = false;
 
   if (versioned_epoch.value_or(0) == 0) { /* force version if not set */
     stat_follow_olh = true;

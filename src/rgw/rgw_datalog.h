@@ -158,6 +158,15 @@ public:
 };
 
 class RGWDataChangesLog {
+public:
+  class BucketFilter {
+  public:
+    virtual ~BucketFilter() {}
+
+    virtual bool filter(const rgw_bucket& bucket, optional_yield y) const = 0;
+  };
+private:
+
   friend DataLogBackends;
   CephContext* cct;
   RGWRados* store;
@@ -211,6 +220,9 @@ class RGWDataChangesLog {
   ceph::condition_variable renew_cond;
   std::thread renew_thread;
 
+  fu2::function<bool(const rgw_bucket& bucket,
+		     optional_yield y) const> bucket_filter;
+
 public:
 
   RGWDataChangesLog(CephContext* cct, RGWRados* store);
@@ -258,6 +270,13 @@ public:
 
   int change_format(log_type type, optional_yield y);
   int trim_generations(std::optional<uint64_t>& through);
+
+  template<typename F>
+  void set_bucket_filter(F&& f) {
+    bucket_filter = std::forward<F>(f);
+  }
+
+  bool filter_bucket(const rgw_bucket& bucket, optional_yield y) const;
 };
 
 class RGWDataChangesBE : public boost::intrusive_ref_counter<RGWDataChangesBE> {
