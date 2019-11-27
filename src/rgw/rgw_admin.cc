@@ -2449,19 +2449,22 @@ static int bucket_source_sync_status(RGWRados *store, const RGWZone& zone,
                                      const rgw_sync_bucket_pipe& pipe,
                                      int width, std::ostream& out)
 {
-  out << indented{width, "source zone"} << source.id << " (" << source.name << ")\n";
+  out << indented{width, "source zone"} << source.id << " (" << source.name << ")" << std::endl;
 
   // syncing from this zone?
   if (!zone.syncs_from(source.name)) {
     out << indented{width} << "does not sync from zone\n";
     return 0;
   }
+  RGWBucketInfo source_bucket_info;
   std::vector<rgw_bucket_shard_sync_info> status;
-  int r = rgw_bucket_sync_status(dpp(), store, pipe, bucket_info, &status);
+  int r = rgw_bucket_sync_status(dpp(), store, pipe, bucket_info, &source_bucket_info, &status);
   if (r < 0) {
     lderr(store->ctx()) << "failed to read bucket sync status: " << cpp_strerror(r) << dendl;
     return r;
   }
+
+  out << indented{width, "source bucket"} << source_bucket_info.bucket.get_key() << std::endl;
 
   int num_full = 0;
   int num_inc = 0;
@@ -2486,7 +2489,7 @@ static int bucket_source_sync_status(RGWRados *store, const RGWZone& zone,
   out << indented{width} << "incremental sync: " << num_inc << "/" << total_shards << " shards\n";
 
   BucketIndexShardsManager remote_markers;
-  r = remote_bilog_markers(store, source, conn, bucket_info, &remote_markers);
+  r = remote_bilog_markers(store, source, conn, source_bucket_info, &remote_markers);
   if (r < 0) {
     lderr(store->ctx()) << "failed to read remote log: " << cpp_strerror(r) << dendl;
     return r;
@@ -2547,6 +2550,7 @@ rgw_zone_id validate_zone_id(const rgw_zone_id& zone_id)
 
 static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
                               const rgw_zone_id& source_zone_id,
+			      const std::optional<rgw_bucket>& opt_source_bucket,
                               std::ostream& out)
 {
   const RGWRealm& realm = store->svc.zone->get_realm();
@@ -2560,7 +2564,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
   out << indented{width, "bucket"} << info.bucket << "\n\n";
 
   if (!store->bucket_imports_data(info.bucket)) {
-    out << "Sync is disabled for bucket " << info.bucket.name << '\n';
+    out << "Sync is disabled for bucket " << info.bucket.name << " or bucket has no sync sources" << std::endl;
     return 0;
   }
 
@@ -2572,7 +2576,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
     return r;
   }
 
-  auto& sources = handler->get_sources();
+  auto sources = handler->get_all_sources();
 
   auto& zone_conn_map = store->svc.zone->get_zone_conn_map();
   set<rgw_zone_id> zone_ids;
@@ -2592,11 +2596,7 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
     zone_ids.insert(source_zone_id);
   } else {
     for (const auto& entry : zonegroup.zones) {
-      auto c = zone_conn_map.find(entry.second.id);
-      if (c == zone_conn_map.end()) {
-        continue;
-      }
-      zone_ids.insert(entry.second.name);
+      zone_ids.insert(entry.second.id);
     }
   }
 
@@ -2605,20 +2605,22 @@ static int bucket_sync_status(RGWRados *store, const RGWBucketInfo& info,
     if (z == zonegroup.zones.end()) { /* should't happen */
       continue;
     }
-    auto c = zone_conn_map.find(source_zone_id);
+    auto c = zone_conn_map.find(zone_id.id);
     if (c == zone_conn_map.end()) { /* should't happen */
       continue;
     }
 
-    for (auto& m : sources) {
-      for (auto& entry : m.second.pipe_map) {
-        auto& pipe = entry.second;
-        if (pipe.source.zone.value_or(rgw_zone_id()) == z->second.id) {
-          bucket_source_sync_status(store, zone, z->second,
-                                    c->second,
-                                    info, pipe,
-                                    width, out);
-        }
+    for (auto& entry : sources) {
+      auto& pipe = entry.second;
+      if (opt_source_bucket &&
+	  pipe.source.bucket != opt_source_bucket) {
+	continue;
+      }
+      if (pipe.source.zone.value_or(rgw_zone_id()) == z->second.id) {
+	bucket_source_sync_status(store, zone, z->second,
+				  c->second,
+				  info, pipe,
+				  width, out);
       }
     }
   }
@@ -7715,7 +7717,7 @@ next:
     if (ret < 0) {
       return -ret;
     }
-    bucket_sync_status(store, bucket_info, source_zone, std::cout);
+    bucket_sync_status(store, bucket_info, source_zone, std::nullopt, std::cout);
   }
 
   if (opt_cmd == OPT_BUCKET_SYNC_MARKERS) {
