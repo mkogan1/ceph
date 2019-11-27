@@ -2724,7 +2724,10 @@ void DaemonServer::got_service_map()
     });
 
   // cull missing daemons, populate new ones
+  std::set<std::string> types;
   for (auto& p : pending_service_map.services) {
+    types.insert(p.first);
+
     std::set<std::string> names;
     for (auto& q : p.second.daemons) {
       names.insert(q.first);
@@ -2740,6 +2743,7 @@ void DaemonServer::got_service_map()
     }
     daemon_state.cull(p.first, names);
   }
+  daemon_state.cull_services(types);
 }
 
 void DaemonServer::got_mgr_map()
