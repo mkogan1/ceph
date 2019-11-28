@@ -648,6 +648,14 @@ struct ReplicationConfiguration {
       }
     };
 
+    struct Source { /* rgw extension */
+      std::vector<string> zone_names;
+
+      void decode_xml(XMLObj *obj) {
+        RGWXMLDecoder::decode_xml("Zone", zone_names, obj);
+      }
+    };
+
     struct Destination {
       struct AccessControlTranslation {
         string owner;
@@ -661,6 +669,7 @@ struct ReplicationConfiguration {
       std::optional<string> account;
       string bucket;
       std::optional<string> storage_class;
+      std::vector<string> zone_names;
 
       void decode_xml(XMLObj *obj) {
         RGWXMLDecoder::decode_xml("AccessControlTranslation", acl_translation, obj);
@@ -673,6 +682,7 @@ struct ReplicationConfiguration {
         if (storage_class && storage_class->empty()) {
           storage_class.reset();
         }
+        RGWXMLDecoder::decode_xml("Zone", zone_names, obj); /* rgw extension */
       }
     };
 
@@ -773,7 +783,22 @@ struct ReplicationConfiguration {
       }
     };
 
+    set<rgw_zone_id> get_zone_ids_from_names(RGWRados *store,
+                                             const vector<string>& zone_names) const {
+      set<rgw_zone_id> ids;
+
+      for (auto& name : zone_names) {
+        rgw_zone_id id;
+        if (store->svc.zone->find_zone_id_by_name(name, &id)) {
+          ids.insert(std::move(id));
+        }
+      }
+
+      return ids;
+    }
+
     std::optional<DeleteMarkerReplication> delete_marker_replication;
+    std::optional<Source> source;
     Destination destination;
     std::optional<Filter> filter;
     string id;
@@ -782,6 +807,7 @@ struct ReplicationConfiguration {
 
     void decode_xml(XMLObj *obj) {
       RGWXMLDecoder::decode_xml("DeleteMarkerReplication", delete_marker_replication, obj);
+      RGWXMLDecoder::decode_xml("Source", source, obj);
       RGWXMLDecoder::decode_xml("Destination", destination, obj);
       RGWXMLDecoder::decode_xml("ID", id, obj);
 
@@ -814,7 +840,7 @@ struct ReplicationConfiguration {
       return true;
     }
 
-    int to_sync_policy_pipe(req_state *s,
+    int to_sync_policy_pipe(req_state *s, RGWRados *store,
                             rgw_sync_bucket_pipes *pipe,
                             bool *enabled) const {
       if (!is_valid(s->cct)) {
@@ -830,12 +856,16 @@ struct ReplicationConfiguration {
       dest_bk.name = destination.bucket;
       dest_bk.tenant = user_id.tenant;
 
-      pipe->source.set_all_zones(true); /*
-                                           all zones that correspond with configured flow,
-                                           we can introduce extended api to select specific
-                                           zones
-                                         */
-      pipe->dest.set_all_zones(true);
+      if (source && !source->zone_names.empty()) {
+        pipe->source.zones = get_zone_ids_from_names(store, source->zone_names);
+      } else {
+        pipe->source.set_all_zones(true);
+      }
+      if (!destination.zone_names.empty()) {
+        pipe->dest.zones = get_zone_ids_from_names(store, destination.zone_names);
+      } else {
+        pipe->dest.set_all_zones(true);
+      }
       pipe->dest.bucket.emplace(dest_bk);
 
       if (filter) {
@@ -870,7 +900,7 @@ struct ReplicationConfiguration {
     RGWXMLDecoder::decode_xml("Rule", rules, obj);
   }
 
-  int to_sync_policy_groups(req_state *s,
+  int to_sync_policy_groups(req_state *s, RGWRados *store,
                             vector<rgw_sync_policy_group> *result) const {
     result->resize(2);
 
@@ -885,7 +915,7 @@ struct ReplicationConfiguration {
     for (auto& rule : rules) {
       rgw_sync_bucket_pipes pipe;
       bool enabled;
-      int r = rule.to_sync_policy_pipe(s, &pipe, &enabled);
+      int r = rule.to_sync_policy_pipe(s, store, &pipe, &enabled);
       if (r < 0) {
         ldout(s->cct, 5) << "NOTICE: failed to convert replication configuration into sync policy pipe (rule.id=" << rule.id << "): " << cpp_strerror(-r) << dendl;
         return r;
@@ -933,7 +963,7 @@ int RGWPutBucketReplication_ObjStore_S3::get_params()
     return -ERR_MALFORMED_XML;
   }
 
-  r = conf.to_sync_policy_groups(s, &sync_policy_groups);
+  r = conf.to_sync_policy_groups(s, store, &sync_policy_groups);
   if (r < 0) {
     return r;
   }
