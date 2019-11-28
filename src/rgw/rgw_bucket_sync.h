@@ -395,6 +395,10 @@ public:
 
   bool bucket_exports_data() const;
   bool bucket_imports_data() const;
+
+  const rgw_sync_policy_info& get_sync_policy() const {
+    return sync_policy;
+  }
 };
 using RGWBucketSyncPolicyHandlerRef = std::shared_ptr<RGWBucketSyncPolicyHandler>;
 

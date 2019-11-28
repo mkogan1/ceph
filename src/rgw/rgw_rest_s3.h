@@ -103,6 +103,13 @@ public:
   void send_response() override;
 };
 
+class RGWPutBucketReplication_ObjStore_S3 : public RGWPutBucketReplication_ObjStore
+{
+public:
+  int get_params() override;
+  void send_response() override;
+};
+
 class RGWListBuckets_ObjStore_S3 : public RGWListBuckets_ObjStore {
 public:
   RGWListBuckets_ObjStore_S3() {}
@@ -656,7 +663,11 @@ protected:
     }
     return false;
   }
-  RGWOp *get_obj_op(bool get_data);
+  bool is_replication_op() const {
+    return s->info.args.exists("replication");
+  }
+
+  RGWOp *get_obj_op(bool get_data) const;
 
   RGWOp *op_get() override;
   RGWOp *op_head() override;
