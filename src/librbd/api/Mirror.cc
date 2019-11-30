@@ -537,6 +537,14 @@ template <typename I>
 int Mirror<I>::image_promote(I *ictx, bool force) {
   CephContext *cct = ictx->cct;
 
+  // TODO temporary workaround to fix out-of-order backports
+  if (ictx->state->is_refresh_required()) {
+    int r = ictx->state->refresh();
+    if (r < 0) {
+      return r;
+    }
+  }
+
   C_SaferCond ctx;
   Mirror<I>::image_promote(ictx, force, &ctx);
   int r = ctx.wait();
