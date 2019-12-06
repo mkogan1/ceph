@@ -17,6 +17,9 @@
 
 #include "include/rados/librados.hpp"
 
+#ifdef HAVE_BOOST_CONTEXT
+#include <spawn/spawn.hpp>
+#endif
 #include <gtest/gtest.h>
 
 struct RadosEnv : public ::testing::Environment {
@@ -33,7 +36,8 @@ struct RadosEnv : public ::testing::Environment {
       r = 0;
     ASSERT_EQ(0, r);
   }
-  void TearDown() {
+  void TearDown() override {
+    rados->shutdown();
     rados.reset();
   }
 };
@@ -119,5 +123,57 @@ TEST_F(Aio_Throttle, ThrottleOverMax)
   EXPECT_EQ(0u, outstanding);
   EXPECT_EQ(window, max_outstanding);
 }
+
+#ifdef HAVE_BOOST_CONTEXT
+TEST_F(Aio_Throttle, YieldCostOverWindow)
+{
+  auto obj = make_obj(__PRETTY_FUNCTION__);
+
+  boost::asio::io_context context;
+  spawn::spawn(context,
+    [&] (spawn::yield_context yield) {
+      YieldingAioThrottle throttle(4, context, yield);
+      scoped_completion op;
+      auto c = throttle.get(obj, wait_on(op), 8, 0);
+      ASSERT_EQ(1u, c.size());
+      EXPECT_EQ(-EDEADLK, c.front().result);
+    });
+}
+
+TEST_F(Aio_Throttle, YieldingThrottleOverMax)
+{
+  constexpr uint64_t window = 4;
+
+  auto obj = make_obj(__PRETTY_FUNCTION__);
+
+  // issue 32 writes, and verify that max_outstanding <= window
+  constexpr uint64_t total = 32;
+  uint64_t max_outstanding = 0;
+  uint64_t outstanding = 0;
+
+  boost::asio::io_context context;
+  spawn::spawn(context,
+    [&] (spawn::yield_context yield) {
+      YieldingAioThrottle throttle(window, context, yield);
+      for (uint64_t i = 0; i < total; i++) {
+        using namespace std::chrono_literals;
+        auto c = throttle.get(obj, wait_for(context, 10ms), 1, 0);
+        outstanding++;
+        outstanding -= c.size();
+        if (max_outstanding < outstanding) {
+          max_outstanding = outstanding;
+        }
+      }
+      auto c = throttle.drain();
+      outstanding -= c.size();
+    });
+  context.poll(); // run until we block
+  EXPECT_EQ(window, outstanding);
+
+  context.run();
+  EXPECT_EQ(0u, outstanding);
+  EXPECT_EQ(window, max_outstanding);
+}
+#endif // HAVE_BOOST_CONTEXT
 
 } // namespace rgw
