@@ -56,10 +56,13 @@ template <typename> struct Threads;
 namespace image_replayer {
 
 template <typename> class BootstrapRequest;
+
+namespace journal {
+
 template <typename> class EventPreprocessor;
+template <typename> class ReplayStatusFormatter;
 
-namespace journal { template <typename> class ReplayStatusFormatter; }
-
+} // namespace journal
 } // namespace image_replayer
 
 /**
@@ -313,7 +316,8 @@ private:
   bool m_resync_requested = false;
   bool m_restart_requested = false;
 
-  image_replayer::EventPreprocessor<ImageCtxT> *m_event_preprocessor = nullptr;
+  image_replayer::journal::EventPreprocessor<ImageCtxT>*
+      m_event_preprocessor = nullptr;
   image_replayer::journal::ReplayStatusFormatter<ImageCtxT>*
     m_replay_status_formatter = nullptr;
   ImageCtxT *m_local_image_ctx = nullptr;
