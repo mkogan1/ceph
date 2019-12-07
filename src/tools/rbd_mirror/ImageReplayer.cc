@@ -52,7 +52,6 @@ namespace mirror {
 using librbd::util::create_async_context_callback;
 using librbd::util::create_context_callback;
 using librbd::util::create_rados_callback;
-using namespace rbd::mirror::image_replayer;
 
 template <typename I>
 std::ostream &operator<<(std::ostream &os,
@@ -392,7 +391,7 @@ void ImageReplayer<I>::prepare_local_image() {
   m_local_image_id = "";
   Context *ctx = create_context_callback<
     ImageReplayer, &ImageReplayer<I>::handle_prepare_local_image>(this);
-  auto req = PrepareLocalImageRequest<I>::create(
+  auto req = image_replayer::PrepareLocalImageRequest<I>::create(
     m_local_io_ctx, m_global_image_id, &m_local_image_id, &m_local_image_name,
     &m_local_image_tag_owner, m_threads->work_queue, ctx);
   req->send();
@@ -435,7 +434,7 @@ void ImageReplayer<I>::prepare_remote_image() {
 
   Context *ctx = create_context_callback<
     ImageReplayer, &ImageReplayer<I>::handle_prepare_remote_image>(this);
-  auto req = PrepareRemoteImageRequest<I>::create(
+  auto req = image_replayer::PrepareRemoteImageRequest<I>::create(
     m_threads, m_remote_image.io_ctx, m_global_image_id, m_local_mirror_uuid,
     m_local_image_id, journal_settings, m_cache_manager_handler,
     &m_remote_image.mirror_uuid, &m_remote_image.image_id, &m_remote_journaler,
@@ -489,7 +488,7 @@ void ImageReplayer<I>::bootstrap() {
     return;
   }
 
-  BootstrapRequest<I> *request = nullptr;
+  image_replayer::BootstrapRequest<I> *request = nullptr;
   {
     std::lock_guard locker{m_lock};
     if (on_start_interrupted(m_lock)) {
@@ -498,7 +497,7 @@ void ImageReplayer<I>::bootstrap() {
 
     auto ctx = create_context_callback<
       ImageReplayer, &ImageReplayer<I>::handle_bootstrap>(this);
-    request = BootstrapRequest<I>::create(
+    request = image_replayer::BootstrapRequest<I>::create(
       m_threads, m_local_io_ctx, m_remote_image.io_ctx, m_instance_watcher,
       &m_local_image_ctx, m_local_image_id, m_remote_image.image_id,
       m_global_image_id, m_local_mirror_uuid, m_remote_image.mirror_uuid,
@@ -635,8 +634,8 @@ void ImageReplayer<I>::handle_start_replay(int r) {
     return;
   }
 
-  m_replay_status_formatter =
-    ReplayStatusFormatter<I>::create(m_remote_journaler, m_local_mirror_uuid);
+  m_replay_status_formatter = image_replayer::ReplayStatusFormatter<I>::create(
+    m_remote_journaler, m_local_mirror_uuid);
 
   Context *on_finish(nullptr);
   {
@@ -646,7 +645,7 @@ void ImageReplayer<I>::handle_start_replay(int r) {
     std::swap(m_on_start_finish, on_finish);
   }
 
-  m_event_preprocessor = EventPreprocessor<I>::create(
+  m_event_preprocessor = image_replayer::EventPreprocessor<I>::create(
     *m_local_image_ctx, *m_remote_journaler, m_local_mirror_uuid,
     &m_client_meta, m_threads->work_queue);
 
@@ -1556,7 +1555,7 @@ void ImageReplayer<I>::shut_down(int r) {
   // close the local image (release exclusive lock)
   if (m_local_image_ctx) {
     ctx = new LambdaContext([this, ctx](int r) {
-      CloseImageRequest<I> *request = CloseImageRequest<I>::create(
+      auto request = image_replayer::CloseImageRequest<I>::create(
         &m_local_image_ctx, ctx);
       request->send();
     });
@@ -1573,7 +1572,7 @@ void ImageReplayer<I>::shut_down(int r) {
           m_local_journal->stop_external_replay();
           m_local_replay = nullptr;
 
-          EventPreprocessor<I>::destroy(m_event_preprocessor);
+          image_replayer::EventPreprocessor<I>::destroy(m_event_preprocessor);
           m_event_preprocessor = nullptr;
           ctx->complete(0);
         });
@@ -1674,7 +1673,7 @@ void ImageReplayer<I>::handle_shut_down(int r) {
   }
 
   dout(10) << "stop complete" << dendl;
-  ReplayStatusFormatter<I>::destroy(m_replay_status_formatter);
+  image_replayer::ReplayStatusFormatter<I>::destroy(m_replay_status_formatter);
   m_replay_status_formatter = nullptr;
 
   Context *on_start = nullptr;
