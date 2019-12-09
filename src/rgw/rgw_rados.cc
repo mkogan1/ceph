@@ -2417,6 +2417,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
 
   result->clear();
 
+restart:
   rgw_obj_key marker_obj(params.marker.name, params.marker.instance, params.ns);
   rgw_obj_index_key cur_marker;
   marker_obj.get_index_key(&cur_marker);
@@ -2476,36 +2477,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
     for (auto eiter = ent_map.begin(); eiter != ent_map.end(); ++eiter) {
       rgw_bucket_dir_entry& entry = eiter->second;
       rgw_obj_index_key index_key = entry.key;
-
       rgw_obj_key obj(index_key);
-
-      /* note that parse_raw_oid() here will not set the correct
-       * object's instance, as rgw_obj_index_key encodes that
-       * separately. We don't need to set the instance because it's
-       * not needed for the checks here and we end up using the raw
-       * entry for the return vector
-       */
-      bool valid = rgw_obj_key::parse_raw_oid(index_key.name, &obj);
-      if (!valid) {
-        ldout(cct, 0) << "ERROR: could not parse object name: " << obj.name << dendl;
-        continue;
-      }
-
-      bool check_ns = (obj.ns == params.ns);
-      if (!params.list_versions && !entry.is_visible()) {
-        continue;
-      }
-
-      if (params.enforce_ns && !check_ns) {
-        if (!params.ns.empty()) {
-          /* we've iterated past the namespace we're searching -- done now */
-          truncated = false;
-          goto done;
-        }
-
-        /* we're not looking at the namespace this object is in, next! */
-        continue;
-      }
 
       if (cur_end_marker_valid && cur_end_marker <= index_key) {
         truncated = false;
@@ -2515,6 +2487,35 @@ int RGWRados::Bucket::List::list_objects_ordered(
       if (count < max) {
         params.marker = index_key;
         next_marker = index_key;
+      }
+
+      /* note that parse_raw_oid() here will not set the correct
+       * object's instance, as rgw_obj_index_key encodes that
+       * separately. We don't need to set the instance because it's
+       * not needed for the checks here and we end up using the raw
+       * entry for the return vector
+       */
+      bool valid = rgw_obj_key::parse_raw_oid(index_key.name, &obj);
+      if (!valid) {
+        ldout(cct, 0) << "ERROR: could not parse object name: "
+		      << obj.name << dendl;
+        continue;
+      }
+
+      bool matched_ns = (obj.ns == params.ns);
+      if (!params.list_versions && !entry.is_visible()) {
+        continue;
+      }
+
+      if (params.enforce_ns && !matched_ns) {
+        if (!params.ns.empty()) {
+          /* we've iterated past the namespace we're searching -- done now */
+          truncated = false;
+          goto done;
+        }
+
+        /* we're not looking at the namespace this object is in, next! */
+        continue;
       }
 
       if (params.filter && !params.filter->filter(obj.name, index_key.name))
@@ -2578,6 +2579,11 @@ int RGWRados::Bucket::List::list_objects_ordered(
   } // read attempt loop
 
 done:
+  /* reject empty results */
+  if (result->size() == 0) {
+    goto restart;
+  }
+
   if (is_truncated)
     *is_truncated = truncated;
 
