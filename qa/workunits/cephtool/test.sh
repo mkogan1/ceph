@@ -1175,6 +1175,8 @@ function test_mon_mon()
   # ceph mon tell
   ceph mon_status
 
+  first=$(ceph mon dump -f json | jq -r '.mons[0].name')
+  
   # test mon features
   ceph mon feature ls
   ceph mon feature set kraken --yes-i-really-mean-it
@@ -1187,7 +1189,9 @@ function test_mon_mon()
   ceph mon stat -f json | jq '.'
 
   ceph mon set election_strategy DISALLOW
+  ceph mon add disallowed_leader $first
   ceph mon set election_strategy CONNECTIVITY
+  ceph mon rm disallowed_leader $first
   ceph mon set election_strategy CLASSIC
 }
 
