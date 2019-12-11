@@ -904,7 +904,7 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
 		  dest_obj_tags.decode(iter);
 		} catch (buffer::error& err) {
 		  ldout(cct,0) << "ERROR: caught buffer::error, couldn't decode TagSet" << dendl;
-		  return -EIO;
+		  continue;
 		}
 
 		if (! has_all_tags(prefix_iter->second, dest_obj_tags)) {
