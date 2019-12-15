@@ -82,6 +82,10 @@ of the master zone group.
 See `Pools`_ for instructions on creating and tuning pools for Ceph
 Object Storage.
 
+See `Sync Policy Config`_ for instructions on defining fine grained bucket sync
+policy rules.
+
+.. _master-zone-label:
 
 Configuring a Master Zone
 =========================
@@ -1445,3 +1449,4 @@ instance.
 
 
 .. _`Pools`: ../pools
+.. _`Sync Policy Config`: ../multisite-sync-policy
