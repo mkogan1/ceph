@@ -1188,11 +1188,13 @@ function test_mon_mon()
   ceph mon stat
   ceph mon stat -f json | jq '.'
 
+  expect_failure $TEMP_DIR ceph mon add disallowed_leader $first
   ceph mon set election_strategy DISALLOW
   ceph mon add disallowed_leader $first
   ceph mon set election_strategy CONNECTIVITY
   ceph mon rm disallowed_leader $first
   ceph mon set election_strategy CLASSIC
+  expect_failure $TEMP_DIR ceph mon rm disallowed_leader $first
 }
 
 function gen_secrets_file()
