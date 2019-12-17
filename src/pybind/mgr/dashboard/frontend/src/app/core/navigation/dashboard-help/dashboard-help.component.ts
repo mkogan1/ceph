@@ -2,6 +2,7 @@ import { Component, OnInit, ViewChild } from '@angular/core';
 
 import { BsModalRef, BsModalService } from 'ngx-bootstrap/modal';
 
+import { DocUrls } from '../../../shared/constants/app.constants';
 import { CephReleaseNamePipe } from '../../../shared/pipes/ceph-release-name.pipe';
 import { SummaryService } from '../../../shared/services/summary.service';
 import { AboutComponent } from '../about/about.component';
@@ -29,8 +30,9 @@ export class DashboardHelpComponent implements OnInit {
         return;
       }
 
+      // @ts-ignore
       const releaseName = this.cephReleaseNamePipe.transform(summary.version);
-      this.docsUrl = `http://docs.ceph.com/docs/${releaseName}/mgr/dashboard/`;
+      this.docsUrl = DocUrls.base;
 
       setTimeout(() => {
         subs.unsubscribe();
