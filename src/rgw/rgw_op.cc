@@ -453,10 +453,10 @@ static int modify_obj_attr(RGWRados *store, struct req_state *s, const rgw_obj& 
   if (r < 0) {
     return r;
   }
-  RGWObjectCtx *obj_ctx = static_cast<RGWObjectCtx *>(s->obj_ctx);
+  RGWObjectCtx* obj_ctx = static_cast<RGWObjectCtx *>(s->obj_ctx);
   obj_ctx->set_atomic(read_op.state.obj);
   attrs[attr_name] = attr_val;
-  return store->set_attrs(&obj_ctx, s->bucket_info, read_op.state.obj, attrs, NULL);
+  return store->set_attrs(obj_ctx, s->bucket_info, read_op.state.obj, attrs, NULL);
 }
 
 static int read_bucket_policy(RGWRados *store,
