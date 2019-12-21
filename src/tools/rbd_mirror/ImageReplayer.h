@@ -132,12 +132,6 @@ protected:
    * <starting>                                             *
    *    |                                                   *
    *    v                                           (error) *
-   * PREPARE_LOCAL_IMAGE  * * * * * * * * * * * * * * * * * *
-   *    |                                                   *
-   *    v                                           (error) *
-   * PREPARE_REMOTE_IMAGE * * * * * * * * * * * * * * * * * *
-   *    |                                                   *
-   *    v                                           (error) *
    * BOOTSTRAP_IMAGE  * * * * * * * * * * * * * * * * * * * *
    *    |                                                   *
    *    v                                           (error) *
@@ -203,7 +197,8 @@ private:
     }
 
     void update_progress(const std::string &description,
-				 bool flush = true) override;
+                         bool flush = true) override;
+
   private:
     ImageReplayer<ImageCtxT> *replayer;
   };
@@ -239,7 +234,6 @@ private:
   bool m_restart_requested = false;
 
   ImageCtxT *m_local_image_ctx = nullptr;
-  std::string m_local_image_tag_owner;
 
   decltype(ImageCtxT::journal) m_local_journal = nullptr;
   Journaler* m_remote_journaler = nullptr;
@@ -255,10 +249,6 @@ private:
   AdminSocketHook *m_asok_hook = nullptr;
 
   image_replayer::BootstrapRequest<ImageCtxT> *m_bootstrap_request = nullptr;
-
-  cls::journal::ClientState m_client_state =
-    cls::journal::CLIENT_STATE_DISCONNECTED;
-  librbd::journal::MirrorPeerClientMeta m_client_meta;
 
   AsyncOpTracker m_in_flight_op_tracker;
 
@@ -279,12 +269,6 @@ private:
 
   void shut_down(int r);
   void handle_shut_down(int r);
-
-  void prepare_local_image();
-  void handle_prepare_local_image(int r);
-
-  void prepare_remote_image();
-  void handle_prepare_remote_image(int r);
 
   void bootstrap();
   void handle_bootstrap(int r);
