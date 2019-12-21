@@ -17,7 +17,7 @@ class MockTransitSecretEngine : public TransitSecretEngine {
 public:
   MockTransitSecretEngine(CephContext *cct) : TransitSecretEngine(cct){}
 
-  MOCK_METHOD(int, send_request, (boost::string_view key_id, JSONParser* parser), (override));
+  MOCK_METHOD2(send_request, int(boost::string_view key_id, JSONParser* parser)); // XXX override omitted
 
 };
 
