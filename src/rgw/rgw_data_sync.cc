@@ -1148,8 +1148,6 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   bool *reset_backoff;
 
-  set<string> spawned_keys;
-
   boost::intrusive_ptr<RGWContinuousLeaseCR> lease_cr;
   boost::intrusive_ptr<RGWCoroutinesStack> lease_stack;
   string status_oid;
@@ -1400,9 +1398,7 @@ public:
           }
         }
 
-#define INCREMENTAL_MAX_ENTRIES 100
 	      ldout(sync_env->cct, 20) << __func__ << ":" << __LINE__ << ": shard_id=" << shard_id << " sync_marker=" << sync_marker.marker << dendl;
-        spawned_keys.clear();
         yield call(new RGWReadRemoteDataLogShardCR(sync_env, shard_id, sync_marker.marker,
                                                    &next_marker, &log_entries, &truncated));
         if (retcode < 0) {
@@ -1421,18 +1417,7 @@ public:
           if (!marker_tracker->start(log_iter->log_id, 0, log_iter->log_timestamp)) {
             ldout(sync_env->cct, 0) << "ERROR: cannot start syncing " << log_iter->log_id << ". Duplicate entry?" << dendl;
           } else {
-            /*
-             * don't spawn the same key more than once. We can do that as long as we don't yield
-             */
-            if (spawned_keys.find(log_iter->entry.key) == spawned_keys.end()) {
-              spawned_keys.insert(log_iter->entry.key);
-              spawn(new RGWDataSyncSingleEntryCR(sync_env, log_iter->entry.key, log_iter->log_id, marker_tracker, error_repo, false), false);
-              if (retcode < 0) {
-                stop_spawned_services();
-                drain_all();
-                return set_cr_error(retcode);
-              }
-            }
+            spawn(new RGWDataSyncSingleEntryCR(sync_env, log_iter->entry.key, log_iter->log_id, marker_tracker, error_repo, false), false);
           }
           while ((int)num_spawned() > spawn_window) {
             set_status() << "num_spawned() > spawn_window";
