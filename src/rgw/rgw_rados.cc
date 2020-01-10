@@ -5,9 +5,10 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <sstream>
+
 #include <boost/algorithm/string.hpp>
 #include <boost/utility/string_view.hpp>
-
 #include <boost/container/flat_set.hpp>
 #include <boost/format.hpp>
 #include <boost/optional.hpp>
@@ -5732,6 +5733,9 @@ int RGWRados::Bucket::List::list_objects_ordered(
   rgw_obj_index_key prev_marker;
   uint16_t attempt = 0;
   while (true) {
+    ldout(cct, 20) << "RGWRados::Bucket::List" << __func__ <<
+      " beginning attempt=" << ++attempt << dendl;
+
     // this loop is generally expected only to have a single
     // iteration; the standard exit is at the bottom of the loop, but
     // there's an error condition emergency exit as well
@@ -5772,8 +5776,10 @@ int RGWRados::Bucket::List::list_objects_ordered(
     for (auto eiter = ent_map.begin(); eiter != ent_map.end(); ++eiter) {
       rgw_bucket_dir_entry& entry = eiter->second;
       rgw_obj_index_key index_key = entry.key;
-
       rgw_obj_key obj(index_key);
+
+      ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ <<
+	" considering entry " << entry.key << dendl;
 
       /* note that parse_raw_oid() here will not set the correct
        * object's instance, as rgw_obj_index_key encodes that
@@ -5783,7 +5789,8 @@ int RGWRados::Bucket::List::list_objects_ordered(
        */
       bool valid = rgw_obj_key::parse_raw_oid(index_key.name, &obj);
       if (!valid) {
-        ldout(cct, 0) << "ERROR: could not parse object name: " << obj.name << dendl;
+        ldout(cct, 0) << "ERROR: could not parse object name: " << obj.name <<
+	  dendl;
         continue;
       }
 
@@ -5857,9 +5864,16 @@ int RGWRados::Bucket::List::list_objects_ordered(
         goto done;
       }
 
+      ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ <<
+	" adding entry " << entry.key << " to result" << dendl;
+
       result->emplace_back(std::move(entry));
       count++;
     } // eiter for loop
+
+    ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ <<
+      " INFO end of outer loop, trucated=" << truncated <<
+      ", count=" << count << ", attempt=" << attempt << dendl;
 
     // if we finished listing, or if we're returning at least half the
     // requested entries, that's enough; S3 and swift protocols allow
@@ -13581,9 +13595,12 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 				      uint16_t attempt, // 0 means ignore
 				      bool (*force_check_filter)(const string& name))
 {
-  ldout(cct, 10) << "cls_bucket_list_ordered " << bucket_info.bucket <<
-    " start " << start.name << "[" << start.instance << "] num_entries " <<
-    num_entries << dendl;
+  ldout(cct, 10) << "RGWRados::" << __func__ << ": " << bucket_info.bucket <<
+    " start=\"" << start.name << "[" << start.instance <<
+    "]\", prefix=\"" << prefix <<
+    "\" num_entries=" << num_entries <<
+    ", list_versions=" << list_versions <<
+    ", attempt=" << attempt << dendl;
 
   librados::IoCtx index_ctx;
   // key   - oid (for different shards if there is any)
@@ -13603,7 +13620,8 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 	      calc_ordered_bucket_list_per_shard(num_entries, shard_count))) :
     calc_ordered_bucket_list_per_shard(num_entries, shard_count);
 
-  ldout(cct, 10) << __func__ << " request from each of " << shard_count <<
+  ldout(cct, 10) << "RGWRados::" << __func__ <<
+    " request from each of " << shard_count <<
     " shard(s) for " << num_entries_per_shard << " entries to get " <<
     num_entries << " total entries" << dendl;
 
@@ -13615,6 +13633,21 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
   if (r < 0) {
     return r;
   }
+
+  auto result_info =
+    [](const map<int, struct rgw_cls_list_ret>& m) -> std::string {
+      std::stringstream out;
+      out << "{ size:" << m.size() << ", entries:[";
+      for (const auto& i : m) {
+	out << " { " << i.first << ", " << i.second.dir.m.size() << " },";
+      }
+      out << "] }";
+      return out.str();
+    };
+
+  ldout(cct, 20) << "RGWRados::" << __func__ <<
+    " CLSRGWIssueBucketList() result=" <<
+    result_info(list_results) << dendl;
 
   // create a list of iterators that are used to iterate each shard
   vector<map<string, struct rgw_bucket_dir_entry>::iterator> vcurrents;
@@ -13649,6 +13682,9 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
     const string& name = vcurrents[pos]->first;
     struct rgw_bucket_dir_entry& dirent = vcurrents[pos]->second;
 
+    ldout(cct, 20) << "RGWRados::" << __func__ << " currently processing " <<
+      dirent.key << " from shard " << pos << dendl;
+
     bool force_check = force_check_filter &&
         force_check_filter(dirent.key.name);
     if ((!dirent.exists && !dirent.is_delete_marker()) ||
@@ -13667,11 +13703,15 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
     } else {
       r = 0;
     }
+
     if (r >= 0) {
-      ldout(cct, 10) << "RGWRados::cls_bucket_list_ordered: got " <<
+      ldout(cct, 10) << "RGWRados::" << __func__ << ": got " <<
 	dirent.key.name << "[" << dirent.key.instance << "]" << dendl;
       m[name] = std::move(dirent);
       ++count;
+    } else {
+      ldout(cct, 10) << "RGWRados::" << __func__ << ": skipping " <<
+	dirent.key.name << "[" << dirent.key.instance << "]" << dendl;
     }
 
     // refresh the candidates map
@@ -13687,7 +13727,7 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
     }
   } // while we haven't provided requested # of result entries
 
-  // suggest updates if there is any
+  // suggest updates if there are any
   for (auto& miter : updates) {
     if (miter.second.length()) {
       ObjectWriteOperation o;
@@ -13709,6 +13749,10 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
     }
   }
 
+  ldout(cct, 20) << "RGWRados::" << __func__ <<
+    ": returning, count=" << count << ", is_truncated=" << *is_truncated <<
+    dendl;
+  
   if (*is_truncated && count < num_entries) {
     ldout(cct, 10) << "RGWRados::" << __func__ <<
       ": INFO requested " << num_entries << " entries but returning " <<
