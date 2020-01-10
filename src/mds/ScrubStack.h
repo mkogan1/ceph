@@ -139,6 +139,8 @@ public:
    */
   std::string_view scrub_summary();
 
+  bool is_scrubbing() const { return !inode_stack.empty(); }
+
 private:
   // scrub abort is _not_ a state, rather it's an operation that's
   // performed after in-progress scrubs are finished.
