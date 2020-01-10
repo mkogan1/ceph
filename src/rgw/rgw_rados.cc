@@ -5723,11 +5723,13 @@ int RGWRados::Bucket::List::list_objects_ordered(
     }
   }
 
-  constexpr int allowed_read_attempts = 2;
   string skip_after_delim;
-  for (int attempt = 0; attempt < allowed_read_attempts; ++attempt) {
+  rgw_obj_index_key prev_marker;
+  uint16_t attempt = 0;
+  while (true) {
     // this loop is generally expected only to have a single
-    // iteration; see bottom of loop for early exit
+    // iteration; the standard exit is at the bottom of the loop, but
+    // there's an error condition emergency exit as well
 
     if (skip_after_delim > cur_marker.name) {
       cur_marker = skip_after_delim;
@@ -5737,6 +5739,17 @@ int RGWRados::Bucket::List::list_objects_ordered(
 		     << "[" << cur_marker.instance << "]"
 		     << dendl;
     }
+
+    if (attempt > 1 && !(prev_marker < cur_marker)) {
+      // we've failed to make forward progress
+      ldout(cct, 0) << "RGWRados::Bucket::List" << __func__ <<
+	": ERROR marker failed to make forward progress; attempt=" << attempt <<
+	", prev_marker=" << prev_marker <<
+	", cur_marker=" << cur_marker << dendl;
+      break;
+    }
+    prev_marker = cur_marker;
+
     std::map<string, rgw_bucket_dir_entry> ent_map;
     int r = store->cls_bucket_list_ordered(target->get_bucket_info(),
 					   shard_id,
@@ -5746,7 +5759,8 @@ int RGWRados::Bucket::List::list_objects_ordered(
 					   params.list_versions,
 					   ent_map,
 					   &truncated,
-					   &cur_marker);
+					   &cur_marker,
+					   attempt);
     if (r < 0)
       return r;
 
@@ -5845,12 +5859,16 @@ int RGWRados::Bucket::List::list_objects_ordered(
     // if we finished listing, or if we're returning at least half the
     // requested entries, that's enough; S3 and swift protocols allow
     // returning fewer than max entries
-    if (!truncated || count >= max / 2) {
+    if (!truncated || count >= (max + 1) / 2) {
+      break;
+    } else if (attempt > 4 and count >= (max + 7) / 8) {
+      break;
+    } else if (attempt > 8 and count >= 1) {
       break;
     }
 
     ldout(cct, 1) << "RGWRados::Bucket::List::" << __func__ <<
-      " INFO ordered bucket listing requires read #" << (2 + attempt) <<
+      " INFO ordered bucket listing requires read #" << (1 + attempt) <<
       dendl;
   } // read attempt loop
 
@@ -13553,6 +13571,7 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 				      map<string, rgw_bucket_dir_entry>& m,
 				      bool *is_truncated,
 				      rgw_obj_index_key *last_entry,
+				      uint16_t attempt, // 0 means ignore
 				      bool (*force_check_filter)(const string& name))
 {
   ldout(cct, 10) << "cls_bucket_list_ordered " << bucket_info.bucket <<
@@ -13571,6 +13590,10 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 
   const uint32_t shard_count = oids.size();
   const uint32_t num_entries_per_shard =
+    attempt > 0 ?
+    std::min(num_entries,
+	     (attempt *
+	      calc_ordered_bucket_list_per_shard(num_entries, shard_count))) :
     calc_ordered_bucket_list_per_shard(num_entries, shard_count);
 
   ldout(cct, 10) << __func__ << " request from each of " << shard_count <<
@@ -13611,10 +13634,11 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 
   map<string, bufferlist> updates;
   uint32_t count = 0;
+  int pos = -1;
   while (count < num_entries && !candidates.empty()) {
     r = 0;
     // select the next one
-    int pos = candidates.begin()->second;
+    pos = candidates.begin()->second;
     const string& name = vcurrents[pos]->first;
     struct rgw_bucket_dir_entry& dirent = vcurrents[pos]->second;
 
@@ -13684,8 +13708,13 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
       count << ", which is truncated" << dendl;
   }
 
-  if (!m.empty()) {
-    *last_entry = m.rbegin()->first;
+  if (pos >= 0) {
+    *last_entry = std::move((--vcurrents[pos])->first);
+    ldout(cct, 20) << "RGWRados::" << __func__ <<
+      ": returning, last_entry=" << *last_entry << dendl;
+  } else {
+    ldout(cct, 20) << "RGWRados::" << __func__ <<
+      ": returning, last_entry NOT SET" << dendl;
   }
 
   return 0;
