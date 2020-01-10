@@ -2212,10 +2212,13 @@ public:
   using ent_map_t =
     boost::container::flat_map<std::string, rgw_bucket_dir_entry>;
 
-  int cls_bucket_list_ordered(RGWBucketInfo& bucket_info, int shard_id,
+  int cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
+			      const int shard_id,
 			      const rgw_obj_index_key& start,
 			      const string& prefix,
-			      uint32_t num_entries, bool list_versions,
+			      const uint32_t num_entries,
+			      const bool list_versions,
+			      const uint16_t attempt, // 0 means ignore
 			      ent_map_t& m,
 			      bool *is_truncated,
 			      rgw_obj_index_key *last_entry,
