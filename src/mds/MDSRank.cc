@@ -2403,6 +2403,13 @@ void MDSRankDispatcher::handle_mds_map(
   if (oldmap.get_max_mds() != mdsmap->get_max_mds()) {
     purge_queue.update_op_limit(*mdsmap);
   }
+
+  if (scrubstack->is_scrubbing()) {
+    if (mdsmap->get_max_mds() > 1) {
+      auto c = new C_MDSInternalNoop;
+      scrubstack->scrub_abort(c);
+    }
+  }
 }
 
 void MDSRank::handle_mds_recovery(mds_rank_t who)
@@ -2504,6 +2511,12 @@ bool MDSRankDispatcher::handle_asok_command(std::string_view command,
     vector<string> scrubop_vec;
     cmd_getval(g_ceph_context, cmdmap, "scrubops", scrubop_vec);
     cmd_getval(g_ceph_context, cmdmap, "path", path);
+
+    /* Multiple MDS scrub is not currently supported. See also: https://tracker.ceph.com/issues/12274 */
+    if (mdsmap->get_max_mds() > 1) {
+      ss << "Scrub is not currently supported for multiple active MDS. Please reduce max_mds to 1 and then scrub.";
+      return true;
+    }
 
     C_SaferCond cond;
     command_scrub_start(f, path, "", scrubop_vec, &cond);
