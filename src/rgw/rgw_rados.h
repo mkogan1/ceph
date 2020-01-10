@@ -3556,6 +3556,7 @@ public:
 			      map<string, rgw_bucket_dir_entry>& m,
 			      bool *is_truncated,
 			      rgw_obj_index_key *last_entry,
+			      uint16_t attempt = 0, // 0 means ignore
 			      bool (*force_check_filter)(const string& name) = nullptr);
   int cls_bucket_list_unordered(RGWBucketInfo& bucket_info, int shard_id,
 				const rgw_obj_index_key& start,

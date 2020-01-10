@@ -1374,12 +1374,14 @@ int RGWBucket::check_object_index(RGWBucketAdminOpState& op_state,
 
   Formatter *formatter = flusher.get_formatter();
   formatter->open_object_section("objects");
+  uint16_t attempt = 0;
   while (is_truncated) {
     map<string, rgw_bucket_dir_entry> result;
 
     int r = store->cls_bucket_list_ordered(bucket_info, RGW_NO_SHARD,
 					   marker, prefix, 1000, true,
 					   result, &is_truncated, &marker,
+					   ++attempt,
 					   bucket_object_check_filter);
     if (r == -ENOENT) {
       break;
