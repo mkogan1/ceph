@@ -505,7 +505,8 @@ namespace rgw {
 	if (! first)
 	  path += "/";
 	else {
-	  if (!omit_bucket && (path.front() != '/')) // pretty-print
+	  if (!omit_bucket &&
+	      ((path.length() == 0) || (path.front() != '/')))
 	    path += "/";
 	  first = false;
 	}
