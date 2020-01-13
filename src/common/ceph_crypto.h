@@ -131,7 +131,7 @@ namespace ceph {
 	EVP_MD_CTX *mpContext;
 	const EVP_MD *mpType;
       public:
-	OpenSSLDigest (const EVP_MD *_type);
+	OpenSSLDigest (const EVP_MD *_type, bool non_fips = 0);
 	~OpenSSLDigest ();
 	void Restart();
 	void Update (const unsigned char *input, size_t length);
@@ -140,7 +140,7 @@ namespace ceph {
 
       class MD5 : public OpenSSLDigest {
       public:
-	MD5 () : OpenSSLDigest(EVP_md5()) { }
+	MD5 () : OpenSSLDigest(EVP_md5(), 1) { }
       };
 
       class SHA1 : public OpenSSLDigest {
