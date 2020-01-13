@@ -90,9 +90,12 @@ ceph::crypto::nss::HMAC::~HMAC()
 
 #ifdef USE_OPENSSL
 
-ceph::crypto::ssl::OpenSSLDigest::OpenSSLDigest(const EVP_MD * _type)
+ceph::crypto::ssl::OpenSSLDigest::OpenSSLDigest(const EVP_MD * _type, bool non_fips)
   : mpContext(EVP_MD_CTX_create())
   , mpType(_type) {
+  if (non_fips) {
+    EVP_MD_CTX_set_flags(mpContext, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
+  }
   this->Restart();
 }
 
