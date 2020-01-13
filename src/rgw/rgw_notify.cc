@@ -49,6 +49,7 @@ void populate_record_from_request(const req_state *s,
   record.x_meta_map = s->info.x_meta_map;
   // pass tags
   record.tags = s->tagset.get_tags();
+  // opaque data will be filled from topic configuration
 }
 
 bool match(const rgw_pubsub_topic_filter& filter, const req_state* s, EventType event) {
@@ -93,6 +94,7 @@ int publish(const req_state* s,
         }
         event_should_be_handled = true;
         record.configurationId = topic_filter.s3_id;
+        record.opaque_data = topic_cfg.opaque_data;
         ldout(s->cct, 20) << "notification: '" << topic_filter.s3_id << 
             "' on topic: '" << topic_cfg.dest.arn_topic << 
             "' and bucket: '" << s->bucket.name << 
