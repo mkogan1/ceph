@@ -2549,7 +2549,7 @@ public:
   const string& get_key() const {
     return oid;
   }
-  bool from_meta(string& meta) {
+  bool from_meta(const string& meta) {
     int end_pos = meta.rfind('.'); // search for ".meta"
     if (end_pos < 0)
       return false;
@@ -2566,6 +2566,10 @@ public:
     prefix = "";
     meta = "";
     upload_id = "";
+  }
+  friend std::ostream& operator<<(std::ostream& out, const RGWMPObj& obj) {
+    return out << "RGWMPObj:{ prefix=\"" << obj.prefix <<
+      "\", meta=\"" << obj.meta << "\" }";
   }
 }; // class RGWMPObj
 
