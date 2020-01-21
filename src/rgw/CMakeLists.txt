@@ -414,3 +414,8 @@ if(WITH_TESTS)
     ceph_rgw_multiparser
     DESTINATION bin)
 endif(WITH_TESTS)
+
+configure_file(${CMAKE_SOURCE_DIR}/src/rgw/rgw-orphan-list.in
+  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rgw-orphan-list @ONLY)
+install(PROGRAMS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rgw-orphan-list
+  DESTINATION bin)
