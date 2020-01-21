@@ -307,7 +307,7 @@ class RGWBucketSyncPolicyHandler {
   }
 
   bool bucket_is_sync_target() const {
-    return !sources.empty();
+    return !sources.empty() || !resolved_sources.empty();
   }
 
   RGWBucketSyncPolicyHandler(const RGWBucketSyncPolicyHandler *_parent,
