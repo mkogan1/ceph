@@ -247,36 +247,18 @@ if(WITH_RADOSGW_BEAST_FRONTEND)
     rgw_dmclock_async_scheduler.cc)
 endif()
 
-add_library(rgw_schedulers STATIC ${rgw_schedulers_srcs})
-target_link_libraries(rgw_schedulers
-  PUBLIC dmclock::dmclock)
 
-add_library(radosgw SHARED ${radosgw_srcs} ${rgw_a_srcs} rgw_main.cc
+add_library(radosgw_a STATIC ${radosgw_srcs}
   $<TARGET_OBJECTS:civetweb_common_objs>)
-
-add_dependencies(radosgw civetweb_h)
-
-target_compile_definitions(radosgw PUBLIC "-DCLS_CLIENT_HIDE_IOCTX")
-target_include_directories(radosgw PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src")
-target_include_directories(radosgw SYSTEM PUBLIC "../rapidjson/include")
-
-target_link_libraries(radosgw
-  PRIVATE ${rgw_libs} rgw_schedulers
-  PUBLIC dmclock::dmclock
-)
-if(WITH_RADOSGW_BEAST_FRONTEND)
-  target_link_libraries(rgw_schedulers PUBLIC spawn)
-  if(WITH_RADOSGW_BEAST_OPENSSL)
-    # used by rgw_asio_frontend.cc
-    target_link_libraries(radosgw PRIVATE OpenSSL::SSL)
-  endif()
+target_link_libraries(radosgw_a PRIVATE ${rgw_libs})
+if(WITH_RADOSGW_BEAST_FRONTEND AND WITH_RADOSGW_BEAST_OPENSSL)
+  # used by rgw_asio_frontend.cc
+  target_link_libraries(radosgw_a PRIVATE OpenSSL::SSL)
+  target_link_libraries(radosgw_a PUBLIC spawn)
 endif()
-set_target_properties(radosgw PROPERTIES OUTPUT_NAME radosgw VERSION 2.0.0
-  SOVERSION 2)
-install(TARGETS radosgw DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-add_executable(radosgwd radosgw.cc)
-target_link_libraries(radosgwd radosgw librados
+add_executable(radosgw rgw_main.cc)
+target_link_libraries(radosgw radosgw_a librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
