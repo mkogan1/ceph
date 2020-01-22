@@ -8,6 +8,7 @@
 #include <boost/asio.hpp>
 #include <boost/intrusive/list.hpp>
 
+#include <boost/context/protected_fixedsize_stack.hpp>
 #include <spawn/spawn.hpp>
 
 #include "common/async/shared_mutex.h"
@@ -35,6 +36,11 @@ namespace ssl = boost::asio::ssl;
 
 using parse_buffer = boost::beast::flat_static_buffer<65536>;
 
+// use mmap/mprotect to allocate 512k coroutine stacks
+auto make_stack_allocator() {
+  return boost::context::protected_fixedsize_stack{512*1024};
+}
+
 template <typename Stream>
 class StreamIO : public rgw::asio::ClientIO {
   CephContext* const cct;
@@ -48,12 +54,13 @@ class StreamIO : public rgw::asio::ClientIO {
            const tcp::endpoint& local_endpoint,
            const tcp::endpoint& remote_endpoint)
       : ClientIO(parser, is_ssl, local_endpoint, remote_endpoint),
-        cct(cct), stream(stream), buffer(buffer)
+        cct(cct), stream(stream), yield(yield), buffer(buffer)
   {}
 
   size_t write_data(const char* buf, size_t len) override {
     boost::system::error_code ec;
-    auto bytes = boost::asio::write(stream, boost::asio::buffer(buf, len), ec);
+    auto bytes = boost::asio::async_write(stream, boost::asio::buffer(buf, len),
+                                          yield[ec]);
     if (ec) {
       ldout(cct, 4) << "write_data failed: " << ec.message() << dendl;
       if (ec==boost::asio::error::broken_pipe) {
@@ -73,7 +80,7 @@ class StreamIO : public rgw::asio::ClientIO {
 
     while (body_remaining.size && !parser.is_done()) {
       boost::system::error_code ec;
-      http::read_some(stream, buffer, parser, ec);
+      http::async_read_some(stream, buffer, parser, yield[ec]);
       if (ec == http::error::need_buffer) {
         break;
       }
@@ -185,7 +192,7 @@ void handle_connection(boost::asio::io_context& context,
         return;
       }
 
-      StreamIO real_client{cct, stream, parser, buffer, is_ssl,
+      StreamIO real_client{cct, stream, parser, yield, buffer, is_ssl,
                            socket.local_endpoint(),
                            remote_endpoint};
 
@@ -672,7 +679,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
           stream.async_shutdown(yield[ec]);
         }
         s.shutdown(tcp::socket::shutdown_both, ec);
-      });
+      }, make_stack_allocator());
   } else {
 #else
   {
@@ -686,7 +693,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         handle_connection(context, env, s, *buffer, false, pause_mutex,
                           scheduler.get(), ec, yield);
         s.shutdown(tcp::socket::shutdown_both, ec);
-      });
+      }, make_stack_allocator());
   }
 }
 
