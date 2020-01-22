@@ -46,13 +46,7 @@ class AioThrottle : public Aio {
   enum class Wait { None, Available, Completion, Drained };
   Wait waiter = Wait::None;
 
-#ifdef HAVE_BOOST_CONTEXT
-// a throttle that yields the coroutine instead of blocking. all public
-// functions must be called within the coroutine strand
-class YieldingAioThrottle final : public Aio, private Throttle {
-  boost::asio::io_context& context;
-  spawn::yield_context yield;
-  struct Handler;
+  bool waiter_ready() const;
 
   ceph::mutex mutex = ceph::make_mutex("AioThrottle");
   ceph::condition_variable cond;
@@ -63,10 +57,7 @@ class YieldingAioThrottle final : public Aio, private Throttle {
   static void aio_cb(void *cb, void *arg);
 
  public:
-  YieldingAioThrottle(uint64_t window, boost::asio::io_context& context,
-                      spawn::yield_context yield)
-    : Throttle(window), context(context), yield(yield)
-  {}
+  AioThrottle(uint64_t window) : window(window) {}
 
   virtual ~AioThrottle() {
     // must drain before destructing
