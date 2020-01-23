@@ -674,6 +674,7 @@ RGWBucketSyncPolicyHandler::RGWBucketSyncPolicyHandler(RGWSI_Zone *_zone_svc,
 
   if (sync_policy.empty()) {
     RGWSyncPolicyCompat::convert_old_sync_config(zone_svc, sync_modules_svc, &sync_policy);
+    legacy_config = true;
   }
 }
 
@@ -694,6 +695,7 @@ RGWBucketSyncPolicyHandler::RGWBucketSyncPolicyHandler(const RGWBucketSyncPolicy
       }
     }
   }
+  legacy_config = parent->legacy_config;
   bucket = _bucket_info.bucket;
   zone_svc = parent->zone_svc;
   store = parent->store;
@@ -709,6 +711,7 @@ RGWBucketSyncPolicyHandler::RGWBucketSyncPolicyHandler(const RGWBucketSyncPolicy
   if (_sync_policy) {
     sync_policy = *_sync_policy;
   }
+  legacy_config = parent->legacy_config;
   bucket = _bucket;
   zone_svc = parent->zone_svc;
   store = parent->store;

@@ -277,6 +277,7 @@ static inline ostream& operator<<(ostream& os, const RGWBucketSyncFlowManager::e
 }
 
 class RGWBucketSyncPolicyHandler {
+  bool legacy_config{false};
   const RGWBucketSyncPolicyHandler *parent{nullptr};
   RGWSI_Zone *zone_svc;
   RGWRados *store;
@@ -400,6 +401,10 @@ public:
 
   const rgw_sync_policy_info& get_sync_policy() const {
     return sync_policy;
+  }
+
+  bool is_legacy_config() const {
+    return legacy_config;
   }
 };
 using RGWBucketSyncPolicyHandlerRef = std::shared_ptr<RGWBucketSyncPolicyHandler>;
