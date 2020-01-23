@@ -10958,18 +10958,26 @@ void RGWRados::get_hint_entities(const std::set<rgw_zone_id>& zones,
 				 const std::set<rgw_bucket>& buckets,
 				 std::set<rgw_sync_bucket_entity> *hint_entities)
 {
-  for (auto& zone : zones) {
-    for (auto& b : buckets) {
-      RGWBucketInfo hint_bucket_info;
-      RGWSysObjectCtx obj_ctx = svc.sysobj->init_obj_ctx();
-      int ret = get_bucket_info(obj_ctx, b.tenant, b.name, hint_bucket_info,
-				nullptr, nullptr);
-      if (ret < 0) {
-	ldout(cct, 20) << "could not init bucket info for hint bucket=" << b << " ... skipping" << dendl;
-	continue;
-      }
+  vector<rgw_bucket> hint_buckets;
 
-      hint_entities->insert(rgw_sync_bucket_entity(zone, hint_bucket_info.bucket));
+  hint_buckets.reserve(buckets.size());
+  for (auto& b : buckets) {
+    RGWBucketInfo hint_bucket_info;
+    RGWSysObjectCtx obj_ctx = svc.sysobj->init_obj_ctx();
+    int ret = get_bucket_info(obj_ctx, b.tenant, b.name,
+			      hint_bucket_info,
+			      nullptr);
+    if (ret < 0) {
+      ldout(cct, 20) << "could not init bucket info for hint bucket=" << b << " ... skipping" << dendl;
+      continue;
+    }
+
+    hint_buckets.emplace_back(std::move(hint_bucket_info.bucket));
+  }
+
+  for (auto& zone : zones) {
+    for (auto& b : hint_buckets) {
+      hint_entities->insert(rgw_sync_bucket_entity(zone, b));
     }
   }
 }
