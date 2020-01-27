@@ -1968,29 +1968,6 @@ bool RGWUserCaps::is_valid_cap_type(const string& tp)
   return false;
 }
 
-void rgw_pool::from_str(const string& s)
-{
-  size_t pos = rgw_unescape_str(s, 0, '\\', ':', &name);
-  if (pos != string::npos) {
-    pos = rgw_unescape_str(s, pos, '\\', ':', &ns);
-    /* ignore return; if pos != string::npos it means that we had a colon
-     * in the middle of ns that wasn't escaped, we're going to stop there
-     */
-  }
-}
-
-string rgw_pool::to_str() const
-{
-  string esc_name;
-  rgw_escape_str(name, '\\', ':', &esc_name);
-  if (ns.empty()) {
-    return esc_name;
-  }
-  string esc_ns;
-  rgw_escape_str(ns, '\\', ':', &esc_ns);
-  return esc_name + ":" + esc_ns;
-}
-
 void rgw_raw_obj::decode_from_rgw_obj(bufferlist::const_iterator& bl)
 {
   using ceph::decode;
@@ -1999,37 +1976,6 @@ void rgw_raw_obj::decode_from_rgw_obj(bufferlist::const_iterator& bl)
 
   get_obj_bucket_and_oid_loc(old_obj, oid, loc);
   pool = old_obj.get_explicit_data_pool();
-}
-
-std::string rgw_bucket::get_key(char tenant_delim, char id_delim, size_t reserve) const
-{
-  const size_t max_len = tenant.size() + sizeof(tenant_delim) +
-      name.size() + sizeof(id_delim) + bucket_id.size() + reserve;
-
-  std::string key;
-  key.reserve(max_len);
-  if (!tenant.empty() && tenant_delim) {
-    key.append(tenant);
-    key.append(1, tenant_delim);
-  }
-  key.append(name);
-  if (!bucket_id.empty() && id_delim) {
-    key.append(1, id_delim);
-    key.append(bucket_id);
-  }
-  return key;
-}
-
-std::string rgw_bucket_shard::get_key(char tenant_delim, char id_delim,
-                                      char shard_delim) const
-{
-  static constexpr size_t shard_len{12}; // ":4294967295\0"
-  auto key = bucket.get_key(tenant_delim, id_delim, shard_len);
-  if (shard_id >= 0 && shard_delim) {
-    key.append(1, shard_delim);
-    key.append(std::to_string(shard_id));
-  }
-  return key;
 }
 
 static struct rgw_name_to_flag op_type_mapping[] = { {"*",  RGW_OP_TYPE_ALL},
@@ -2271,15 +2217,5 @@ bool RGWBucketInfo::empty_sync_policy() const
   }
 
   return sync_policy->empty();
-}
-
-void encode_json_impl(const char *name, const rgw_zone_id& zid, Formatter *f)
-{
-  encode_json(name, zid.id, f);
-}
-
-void decode_json_obj(rgw_zone_id& zid, JSONObj *obj)
-{
-  decode_json_obj(zid.id, obj);
 }
 
