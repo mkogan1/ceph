@@ -33,6 +33,7 @@
 #include "rgw_website.h"
 #include "rgw_object_lock.h"
 #include "rgw_tag.h"
+#include "rgw_sync_policy.h"
 #include "cls/version/cls_version_types.h"
 #include "cls/user/cls_user_types.h"
 #include "cls/rgw/cls_rgw_types.h"
@@ -1104,7 +1105,6 @@ inline ostream& operator<<(ostream& out, const RGWBucketIndexType &index_type)
   }
 }
 
-struct rgw_sync_policy_info;
 class RGWSI_Zone;
 
 struct RGWBucketInfo {
@@ -1155,7 +1155,7 @@ struct RGWBucketInfo {
 
   RGWObjectLock obj_lock;
 
-  std::shared_ptr<const rgw_sync_policy_info> sync_policy;
+  std::optional<rgw_sync_policy_info> sync_policy;
 
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& bl);

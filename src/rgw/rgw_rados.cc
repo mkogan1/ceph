@@ -8620,10 +8620,6 @@ int RGWRados::_get_bucket_info(RGWSysObjectCtx& obj_ctx,
       binfo_cache->invalidate(bucket_entry);
     } else {
       info = e->info;
-      if (info.sync_policy) { /* fork policy off cache */
-	auto policy = make_shared<rgw_sync_policy_info>(*info.sync_policy);
-	info.sync_policy = std::const_pointer_cast<const rgw_sync_policy_info>(policy);
-      }
 
       if (pattrs)
 	*pattrs = e->attrs;
