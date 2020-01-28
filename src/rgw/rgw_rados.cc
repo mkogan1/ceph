@@ -11445,6 +11445,7 @@ public:
 	ldout(store->ctx(), 0) << "ERROR: failed to flush hint index: obj=" << obj << " r=" << r << dendl;
 	return r;
       }
+      invalidate();
     }
     ldout(store->ctx(), 0) << "ERROR: failed to flush hint index: too many retries (obj=" << obj << "), likely a bug" << dendl;
 
