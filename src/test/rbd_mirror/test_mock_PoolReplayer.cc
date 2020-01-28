@@ -13,6 +13,7 @@
 #include "tools/rbd_mirror/Throttler.h"
 #include "tools/rbd_mirror/LeaderWatcher.h"
 #include "tools/rbd_mirror/NamespaceReplayer.h"
+#include "tools/rbd_mirror/PoolMetaCache.h"
 #include "tools/rbd_mirror/PoolReplayer.h"
 #include "tools/rbd_mirror/RemotePoolPoller.h"
 #include "tools/rbd_mirror/ServiceDaemon.h"
@@ -137,7 +138,8 @@ struct NamespaceReplayer<librbd::MockTestImageCtx> {
       Throttler<librbd::MockTestImageCtx> *image_sync_throttler,
       Throttler<librbd::MockTestImageCtx> *image_deletion_throttler,
       ServiceDaemon<librbd::MockTestImageCtx> *service_daemon,
-      journal::CacheManagerHandler *cache_manager_handler) {
+      journal::CacheManagerHandler *cache_manager_handler,
+      PoolMetaCache* pool_meta_cache) {
     ceph_assert(s_instances.count(name));
     auto namespace_replayer = s_instances[name];
     s_instances.erase(name);
@@ -529,6 +531,8 @@ public:
     expect_service_daemon_add_or_update_attribute(
         mock_service_daemon, "instance_id", {instance_id});
   }
+
+  PoolMetaCache m_pool_meta_cache{g_ceph_context};
 };
 
 TEST_F(TestMockPoolReplayer, ConfigKeyOverride) {
@@ -577,6 +581,7 @@ TEST_F(TestMockPoolReplayer, ConfigKeyOverride) {
     mock_service_daemon, instance_id);
 
   MockPoolReplayer pool_replayer(&mock_threads, &mock_service_daemon, nullptr,
+                                 &m_pool_meta_cache,
                                  m_local_io_ctx.get_id(), peer_spec, {});
   pool_replayer.init("siteA");
 
@@ -638,6 +643,7 @@ TEST_F(TestMockPoolReplayer, AcquireReleaseLeader) {
     mock_service_daemon, instance_id);
 
   MockPoolReplayer pool_replayer(&mock_threads, &mock_service_daemon, nullptr,
+                                 &m_pool_meta_cache,
                                  m_local_io_ctx.get_id(), peer_spec, {});
   pool_replayer.init("siteA");
 
@@ -725,6 +731,7 @@ TEST_F(TestMockPoolReplayer, Namespaces) {
     mock_service_daemon, instance_id);
 
   MockPoolReplayer pool_replayer(&mock_threads, &mock_service_daemon, nullptr,
+                                 &m_pool_meta_cache,
                                  m_local_io_ctx.get_id(), peer_spec, {});
   pool_replayer.init("siteA");
 
@@ -842,6 +849,7 @@ TEST_F(TestMockPoolReplayer, NamespacesError) {
     mock_service_daemon, instance_id);
 
   MockPoolReplayer pool_replayer(&mock_threads, &mock_service_daemon, nullptr,
+                                 &m_pool_meta_cache,
                                  m_local_io_ctx.get_id(), peer_spec, {});
   pool_replayer.init("siteA");
 
