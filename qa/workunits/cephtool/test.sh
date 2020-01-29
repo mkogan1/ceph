@@ -1189,11 +1189,11 @@ function test_mon_mon()
   ceph mon stat -f json | jq '.'
 
   expect_failure $TEMP_DIR ceph mon add disallowed_leader $first
-  ceph mon set election_strategy DISALLOW
+  ceph mon set election_strategy disallow
   ceph mon add disallowed_leader $first
-  ceph mon set election_strategy CONNECTIVITY
+  ceph mon set election_strategy connectivity
   ceph mon rm disallowed_leader $first
-  ceph mon set election_strategy CLASSIC
+  ceph mon set election_strategy classic
   expect_failure $TEMP_DIR ceph mon rm disallowed_leader $first
 }
 
