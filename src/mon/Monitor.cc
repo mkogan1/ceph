@@ -321,7 +321,7 @@ void Monitor::do_admin_command(string command, cmdmap_t& cmdmap, string format,
     if (f) {
       f->open_array_section("sessions");
       for (auto p : session_map.sessions) {
-        f->dump_stream("session") << *p;
+        f->dump_object("session", *p);
       }
       f->close_section();
       f->flush(ss);

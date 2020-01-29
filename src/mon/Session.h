@@ -97,6 +97,21 @@ struct MonSession : public RefCountedObject {
       service, "", args,
       mask & MON_CAP_R, mask & MON_CAP_W, mask & MON_CAP_X);
   }
+
+  void dump(Formatter *f) const {
+    f->dump_stream("name") << inst.name;
+    f->dump_stream("entity_name") << entity_name;
+    f->dump_object("addr", inst.addr);
+    f->dump_string("con_type", ceph_entity_type_name(con_type));
+    f->dump_unsigned("con_features", con_features);
+    f->dump_stream("con_features_hex") << std::hex << con_features << std::dec;
+    f->dump_string("con_features_release",
+		   ceph_release_name(ceph_release_from_features(con_features)));
+    f->dump_bool("open", !closed);
+    f->dump_object("caps", caps);
+    f->dump_bool("authenticated", authenticated);
+    f->dump_unsigned("osd_epoch", osd_epoch);
+  }
 };
 
 
