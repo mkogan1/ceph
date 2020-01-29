@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 #include <iostream>
+#include <memory>
 #include <include/types.h>
 
 #include "common/debug.h"
@@ -364,6 +365,7 @@ class RGWLC {
   std::atomic<bool> down_flag = { false };
   string cookie;
 
+public:
   class LCWorker : public Thread {
     CephContext *cct;
     RGWLC *lc;
@@ -371,16 +373,21 @@ class RGWLC {
     Cond cond;
 
   public:
-    LCWorker(CephContext *_cct, RGWLC *_lc) : cct(_cct), lc(_lc), lock("LCWorker") {}
+    LCWorker(CephContext *_cct, RGWLC *_lc)
+      : cct(_cct), lc(_lc), lock("LCWorker") {}
+    RGWLC* get_lc() { return lc; }
     void *entry() override;
     void stop();
     bool should_work(utime_t& now);
     int schedule_next_start_time(utime_t& start, utime_t& now);
+    friend class RGWRados;
   };
-  
-  public:
-  LCWorker *worker;
-  RGWLC() : cct(NULL), store(NULL), worker(NULL) {}
+
+  friend class RGWRados;
+
+  std::vector<std::unique_ptr<RGWLC::LCWorker>> workers;
+
+  RGWLC() : cct(nullptr), store(nullptr) {}
   ~RGWLC() {
     stop_processor();
     finalize();
@@ -389,13 +396,14 @@ class RGWLC {
   void initialize(CephContext *_cct, RGWRados *_store);
   void finalize();
 
-  int process();
-  int process(int index, int max_secs);
+  int process(LCWorker* worker);
+  int process(int index, int max_secs, LCWorker* worker);
   bool if_already_run_today(time_t& start_date);
   int list_lc_progress(const string& marker, uint32_t max_entries, map<string, int> *progress_map);
-  int bucket_lc_prepare(int index);
-  int bucket_lc_process(string& shard_id);
-  int bucket_lc_post(int index, int max_lock_sec, pair<string, int >& entry, int& result);
+  int bucket_lc_prepare(int index, LCWorker* worker);
+  int bucket_lc_process(string& shard_id, LCWorker* worker);
+  int bucket_lc_post(int index, int max_lock_sec,
+		     pair<string, int >& entry, int& result, LCWorker* worker);
   bool going_down();
   void start_processor();
   void stop_processor();
