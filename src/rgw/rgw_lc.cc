@@ -11,6 +11,7 @@
 #include "common/Formatter.h"
 #include <common/errno.h>
 #include "auth/Crypto.h"
+#include "common/backport14.h"
 #include "cls/rgw/cls_rgw_client.h"
 #include "cls/lock/cls_lock_client.h"
 #include "rgw_common.h"
@@ -136,7 +137,7 @@ void *RGWLC::LCWorker::entry() {
     utime_t start = ceph_clock_now();
     if (should_work(start)) {
       dout(5) << "life cycle: start" << dendl;
-      int r = lc->process();
+      int r = lc->process(this);
       if (r < 0) {
         dout(0) << "ERROR: do life cycle process() returned error r=" << r << dendl;
       }
@@ -211,7 +212,7 @@ bool RGWLC::if_already_run_today(time_t& start_date)
     return false;
 }
 
-int RGWLC::bucket_lc_prepare(int index)
+int RGWLC::bucket_lc_prepare(int index, LCWorker* worker)
 {
   map<string, int > entries;
 
@@ -273,6 +274,10 @@ int RGWLC::remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key, c
     del_op.params.bucket_owner = bucket_info.owner;
     del_op.params.versioning_status = bucket_info.versioning_status();
     del_op.params.obj_owner = obj_owner;
+
+    if (perfcounter) {
+      perfcounter->inc(l_rgw_lc_remove_expired, 1);
+    }
 
     return del_op.delete_obj();
   }
@@ -355,7 +360,7 @@ static inline bool has_all_tags(const lc_op& rule_action,
   return true;
 }
 
-int RGWLC::bucket_lc_process(string& shard_id)
+int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
 {
   RGWLifecycleConfiguration  config(cct);
   RGWBucketInfo bucket_info;
@@ -644,7 +649,9 @@ int RGWLC::bucket_lc_process(string& shard_id)
   return ret;
 }
 
-int RGWLC::bucket_lc_post(int index, int max_lock_sec, pair<string, int >& entry, int& result)
+int RGWLC::bucket_lc_post(int index, int max_lock_sec,
+			  pair<string, int >& entry, int& result,
+			  LCWorker* worker)
 {
   utime_t lock_duration(cct->_conf->rgw_lc_lock_max_time, 0);
 
@@ -709,7 +716,7 @@ int RGWLC::list_lc_progress(const string& marker, uint32_t max_entries, map<stri
   return 0;
 }
 
-int RGWLC::process()
+int RGWLC::process(LCWorker* worker)
 {
   int max_secs = cct->_conf->rgw_lc_lock_max_time;
 
@@ -720,7 +727,7 @@ int RGWLC::process()
 
   for (int i = 0; i < max_objs; i++) {
     int index = (i + start) % max_objs;
-    ret = process(index, max_secs);
+    ret = process(index, max_secs, worker);
     if (ret < 0)
       return ret;
   }
@@ -728,7 +735,7 @@ int RGWLC::process()
   return 0;
 }
 
-int RGWLC::process(int index, int max_lock_secs)
+int RGWLC::process(int index, int max_lock_secs, LCWorker* worker)
 {
   rados::cls::lock::Lock l(lc_index_lock_name);
   do {
@@ -760,7 +767,7 @@ int RGWLC::process(int index, int max_lock_secs)
     if(!if_already_run_today(head.start_date)) {
       head.start_date = now;
       head.marker.clear();
-      ret = bucket_lc_prepare(index);
+      ret = bucket_lc_prepare(index, worker);
       if (ret < 0) {
       dout(0) << "RGWLC::process() failed to update lc object " << obj_names[index] << ret << dendl;
       goto exit;
@@ -790,8 +797,8 @@ int RGWLC::process(int index, int max_lock_secs)
       goto exit;
     }
     l.unlock(&store->lc_pool_ctx, obj_names[index]);
-    ret = bucket_lc_process(entry.first);
-    bucket_lc_post(index, max_lock_secs, entry, ret);
+    ret = bucket_lc_process(entry.first, worker);
+    bucket_lc_post(index, max_lock_secs, entry, ret, worker);
   }while(1);
 
 exit:
@@ -801,19 +808,24 @@ exit:
 
 void RGWLC::start_processor()
 {
-  worker = new LCWorker(cct, this);
-  worker->create("lifecycle_thr");
+  auto maxw = cct->_conf->rgw_lc_max_worker;
+  workers.reserve(maxw);
+  for (int ix = 0; ix < maxw; ++ix) {
+    auto worker  =
+      ceph::make_unique<RGWLC::LCWorker>(cct, this);
+    worker->create((string{"lifecycle_thr_"} + to_string(ix)).c_str());
+    workers.emplace_back(std::move(worker));
+  }
 }
 
 void RGWLC::stop_processor()
 {
   down_flag = true;
-  if (worker) {
+  for (auto& worker : workers) {
     worker->stop();
     worker->join();
   }
-  delete worker;
-  worker = NULL;
+  workers.clear();
 }
 
 void RGWLC::LCWorker::stop()

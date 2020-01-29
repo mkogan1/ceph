@@ -164,6 +164,7 @@ int rgw_perf_start(CephContext *cct)
 
   plb.add_u64_counter(l_rgw_keystone_token_cache_hit, "keystone_token_cache_hit", "Keystone token cache hits");
   plb.add_u64_counter(l_rgw_keystone_token_cache_miss, "keystone_token_cache_miss", "Keystone token cache miss");
+  plb.add_u64_counter(l_rgw_lc_remove_expired, "lc_remove_expired", "LC removed objects");
 
   perfcounter = plb.create_perf_counters();
   cct->get_perfcounters_collection()->add(perfcounter);
