@@ -45,3 +45,12 @@
     ceph config set global mon_warn_on_pool_pg_num_not_power_of_two false
 
 * The format of MDSs in `ceph fs dump` has changed.
+
+* The pool parameter ``target_size_ratio``, used by the pg autoscaler,
+  has changed meaning. It is now normalized across pools, rather than
+  specifying an absolute ratio. For details, see :ref:`pg-autoscaler`.
+  If you have set target size ratios on any pools, you may want to set
+  these pools to autoscale ``warn`` mode to avoid data movement during
+  the upgrade::
+
+    ceph osd pool set <pool-name> pg_autoscale_mode warn
