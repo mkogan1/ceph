@@ -1846,7 +1846,7 @@ class TestMirroring(object):
             'direction': RBD_MIRROR_PEER_DIRECTION_RX_TX,
             'site_name' : site_name,
             'cluster_name' : site_name,
-            'fsid': '',
+            'mirror_uuid': '',
             'client_name' : client_name,
             }
         eq([peer], list(self.rbd.mirror_peer_list(ioctx)))
@@ -1859,7 +1859,7 @@ class TestMirroring(object):
             'direction': RBD_MIRROR_PEER_DIRECTION_RX_TX,
             'site_name' : cluster_name,
             'cluster_name' : cluster_name,
-            'fsid': '',
+            'mirror_uuid': '',
             'client_name' : client_name,
             }
         eq([peer], list(self.rbd.mirror_peer_list(ioctx)))
