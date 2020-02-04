@@ -2163,8 +2163,9 @@ TEST_F(TestClsRbd, mirror_snapshot) {
   string oid = get_temp_image_name();
   ASSERT_EQ(0, create_image(&ioctx, oid, 10, 22, 0, oid, -1));
 
-  cls::rbd::MirrorPrimarySnapshotNamespace primary = {false,
-                                                      {"peer1", "peer2"}};
+  cls::rbd::MirrorSnapshotNamespace primary = {
+    cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"peer1", "peer2"}, "",
+    CEPH_NOSNAP};
   cls::rbd::MirrorNonPrimarySnapshotNamespace non_primary = {"uuid", 123};
   librados::ObjectWriteOperation op;
   ::librbd::cls_client::snapshot_add(&op, 1, "primary", primary);
@@ -2173,7 +2174,7 @@ TEST_F(TestClsRbd, mirror_snapshot) {
 
   cls::rbd::SnapshotInfo snap;
   ASSERT_EQ(0, snapshot_get(&ioctx, oid, 1, &snap));
-  auto sn = boost::get<cls::rbd::MirrorPrimarySnapshotNamespace>(
+  auto sn = boost::get<cls::rbd::MirrorSnapshotNamespace>(
     &snap.snapshot_namespace);
   ASSERT_NE(nullptr, sn);
   ASSERT_EQ(primary, *sn);
@@ -2186,7 +2187,7 @@ TEST_F(TestClsRbd, mirror_snapshot) {
   ASSERT_EQ(-ENOENT, mirror_image_snapshot_unlink_peer(&ioctx, oid, 1,
                                                        "peer1"));
   ASSERT_EQ(0, snapshot_get(&ioctx, oid, 1, &snap));
-  sn = boost::get<cls::rbd::MirrorPrimarySnapshotNamespace>(
+  sn = boost::get<cls::rbd::MirrorSnapshotNamespace>(
     &snap.snapshot_namespace);
   ASSERT_NE(nullptr, sn);
   ASSERT_EQ(1U, sn->mirror_peer_uuids.size());
@@ -2195,7 +2196,7 @@ TEST_F(TestClsRbd, mirror_snapshot) {
   ASSERT_EQ(-ERESTART,
             mirror_image_snapshot_unlink_peer(&ioctx, oid, 1, "peer2"));
   ASSERT_EQ(0, snapshot_get(&ioctx, oid, 1, &snap));
-  sn = boost::get<cls::rbd::MirrorPrimarySnapshotNamespace>(
+  sn = boost::get<cls::rbd::MirrorSnapshotNamespace>(
     &snap.snapshot_namespace);
   ASSERT_NE(nullptr, sn);
   ASSERT_EQ(1U, sn->mirror_peer_uuids.size());
