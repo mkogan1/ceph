@@ -578,11 +578,6 @@ void SnapshotCopyRequest<I>::send_set_head() {
         parent_spec = m_src_image_ctx->parent_md.spec;
         parent_overlap = m_src_image_ctx->parent_md.overlap;
       }
-#if 0
-      if (!m_flatten) {
-      parent_spec = m_src_image_ctx->parent_md.spec;
-      parent_overlap = m_src_image_ctx->parent_md.overlap;
-#endif
     }
   }
 
