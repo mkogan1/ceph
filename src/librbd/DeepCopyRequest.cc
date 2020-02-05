@@ -38,10 +38,9 @@ DeepCopyRequest<I>::DeepCopyRequest(I *src_image_ctx, I *dst_image_ctx,
   : RefCountedObject(dst_image_ctx->cct, 1), m_src_image_ctx(src_image_ctx),
     m_dst_image_ctx(dst_image_ctx), m_src_snap_id_start(src_snap_id_start),
     m_src_snap_id_end(src_snap_id_end), m_dst_snap_id_start(dst_snap_id_start),
-    m_flatten(flatten),
-    m_object_number(object_number), m_work_queue(work_queue),
-    m_snap_seqs(snap_seqs), m_prog_ctx(prog_ctx), m_on_finish(on_finish),
-    m_cct(dst_image_ctx->cct),
+    m_flatten(flatten), m_object_number(object_number),
+    m_work_queue(work_queue), m_snap_seqs(snap_seqs), m_prog_ctx(prog_ctx),
+    m_on_finish(on_finish), m_cct(dst_image_ctx->cct),
     m_lock(ceph::make_mutex(unique_lock_name("DeepCopyRequest::m_lock", this))) {
 }
 
