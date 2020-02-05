@@ -61,15 +61,15 @@ SnapshotCopyRequest<I>::SnapshotCopyRequest(I *src_image_ctx,
               (m_src_snap_id_start > 0 && m_dst_snap_id_start > 0));
 
   // snap ids ordered from oldest to newest
-  m_src_image_ctx->snap_lock.get_read();
+  m_src_image_ctx->image_lock.lock_shared();
   m_src_snap_ids.insert(src_image_ctx->snaps.begin(),
                         src_image_ctx->snaps.end());
-  m_src_image_ctx->snap_lock.put_read();
+  m_src_image_ctx->image_lock.unlock_shared();
 
-  m_dst_image_ctx->snap_lock.get_read();
+  m_dst_image_ctx->image_lock.lock_shared();
   m_dst_snap_ids.insert(dst_image_ctx->snaps.begin(),
                         dst_image_ctx->snaps.end());
-  m_dst_image_ctx->snap_lock.put_read();
+  m_dst_image_ctx->image_lock.unlock_shared();
 
   if (m_src_snap_id_end != CEPH_NOSNAP) {
     m_src_snap_ids.erase(m_src_snap_ids.upper_bound(m_src_snap_id_end),
@@ -578,11 +578,6 @@ void SnapshotCopyRequest<I>::send_set_head() {
         parent_spec = m_src_image_ctx->parent_md.spec;
         parent_overlap = m_src_image_ctx->parent_md.overlap;
       }
-#if 0
-      if (!m_flatten) {
-      parent_spec = m_src_image_ctx->parent_md.spec;
-      parent_overlap = m_src_image_ctx->parent_md.overlap;
-#endif
     }
   }
 
