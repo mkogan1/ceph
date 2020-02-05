@@ -948,7 +948,7 @@ RGWDataChangesLog::~RGWDataChangesLog() {
 void RGWDataChangesLog::renew_run() {
   static constexpr auto runs_per_prune = 150;
   auto run = 0;
-  do {
+  for (;;) {
     ldout(cct, 2) << "RGWDataChangesLog::ChangesRenewThread: start" << dendl;
     int r = renew_entries();
     if (r < 0) {
