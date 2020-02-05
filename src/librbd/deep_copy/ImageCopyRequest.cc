@@ -41,11 +41,11 @@ ImageCopyRequest<I>::ImageCopyRequest(I *src_image_ctx, I *dst_image_ctx,
 
 template <typename I>
 void ImageCopyRequest<I>::send() {
-  m_dst_image_ctx->snap_lock.get_read();
+  m_dst_image_ctx->image_lock.lock_shared();
   util::compute_snap_map(m_dst_image_ctx->cct, m_src_snap_id_start,
                          m_src_snap_id_end, m_dst_image_ctx->snaps, m_snap_seqs,
                          &m_snap_map);
-  m_dst_image_ctx->snap_lock.put_read();
+  m_dst_image_ctx->image_lock.unlock_shared();
 
   if (m_snap_map.empty()) {
     lderr(m_cct) << "failed to map snapshots within boundary" << dendl;
