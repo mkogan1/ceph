@@ -1251,6 +1251,7 @@ class RGWRunBucketSourcesSyncCR : public RGWCoroutine {
 
   int num_shards{0};
   int cur_shard{0};
+  bool again = false;
 
 public:
   RGWRunBucketSourcesSyncCR(RGWDataSyncCtx *_sc,
@@ -4601,20 +4602,31 @@ int RGWRunBucketSourcesSyncCR::operate()
 	while (num_spawned() > BUCKET_SYNC_SPAWN_WINDOW) {
           set_status() << "num_spawned() > spawn_window";
           yield wait_for_child();
-          bool again = true;
+          again = true;
           while (again) {
             again = collect(&ret, nullptr);
             if (ret < 0) {
               tn->log(10, "a sync operation returned error");
-              /* we have reported this error */
+              drain_all();
+              return set_cr_error(ret);
             }
-            /* not waiting for child here */
           }
         }
       }
     }
-
-    drain_all();
+    while (num_spawned()) {
+      set_status() << "draining";
+      yield wait_for_child();
+      again = true;
+      while (again) {
+        again = collect(&ret, nullptr);
+        if (ret < 0) {
+          tn->log(10, "a sync operation returned error");
+          drain_all();
+          return set_cr_error(ret);
+        }
+      }
+    }
     if (progress) {
       *progress = *std::min_element(shard_progress.begin(), shard_progress.end());
     }
