@@ -2167,7 +2167,7 @@ TEST_F(TestClsRbd, mirror_snapshot) {
     cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"peer1", "peer2"}, "",
     CEPH_NOSNAP};
   cls::rbd::MirrorSnapshotNamespace non_primary = {
-    cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "uuid", 123};
+    cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {"peer1"}, "uuid", 123};
   librados::ObjectWriteOperation op;
   ::librbd::cls_client::snapshot_add(&op, 1, "primary", primary);
   ::librbd::cls_client::snapshot_add(&op, 2, "non_primary", non_primary);
@@ -2208,6 +2208,8 @@ TEST_F(TestClsRbd, mirror_snapshot) {
     &snap.snapshot_namespace);
   ASSERT_NE(nullptr, nsn);
   ASSERT_EQ(non_primary, *nsn);
+  ASSERT_EQ(1U, nsn->mirror_peer_uuids.size());
+  ASSERT_EQ(1U, nsn->mirror_peer_uuids.count("peer1"));
   ASSERT_FALSE(nsn->complete);
   ASSERT_EQ(nsn->last_copied_object_number, 0);
 
@@ -2219,6 +2221,8 @@ TEST_F(TestClsRbd, mirror_snapshot) {
   ASSERT_NE(nullptr, nsn);
   ASSERT_TRUE(nsn->complete);
   ASSERT_EQ(nsn->last_copied_object_number, 10);
+
+  ASSERT_EQ(0, mirror_image_snapshot_unlink_peer(&ioctx, oid, 2, "peer1"));
 
   ASSERT_EQ(0, snapshot_remove(&ioctx, oid, 1));
   ASSERT_EQ(0, snapshot_remove(&ioctx, oid, 2));
