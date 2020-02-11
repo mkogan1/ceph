@@ -2037,6 +2037,7 @@ class TestMirroring(object):
 
         self.rbd.mirror_peer_remove(ioctx, peer1_uuid)
         self.rbd.mirror_peer_remove(ioctx, peer2_uuid)
+        self.image.mirror_image_promote(False)
 
 class TestTrash(object):
 
