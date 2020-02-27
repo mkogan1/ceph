@@ -142,11 +142,11 @@ public:
     }
   }
 
-  void expect_try_acquire_exclusive_lock(MockTestImageCtx &mock_image_ctx,
-                                       MockExclusiveLock &mock_exclusive_lock,
-                                       int r) {
+  void expect_acquire_exclusive_lock(MockTestImageCtx &mock_image_ctx,
+                                     MockExclusiveLock &mock_exclusive_lock,
+                                     int r) {
     if (m_mock_imctx->exclusive_lock != nullptr) {
-      EXPECT_CALL(mock_exclusive_lock, try_acquire_lock(_))
+      EXPECT_CALL(mock_exclusive_lock, acquire_lock(_))
         .WillOnce(CompleteContext(r, mock_image_ctx.image_ctx->op_work_queue));
     }
   }
@@ -213,7 +213,7 @@ TEST_F(TestMockImagePreRemoveRequest, Success) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
   expect_is_exclusive_lock_owner(*m_mock_imctx, mock_exclusive_lock, true);
 
   MockListWatchersRequest mock_list_watchers_request;
@@ -251,8 +251,8 @@ TEST_F(TestMockImagePreRemoveRequest, ExclusiveLockTryAcquireFailed) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock,
-                                    -EINVAL);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock,
+                                -EINVAL);
 
   C_SaferCond ctx;
   auto req = MockPreRemoveRequest::create(m_mock_imctx, false, &ctx);
@@ -272,7 +272,7 @@ TEST_F(TestMockImagePreRemoveRequest, ExclusiveLockTryAcquireNotLockOwner) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
   expect_is_exclusive_lock_owner(*m_mock_imctx, mock_exclusive_lock, false);
 
   C_SaferCond ctx;
@@ -293,8 +293,8 @@ TEST_F(TestMockImagePreRemoveRequest, Force) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock,
-                                    -EINVAL);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock,
+                                -EINVAL);
   expect_shut_down_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
 
   MockListWatchersRequest mock_list_watchers_request;
@@ -320,7 +320,7 @@ TEST_F(TestMockImagePreRemoveRequest, ExclusiveLockShutDownFailed) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, -EINVAL);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, -EINVAL);
   expect_shut_down_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, -EINVAL);
 
   C_SaferCond ctx;
@@ -366,7 +366,7 @@ TEST_F(TestMockImagePreRemoveRequest, Watchers) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
   expect_is_exclusive_lock_owner(*m_mock_imctx, mock_exclusive_lock, true);
 
   MockListWatchersRequest mock_list_watchers_request;
@@ -393,7 +393,7 @@ TEST_F(TestMockImagePreRemoveRequest, GroupError) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
   expect_is_exclusive_lock_owner(*m_mock_imctx, mock_exclusive_lock, true);
 
   MockListWatchersRequest mock_list_watchers_request;
@@ -424,7 +424,7 @@ TEST_F(TestMockImagePreRemoveRequest, AutoDeleteSnapshots) {
 
   InSequence seq;
   expect_set_journal_policy(*m_mock_imctx);
-  expect_try_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
+  expect_acquire_exclusive_lock(*m_mock_imctx, mock_exclusive_lock, 0);
   expect_is_exclusive_lock_owner(*m_mock_imctx, mock_exclusive_lock, true);
 
   MockListWatchersRequest mock_list_watchers_request;
