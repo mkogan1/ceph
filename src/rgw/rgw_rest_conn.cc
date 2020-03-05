@@ -259,7 +259,7 @@ int RGWRESTConn::get_resource(const string& resource,
     headers.insert(extra_headers->begin(), extra_headers->end());
   }
 
-  ret = req.send_request(&key, headers, resource, send_data, mgr);
+  ret = req.encoded_send_request(&key, headers, resource, send_data, mgr);
   if (ret < 0) {
     ldout(cct, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;
@@ -306,7 +306,7 @@ void RGWRESTReadResource::init_common(param_vec_t *extra_headers)
 
 int RGWRESTReadResource::read()
 {
-  int ret = req.send_request(&conn->get_key(), headers, resource, nullptr, mgr);
+  int ret = req.encoded_send_request(&conn->get_key(), headers, resource, nullptr, mgr);
   if (ret < 0) {
     ldout(cct, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;
@@ -319,7 +319,7 @@ int RGWRESTReadResource::read()
 
 int RGWRESTReadResource::aio_read()
 {
-  int ret = req.send_request(&conn->get_key(), headers, resource, nullptr, mgr);
+  int ret = req.encoded_send_request(&conn->get_key(), headers, resource, nullptr, mgr);
   if (ret < 0) {
     ldout(cct, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;
@@ -367,7 +367,7 @@ void RGWRESTSendResource::init_common(param_vec_t *extra_headers)
 int RGWRESTSendResource::send(bufferlist& outbl)
 {
   req.set_outbl(outbl);
-  int ret = req.send_request(&conn->get_key(), headers, resource, nullptr, mgr);
+  int ret = req.encoded_send_request(&conn->get_key(), headers, resource, nullptr, mgr);
   if (ret < 0) {
     ldout(cct, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;
@@ -381,7 +381,7 @@ int RGWRESTSendResource::send(bufferlist& outbl)
 int RGWRESTSendResource::aio_send(bufferlist& outbl)
 {
   req.set_outbl(outbl);
-  int ret = req.send_request(&conn->get_key(), headers, resource, nullptr, mgr);
+  int ret = req.encoded_send_request(&conn->get_key(), headers, resource, nullptr, mgr);
   if (ret < 0) {
     ldout(cct, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;

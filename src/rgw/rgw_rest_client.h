@@ -105,6 +105,7 @@ public:
   }
   virtual ~RGWRESTStreamRWRequest() override {}
   int send_request(RGWAccessKey& key, map<string, string>& extra_headers, rgw_obj& obj, RGWHTTPManager *mgr = NULL);
+  int encoded_send_request(RGWAccessKey *key, map<string, string>& extra_headers, const string& resource, bufferlist *send_data = NULL /* optional input data */, RGWHTTPManager *mgr = NULL);
   int send_request(RGWAccessKey *key, map<string, string>& extra_headers, const string& resource, bufferlist *send_data = NULL /* optional input data */, RGWHTTPManager *mgr = NULL);
   int complete_request(string& etag, real_time *mtime, uint64_t *psize, map<string, string>& attrs);
 
