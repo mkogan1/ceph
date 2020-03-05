@@ -616,6 +616,16 @@ int RGWRESTStreamRWRequest::send_request(RGWAccessKey& key, map<string, string>&
   return send_request(&key, extra_headers, resource, nullptr, mgr);
 }
 
+int RGWRESTStreamRWRequest::encoded_send_request(RGWAccessKey *key, map<string, string>& extra_headers, const string& resource,
+                                           bufferlist *send_data, RGWHTTPManager *mgr)
+{
+  string new_resource;
+  //do not encode slash
+  url_encode(resource, new_resource);
+
+  return send_request(key, extra_headers, new_resource, send_data, mgr);
+}
+
 int RGWRESTStreamRWRequest::send_request(RGWAccessKey *key, map<string, string>& extra_headers, const string& resource,
                                          bufferlist *send_data, RGWHTTPManager *mgr)
 {

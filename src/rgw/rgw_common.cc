@@ -1595,12 +1595,11 @@ void url_encode(const string& src, string& dst)
 {
   const char *p = src.c_str();
   for (unsigned i = 0; i < src.size(); i++, p++) {
-    if (char_needs_url_encoding(*p)) {
+    if ((*p == 0x2F) || !char_needs_url_encoding(*p)) {
+      dst.append(p, 1);
+    }else {
       rgw_uri_escape_char(*p, dst);
-      continue;
     }
-
-    dst.append(p, 1);
   }
 }
 
