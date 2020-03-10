@@ -755,6 +755,7 @@ protected:
   int default_max;
   bool is_truncated;
   bool allow_unordered;
+  bool enforce_max; // return max if possible
 
   int shard_id;
 
@@ -763,7 +764,8 @@ protected:
 public:
   RGWListBucket() : list_versions(false), max(0),
                     default_max(0), is_truncated(false),
-		    allow_unordered(false), shard_id(-1) {}
+		    allow_unordered(false), enforce_max(false),
+		    shard_id(-1) {}
   int verify_permission() override;
   void pre_exec() override;
   void execute() override;
@@ -774,7 +776,7 @@ public:
   RGWOpType get_type() override { return RGW_OP_LIST_BUCKET; }
   uint32_t op_mask() override { return RGW_OP_TYPE_READ; }
   virtual bool need_container_stats() { return false; }
-};
+}; // class RGWListBucket
 
 class RGWGetBucketLogging : public RGWOp {
 public:
