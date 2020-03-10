@@ -2161,10 +2161,12 @@ void RGWStatAccount::execute()
   string marker;
   bool is_truncated = false;
   uint64_t max_buckets = s->cct->_conf->rgw_list_buckets_max_chunk;
+  const string *lastmarker;
 
   do {
     RGWUserBuckets buckets;
 
+    lastmarker = 0;
     op_ret = rgw_read_user_buckets(store, s->user->user_id, buckets, marker,
 				   string(), max_buckets, true, &is_truncated);
     if (op_ret < 0) {
@@ -2185,6 +2187,7 @@ void RGWStatAccount::execute()
       std::map<std::string, RGWBucketEnt>& m = buckets.get_buckets();
       for (const auto& kv : m) {
         const auto& bucket = kv.second;
+	lastmarker = &kv.first;
 
         global_stats.bytes_used += bucket.size;
         global_stats.bytes_used_rounded += bucket.size_rounded;
@@ -2201,6 +2204,12 @@ void RGWStatAccount::execute()
       global_stats.buckets_count += m.size();
 
     }
+    if (!lastmarker) {
+	lderr(s->cct) << "ERROR: rgw_get_user_buckets, statis at marker="
+	      << marker << " uid=" << s->user->user_id << dendl;
+	break;
+    }
+    marker = *lastmarker;
   } while (is_truncated);
 }
 
