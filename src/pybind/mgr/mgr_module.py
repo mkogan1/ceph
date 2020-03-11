@@ -514,7 +514,11 @@ class MgrStandbyModule(ceph_module.BaseMgrStandbyModule):
                     self.MODULE_OPTION_DEFAULTS[o['name']] = str(o['default'])
 
     def __del__(self):
+        self._cleanup()
         unconfigure_logger()
+
+    def _cleanup(self):
+        pass
 
     @property
     def log(self):
