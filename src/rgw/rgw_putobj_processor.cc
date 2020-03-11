@@ -543,6 +543,7 @@ int AppendObjectProcessor::prepare()
       return -ERR_POSITION_NOT_EQUAL_TO_LENGTH;
     }
     try {
+      using ceph::decode;
       decode(cur_part_num, iter->second);
     } catch (buffer::error& err) {
       ldout(store->ctx(), 5) << "ERROR: failed to decode part num" << dendl;
@@ -631,6 +632,7 @@ int AppendObjectProcessor::complete(size_t accounted_size, const string &etag, c
   obj_op.meta.appendable = true;
   //Add the append part number
   bufferlist cur_part_num_bl;
+  using ceph::encode;
   encode(cur_part_num, cur_part_num_bl);
   attrs[RGW_ATTR_APPEND_PART_NUM] = cur_part_num_bl;
   //calculate the etag
