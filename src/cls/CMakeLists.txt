@@ -298,3 +298,5 @@ if (WITH_RADOSGW)
     rgw_gc/cls_rgw_gc_client.cc)
   add_library(cls_rgw_gc_client STATIC ${cls_rgw_gc_client_srcs})
 endif (WITH_RADOSGW)
+
+add_subdirectory(cmpomap)
