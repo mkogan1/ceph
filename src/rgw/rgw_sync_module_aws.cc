@@ -1643,7 +1643,8 @@ public:
             return set_cr_error(retcode);
           }
 
-          if (result.code != "BucketAlreadyOwnedByYou") {
+          if ((result.code != "BucketAlreadyOwnedByYou") &&
+                 (result.code != "BucketAlreadyExists")) {
             return set_cr_error(retcode);
           }
         }
