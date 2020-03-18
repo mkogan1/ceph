@@ -471,21 +471,28 @@ class RGWLC : public DoutPrefixProvider {
   string cookie;
 
 public:
-  class LCWorker : public Thread {
+
+  class WorkPool;
+
+  class LCWorker : public Thread
+  {
     const DoutPrefixProvider *dpp;
     CephContext *cct;
     RGWLC *lc;
     int ix;
     ceph::mutex lock = ceph::make_mutex("LCWorker");
     ceph::condition_variable cond;
+    WorkPool* workpool{nullptr};
 
   public:
-    LCWorker(const DoutPrefixProvider* _dpp, CephContext *_cct, RGWLC *_lc) : dpp(_dpp), cct(_cct), lc(_lc) {}
+    LCWorker(const DoutPrefixProvider* _dpp, CephContext *_cct, RGWLC *_lc);
     RGWLC* get_lc() { return lc; }
     void *entry() override;
     void stop();
     bool should_work(utime_t& now);
     int schedule_next_start_time(utime_t& start, utime_t& now);
+    ~LCWorker();
+
     friend class RGWRados;
     friend class RGWLC;
     friend class WorkQ;
@@ -496,10 +503,7 @@ public:
   std::vector<std::unique_ptr<RGWLC::LCWorker>> workers;
 
   RGWLC() : cct(nullptr), store(nullptr) {}
-  ~RGWLC() {
-    stop_processor();
-    finalize();
-  }
+  ~RGWLC();
 
   void initialize(CephContext *_cct, RGWRados *_store);
   void finalize();
@@ -529,7 +533,8 @@ public:
   private:
 
   int handle_multipart_expiration(RGWRados::Bucket *target,
-				  const multimap<string, lc_op>& prefix_map);
+				  const multimap<string, lc_op>& prefix_map,
+				  LCWorker* worker);
 };
 
 namespace rgw::lc {
