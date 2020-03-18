@@ -2456,14 +2456,9 @@ int RGWRados::Bucket::List::list_objects_ordered(
 
   string skip_after_delim;
   rgw_obj_index_key prev_marker;
-  uint16_t attempt = 0;
-  while (true) {
+  for (uint16_t attempt = 1; /* empty */; ++attempt) {
     ldout(cct, 20) << "RGWRados::Bucket::List::" << __func__ <<
-      " beginning attempt=" << ++attempt << dendl;
-
-    // this loop is generally expected only to have a single
-    // iteration; the standard exit is at the bottom of the loop, but
-    // there's an error condition emergency exit as well
+      " starting attempt " << attempt << dendl;
 
     if (attempt > 1 && !(prev_marker < cur_marker)) {
       // we've failed to make forward progress
@@ -2612,11 +2607,7 @@ int RGWRados::Bucket::List::list_objects_ordered(
 	break;
       }
     }
-
-    ldout(cct, 1) << "RGWRados::Bucket::List::" << __func__ <<
-      " INFO ordered bucket listing requires read #" << (1 + attempt) <<
-      dendl;
-  } // read attempt loop
+  } // for (uint16_t attempt...
 
 done:
 
