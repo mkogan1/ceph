@@ -1748,7 +1748,7 @@ public:
 
       UpdateIndex(RGWRados::Bucket *_target, const rgw_obj& _obj) : target(_target), obj(_obj),
                                                               bs(target->get_store()) {
-                                                                blind = (target->get_bucket_info().index_type == RGWBIType_Indexless);
+                                                                blind = (target->get_bucket_info().layout.current_index.layout.type == rgw::BucketIndexType::Indexless);
                                                               }
 
       int get_bucket_shard(BucketShard **pbs) {
@@ -2422,7 +2422,7 @@ public:
    * Return 0 on success, a failure code otherwise.
    */
   int get_bucket_index_object(const string& bucket_oid_base, const string& obj_key,
-      uint32_t num_shards, RGWBucketInfo::BIShardsHashType hash_type, string *bucket_obj, int *shard);
+      uint32_t num_shards, rgw::BucketHashType hash_type, string *bucket_obj, int *shard);
 
   void get_bucket_index_object(const string& bucket_oid_base, uint32_t num_shards,
                                int shard_id, string *bucket_obj);

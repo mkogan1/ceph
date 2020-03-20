@@ -1353,17 +1353,12 @@ enum RGWBucketFlags {
   BUCKET_OBJ_LOCK_ENABLED = 0X20,
 };
 
-enum RGWBucketIndexType {
-  RGWBIType_Normal = 0,
-  RGWBIType_Indexless = 1,
-};
-
-inline ostream& operator<<(ostream& out, const RGWBucketIndexType &index_type) 
+inline ostream& operator<<(ostream& out, const rgw::BucketIndexType &index_type)
 {
   switch (index_type) {
-    case RGWBIType_Normal:
+    case rgw::BucketIndexType::Normal:
       return out << "Normal";
-    case RGWBIType_Indexless:
+    case rgw::BucketIndexType::Indexless:
       return out << "Indexless";
     default:
       return out << "Unknown";
@@ -1393,10 +1388,6 @@ struct RGWBucketInfo {
   //   - value of 0 indicates there is no sharding (this is by default before this
   //     feature is implemented).
   //   - value of UINT32_T::MAX indicates this is a blind bucket.
-  uint32_t num_shards;
-
-  // Represents the bucket index shard hash type.
-  uint8_t bucket_index_shard_hash_type;
 
   // Represents the shard number for blind bucket.
   const static uint32_t NUM_SHARDS_BLIND_BUCKET;
@@ -1405,8 +1396,6 @@ struct RGWBucketInfo {
 
   bool has_website;
   RGWBucketWebsiteConf website_conf;
-
-  RGWBucketIndexType index_type = RGWBIType_Normal;
 
   bool swift_versioning;
   string swift_ver_location;
@@ -1432,15 +1421,12 @@ struct RGWBucketInfo {
      encode(placement_rule, bl);
      encode(has_instance_obj, bl);
      encode(quota, bl);
-     encode(num_shards, bl);
-     encode(bucket_index_shard_hash_type, bl);
      encode(requester_pays, bl);
      encode(owner.tenant, bl);
      encode(has_website, bl);
      if (has_website) {
        encode(website_conf, bl);
      }
-     encode((uint32_t)index_type, bl);
      encode(swift_versioning, bl);
      if (swift_versioning) {
        encode(swift_ver_location, bl);
@@ -1479,10 +1465,11 @@ struct RGWBucketInfo {
        decode(has_instance_obj, bl);
      if (struct_v >= 9)
        decode(quota, bl);
-     if (struct_v >= 10)
-       decode(num_shards, bl);
-     if (struct_v >= 11)
-       decode(bucket_index_shard_hash_type, bl);
+     static constexpr uint8_t new_layout_v = 22;
+     if (struct_v >= 10 && struct_v < new_layout_v)
+       decode(layout.current_index.layout.normal.num_shards, bl);
+     if (struct_v >= 11 && struct_v < new_layout_v)
+       decode(layout.current_index.layout.normal.hash_type, bl);
      if (struct_v >= 12)
        decode(requester_pays, bl);
      if (struct_v >= 13)
@@ -1495,12 +1482,12 @@ struct RGWBucketInfo {
          website_conf = RGWBucketWebsiteConf();
        }
      }
-     if (struct_v >= 15) {
+     if (struct_v >= 15 && struct_v < new_layout_v) {
        uint32_t it;
        decode(it, bl);
-       index_type = (RGWBucketIndexType)it;
+       layout.current_index.layout.type = (rgw::BucketIndexType)it;
      } else {
-       index_type = RGWBIType_Normal;
+       layout.current_index.layout.type = rgw::BucketIndexType::Normal;
      }
      swift_versioning = false;
      swift_ver_location.clear();
@@ -1545,7 +1532,7 @@ struct RGWBucketInfo {
     return swift_versioning && !versioned();
   }
 
-  RGWBucketInfo() : flags(0), has_instance_obj(false), num_shards(0), bucket_index_shard_hash_type(MOD), requester_pays(false),
+  RGWBucketInfo() : flags(0), has_instance_obj(false), requester_pays(false),
                     has_website(false), swift_versioning(false), reshard_status(0) {}
 };
 WRITE_CLASS_ENCODER(RGWBucketInfo)

@@ -79,7 +79,7 @@ void encode(const BucketLayout& l, bufferlist& bl, uint64_t f)
   ENCODE_START(1, 1, bl);
   encode(l.resharding, bl);
   encode(l.current_index, bl);
-  encode(l.target_index, bl);
+  encode(*l.target_index, bl);
   ENCODE_FINISH(bl);
 }
 void decode(BucketLayout& l, bufferlist::const_iterator& bl)
@@ -87,7 +87,7 @@ void decode(BucketLayout& l, bufferlist::const_iterator& bl)
   DECODE_START(1, bl);
   decode(l.resharding, bl);
   decode(l.current_index, bl);
-  decode(l.target_index, bl);
+  decode(*l.target_index, bl);
   DECODE_FINISH(bl);
 }
 

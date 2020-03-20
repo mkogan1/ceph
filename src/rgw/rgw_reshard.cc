@@ -105,7 +105,7 @@ public:
     store(_store), bucket_info(_bucket_info), bs(store),
     aio_completions(_completions)
   {
-    num_shard = (bucket_info.num_shards > 0 ? _num_shard : -1);
+    num_shard = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? _num_shard : -1);
     bs.init(bucket_info.bucket, num_shard, nullptr /* no RGWBucketInfo */);
 
     max_aio_completions =
@@ -302,7 +302,7 @@ int RGWBucketReshard::clear_resharding(RGWRados* store,
 int RGWBucketReshard::clear_index_shard_reshard_status(RGWRados* store,
 						       const RGWBucketInfo& bucket_info)
 {
-  uint32_t num_shards = bucket_info.num_shards;
+  uint32_t num_shards = bucket_info.layout.current_index.layout.normal.num_shards;
 
   if (num_shards < std::numeric_limits<uint32_t>::max()) {
     int ret = set_resharding_status(store, bucket_info,
@@ -331,13 +331,13 @@ static int create_new_bucket_instance(RGWRados *store,
   store->create_bucket_id(&new_bucket_info.bucket.bucket_id);
   new_bucket_info.bucket.oid.clear();
 
-  new_bucket_info.num_shards = new_num_shards;
+  new_bucket_info.layout.current_index.layout.normal.num_shards = new_num_shards;
   new_bucket_info.objv_tracker.clear();
 
   new_bucket_info.new_bucket_instance_id.clear();
   new_bucket_info.reshard_status = 0;
 
-  int ret = store->init_bucket_index(new_bucket_info, new_bucket_info.num_shards);
+  int ret = store->init_bucket_index(new_bucket_info, new_bucket_info.layout.current_index.layout.normal.num_shards);
   if (ret < 0) {
     cerr << "ERROR: failed to init new bucket indexes: " << cpp_strerror(-ret) << std::endl;
     return ret;
@@ -572,7 +572,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
     return ret;
   }
 
-  int num_target_shards = (new_bucket_info.num_shards > 0 ? new_bucket_info.num_shards : 1);
+  int num_target_shards = (new_bucket_info.layout.current_index.layout.normal.num_shards > 0 ? new_bucket_info.layout.current_index.layout.normal.num_shards : 1);
 
   BucketReshardManager target_shards_mgr(store, new_bucket_info, num_target_shards);
 
@@ -589,7 +589,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
   }
 
   const int num_source_shards =
-    (bucket_info.num_shards > 0 ? bucket_info.num_shards : 1);
+    (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
   string marker;
   for (int i = 0; i < num_source_shards; ++i) {
     bool is_truncated = true;
@@ -789,7 +789,7 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
   // best effort and don't report out an error; the lock isn't needed
   // at this point since all we're using a best effor to to remove old
   // shard objects
-  ret = store->clean_bucket_index(bucket_info, bucket_info.num_shards);
+  ret = store->clean_bucket_index(bucket_info, bucket_info.layout.current_index.layout.normal.num_shards);
   if (ret < 0) {
     lderr(store->ctx()) << "Error: " << __func__ <<
       " failed to clean up old shards; " <<
@@ -821,7 +821,7 @@ error_out:
   // path, we won't touch ret and instead use another variable to
   // temporarily error codes
   int ret2 = store->clean_bucket_index(new_bucket_info,
-				       new_bucket_info.num_shards);
+				       new_bucket_info.layout.current_index.layout.normal.num_shards);
   if (ret2 < 0) {
     lderr(store->ctx()) << "Error: " << __func__ <<
       " failed to clean up shards from failed incomplete resharding; " <<

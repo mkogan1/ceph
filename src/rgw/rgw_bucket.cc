@@ -1561,14 +1561,14 @@ static int bucket_stats(RGWRados *store, const std::string& tenant_name, const s
 
   formatter->open_object_section("stats");
   formatter->dump_string("bucket", bucket.name);
-  formatter->dump_int("num_shards", bucket_info.num_shards);
+  formatter->dump_int("num_shards", bucket_info.layout.current_index.layout.normal.num_shards);
   formatter->dump_string("tenant", bucket.tenant);
   formatter->dump_string("zonegroup", bucket_info.zonegroup);
   formatter->dump_string("placement_rule", bucket_info.placement_rule.to_str());
   ::encode_json("explicit_placement", bucket.explicit_placement, formatter);
   formatter->dump_string("id", bucket.bucket_id);
   formatter->dump_string("marker", bucket.marker);
-  formatter->dump_stream("index_type") << bucket_info.index_type;
+  formatter->dump_stream("index_type") << bucket_info.layout.current_index.layout.type;
   ::encode_json("owner", bucket_info.owner, formatter);
   formatter->dump_string("ver", bucket_ver);
   formatter->dump_string("master_ver", master_ver);
@@ -1654,7 +1654,7 @@ int RGWBucketAdminOp::limit_check(RGWRados *store,
 	    num_objects += s.second.num_objects;
 	}
 
-	num_shards = info.num_shards;
+	num_shards = info.layout.current_index.layout.normal.num_shards;
 	uint64_t objs_per_shard =
 	  (num_shards) ? num_objects/num_shards : num_objects;
 	{
@@ -1806,10 +1806,10 @@ int RGWBucketAdminOp::set_quota(RGWRados *store, RGWBucketAdminOpState& op_state
 
 static int purge_bucket_instance(RGWRados *store, const RGWBucketInfo& bucket_info)
 {
-  int max_shards = (bucket_info.num_shards > 0 ? bucket_info.num_shards : 1);
+  int max_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
   for (int i = 0; i < max_shards; i++) {
     RGWRados::BucketShard bs(store);
-    int shard_id = (bucket_info.num_shards > 0  ? i : -1);
+    int shard_id = (bucket_info.layout.current_index.layout.normal.num_shards > 0  ? i : -1);
     int ret = bs.init(bucket_info.bucket, shard_id, nullptr);
     if (ret < 0) {
       cerr << "ERROR: bs.init(bucket=" << bucket_info.bucket << ", shard=" << shard_id
@@ -3034,7 +3034,7 @@ public:
         ldout(store->ctx(), 0) << "ERROR: select_bucket_placement() returned " << ret << dendl;
         return ret;
       }
-      bci.info.index_type = rule_info.index_type;
+      bci.info.layout.current_index.layout.type = rule_info.index_type;
     } else {
       /* existing bucket, keep its placement */
       bci.info.bucket.explicit_placement = old_bci.info.bucket.explicit_placement;
@@ -3042,8 +3042,8 @@ public:
     }
 
     if (exists && old_bci.info.datasync_flag_enabled() != bci.info.datasync_flag_enabled()) {
-      int shards_num = bci.info.num_shards? bci.info.num_shards : 1;
-      int shard_id = bci.info.num_shards? 0 : -1;
+      int shards_num = bci.info.layout.current_index.layout.normal.num_shards? bci.info.layout.current_index.layout.normal.num_shards : 1;
+      int shard_id = bci.info.layout.current_index.layout.normal.num_shards? 0 : -1;
 
       if (!bci.info.datasync_flag_enabled()) {
       ret = store->stop_bi_log_entries(bci.info, -1);
@@ -3086,7 +3086,7 @@ public:
 
     objv_tracker = bci.info.objv_tracker;
 
-    ret = store->init_bucket_index(bci.info, bci.info.num_shards);
+    ret = store->init_bucket_index(bci.info, bci.info.layout.current_index.layout.normal.num_shards);
     if (ret < 0)
       return ret;
 
