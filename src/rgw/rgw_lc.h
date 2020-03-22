@@ -7,8 +7,10 @@
 #include <string>
 #include <iostream>
 #include <memory>
-#include <include/types.h>
+#include <mutex>
+#include <condition_variable>
 
+#include <include/types.h>
 #include "common/debug.h"
 
 #include "include/types.h"
@@ -366,22 +368,30 @@ class RGWLC {
   string cookie;
 
 public:
+
+  class WorkPool;
+
   class LCWorker : public Thread {
     CephContext *cct;
     RGWLC *lc;
-    Mutex lock;
-    Cond cond;
+    std::mutex lock;
+    std::condition_variable cond;
+    WorkPool* workpool{nullptr};
 
   public:
-    LCWorker(CephContext *_cct, RGWLC *_lc)
-      : cct(_cct), lc(_lc), lock("LCWorker") {}
+    using lock_guard = std::lock_guard<std::mutex>;
+    using unique_lock = std::unique_lock<std::mutex>;
+
+    LCWorker(CephContext *_cct, RGWLC *_lc);
     RGWLC* get_lc() { return lc; }
     void *entry() override;
     void stop();
     bool should_work(utime_t& now);
     int schedule_next_start_time(utime_t& start, utime_t& now);
+    ~LCWorker();
     friend class RGWRados;
-  };
+    friend class RGWLC;
+  }; /* LCWorker */
 
   friend class RGWRados;
 
@@ -415,10 +425,13 @@ public:
                            const map<string, bufferlist>& bucket_attrs);
 
   private:
-  int remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key, const string& owner, const string& owner_display_name, bool remove_indeed = true);
+  int remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key,
+			 const string& owner, const string& owner_display_name,
+			 bool remove_indeed = true);
   bool obj_has_expired(ceph::real_time mtime, int days);
   int handle_multipart_expiration(RGWRados::Bucket *target,
-				  const multimap<string, lc_op>& prefix_map);
+				  const multimap<string, lc_op>& prefix_map,
+				  RGWLC::LCWorker* worker);
 };
 
 std::string rgwlc_s3_expiration_header(
