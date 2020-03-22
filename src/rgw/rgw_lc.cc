@@ -4,9 +4,17 @@
 #include <string.h>
 #include <iostream>
 #include <map>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
+#include <algorithm>
+#include <tuple>
+#include <functional>
 
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/variant.hpp>
 
 #include "common/Formatter.h"
 #include <common/errno.h>
@@ -132,6 +140,130 @@ bool RGWLifecycleConfiguration::valid()
   return true;
 }
 
+using WorkItem =
+  boost::variant<void*,
+		 /* out-of-line delete */
+		 /* uncompleted MPU expiration */
+		 std::tuple<const lc_op&, rgw_bucket_dir_entry>,
+		 /* out-of-line delete versioned */
+		 std::tuple<const lc_op&, rgw_bucket_dir_entry, bool>
+		 >;
+
+class WorkQ : public Thread
+{
+public:
+  using unique_lock = std::unique_lock<std::mutex>;
+  using work_f = std::function<void(RGWLC::LCWorker*, WorkItem&)>;
+  using dequeue_result = boost::variant<void*, WorkItem>;
+
+private:
+  work_f bsf = [](RGWLC::LCWorker* wk, WorkItem& wi) {};
+  RGWLC::LCWorker* wk;
+  uint32_t qmax;
+  std::mutex mtx;
+  std::condition_variable cv;
+  vector<WorkItem> items;
+  work_f f;
+
+public:
+  WorkQ(RGWLC::LCWorker* wk, uint32_t ix, uint32_t qmax)
+    : wk(wk), qmax(qmax), f(bsf)
+    {
+      create((string{"workpool_thr_"} + to_string(ix)).c_str());
+    }
+
+  void setf(work_f _f) {
+    f = _f;
+  }
+
+  void enqueue(WorkItem&& item) {
+    unique_lock uniq(mtx);
+    while ((!wk->get_lc()->going_down()) &&
+	   (items.size() > qmax)) {
+      cv.wait_for(uniq, std::chrono::milliseconds(200));
+    }
+    items.push_back(item);
+  }
+
+  void drain() {
+    unique_lock uniq(mtx);
+    while ((!wk->get_lc()->going_down()) &&
+	   (items.size() > 0)) {
+      cv.wait_for(uniq, std::chrono::milliseconds(200));
+    }
+  }
+
+private:
+  dequeue_result dequeue() {
+    unique_lock uniq(mtx);
+    while ((!wk->get_lc()->going_down()) &&
+	   (items.size() == 0)) {
+      cv.wait_for(uniq, std::chrono::milliseconds(200));
+    }
+    if (items.size() > 0) {
+      auto item = items.back();
+      items.pop_back();
+      return {std::move(item)};
+    }
+    return nullptr;
+  }
+
+  void* entry() override {
+    while (!wk->get_lc()->going_down()) {
+      auto item = dequeue();
+      if (item.which() == 0) {
+	/* going down */
+	break;
+      }
+      f(wk, boost::get<WorkItem>(item));
+    }
+    return nullptr;
+  }
+}; /* WorkQ */
+
+class RGWLC::WorkPool
+{
+  uint64_t ix;
+  std::vector<std::unique_ptr<WorkQ>> wqs;
+
+public:
+  WorkPool(RGWLC::LCWorker* wk, uint16_t n_threads, uint32_t qmax)
+    : ix(0)
+    {
+      wqs.reserve(n_threads);
+      for (int ix2 = 0; ix2 < n_threads; ++ix2) {
+	auto wq =
+	  ceph::make_unique<WorkQ>(wk, ix2, qmax);
+	wqs.emplace_back(std::move(wq));
+      }
+    }
+
+  void setf(WorkQ::work_f _f) {
+    for (auto& wq : wqs) {
+      wq->setf(_f);
+    }
+  }
+
+  void enqueue(WorkItem& item) {
+    const auto tix = ix;
+    ix = (ix+1) % wqs.size();
+    (wqs[tix])->enqueue(std::move(item));
+  }
+
+  void drain() {
+    for (auto& wq : wqs) {
+      wq->drain();
+    }
+  }
+}; /* WorkPool */
+
+RGWLC::LCWorker::LCWorker(CephContext *_cct, RGWLC *_lc)
+  : cct(_cct), lc(_lc)
+{
+  auto wpw = cct->_conf->rgw_lc_max_wp_worker;
+  workpool = new WorkPool(this, wpw, 512);
+}
+
 void *RGWLC::LCWorker::entry() {
   do {
     utime_t start = ceph_clock_now();
@@ -153,9 +285,8 @@ void *RGWLC::LCWorker::entry() {
 
     dout(5) << "schedule life cycle next start time: " << rgw_to_asctime(next) <<dendl;
 
-    lock.Lock();
-    cond.WaitInterval(lock, utime_t(secs, 0));
-    lock.Unlock();
+    unique_lock l{lock};
+    cond.wait_for(l, std::chrono::seconds(secs));
   } while (!lc->going_down());
 
   return NULL;
@@ -258,7 +389,10 @@ bool RGWLC::obj_has_expired(ceph::real_time mtime, int days)
   return (timediff >= cmp);
 }
 
-int RGWLC::remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key, const string& owner, const string& owner_display_name, bool remove_indeed)
+int RGWLC::remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key,
+			      const string& owner,
+			      const string& owner_display_name,
+			      bool remove_indeed)
 {
   if (remove_indeed) {
     return rgw_remove_object(store, bucket_info, bucket_info.bucket, obj_key);
@@ -286,7 +420,8 @@ int RGWLC::remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key, c
 }
 
 int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
-				       const multimap<string, lc_op>& prefix_map)
+				       const multimap<string, lc_op>& prefix_map,
+				       RGWLC::LCWorker* worker)
 {
   MultipartMetaFilter mp_filter;
   vector<rgw_bucket_dir_entry> objs;
@@ -298,6 +433,26 @@ int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
   list_op.params.list_versions = false;
   list_op.params.ns = RGW_OBJ_NS_MULTIPART;
   list_op.params.filter = &mp_filter;
+
+  auto pf = [&](RGWLC::LCWorker* wk, WorkItem& wi) {
+    auto wt = boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry>>(wi);
+    //auto& op = std::get<0>(wt);
+    auto& o = std::get<1>(wt);
+    RGWMPObj mp_obj;
+    rgw_obj_key key(o.key);
+    if (!mp_obj.from_meta(key.name)) {
+      return;
+    }
+    RGWObjectCtx rctx(store);
+    int ret = abort_multipart_upload(store, cct, &rctx, bucket_info, mp_obj);
+    if (ret < 0 && ret != -ERR_NO_SUCH_UPLOAD) {
+      ldout(cct, 0) << "ERROR: abort_multipart_upload failed, ret=" << ret <<dendl;
+      return;
+    }
+  }; /* pf */
+
+  worker->workpool->setf(pf);
+
   for (auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end(); ++prefix_iter) {
     if (!prefix_iter->second.status || prefix_iter->second.mp_expiration <= 0) {
       continue;
@@ -316,19 +471,24 @@ int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
 
       for (auto obj_iter = objs.begin(); obj_iter != objs.end(); ++obj_iter) {
         if (obj_has_expired(obj_iter->meta.mtime, prefix_iter->second.mp_expiration)) {
-          rgw_obj_key key(obj_iter->key);
-          if (!mp_obj.from_meta(key.name)) {
-            continue;
-          }
-          RGWObjectCtx rctx(store);
-          ret = abort_multipart_upload(store, cct, &rctx, bucket_info, mp_obj);
-          if (ret < 0 && ret != -ERR_NO_SUCH_UPLOAD) {
-            ldout(cct, 0) << "ERROR: abort_multipart_upload failed, ret=" << ret <<dendl;
-            return ret;
-          }
-          if (going_down())
+	  std::tuple<const lc_op&, rgw_bucket_dir_entry> t1 =
+	    {prefix_iter->second, *obj_iter};
+	  WorkItem w1 = t1;
+	  worker->workpool->enqueue(w1);
+          if (going_down()) {
+	    worker->workpool->drain();
             return 0;
+	  }
         }
+      } /* for objs */
+
+      /* permit passing o by reference, removes fetch overlap */
+      worker->workpool->drain();
+      {
+	std::mutex mtx;
+	std::condition_variable cv;
+	std::unique_lock<std::mutex> uniq(mtx);
+	cv.wait_for(uniq, std::chrono::milliseconds(200));
       }
     } while(is_truncated);
   }
@@ -409,6 +569,110 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
 		 << prefix_map.size()
 		 << dendl;
 
+  auto pf_nonversion
+    = [this, &bucket_info, &bucket_name](RGWLC::LCWorker* wk, WorkItem& wi) {
+    auto cct = wk->get_lc()->cct;
+    auto wt =
+      boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry>>(wi);
+    auto& op = std::get<0>(wt);
+    auto& o = std::get<1>(wt);
+    ldout(cct, 20) << __func__ << "(): key=" << o.key << dendl;
+
+    bool is_expired{false};
+    rgw_obj_key key(o.key);
+    RGWObjState *state;
+    rgw_obj obj(bucket_info.bucket, key);
+    RGWObjectCtx rctx(store); // XXX can't we re-use obj_ctx above?
+    if (op.obj_tags != boost::none) {
+      bufferlist tags_bl;
+      int ret = read_obj_tags(store, bucket_info, obj, rctx, tags_bl);
+      if (ret < 0) {
+	if (ret != -ENODATA)
+	  ldout(cct, 5) << "ERROR: read_obj_tags returned r=" << ret << dendl;
+	return;
+      }
+      RGWObjTags dest_obj_tags;
+      try {
+	auto iter = tags_bl.begin();
+	dest_obj_tags.decode(iter);
+      } catch (buffer::error& err) {
+	ldout(cct,5) << "ERROR: caught buffer::error, couldn't decode TagSet for key="
+		     << key << dendl;
+	return;
+      }
+
+      if (! has_all_tags(op, dest_obj_tags)) {
+	ldout(cct, 16) << __func__
+		       << "() skipping obj " << key
+		       << " as tags do not match" << dendl;
+	return;
+      }
+    }
+
+    if (op.expiration_date != boost::none) {
+      //we have checked it before
+      is_expired = true;
+    } else {
+      is_expired = obj_has_expired(o.meta.mtime, op.expiration);
+    }
+    if (is_expired) {
+      int ret = store->get_obj_state(&rctx, bucket_info, obj, &state, false);
+      if (ret < 0) {
+	ldout(cct,5) << "ERROR: get_obj_state() failed for key=" << key << dendl;
+	return;
+      }
+      if (state->mtime != o.meta.mtime) {
+	//Check mtime again to avoid delete a recently update object as much as possible
+	ldout(cct, 20) << __func__
+		       << "() skipping removal: state->mtime " << state->mtime
+		       << " obj->mtime " << o.meta.mtime << dendl;
+	return;
+      }
+      ret = remove_expired_obj(bucket_info, o.key, o.meta.owner,
+			       o.meta.owner_display_name, true);
+      if (ret < 0) {
+	ldout(cct, 0) << "ERROR: remove_expired_obj " << dendl;
+      } else {
+	ldout(cct, 10) << "DELETED case 1:" << bucket_name << ":" << key << dendl;
+      }
+    }
+  }; /* pf_noversion */
+
+  auto pf_versioned = [this, &bucket_info, &bucket_name](RGWLC::LCWorker* wk, WorkItem& wi) {
+    auto cct = wk->get_lc()->cct;
+    auto wt =
+      boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry, bool>>(wi);
+    //auto& op = std::get<0>(wt);
+    auto& o = std::get<1>(wt);
+    bool remove_indeed = std::get<2>(wt);
+    int ret = remove_expired_obj(bucket_info, o.key, o.meta.owner,
+				 o.meta.owner_display_name,
+				 remove_indeed);
+    if (ret < 0) {
+      ldout(cct, 0) << "ERROR: remove_expired_obj " << dendl;
+    } else {
+      ldout(cct, 10) << "DELETED case 2:" << bucket_name << ":" << o.key << dendl;
+    }
+  }; /* pf_versioned */
+
+  /* WorkPool has only one action, so we need a dispatcher/visitor */
+  auto pf = [this, &bucket_info, &bucket_name, pf_nonversion, pf_versioned]
+    (RGWLC::LCWorker* wk, WorkItem& wi) {
+    auto cct = wk->get_lc()->cct;
+    switch (wi.which()) {
+    case 0:
+      pf_nonversion(wk, wi);
+    break;
+    case 1:
+      pf_versioned(wk, wi);
+    break;
+    default:
+      ldout(cct, 0) << "ERROR: unknown variant type in RGWLC pf" << dendl;
+      return;
+    };
+  };
+  worker->workpool->setf(pf);
+
   for(auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end(); ++prefix_iter) {
     ldout(cct, 16) << __func__
 		   << "() prefix iter: " << prefix_iter->first
@@ -448,68 +712,24 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
           ldout(cct, 0) << "ERROR: store->list_objects():" <<dendl;
           return ret;
         }
-        
-        bool is_expired;
-        for (auto obj_iter = objs.begin(); obj_iter != objs.end(); ++obj_iter) {
+
+	auto& wq_op = prefix_iter->second;
+        for (auto obj_iter = objs.begin(); obj_iter != objs.end();
+	     ++obj_iter) {
           rgw_obj_key key(obj_iter->key);
-          RGWObjState *state;
-          rgw_obj obj(bucket_info.bucket, key);
-          RGWObjectCtx rctx(store);
-          if (prefix_iter->second.obj_tags != boost::none) {
-            bufferlist tags_bl;
-            int ret = read_obj_tags(store, bucket_info, obj, rctx, tags_bl);
-            if (ret < 0) {
-              if (ret != -ENODATA)
-                ldout(cct, 5) << "ERROR: read_obj_tags returned r=" << ret << dendl;
-              continue;
-            }
-            RGWObjTags dest_obj_tags;
-            try {
-              auto iter = tags_bl.begin();
-              dest_obj_tags.decode(iter);
-            } catch (buffer::error& err) {
-               ldout(cct,0) << "ERROR: caught buffer::error, couldn't decode TagSet" << dendl;
-              return -EIO;
-            }
-
-	    if (! has_all_tags(prefix_iter->second, dest_obj_tags)) {
-              ldout(cct, 16) << __func__ << "() skipping obj " << key << " as tags do not match" << dendl;
-              continue;
-            }
-          }
-
-          if (!key.ns.empty()) {
+	  if (!key.ns.empty()) {
             continue;
           }
-          if (prefix_iter->second.expiration_date != boost::none) {
-            //we have checked it before
-            is_expired = true;
-          } else {
-            is_expired = obj_has_expired(obj_iter->meta.mtime, prefix_iter->second.expiration);
-          }
-          if (is_expired) {
-            int ret = store->get_obj_state(&rctx, bucket_info, obj, &state, false);
-            if (ret < 0) {
-              return ret;
-            }
-            if (state->mtime != obj_iter->meta.mtime) {
-              //Check mtime again to avoid delete a recently update object as much as possible
-              ldout(cct, 20) << __func__ << "() skipping removal: state->mtime " << state->mtime << " obj->mtime " << obj_iter->meta.mtime << dendl;
-              continue;
-            }
-            ret = remove_expired_obj(bucket_info, obj_iter->key, obj_iter->meta.owner, obj_iter->meta.owner_display_name, true);
-            if (ret < 0) {
-              ldout(cct, 0) << "ERROR: remove_expired_obj " << dendl;
-            } else {
-              ldout(cct, 10) << "DELETED case 1:" << bucket_name << ":" << key << dendl;
-            }
-
-            if (going_down())
-              return 0;
-          }
-        }
+	  std::tuple<lc_op&, rgw_bucket_dir_entry> t1 = {wq_op, *obj_iter};
+	  WorkItem w1 = t1;
+	  worker->workpool->enqueue(w1);
+        } /* obj_iter */
+	/* would permit passing o by reference, removes fetch overlap */
+	worker->workpool->drain();
+	if (going_down())
+	  return 0;
       } while (is_truncated);
-    }
+    } /* prefix_iter */
   } else {
     /* bucket versioning is enabled or suspended */
     RGWRados::Bucket::List list_op(&target);
@@ -578,8 +798,8 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
             expiration = prefix_iter->second.expiration;
             if (!skip_expiration && expiration <= 0 && prefix_iter->second.expiration_date == boost::none) {
               continue;
-            } else if (!skip_expiration) {
-
+            }
+	    if (!skip_expiration) {
 	      rgw_obj_key key(obj_iter->key);
 	      rgw_obj obj(bucket_info.bucket, key);
 	      RGWObjectCtx rctx(store);
@@ -605,7 +825,6 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
 		  continue;
 		}
 	      }
-
               if (expiration > 0) {
                 is_expired = obj_has_expired(mtime, expiration);
               } else {
@@ -622,34 +841,25 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
             is_expired = obj_has_expired(mtime, expiration);
           }
           if (skip_expiration || is_expired) {
-            if (obj_iter->is_visible()) {
-              RGWObjectCtx rctx(store);
-              rgw_obj obj(bucket_info.bucket, obj_iter->key);
-              RGWObjState *state;
-              int ret = store->get_obj_state(&rctx, bucket_info, obj, &state, false);
-              if (ret < 0) {
-                return ret;
-              }
-            }
-            ret = remove_expired_obj(bucket_info, obj_iter->key, obj_iter->meta.owner, obj_iter->meta.owner_display_name, remove_indeed);
-            if (ret < 0) {
-              ldout(cct, 0) << "ERROR: remove_expired_obj " << dendl;
-            } else {
-              ldout(cct, 10) << "DELETED case 2:" << bucket_name << ":" << obj_iter->key << dendl;
-            }
-
-            if (going_down())
-              return 0;
+	    auto& wq_op = prefix_iter->second;
+	    std::tuple<lc_op&, rgw_bucket_dir_entry, bool> t1
+	      = {wq_op, *obj_iter, remove_indeed};
+	    WorkItem w1 = t1;
+	    worker->workpool->enqueue(w1);
           }
-        }
+        } /* obj_iter */
+	/* would permit passing o by reference, removes fetch overlap */
+	worker->workpool->drain();
+	if (going_down())
+	  return 0;
       } while (is_truncated);
     }
   }
-
-  ret = handle_multipart_expiration(&target, prefix_map);
+  worker->workpool->drain();
+  ret = handle_multipart_expiration(&target, prefix_map, worker);
 
   return ret;
-}
+} /* bucket_lc_process */
 
 int RGWLC::bucket_lc_post(int index, int max_lock_sec,
 			  cls_rgw_lc_entry& entry, int& result,
@@ -718,18 +928,27 @@ int RGWLC::list_lc_progress(const string& marker, uint32_t max_entries,
   return 0;
 }
 
+static inline vector<int> random_sequence(uint32_t n)
+ {
+  vector<int> v(n-1, 0);
+  int ix{0};
+  std::generate(v.begin(), v.end(),
+    [&ix]() mutable {
+      return ix++;
+    });
+  std::random_shuffle(v.begin(), v.end());
+  return v;
+}
+
 int RGWLC::process(LCWorker* worker)
 {
   int max_secs = cct->_conf->rgw_lc_lock_max_time;
 
-  unsigned start;
-  int ret = get_random_bytes((char *)&start, sizeof(start));
-  if (ret < 0)
-    return ret;
-
-  for (int i = 0; i < max_objs; i++) {
-    int index = (i + start) % max_objs;
-    ret = process(index, max_secs, worker);
+  /* generate an index-shard sequence unrelated to any other
+   * that might be running in parallel */
+  vector<int> shard_seq = random_sequence(max_objs);
+  for (auto index : shard_seq) {
+    int ret = process(index, max_secs, worker);
     if (ret < 0)
       return ret;
   }
@@ -857,8 +1076,8 @@ void RGWLC::stop_processor()
 
 void RGWLC::LCWorker::stop()
 {
-  Mutex::Locker l(lock);
-  cond.Signal();
+  lock_guard l{lock};
+  cond.notify_all();
 }
 
 bool RGWLC::going_down()
@@ -1066,6 +1285,12 @@ std::string rgwlc_s3_expiration_header(
 
 } /* rgwlc_s3_expiration_header */
 
+RGWLC::LCWorker::~LCWorker()
+{
+  workpool->drain();
+  delete workpool;
+} /* ~LCWorker */
+
 void RGWLifecycleConfiguration::generate_test_instances(list<RGWLifecycleConfiguration*>& o)
 {
   o.push_back(new RGWLifecycleConfiguration);
@@ -1081,8 +1306,6 @@ void get_lc_oid(CephContext *cct, const string& shard_id, string *oid)
   oid->append(buf);
   return;
 }
-
-
 
 static std::string get_lc_shard_name(const rgw_bucket& bucket){
   return string_join_reserve(':', bucket.tenant, bucket.name, bucket.marker);
