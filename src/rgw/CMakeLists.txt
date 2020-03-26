@@ -23,6 +23,9 @@ if(Boost_VERSION VERSION_GREATER 1.73)
   add_definitions(-DBOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT)
 endif()
 
+include_directories(jwt-cpp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(picojson PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 set(librgw_common_srcs
   services/svc_finisher.cc
   services/svc_notify.cc
