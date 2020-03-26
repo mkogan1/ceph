@@ -1878,7 +1878,7 @@ public:
 
   bool is_single_zonegroup() const
   {
-      return (period_map.zonegroups.size() == 1);
+      return (period_map.zonegroups.size() <= 1);
   }
 
   /*
