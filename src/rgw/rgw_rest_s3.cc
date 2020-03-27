@@ -186,11 +186,11 @@ int decode_attr_bl_single_value(map<string, bufferlist>& attrs, const char *attr
   return 0;
 }
 
-inline bool str_has_cntrl(const std::string s) {
+static inline bool str_has_cntrl(const std::string s) {
   return std::any_of(s.begin(), s.end(), ::iscntrl);
 }
 
-inline bool str_has_cntrl(const char* s) {
+static inline bool str_has_cntrl(const char* s) {
   std::string _s(s);
   return str_has_cntrl(_s);
 }
@@ -321,7 +321,6 @@ int RGWGetObj_ObjStore_S3::send_response_data(bufferlist& bl, off_t bl_ofs,
            * stating what the problem is */
           return -ERR_INVALID_REQUEST;
         }
-
 	if (strcmp(p->param, "response-content-type") != 0) {
 	  response_attrs[p->http_attr] = val;
 	} else {
