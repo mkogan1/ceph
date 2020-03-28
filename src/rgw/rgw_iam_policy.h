@@ -122,13 +122,15 @@ static constexpr std::uint64_t iamPutRolePolicy = s3All + 10;
 static constexpr std::uint64_t iamGetRolePolicy = s3All + 11;
 static constexpr std::uint64_t iamListRolePolicies = s3All + 12;
 static constexpr std::uint64_t iamDeleteRolePolicy = s3All + 13;
-static constexpr std::uint64_t iamAll = s3All + 14;
-
+static constexpr std::uint64_t iamCreateOIDCProvider = s3All + 14;
+static constexpr std::uint64_t iamDeleteOIDCProvider = s3All + 15;
+static constexpr std::uint64_t iamGetOIDCProvider = s3All + 16;
+static constexpr std::uint64_t iamListOIDCProviders = s3All + 17;
+static constexpr std::uint64_t iamAll = s3All + 18;
 static constexpr std::uint64_t stsAssumeRole = iamAll + 1;
 static constexpr std::uint64_t stsAssumeRoleWithWebIdentity = iamAll + 2;
 static constexpr std::uint64_t stsGetSessionToken = iamAll + 3;
 static constexpr std::uint64_t stsAll = iamAll + 4;
-
 static constexpr std::uint64_t s3Count = s3All;
 static constexpr std::uint64_t allCount = stsAll + 1;
 
