@@ -9,6 +9,7 @@
 #include "rgw_sts.h"
 #include "rgw_web_idp.h"
 #include "jwt-cpp/jwt.h"
+#include "rgw_oidc_provider.h"
 
 namespace rgw {
 namespace auth {
@@ -16,6 +17,7 @@ namespace sts   {
 
 class WebTokenEngine : public rgw::auth::Engine {
   CephContext* const cct;
+  RGWCtl* const ctl;
 
   using result_t = rgw::auth::Engine::result_t;
   using token_t = rgw::web_idp::WebTokenClaims;
@@ -25,10 +27,16 @@ class WebTokenEngine : public rgw::auth::Engine {
 
   bool is_applicable(const std::string& token) const noexcept;
 
-  boost::optional<WebTokenEngine::token_t>
-  get_from_jwt(const DoutPrefixProvider* dpp, const std::string& token) const;
+  bool is_client_id_valid(vector<string>& client_ids, const string& client_id) const;
 
-  void validate_signature (const DoutPrefixProvider* dpp, const jwt::decoded_jwt& decoded, const string& algorithm, const string& iss) const;
+  bool is_cert_valid(const vector<string>& thumbprints, const string& cert) const;
+
+  boost::optional<RGWOIDCProvider> get_provider(const string& role_arn, const string& iss) const;
+
+  boost::optional<WebTokenEngine::token_t>
+  get_from_jwt(const DoutPrefixProvider* dpp, const std::string& token, const req_state* const s) const;
+
+  void validate_signature (const DoutPrefixProvider* dpp, const jwt::decoded_jwt& decoded, const string& algorithm, const string& iss, const vector<string>& thumbprints) const;
 
   result_t authenticate(const DoutPrefixProvider* dpp,
                         const std::string& token,
@@ -36,9 +44,11 @@ class WebTokenEngine : public rgw::auth::Engine {
 
 public:
   WebTokenEngine(CephContext* const cct,
+                    RGWCtl* const ctl,
                     const rgw::auth::TokenExtractor* const extractor,
                     const rgw::auth::WebIdentityApplier::Factory* const apl_factory)
     : cct(cct),
+      ctl(ctl),
       extractor(extractor),
       apl_factory(apl_factory) {
   }
@@ -80,7 +90,8 @@ public:
   DefaultStrategy(CephContext* const cct,
                   RGWRados* const store)
     : store(store),
-      web_token_engine(cct,
+      implicit_tenant_context(implicit_tenant_context),
+      web_token_engine(cct, ctl,
                         static_cast<rgw::auth::TokenExtractor*>(this),
                         static_cast<rgw::auth::WebIdentityApplier::Factory*>(this)) {
     /* When the constructor's body is being executed, all member engines
