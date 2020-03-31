@@ -553,7 +553,7 @@ public:
   void finish();
 
   RGWCoroutine *read_sync_status_cr(rgw_bucket_shard_sync_info *sync_status);
-  RGWCoroutine *init_sync_status_cr();
+  RGWCoroutine *init_sync_status_cr(RGWObjVersionTracker& objv_tracker);
   RGWCoroutine *run_sync_cr();
 
   void wakeup();
