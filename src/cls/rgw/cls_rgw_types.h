@@ -1142,6 +1142,14 @@ struct cls_rgw_lc_entry {
   uint64_t start_time; // if in_progress
   uint32_t status;
 
+  cls_rgw_lc_entry()
+    : start_time(0), status(0) {}
+
+  cls_rgw_lc_entry(const cls_rgw_lc_entry& rhs) = default;
+
+  cls_rgw_lc_entry(const std::string& b, uint64_t t, uint32_t s)
+    : bucket(b), start_time(t), status(s) {};
+
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
     encode(bucket, bl);
@@ -1159,17 +1167,6 @@ struct cls_rgw_lc_entry {
   }
 };
 WRITE_CLASS_ENCODER(cls_rgw_lc_entry);
-
-inline std::ostream& operator<<(std::ostream &os, cls_rgw_lc_entry& ent) {
-  os << "<ent`: bucket=";
-  os << ent.bucket;
-  os << "; start_time=";
-  os << ent.start_time;
-  os << "; status=";
-    os << ent.status;
-    os << ">";
-    return os;
-}
 
 struct cls_rgw_reshard_entry
 {
