@@ -2070,6 +2070,7 @@ public:
         } else {
           status.state = rgw_bucket_shard_sync_info::StateFullSync;
           status.inc_marker.position = info.max_marker;
+          status.inc_marker.timestamp = ceph::real_clock::now();
           map<string, bufferlist> attrs;
           status.encode_all_attrs(attrs);
           call(new RGWSimpleRadosWriteAttrsCR(sync_env->async_rados, store->svc.sysobj, obj, attrs));
