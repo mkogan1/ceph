@@ -17,6 +17,27 @@
 
 #include "rgw_sync_module.h"
 #include "rgw_sync_trace.h"
+// represents an obligation to sync an entry up a given time
+struct rgw_data_sync_obligation {
+  std::string key;
+  std::string marker;
+  ceph::real_time timestamp;
+  bool retry = false;
+};
+
+inline std::ostream& operator<<(std::ostream& out, const rgw_data_sync_obligation& o) {
+  out << "key=" << o.key;
+  if (!o.marker.empty()) {
+    out << " marker=" << o.marker;
+  }
+  if (o.timestamp != ceph::real_time{}) {
+    out << " timestamp=" << o.timestamp;
+  }
+  if (o.retry) {
+    out << " retry";
+  }
+  return out;
+}
 
 struct rgw_datalog_info {
   uint32_t num_shards;
