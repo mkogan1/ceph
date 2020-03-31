@@ -1167,9 +1167,7 @@ class RGWContinuousLeaseCR : public RGWCoroutine {
   const string cookie;
 
   int interval;
-
-  Mutex lock;
-  std::atomic<bool> going_down = { false };
+  bool going_down{ false };
   bool locked{false};
 
   RGWCoroutine *caller;
@@ -1183,18 +1181,16 @@ public:
     : RGWCoroutine(_store->ctx()), async_rados(_async_rados), store(_store),
     obj(_obj), lock_name(_lock_name),
     cookie(RGWSimpleRadosLockCR::gen_random_cookie(cct)),
-    interval(_interval), lock("RGWContinuousLeaseCR"), caller(_caller)
+    interval(_interval), caller(_caller)
   {}
 
   int operate() override;
 
   bool is_locked() {
-    Mutex::Locker l(lock);
     return locked;
   }
 
   void set_locked(bool status) {
-    Mutex::Locker l(lock);
     locked = status;
   }
 
