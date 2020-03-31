@@ -20,6 +20,7 @@
 #include "rgw_cr_rest.h"
 #include "rgw_http_client.h"
 #include "rgw_bucket.h"
+#include "rgw_bucket_sync_cache.h"
 #include "rgw_metadata.h"
 #include "rgw_sync_counters.h"
 #include "rgw_sync_error_repo.h"
@@ -1013,7 +1014,7 @@ public:
 class RGWDataSyncSingleEntryCR : public RGWCoroutine {
   RGWDataSyncEnv *sync_env;
 
-  rgw_bucket_shard source_bs;
+  rgw::bucket_sync::Handle state; // cached bucket-shard state
 
   rgw_data_sync_obligation obligation;
   RGWDataSyncShardMarkerTrack *marker_tracker;
@@ -1025,11 +1026,11 @@ class RGWDataSyncSingleEntryCR : public RGWCoroutine {
   ceph::real_time progress;
   int sync_status = 0;
 public:
-  RGWDataSyncSingleEntryCR(RGWDataSyncEnv* _sync_env, const rgw_bucket_shard& source_bs,
+  RGWDataSyncSingleEntryCR(RGWDataSyncEnv* _sync_env, rgw::bucket_sync::Handle state,
                            rgw_data_sync_obligation obligation, RGWDataSyncShardMarkerTrack *_marker_tracker,
                            RGWOmapAppend *_error_repo, const RGWSyncTraceNodeRef& _tn_parent)
     : RGWCoroutine(_sync_env->cct),
-      sync_env(_sync_env), source_bs(source_bs),
+      sync_env(_sync_env), state(std::move(state)),
       obligation(std::move(obligation)), marker_tracker(_marker_tracker),
       error_repo(_error_repo) {
     set_description() << "data sync single entry (source_zone=" << sync_env->source_zone << ") " << obligation;
@@ -1042,9 +1043,9 @@ public:
         if (marker_tracker) {
           marker_tracker->reset_need_retry(obligation.key);
         }
-        tn->log(0, SSTR("triggering sync of source bucket/shard " << bucket_shard_str{source_bs}));
+        tn->log(0, SSTR("triggering sync of source bucket/shard " << bucket_shard_str{state->key}));
 
-	yield call(new RGWRunBucketSyncCoroutine(sync_env, source_bs, tn, &progress));
+	yield call(new RGWRunBucketSyncCoroutine(sync_env, state->key, tn, &progress));
         if (retcode == 0) {
           tn->log(20, SSTR("RunBucketSources progress=" << progress));
         }
@@ -1123,7 +1124,7 @@ class RGWDataSyncShardCR : public RGWCoroutine {
   std::string next_marker;
   list<rgw_data_change_log_entry> log_entries;
   list<rgw_data_change_log_entry>::iterator log_iter;
-  bool truncated;
+  bool truncated = false;
 
   Mutex inc_lock{"RGWDataSyncShardCR::inc_lock"};
   Cond inc_cond;
@@ -1137,11 +1138,10 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   set<string>::iterator modified_iter;
 
-  int total_entries;
+  uint64_t total_entries = 0;
 
-  int spawn_window;
-
-  bool *reset_backoff;
+  static constexpr int spawn_window = BUCKET_SHARD_SYNC_SPAWN_WINDOW;
+  bool *reset_backoff = nullptr;
 
   boost::intrusive_ptr<RGWContinuousLeaseCR> lease_cr;
   boost::intrusive_ptr<RGWCoroutinesStack> lease_stack;
@@ -1149,22 +1149,26 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
 
   string error_oid;
-  RGWOmapAppend *error_repo;
+  RGWOmapAppend *error_repo = nullptr;
   std::map<std::string, bufferlist> error_entries;
   string error_marker;
   ceph::real_time entry_timestamp;
-  int max_error_entries;
+  static constexpr int max_error_entries = DATA_SYNC_MAX_ERR_ENTRIES;
 
   ceph::coarse_real_time error_retry_time;
 
 #define RETRY_BACKOFF_SECS_MIN 60
 #define RETRY_BACKOFF_SECS_DEFAULT 60
 #define RETRY_BACKOFF_SECS_MAX 600
-  uint32_t retry_backoff_secs;
+  uint32_t retry_backoff_secs = RETRY_BACKOFF_SECS_DEFAULT;
 
   RGWSyncTraceNodeRef tn;
 
   rgw_bucket_shard source_bs;
+
+  // target number of entries to cache before recycling idle ones
+  static constexpr size_t target_cache_size = 256;
+  boost::intrusive_ptr<rgw::bucket_sync::Cache> bucket_shard_cache;
 
   int parse_bucket_key(const std::string& key, rgw_bucket_shard& bs) const {
     return rgw_bucket_parse_bucket_key(sync_env->cct, key,
@@ -1174,8 +1178,9 @@ class RGWDataSyncShardCR : public RGWCoroutine {
                                   const std::string& key,
                                   const std::string& marker,
                                   ceph::real_time timestamp, bool retry) {
+    auto state = bucket_shard_cache->get(src);
     auto obligation = rgw_data_sync_obligation{key, marker, timestamp, retry};
-    return new RGWDataSyncSingleEntryCR(sync_env, src, std::move(obligation),
+    return new RGWDataSyncSingleEntryCR(sync_env, std::move(state), std::move(obligation),
                                         &*marker_tracker, error_repo, tn);
   }
 public:
@@ -1188,10 +1193,9 @@ public:
 					     pool(_pool),
 					     shard_id(_shard_id),
 					     sync_marker(_marker),
-					     truncated(false),
-					     total_entries(0), spawn_window(BUCKET_SHARD_SYNC_SPAWN_WINDOW), reset_backoff(NULL),
-					     lease_cr(nullptr), lease_stack(nullptr), error_repo(nullptr), max_error_entries(DATA_SYNC_MAX_ERR_ENTRIES),
-					     retry_backoff_secs(RETRY_BACKOFF_SECS_DEFAULT), tn(_tn) {
+					     lease_cr(nullptr), lease_stack(nullptr),
+					     tn(_tn),
+					     bucket_shard_cache(rgw::bucket_sync::Cache::create(target_cache_size)) {
     set_description() << "data sync shard source_zone=" << sync_env->source_zone << " shard_id=" << shard_id;
     status_oid = RGWDataSyncStatusManager::shard_obj_name(sync_env->source_zone, shard_id);
     error_oid = status_oid + ".retry";
