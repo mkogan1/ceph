@@ -16,6 +16,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/variant.hpp>
 
+#include "include/scope_guard.h"
 #include "common/Formatter.h"
 #include <common/errno.h>
 #include "auth/Crypto.h"
@@ -153,23 +154,35 @@ class WorkQ : public Thread
 {
 public:
   using unique_lock = std::unique_lock<std::mutex>;
-  using work_f = std::function<void(RGWLC::LCWorker*, WorkItem&)>;
+  using work_f = std::function<void(RGWLC::LCWorker*, WorkQ*, WorkItem&)>;
   using dequeue_result = boost::variant<void*, WorkItem>;
 
+  static constexpr uint32_t FLAG_NONE =        0x0000;
+  static constexpr uint32_t FLAG_EWAIT_SYNC =  0x0001;
+  static constexpr uint32_t FLAG_DWAIT_SYNC =  0x0002;
+  static constexpr uint32_t FLAG_EDRAIN_SYNC = 0x0004;
+
 private:
-  work_f bsf = [](RGWLC::LCWorker* wk, WorkItem& wi) {};
+  work_f bsf = [](RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {};
   RGWLC::LCWorker* wk;
   uint32_t qmax;
+  int ix;
   std::mutex mtx;
   std::condition_variable cv;
+  uint32_t flags;
   vector<WorkItem> items;
   work_f f;
 
 public:
   WorkQ(RGWLC::LCWorker* wk, uint32_t ix, uint32_t qmax)
-    : wk(wk), qmax(qmax), f(bsf)
+    : wk(wk), qmax(qmax), ix(ix), flags(FLAG_NONE), f(bsf)
     {
-      create((string{"workpool_thr_"} + to_string(ix)).c_str());
+      create(thr_name().c_str());
+    }
+
+  std::string thr_name()
+    { return std::string{"wp_thrd: "}
+      + std::to_string(wk->ix) + ", " + std::to_string(ix);
     }
 
   void setf(work_f _f) {
@@ -180,15 +193,20 @@ public:
     unique_lock uniq(mtx);
     while ((!wk->get_lc()->going_down()) &&
 	   (items.size() > qmax)) {
+      flags |= FLAG_EWAIT_SYNC;
       cv.wait_for(uniq, std::chrono::milliseconds(200));
     }
     items.push_back(item);
+    if (flags & FLAG_DWAIT_SYNC) {
+      flags &= ~FLAG_DWAIT_SYNC;
+      cv.notify_one();
+    }
   }
 
   void drain() {
     unique_lock uniq(mtx);
-    while ((!wk->get_lc()->going_down()) &&
-	   (items.size() > 0)) {
+    flags |= FLAG_EDRAIN_SYNC;
+    while (flags & FLAG_EDRAIN_SYNC) {
       cv.wait_for(uniq, std::chrono::milliseconds(200));
     }
   }
@@ -198,11 +216,20 @@ private:
     unique_lock uniq(mtx);
     while ((!wk->get_lc()->going_down()) &&
 	   (items.size() == 0)) {
+      /* clear drain state, as we are NOT doing work and qlen==0 */
+      if (flags & FLAG_EDRAIN_SYNC) {
+	flags &= ~FLAG_EDRAIN_SYNC;
+      }
+      flags |= FLAG_DWAIT_SYNC;
       cv.wait_for(uniq, std::chrono::milliseconds(200));
     }
     if (items.size() > 0) {
       auto item = items.back();
       items.pop_back();
+      if (flags & FLAG_EWAIT_SYNC) {
+	flags &= ~FLAG_EWAIT_SYNC;
+	cv.notify_one();
+      }
       return {std::move(item)};
     }
     return nullptr;
@@ -215,7 +242,7 @@ private:
 	/* going down */
 	break;
       }
-      f(wk, boost::get<WorkItem>(item));
+      f(wk, this, boost::get<WorkItem>(item));
     }
     return nullptr;
   }
@@ -257,8 +284,8 @@ public:
   }
 }; /* WorkPool */
 
-RGWLC::LCWorker::LCWorker(CephContext *_cct, RGWLC *_lc)
-  : cct(_cct), lc(_lc)
+RGWLC::LCWorker::LCWorker(CephContext *_cct, RGWLC *_lc, int ix)
+  : cct(_cct), lc(_lc), ix(ix)
 {
   auto wpw = cct->_conf->rgw_lc_max_wp_worker;
   workpool = new WorkPool(this, wpw, 512);
@@ -319,7 +346,7 @@ void RGWLC::finalize()
   delete[] obj_names;
 }
 
-bool RGWLC::if_already_run_today(time_t& start_date)
+bool RGWLC::if_already_run_today(time_t start_date)
 {
   struct tm bdt;
   time_t begin_of_day;
@@ -343,10 +370,25 @@ bool RGWLC::if_already_run_today(time_t& start_date)
     return false;
 }
 
+static inline std::ostream& operator<<(std::ostream &os, cls_rgw_lc_entry& ent) {
+  os << "<ent: bucket=";
+  os << ent.bucket;
+  os << "; start_time=";
+  os << rgw_to_asctime(utime_t(time_t(ent.start_time), 0));
+  os << "; status=";
+    os << ent.status;
+    os << ">";
+    return os;
+}
+
 int RGWLC::bucket_lc_prepare(int index, LCWorker* worker)
 {
   vector<cls_rgw_lc_entry> entries;
   string marker;
+
+  dout(5) << "RGWLC::bucket_lc_prepare(): PREPARE "
+	  << "index: " << index << " worker ix: " << worker->ix
+	  << dendl;
 
 #define MAX_LC_LIST_ENTRIES 100
   do {
@@ -419,9 +461,16 @@ int RGWLC::remove_expired_obj(RGWBucketInfo& bucket_info, rgw_obj_key obj_key,
   }
 }
 
-int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
-				       const multimap<string, lc_op>& prefix_map,
-				       RGWLC::LCWorker* worker)
+static inline bool worker_should_stop(time_t stop_at)
+{
+  return stop_at < ceph_clock_gettime();
+}
+
+int RGWLC::handle_multipart_expiration(
+  RGWRados::Bucket *target,
+  const multimap<string, lc_op>& prefix_map,
+  RGWLC::LCWorker* worker,
+  time_t stop_at)
 {
   MultipartMetaFilter mp_filter;
   vector<rgw_bucket_dir_entry> objs;
@@ -434,7 +483,7 @@ int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
   list_op.params.ns = RGW_OBJ_NS_MULTIPART;
   list_op.params.filter = &mp_filter;
 
-  auto pf = [&](RGWLC::LCWorker* wk, WorkItem& wi) {
+  auto pf = [&](RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {
     auto wt = boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry>>(wi);
     //auto& op = std::get<0>(wt);
     auto& o = std::get<1>(wt);
@@ -446,14 +495,24 @@ int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
     RGWObjectCtx rctx(store);
     int ret = abort_multipart_upload(store, cct, &rctx, bucket_info, mp_obj);
     if (ret < 0 && ret != -ERR_NO_SUCH_UPLOAD) {
-      ldout(cct, 0) << "ERROR: abort_multipart_upload failed, ret=" << ret <<dendl;
+      ldout(cct, 0) << "ERROR: abort_multipart_upload failed, ret="
+		    << ret << dendl;
       return;
     }
   }; /* pf */
 
   worker->workpool->setf(pf);
 
-  for (auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end(); ++prefix_iter) {
+  for (auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end();
+       ++prefix_iter) {
+
+    if (worker_should_stop(stop_at)) {
+      ldout(cct, 5) << __func__ << " interval budget EXPIRED worker "
+		     << worker->ix
+		     << dendl;
+      return 0;
+    }
+    
     if (!prefix_iter->second.status || prefix_iter->second.mp_expiration <= 0) {
       continue;
     }
@@ -476,7 +535,6 @@ int RGWLC::handle_multipart_expiration(RGWRados::Bucket *target,
 	  WorkItem w1 = t1;
 	  worker->workpool->enqueue(w1);
           if (going_down()) {
-	    worker->workpool->drain();
             return 0;
 	  }
         }
@@ -522,7 +580,8 @@ static inline bool has_all_tags(const lc_op& rule_action,
   return true;
 }
 
-int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
+int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
+			     time_t stop_at)
 {
   RGWLifecycleConfiguration  config(cct);
   RGWBucketInfo bucket_info;
@@ -541,6 +600,13 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
     ldout(cct, 0) << "LC:get_bucket_info failed" << bucket_name <<dendl;
     return ret;
   }
+
+  auto stack_guard = make_scope_guard(
+    [&worker, &bucket_info]
+      {
+	worker->workpool->drain();
+      }
+    );
 
   if (bucket_info.bucket.marker != bucket_marker) {
     ldout(cct, 1) << "LC: deleting stale entry found for bucket=" << bucket_tenant
@@ -570,7 +636,8 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
 		 << dendl;
 
   auto pf_nonversion
-    = [this, &bucket_info, &bucket_name](RGWLC::LCWorker* wk, WorkItem& wi) {
+    = [this, &bucket_info, &bucket_name](RGWLC::LCWorker* wk, WorkQ* wq,
+					 WorkItem& wi) {
     auto cct = wk->get_lc()->cct;
     auto wt =
       boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry>>(wi);
@@ -631,14 +698,20 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
       ret = remove_expired_obj(bucket_info, o.key, o.meta.owner,
 			       o.meta.owner_display_name, true);
       if (ret < 0) {
-	ldout(cct, 0) << "ERROR: remove_expired_obj " << dendl;
+	ldout(cct, 0) << "ERROR: pf_noversion: remove_expired_obj "
+		      << wq->thr_name() << " " << bucket_name << ":"
+		      << key << "ret: " << ret
+		      << dendl;
       } else {
-	ldout(cct, 10) << "DELETED case 1:" << bucket_name << ":" << key << dendl;
+	ldout(cct, 2) << "DELETED case 1:" << wq->thr_name() << " "
+		      << bucket_name << ":" << key
+		      << dendl;
       }
     }
   }; /* pf_noversion */
 
-  auto pf_versioned = [this, &bucket_info, &bucket_name](RGWLC::LCWorker* wk, WorkItem& wi) {
+  auto pf_versioned = [this, &bucket_info, &bucket_name](
+    RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {
     auto cct = wk->get_lc()->cct;
     auto wt =
       boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry, bool>>(wi);
@@ -649,35 +722,49 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
 				 o.meta.owner_display_name,
 				 remove_indeed);
     if (ret < 0) {
-      ldout(cct, 0) << "ERROR: remove_expired_obj " << dendl;
+      ldout(cct, 0) << "ERROR: pf_versioned: remove_expired_obj "
+		    << wq->thr_name() << " " << bucket_name << ":" << o.key
+		    << "ret: " << ret << dendl;
     } else {
-      ldout(cct, 10) << "DELETED case 2:" << bucket_name << ":" << o.key << dendl;
+      ldout(cct, 2) << "DELETED case 2:"
+		    << wq->thr_name() << " " << bucket_name
+		    << ":" << o.key << dendl;
     }
   }; /* pf_versioned */
 
   /* WorkPool has only one action, so we need a dispatcher/visitor */
   auto pf = [this, &bucket_info, &bucket_name, pf_nonversion, pf_versioned]
-    (RGWLC::LCWorker* wk, WorkItem& wi) {
+    (RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {
     auto cct = wk->get_lc()->cct;
     switch (wi.which()) {
-    case 0:
-      pf_nonversion(wk, wi);
-    break;
     case 1:
-      pf_versioned(wk, wi);
+      pf_nonversion(wk, wq, wi);
+    break;
+    case 2:
+      pf_versioned(wk, wq, wi);
     break;
     default:
-      ldout(cct, 0) << "ERROR: unknown variant type in RGWLC pf" << dendl;
+      ldout(cct, 0) << "ERROR: unknown variant type " << wi.which()
+		    << " in RGWLC pf"
+		    << dendl;
       return;
     };
   };
   worker->workpool->setf(pf);
 
-  for(auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end(); ++prefix_iter) {
+  for(auto prefix_iter = prefix_map.begin(); prefix_iter != prefix_map.end();
+      ++prefix_iter) {
     ldout(cct, 16) << __func__
 		   << "() prefix iter: " << prefix_iter->first
 		   << " rule-id: " << prefix_iter->second.id
 		   << dendl;
+  }
+
+  if (worker_should_stop(stop_at)) {
+      ldout(cct, 5) << __func__ << " interval budget EXPIRED worker "
+		     << worker->ix
+		     << dendl;
+      return 0;
   }
 
   if (! bucket_info.versioned()) {
@@ -855,8 +942,8 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker)
       } while (is_truncated);
     }
   }
-  worker->workpool->drain();
-  ret = handle_multipart_expiration(&target, prefix_map, worker);
+
+  ret = handle_multipart_expiration(&target, prefix_map, worker, stop_at);
 
   return ret;
 } /* bucket_lc_process */
@@ -878,13 +965,13 @@ int RGWLC::bucket_lc_post(int index, int max_lock_sec,
   do {
     int ret = l.lock_exclusive(&store->lc_pool_ctx, obj_names[index]);
     if (ret == -EBUSY) { /* already locked by another lc processor */
-      dout(0) << "RGWLC::bucket_lc_post() failed to acquire lock on, sleep 5, try again" << obj_names[index] << dendl;
+      dout(0) << "RGWLC::bucket_lc_post() failed to acquire lock on, sleep 5, try again " << obj_names[index] << dendl;
       sleep(5);
       continue;
     }
     if (ret < 0)
       return 0;
-    dout(20) << "RGWLC::bucket_lc_post()  get lock" << obj_names[index] << dendl;
+    dout(20) << "RGWLC::bucket_lc_post()  get lock " << obj_names[index] << dendl;
     if (result ==  -ENOENT) {
       ret = cls_rgw_lc_rm_entry(store->lc_pool_ctx, obj_names[index], entry);
       if (ret < 0) {
@@ -903,7 +990,7 @@ int RGWLC::bucket_lc_post(int index, int max_lock_sec,
     }
 clean:
     l.unlock(&store->lc_pool_ctx, obj_names[index]);
-    dout(20) << "RGWLC::bucket_lc_post()  unlock" << obj_names[index] << dendl;
+    dout(20) << "RGWLC::bucket_lc_post()  unlock " << obj_names[index] << dendl;
     return 0;
   } while (true);
 }
@@ -956,8 +1043,38 @@ int RGWLC::process(LCWorker* worker)
   return 0;
 }
 
+bool RGWLC::expired_session(time_t started)
+{
+  uint64_t interval = (cct->_conf->rgw_lc_debug_interval > 0)
+    ? cct->_conf->rgw_lc_debug_interval
+    : 24*60*60;
+
+  auto now = ceph_clock_gettime();
+
+  dout(16) << "RGWLC::expired_session"
+	   << " started: " << started
+	   << " interval: " << interval << "(*2==" << 2*interval << ")"
+	   << " now: " << now
+	   << dendl;
+
+  return (started + 2*interval < now);
+}
+
+time_t RGWLC::thread_stop_at()
+{
+  uint64_t interval = (cct->_conf->rgw_lc_debug_interval > 0)
+    ? cct->_conf->rgw_lc_debug_interval
+    : 24*60*60;
+
+  return ceph_clock_gettime() + interval;
+}
+
 int RGWLC::process(int index, int max_lock_secs, LCWorker* worker)
 {
+  dout(5) << "RGWLC::process(): ENTER: "
+	  << "index: " << index << " worker ix: " << worker->ix
+	  << dendl;
+
   rados::cls::lock::Lock l(lc_index_lock_name);
   do {
     utime_t now = ceph_clock_now();
@@ -990,12 +1107,20 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker)
     if (! (cct->_conf->rgw_lc_lock_max_time == 9969)) {
       ret = cls_rgw_lc_get_entry(store->lc_pool_ctx,
 				 obj_names[index], head.marker, entry);
-      if ((entry.status == lc_processing) &&
-	  (true /* XXXX expired epoch! */)) {
-	dout(5) << "RGWLC::process(): ACTIVE entry: " << entry
-		<< " index: " << index << " worker ix: " << worker->ix
-		<< dendl;
-	goto exit;
+      if (ret >= 0) {
+	if (entry.status == lc_processing) {
+	  if (expired_session(entry.start_time)) {
+	    dout(5) << "RGWLC::process(): STALE lc session found for: " << entry
+		    << " index: " << index << " worker ix: " << worker->ix
+		    << " (clearing)"
+		    << dendl;
+	  } else {
+	    dout(5) << "RGWLC::process(): ACTIVE entry: " << entry
+		    << " index: " << index << " worker ix: " << worker->ix
+		  << dendl;
+	    goto exit;
+	  }
+	}
       }
     }
 
@@ -1023,6 +1148,8 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker)
 	    << dendl;
 
     entry.status = lc_processing;
+    entry.start_time = ceph_clock_gettime();
+
     ret = cls_rgw_lc_set_entry(store->lc_pool_ctx, obj_names[index], entry);
     if (ret < 0) {
       dout(0) << "RGWLC::process() failed to set obj entry "
@@ -1043,9 +1170,9 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker)
 	    << dendl;
 
     l.unlock(&store->lc_pool_ctx, obj_names[index]);
-    ret = bucket_lc_process(entry.bucket, worker);
+    ret = bucket_lc_process(entry.bucket, worker, thread_stop_at());
     bucket_lc_post(index, max_lock_secs, entry, ret, worker);
-  }while(1);
+  } while(1);
 
 exit:
     l.unlock(&store->lc_pool_ctx, obj_names[index]);
@@ -1058,7 +1185,7 @@ void RGWLC::start_processor()
   workers.reserve(maxw);
   for (int ix = 0; ix < maxw; ++ix) {
     auto worker  =
-      ceph::make_unique<RGWLC::LCWorker>(cct, this);
+      ceph::make_unique<RGWLC::LCWorker>(cct, this, ix);
     worker->create((string{"lifecycle_thr_"} + to_string(ix)).c_str());
     workers.emplace_back(std::move(worker));
   }
