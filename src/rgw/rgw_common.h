@@ -1300,6 +1300,11 @@ struct rgw_bucket_shard {
     }
     return shard_id < b.shard_id;
   }
+
+  bool operator==(const rgw_bucket_shard& b) const {
+    return (bucket == b.bucket &&
+	    shard_id == b.shard_id);
+  }
 };
 
 
