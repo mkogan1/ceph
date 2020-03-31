@@ -1186,7 +1186,7 @@ public:
 
   int operate() override;
 
-  bool is_locked() {
+  bool is_locked() const {
     return locked;
   }
 
