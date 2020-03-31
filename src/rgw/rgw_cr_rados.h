@@ -592,10 +592,12 @@ class RGWRadosRemoveCR : public RGWSimpleCoroutine {
   RGWRados *store;
   librados::IoCtx ioctx;
   const rgw_raw_obj obj;
+  RGWObjVersionTracker* objv_tracker;
   boost::intrusive_ptr<RGWAioCompletionNotifier> cn;
 
 public:
-  RGWRadosRemoveCR(RGWRados *store, const rgw_raw_obj& obj);
+  RGWRadosRemoveCR(RGWRados *store, const rgw_raw_obj& obj,
+                   RGWObjVersionTracker* objv_tracker = nullptr);
 
   int send_request() override;
   int request_complete() override;
