@@ -41,7 +41,6 @@ set(librgw_common_srcs
   rgw_basic_types.cc
   rgw_bucket.cc
   rgw_bucket_layout.cc
-  rgw_bucket_sync.cc
   rgw_cache.cc
   rgw_common.cc
   rgw_compression.cc
