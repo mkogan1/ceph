@@ -380,6 +380,7 @@ target_link_libraries(ceph_test_librgw_admin_user
   rgw_admin_user
   cls_otp_client
   cls_2pc_queue_client
+  cls_cmpomap_client
   librados
   ceph-common
   ${UNITTEST_LIBS}
