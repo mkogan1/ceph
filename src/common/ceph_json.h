@@ -10,13 +10,12 @@
 #define NEED_ASSERT_H
 #pragma push_macro("_ASSERT_H")
 #endif
-
 #include "json_spirit/json_spirit.h"
-#undef _ASSERT_H
-
 #ifdef NEED_ASSERT_H
 #pragma pop_macro("_ASSERT_H")
 #endif
+
+#include "common/ceph_time.h"
 
 #include "Formatter.h"
 
@@ -177,6 +176,9 @@ void decode_json_obj(bool& val, JSONObj *obj);
 void decode_json_obj(bufferlist& val, JSONObj *obj);
 class utime_t;
 void decode_json_obj(utime_t& val, JSONObj *obj);
+
+void decode_json_obj(ceph::real_time& val, JSONObj *obj);
+void decode_json_obj(ceph::coarse_real_time& val, JSONObj *obj);
 
 template<class T>
 void decode_json_obj(list<T>& l, JSONObj *obj)
@@ -448,6 +450,9 @@ void encode_json(const char *name, long long val, ceph::Formatter *f);
 void encode_json(const char *name, const utime_t& val, ceph::Formatter *f);
 void encode_json(const char *name, const bufferlist& bl, ceph::Formatter *f);
 void encode_json(const char *name, long long unsigned val, ceph::Formatter *f);
+
+void encode_json(const char *name, const ceph::real_time& val, ceph::Formatter *f);
+void encode_json(const char *name, const ceph::coarse_real_time& val, ceph::Formatter *f);
 
 template<class T>
 static void encode_json(const char *name, const std::list<T>& l, ceph::Formatter *f)
