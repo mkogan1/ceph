@@ -221,7 +221,9 @@ class RGWSimpleAsyncCR : public RGWSimpleCoroutine {
 
 class RGWAsyncGetSystemObj : public RGWAsyncRadosRequest {
   RGWSysObjectCtx obj_ctx;
+public:
   RGWObjVersionTracker objv_tracker;
+private:
   rgw_raw_obj obj;
   const bool want_attrs;
   const bool raw_attrs;
@@ -381,21 +383,21 @@ class RGWSimpleRadosReadAttrsCR : public RGWSimpleCoroutine {
   rgw_raw_obj obj;
   map<string, bufferlist> *pattrs;
   bool raw_attrs;
-  RGWAsyncGetSystemObj *req;
+  RGWObjVersionTracker* objv_tracker;
+  RGWAsyncGetSystemObj *req = nullptr;
 
 public:
   RGWSimpleRadosReadAttrsCR(RGWAsyncRadosProcessor *_async_rados, RGWSI_SysObj *_svc,
-		      const rgw_raw_obj& _obj,
-		      map<string, bufferlist> *_pattrs, bool _raw_attrs) : RGWSimpleCoroutine(_svc->ctx()),
-                                                async_rados(_async_rados), svc(_svc),
-						obj(_obj),
-                                                pattrs(_pattrs),
-						raw_attrs(_raw_attrs),
-                                                req(NULL) {}
+			    const rgw_raw_obj& _obj,
+			    map<string, bufferlist> *_pattrs, bool _raw_attrs,
+			    RGWObjVersionTracker* objv_tracker = nullptr)
+    : RGWSimpleCoroutine(_svc->ctx()), async_rados(_async_rados), svc(_svc),
+      obj(_obj), pattrs(_pattrs), raw_attrs(_raw_attrs),
+      objv_tracker(objv_tracker) {}
   ~RGWSimpleRadosReadAttrsCR() override {
     request_cleanup();
   }
-                                                         
+
   void request_cleanup() override {
     if (req) {
       req->finish();
