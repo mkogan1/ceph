@@ -398,8 +398,10 @@ int RGWRadosRemoveOmapKeysCR::request_complete()
   return r;
 }
 
-RGWRadosRemoveCR::RGWRadosRemoveCR(RGWRados *store, const rgw_raw_obj& obj)
-  : RGWSimpleCoroutine(store->ctx()), store(store), obj(obj)
+RGWRadosRemoveCR::RGWRadosRemoveCR(RGWRados *store, const rgw_raw_obj& obj,
+                                   RGWObjVersionTracker* objv_tracker)
+  : RGWSimpleCoroutine(store->ctx()),
+    store(store), obj(obj), objv_tracker(objv_tracker)
 {
   set_description() << "remove dest=" << obj;
 }
@@ -417,6 +419,9 @@ int RGWRadosRemoveCR::send_request()
   set_status() << "send request";
 
   librados::ObjectWriteOperation op;
+  if (objv_tracker) {
+    objv_tracker->prepare_op_for_write(&op);
+  }
   op.remove();
 
   cn = stack->create_completion_notifier();
