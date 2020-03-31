@@ -65,6 +65,7 @@ set(librgw_common_srcs
   rgw_sync.cc
   rgw_data_sync.cc
   rgw_sync_counters.cc
+  rgw_sync_error_repo.cc
   rgw_sync_module.cc
   rgw_sync_module_aws.cc
   rgw_sync_module_es.cc
@@ -214,8 +215,9 @@ target_include_directories(rgw_a SYSTEM PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 target_link_libraries(rgw_a
   PRIVATE
   librados cls_otp_client cls_lock_client cls_rgw_client cls_refcount_client
-  cls_log_client cls_timeindex_client cls_version_client
-  cls_user_client cls_rgw_gc_client ceph-common common_utf8 global
+  cls_log_client cls_timeindex_client cls_version_client cls_cmpomap_client
+  cls_user_client cls_rgw_gc_client cls_cmpomap_client
+  ceph-common common_utf8 global
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
   ${OPENLDAP_LIBRARIES} ${CRYPTO_LIBS}
@@ -281,6 +283,7 @@ target_link_libraries(radosgw radosgw_a librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
+  cls_cmpomap_client
   global dmclock::dmclock
   ${FCGI_LIBRARY} ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
@@ -294,7 +297,7 @@ add_executable(radosgw-admin ${radosgw_admin_srcs})
 target_link_libraries(radosgw-admin ${rgw_libs} librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
-  cls_version_client cls_user_client
+  cls_version_client cls_user_client cls_cmpomap_client
   global ${FCGI_LIBRARY} ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES}
   ${BOOST_CONTEXT_LIBS})
@@ -307,6 +310,7 @@ target_link_libraries(radosgw-es ${rgw_libs} librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
+  cls_cmpomap_client
   global ${FCGI_LIBRARY} ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BLKID_LIBRARIES})
 install(TARGETS radosgw-es DESTINATION bin)
@@ -325,6 +329,7 @@ target_link_libraries(radosgw-object-expirer ${rgw_libs} librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
   cls_version_client cls_user_client
+  cls_cmpomap_client
   global ${FCGI_LIBRARY} ${LIB_RESOLV}
   ${CURL_LIBRARIES} ${EXPAT_LIBRARIES} ${BOOST_CONTEXT_LIBS})
 install(TARGETS radosgw-object-expirer DESTINATION bin)
@@ -345,6 +350,7 @@ target_link_libraries(rgw
   cls_timeindex_client
   cls_version_client
   cls_user_client
+  cls_cmpomap_client
   global
   ${LIB_RESOLV}
   ${CURL_LIBRARIES}
@@ -386,6 +392,7 @@ target_link_libraries(rgw_admin_user PRIVATE
   cls_version_client
   cls_user_client
   cls_rgw_gc_client
+  cls_cmpomap_client
   global
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
