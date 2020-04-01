@@ -1137,6 +1137,40 @@ struct cls_rgw_lc_obj_head
 };
 WRITE_CLASS_ENCODER(cls_rgw_lc_obj_head)
 
+struct cls_rgw_lc_entry {
+  std::string bucket;
+  uint64_t start_time; // if in_progress
+  uint32_t status;
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    encode(bucket, bl);
+    encode(start_time, bl);
+    encode(status, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::const_iterator& bl) {
+    DECODE_START(1, bl);
+    decode(bucket, bl);
+    decode(start_time, bl);
+    decode(status, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(cls_rgw_lc_entry);
+
+inline std::ostream& operator<<(std::ostream &os, cls_rgw_lc_entry& ent) {
+  os << "<ent`: bucket=";
+  os << ent.bucket;
+  os << "; start_time=";
+  os << ent.start_time;
+  os << "; status=";
+    os << ent.status;
+    os << ">";
+    return os;
+}
+
 struct cls_rgw_reshard_entry
 {
   ceph::real_time time;
