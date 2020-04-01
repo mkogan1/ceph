@@ -35,6 +35,9 @@ struct ObjectPosition {
             tag_tid == rhs.tag_tid &&
             entry_tid == rhs.entry_tid);
   }
+  inline bool operator!=(const ObjectPosition& rhs) const {
+    return !(*this == rhs);
+  }
 
   void encode(bufferlist& bl) const;
   void decode(bufferlist::const_iterator& iter);
