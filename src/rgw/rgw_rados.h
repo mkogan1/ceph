@@ -1237,7 +1237,7 @@ class RGWRados : public AdminSocketHook
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
       const string& obj_key, string *bucket_obj, int *shard_id);
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-                              int shard_id, string *bucket_obj);
+                              int shard_id, uint64_t gen_id, string *bucket_obj);
   int open_bucket_index(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
       map<int, string>& bucket_objs, int shard_id = -1, map<int, string> *bucket_instance_ids = NULL);
   template<typename T>
@@ -2482,7 +2482,7 @@ public:
       uint32_t num_shards, RGWBucketInfo::BIShardsHashType hash_type, string *bucket_obj, int *shard);
 
   void get_bucket_index_object(const string& bucket_oid_base, uint32_t num_shards,
-                               int shard_id, string *bucket_obj);
+                               int shard_id, uint64_t gen_id, string *bucket_obj);
 
   /**
    * Check the actual on-disk state of the object specified
