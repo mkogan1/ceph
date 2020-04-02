@@ -3359,7 +3359,7 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 }
 
 int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
-				int sid,
+				int sid, const rgw::bucket_index_layout_generation& idx_layout,
 				RGWBucketInfo* bucket_info_out)
 {
   bucket = _bucket;
@@ -3367,8 +3367,6 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
 
-  rgw::bucket_index_layout_generation generator;
-  uint64_t gen_number = generator.gen;
 
   RGWBucketInfo bucket_info;
   RGWBucketInfo* bucket_info_p =
@@ -3380,7 +3378,7 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 
   string oid;
 
-  ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, gen_number, &bucket_obj);
+  ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, idx_layout, &bucket_obj);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -3407,14 +3405,12 @@ int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info,
   return 0;
 }
 
-int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, int sid)
+int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout, int sid)
 {
   bucket = bucket_info.bucket;
   shard_id = sid;
-  rgw::bucket_index_layout_generation generator;
-  uint64_t gen_number = generator.gen;
 
-  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, gen_number, &bucket_obj);
+  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, idx_layout, &bucket_obj);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -5561,7 +5557,8 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
 }
 
 int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-                                      int shard_id, uint64_t gen_id, string *bucket_obj)
+                                      int shard_id, const rgw::bucket_index_layout_generation& idx_layout,
+				      string *bucket_obj)
 {
   string bucket_oid_base;
   int ret = open_bucket_index_base(bucket_info, index_ctx, bucket_oid_base);
@@ -5571,7 +5568,7 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
   RGWObjectCtx obj_ctx(this);
 
   get_bucket_index_object(bucket_oid_base, bucket_info.layout.current_index.layout.normal.num_shards,
-                          shard_id, gen_id, bucket_obj);
+                          shard_id, idx_layout.gen, bucket_obj);
   return 0;
 }
 
@@ -9294,10 +9291,10 @@ int RGWRados::bi_remove(BucketShard& bs)
   return 0;
 }
 
-int RGWRados::bi_list(rgw_bucket& bucket, int shard_id, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated)
+int RGWRados::bi_list(RGWBucketInfo& bucket_info, int shard_id, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated)
 {
   BucketShard bs(this);
-  int ret = bs.init(bucket, shard_id, nullptr /* no RGWBucketInfo */);
+  int ret = bs.init(bucket_info.bucket, shard_id, bucket_info.layout.current_index, nullptr /* no RGWBucketInfo */);
   if (ret < 0) {
     ldout(cct, 5) << "bs.init() returned ret=" << ret << dendl;
     return ret;
@@ -10481,6 +10478,7 @@ void RGWRados::get_bucket_index_object(const string& bucket_oid_base, uint32_t n
       snprintf(buf, sizeof(buf), "%s.%" PRIu64 ".%d", bucket_oid_base.c_str(), gen_id, shard_id);
       (*bucket_obj) = buf;
     } else {
+      // for backward compatibility, gen_id(0) will not be added in the object name
       snprintf(buf, sizeof(buf), "%s.%d", bucket_oid_base.c_str(), shard_id);
       (*bucket_obj) = buf;
     }
