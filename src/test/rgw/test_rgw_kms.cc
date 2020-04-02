@@ -27,7 +27,7 @@ class MockKvSecretEngine : public KvSecretEngine {
 public:
   MockKvSecretEngine(CephContext *cct) : KvSecretEngine(cct){}
 
-  MOCK_METHOD(int, send_request, (boost::string_view key_id, JSONParser* parser), (override));
+  MOCK_METHOD2(send_request, int(boost::string_view key_id, JSONParser* parser)); // XXX override omitted
 
 };
 
