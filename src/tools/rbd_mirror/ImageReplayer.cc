@@ -253,6 +253,7 @@ ImageReplayer<I>::~ImageReplayer()
   ceph_assert(m_on_start_finish == nullptr);
   ceph_assert(m_on_stop_finish == nullptr);
   ceph_assert(m_bootstrap_request == nullptr);
+  ceph_assert(m_update_status_task == nullptr);
   delete m_replayer_listener;
 }
 
@@ -451,6 +452,9 @@ void ImageReplayer<I>::handle_start_replay(int r) {
     ceph_assert(m_state == STATE_STARTING);
     m_state = STATE_REPLAYING;
     std::swap(m_on_start_finish, on_finish);
+
+    std::unique_lock timer_locker{m_threads->timer_lock};
+    schedule_update_mirror_image_replay_status();
   }
 
   update_mirror_image_status(true, boost::none);
@@ -583,6 +587,7 @@ void ImageReplayer<I>::on_stop_journal_replay(int r, const std::string &desc)
     m_state = STATE_STOPPING;
   }
 
+  cancel_update_mirror_image_replay_status();
   set_state_description(r, desc);
   update_mirror_image_status(true, boost::none);
   shut_down(0);
@@ -653,6 +658,60 @@ void ImageReplayer<I>::print_status(Formatter *f, stringstream *ss)
     f->flush(*ss);
   } else {
     *ss << m_image_spec << ": state: " << to_string(m_state);
+  }
+}
+
+template <typename I>
+void ImageReplayer<I>::schedule_update_mirror_image_replay_status() {
+  ceph_assert(ceph_mutex_is_locked_by_me(m_lock));
+  ceph_assert(ceph_mutex_is_locked_by_me(m_threads->timer_lock));
+  if (m_state != STATE_REPLAYING) {
+    return;
+  }
+
+  dout(10) << dendl;
+
+  // periodically update the replaying status even if nothing changes
+  // so that we can adjust our performance stats
+  ceph_assert(m_update_status_task == nullptr);
+  m_update_status_task = create_context_callback<
+    ImageReplayer<I>,
+    &ImageReplayer<I>::handle_update_mirror_image_replay_status>(this);
+  m_threads->timer->add_event_after(10, m_update_status_task);
+}
+
+template <typename I>
+void ImageReplayer<I>::handle_update_mirror_image_replay_status(int r) {
+  dout(10) << dendl;
+
+  auto ctx = new LambdaContext([this](int) {
+      update_mirror_image_status(false, boost::none);
+
+      {
+        std::unique_lock locker{m_lock};
+        std::unique_lock timer_locker{m_threads->timer_lock};
+        ceph_assert(m_update_status_task != nullptr);
+        m_update_status_task = nullptr;
+
+        schedule_update_mirror_image_replay_status();
+      }
+
+      m_in_flight_op_tracker.finish_op();
+    });
+
+  m_in_flight_op_tracker.start_op();
+  m_threads->work_queue->queue(ctx, 0);
+}
+
+template <typename I>
+void ImageReplayer<I>::cancel_update_mirror_image_replay_status() {
+  std::unique_lock timer_locker{m_threads->timer_lock};
+  if (m_update_status_task != nullptr) {
+    dout(10) << dendl;
+
+    if (m_threads->timer->cancel_event(m_update_status_task)) {
+      m_update_status_task = nullptr;
+    }
   }
 }
 
