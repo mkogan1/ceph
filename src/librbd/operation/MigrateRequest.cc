@@ -137,7 +137,7 @@ private:
 
       auto req = deep_copy::ObjectCopyRequest<I>::create(
         image_ctx.parent, &image_ctx, 0, 0, image_ctx.migration_info.snap_map,
-        m_object_no, flags, ctx);
+        m_object_no, flags, nullptr, ctx);
 
       ldout(cct, 20) << "deep copy object req " << req << ", object_no "
                      << m_object_no << dendl;
