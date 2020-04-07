@@ -530,9 +530,9 @@ int RGWLC::handle_multipart_expiration(
 
       for (auto obj_iter = objs.begin(); obj_iter != objs.end(); ++obj_iter) {
         if (obj_has_expired(obj_iter->meta.mtime, prefix_iter->second.mp_expiration)) {
-	  std::tuple<const lc_op&, rgw_bucket_dir_entry> t1 =
-	    {prefix_iter->second, *obj_iter};
-	  WorkItem w1 = t1;
+	  std::tuple<const lc_op&, rgw_bucket_dir_entry>
+	    t1(prefix_iter->second, *obj_iter);
+	  WorkItem w1{std::move(t1)};
 	  worker->workpool->enqueue(w1);
           if (going_down()) {
             return 0;
@@ -807,8 +807,8 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
 	  if (!key.ns.empty()) {
             continue;
           }
-	  std::tuple<lc_op&, rgw_bucket_dir_entry> t1 = {wq_op, *obj_iter};
-	  WorkItem w1 = t1;
+	  std::tuple<lc_op&, rgw_bucket_dir_entry> t1{wq_op, *obj_iter};
+	  WorkItem w1{std::move(t1)};
 	  worker->workpool->enqueue(w1);
         } /* obj_iter */
 	/* would permit passing o by reference, removes fetch overlap */
@@ -929,9 +929,9 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
           }
           if (skip_expiration || is_expired) {
 	    auto& wq_op = prefix_iter->second;
-	    std::tuple<lc_op&, rgw_bucket_dir_entry, bool> t1
-	      = {wq_op, *obj_iter, remove_indeed};
-	    WorkItem w1 = t1;
+	    std::tuple<lc_op&, rgw_bucket_dir_entry, bool>
+	      t1{wq_op, *obj_iter, remove_indeed};
+	    WorkItem w1{std::move(t1)};
 	    worker->workpool->enqueue(w1);
           }
         } /* obj_iter */
