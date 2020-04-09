@@ -17,7 +17,7 @@ namespace sts   {
 
 class WebTokenEngine : public rgw::auth::Engine {
   CephContext* const cct;
-  RGWCtl* const ctl;
+  RGWRados* store;
 
   using result_t = rgw::auth::Engine::result_t;
   using token_t = rgw::web_idp::WebTokenClaims;
@@ -44,11 +44,11 @@ class WebTokenEngine : public rgw::auth::Engine {
 
 public:
   WebTokenEngine(CephContext* const cct,
-                    RGWCtl* const ctl,
-                    const rgw::auth::TokenExtractor* const extractor,
-                    const rgw::auth::WebIdentityApplier::Factory* const apl_factory)
+		 RGWRados* store,
+		 const rgw::auth::TokenExtractor* const extractor,
+		 const rgw::auth::WebIdentityApplier::Factory* const apl_factory)
     : cct(cct),
-      ctl(ctl),
+      store(store),
       extractor(extractor),
       apl_factory(apl_factory) {
   }
@@ -93,9 +93,10 @@ public:
                   RGWRados* const store)
     : store(store),
       implicit_tenant_context(implicit_tenant_context),
-      web_token_engine(cct, ctl,
-                        static_cast<rgw::auth::TokenExtractor*>(this),
-                        static_cast<rgw::auth::WebIdentityApplier::Factory*>(this)) {
+      web_token_engine(cct,
+		       store,
+		       static_cast<rgw::auth::TokenExtractor*>(this),
+		       static_cast<rgw::auth::WebIdentityApplier::Factory*>(this)) {
     /* When the constructor's body is being executed, all member engines
      * should be initialized. Thus, we can safely add them. */
     using Control = rgw::auth::Strategy::Control;

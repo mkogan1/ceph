@@ -8,7 +8,7 @@
 
 #include "common/ceph_context.h"
 
-class RGWCtl;
+class RGWRados;
 
 class RGWOIDCProvider
 {
@@ -21,8 +21,8 @@ class RGWOIDCProvider
   static constexpr int MAX_OIDC_THUMBPRINT_LEN = 40;
   static constexpr int MAX_OIDC_URL_LEN = 255;
 
-  CephContext *cct;
-  RGWCtl *ctl;
+  CephContext* cct;
+  RGWRados* store;
   string id;
   string provider_url;
   string arn;
@@ -37,14 +37,14 @@ class RGWOIDCProvider
   bool validate_input();
 
 public:
-  RGWOIDCProvider(CephContext *cct,
-                    RGWCtl *ctl,
-                    string provider_url,
-                    string tenant,
-                    vector<string> client_ids,
-                    vector<string> thumbprints)
+  RGWOIDCProvider(CephContext* cct,
+		  RGWRados* store,
+		  string provider_url,
+		  string tenant,
+		  vector<string> client_ids,
+		  vector<string> thumbprints)
   : cct(cct),
-    ctl(ctl),
+    store(store),
     provider_url(std::move(provider_url)),
     tenant(std::move(tenant)),
     client_ids(std::move(client_ids)),
@@ -52,26 +52,26 @@ public:
   }
 
   RGWOIDCProvider(CephContext *cct,
-                    RGWCtl *ctl,
-                    string arn,
-                    string tenant)
+		  RGWRados* store,
+		  string arn,
+		  string tenant)
   : cct(cct),
-    ctl(ctl),
+    store(store),
     arn(std::move(arn)),
     tenant(std::move(tenant)) {
   }
 
   RGWOIDCProvider(CephContext *cct,
-                    RGWCtl *ctl,
-                    string tenant)
+		  RGWRados* store,
+		  string tenant)
   : cct(cct),
-    ctl(ctl),
+    store(store),
     tenant(std::move(tenant)) {}
 
   RGWOIDCProvider(CephContext *cct,
-          RGWCtl *ctl)
-  : cct(cct),
-    ctl(ctl) {}
+		  RGWRados* store)
+    : cct(cct), store(store)
+    {}
 
   RGWOIDCProvider() {}
 
