@@ -31,7 +31,7 @@ int RGWRestOIDCProvider::verify_permission()
     return -EINVAL;
   }
 
-  auto ret = check_caps(s->user->get_caps());
+  auto ret = check_caps(s->user->caps);
   if (ret == 0) {
     return ret;
   }
@@ -58,12 +58,12 @@ void RGWRestOIDCProvider::send_response()
   end_header(s, this);
 }
 
-int RGWRestOIDCProviderRead::check_caps(const RGWUserCaps& caps)
+int RGWRestOIDCProviderRead::check_caps(RGWUserCaps& caps)
 {
     return caps.check_cap("oidc-provider", RGW_CAP_READ);
 }
 
-int RGWRestOIDCProviderWrite::check_caps(const RGWUserCaps& caps)
+int RGWRestOIDCProviderWrite::check_caps(RGWUserCaps& caps)
 {
     return caps.check_cap("oidc-provider", RGW_CAP_WRITE);
 }
@@ -74,7 +74,7 @@ int RGWCreateOIDCProvider::verify_permission()
     return -EACCES;
   }
 
-  auto ret = check_caps(s->user->get_caps());
+  auto ret = check_caps(s->user->caps);
   if (ret == 0) {
     return ret;
   }
@@ -84,7 +84,7 @@ int RGWCreateOIDCProvider::verify_permission()
                               s,
                               rgw::ARN(idp_url,
                                         "oidc-provider",
-                                         s->user->get_tenant(), true),
+                                         s->user->user_id.tenant, true),
                                          get_op())) {
     return -EACCES;
   }
@@ -120,8 +120,8 @@ void RGWCreateOIDCProvider::execute()
     return;
   }
 
-  RGWOIDCProvider provider(s->cct, store->getRados()->pctl, provider_url,
-                            s->user->get_tenant(), client_ids, thumbprints);
+  RGWOIDCProvider provider(s->cct, store, provider_url,
+			   s->user->user_id.tenant, client_ids, thumbprints);
   op_ret = provider.create(true);
 
   if (op_ret == 0) {
@@ -139,7 +139,7 @@ void RGWCreateOIDCProvider::execute()
 
 void RGWDeleteOIDCProvider::execute()
 {
-  RGWOIDCProvider provider(s->cct, store->getRados()->pctl, provider_arn, s->user->get_tenant());
+  RGWOIDCProvider provider(s->cct, store, provider_arn, s->user->user_id.tenant);
   op_ret = provider.delete_obj();
   
   if (op_ret < 0 && op_ret != -ENOENT && op_ret != -EINVAL) {
@@ -157,7 +157,7 @@ void RGWDeleteOIDCProvider::execute()
 
 void RGWGetOIDCProvider::execute()
 {
-  RGWOIDCProvider provider(s->cct, store->getRados()->pctl, provider_arn, s->user->get_tenant());
+  RGWOIDCProvider provider(s->cct, store, provider_arn, s->user->user_id.tenant);
   op_ret = provider.get();
 
   if (op_ret < 0 && op_ret != -ENOENT && op_ret != -EINVAL) {
@@ -182,7 +182,7 @@ int RGWListOIDCProviders::verify_permission()
     return -EACCES;
   }
 
-  if (int ret = check_caps(s->user->get_caps()); ret == 0) {
+  if (int ret = check_caps(s->user->caps); ret == 0) {
     return ret;
   }
 
@@ -199,7 +199,8 @@ int RGWListOIDCProviders::verify_permission()
 void RGWListOIDCProviders::execute()
 {
   vector<RGWOIDCProvider> result;
-  op_ret = RGWOIDCProvider::get_providers(store->getRados(), s->user->get_tenant(), result);
+  op_ret = RGWOIDCProvider::get_providers(store, s->user->user_id.tenant,
+					  result);
 
   if (op_ret == 0) {
     s->formatter->open_array_section("ListOpenIDConnectProvidersResponse");
