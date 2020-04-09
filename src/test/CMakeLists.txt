@@ -263,6 +263,8 @@ if(${WITH_RADOSGW})
 add_executable(ceph_test_librgw_file
   librgw_file.cc
   )
+target_include_directories(ceph_test_librgw_file SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/rgw")
 if(WITH_RADOSGW_FCGI_FRONTEND)
 target_include_directories(ceph_test_librgw_file SYSTEM PRIVATE ${FCGI_INCLUDE_DIR})
 endif(WITH_RADOSGW_FCGI_FRONTEND)
@@ -278,6 +280,8 @@ target_link_libraries(ceph_test_librgw_file
 add_executable(ceph_test_librgw_file_cd
   librgw_file_cd.cc
   )
+target_include_directories(ceph_test_librgw_file_cd SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/rgw")
 target_link_libraries(ceph_test_librgw_file_cd
   rgw
   librados
@@ -290,6 +294,8 @@ target_link_libraries(ceph_test_librgw_file_cd
 add_executable(ceph_test_librgw_file_gp
   librgw_file_gp.cc
   )
+target_include_directories(ceph_test_librgw_file_gp SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/rgw")
 target_link_libraries(ceph_test_librgw_file_gp
   rgw
   librados
@@ -302,9 +308,11 @@ target_link_libraries(ceph_test_librgw_file_gp
 add_executable(ceph_test_librgw_file_nfsns
   librgw_file_nfsns.cc
   )
-target_include_directories(ceph_test_librgw_file_nfsns SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw")
+target_include_directories(ceph_test_librgw_file_nfsns SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/rgw")
 if(WITH_RADOSGW_FCGI_FRONTEND)
-target_include_directories(ceph_test_librgw_file_nfsns SYSTEM PRIVATE ${FCGI_INCLUDE_DIR})
+  target_include_directories(ceph_test_librgw_file_nfsns SYSTEM PRIVATE
+    ${FCGI_INCLUDE_DIR})
 endif(WITH_RADOSGW_FCGI_FRONTEND)
 target_link_libraries(ceph_test_librgw_file_nfsns
   rgw
@@ -317,11 +325,12 @@ if(WITH_BOOST_CONTEXT)
   target_link_libraries(ceph_test_librgw_file_nfsns spawn)
 endif()
 
-
 # ceph_test_librgw_file_aw (nfs write transaction [atomic write] tests)
 add_executable(ceph_test_librgw_file_aw
   librgw_file_aw.cc
   )
+target_include_directories(ceph_test_librgw_file_aw SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/rgw")
 target_link_libraries(ceph_test_librgw_file_aw
   rgw
   librados
@@ -342,6 +351,8 @@ target_link_libraries(ceph_test_librgw_file_marker
   ${UNITTEST_LIBS}
   ${EXTRALIBS}
   )
+target_include_directories(ceph_test_librgw_file_marker SYSTEM PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/rgw")
 if(WITH_BOOST_CONTEXT)
   target_link_libraries(ceph_test_librgw_file_marker spawn)
 endif()
