@@ -75,6 +75,8 @@ corenet_sendrecv_cyphesis_server_packets(ceph_t)
 corenet_tcp_bind_cyphesis_port(ceph_t)
 corenet_tcp_sendrecv_cyphesis_port(ceph_t)
 
+allow ceph_t http_cache_port_t:tcp_socket name_connect;
+
 corecmd_exec_bin(ceph_t)
 corecmd_exec_shell(ceph_t)
 
