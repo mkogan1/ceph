@@ -20,13 +20,13 @@ public:
 class RGWRestOIDCProviderRead : public RGWRestOIDCProvider {
 public:
   RGWRestOIDCProviderRead() = default;
-  int check_caps(const RGWUserCaps& caps) override;
+  int check_caps(RGWUserCaps& caps) override;
 };
 
 class RGWRestOIDCProviderWrite : public RGWRestOIDCProvider {
 public:
   RGWRestOIDCProviderWrite() = default;
-  int check_caps(const RGWUserCaps& caps) override;
+  int check_caps(RGWUserCaps& caps) override;
 };
 
 class RGWCreateOIDCProvider : public RGWRestOIDCProviderWrite {
