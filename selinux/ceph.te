@@ -2,6 +2,7 @@ policy_module(ceph, 1.1.1)
 
 require {
 	type sysfs_t;
+	type http_cache_port_t;
 	type var_run_t;
 	type random_device_t;
 	type urandom_device_t;
