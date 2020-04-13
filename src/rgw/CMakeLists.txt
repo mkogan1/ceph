@@ -19,9 +19,6 @@ function(gperf_generate input output)
     )
 endfunction()
 
-include_directories(jwt-cpp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(picojson PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
 set(librgw_common_srcs
   services/svc_finisher.cc
   services/svc_bi_rados.cc
@@ -168,6 +165,7 @@ add_library(rgw_common OBJECT ${librgw_common_srcs})
 target_include_directories(rgw_common SYSTEM PUBLIC "services")
 target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src")
 target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/fmt/include")
+target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 
 set(librgw_kmip_srcs
   rgw_kmip_client_impl.cc)
@@ -235,6 +233,7 @@ add_dependencies(rgw_a civetweb_h)
 target_compile_definitions(rgw_a PUBLIC "-DCLS_CLIENT_HIDE_IOCTX")
 target_include_directories(rgw_a PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src")
 target_include_directories(rgw_a SYSTEM PUBLIC "../rapidjson/include")
+target_include_directories(rgw_a SYSTEM PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)
   find_package(RabbitMQ REQUIRED)
@@ -416,6 +415,8 @@ set(librgw_admin_user_srcs
 add_library(rgw_admin_user SHARED
     ${librgw_admin_user_srcs}
     $<TARGET_OBJECTS:rgw_common>)
+
+target_include_directories(rgw_admin_user PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 
 add_dependencies(rgw_admin_user civetweb_h)
 
