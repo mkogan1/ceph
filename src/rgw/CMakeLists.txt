@@ -154,6 +154,7 @@ add_library(rgw_common OBJECT ${librgw_common_srcs})
 
 target_include_directories(rgw_common SYSTEM PUBLIC "services")
 target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src")
+target_include_directories(rgw_common PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 
 if(WITH_BOOST_CONTEXT)
   target_include_directories(rgw_common PRIVATE
@@ -211,6 +212,7 @@ add_dependencies(rgw_a civetweb_h)
 
 target_include_directories(rgw_a PUBLIC "${CMAKE_SOURCE_DIR}/src/dmclock/support/src")
 target_include_directories(rgw_a SYSTEM PUBLIC "../rapidjson/include")
+target_include_directories(rgw_a SYSTEM PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 
 target_link_libraries(rgw_a
   PRIVATE
@@ -272,6 +274,7 @@ if(WITH_BOOST_CONTEXT)
 endif()
 
 add_executable(radosgw rgw_main.cc)
+target_include_directories(radosgw PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw")
 target_link_libraries(radosgw radosgw_a librados
   cls_rgw_client cls_otp_client cls_lock_client cls_refcount_client
   cls_log_client cls_timeindex_client
@@ -396,6 +399,7 @@ endif()
 if(WITH_BOOST_CONTEXT)
   target_link_libraries(rgw_admin_user PRIVATE spawn)
 endif()
+target_include_directories(rgw_admin_user PRIVATE "${CMAKE_SOURCE_DIR}/src/rgw")
 
 if(WITH_TESTS)
   add_executable(ceph_rgw_jsonparser
