@@ -3,11 +3,13 @@
 @import 'defaults';
 
 .toast-success,
+.badge-success,
 .label-success {
   background-color: $color-success;
 }
 
 .toast-error,
+.badge-danger,
 .label-danger {
   background-color: $color-danger;
 }
