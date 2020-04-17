@@ -2642,10 +2642,10 @@ int RGWRados::Bucket::List::list_objects_ordered(
 
 done:
 
+  auto csz = (common_prefixes) ? common_prefixes->size() : 0;
   ldout(cct, 10) << "RGWRados::Bucket::List::" << __func__ <<
-    " INFO returning " <<
-    result->size() << " entries and " <<
-    common_prefixes->size() << " common prefixes" << dendl;
+    " INFO returning " << result->size() << " entries and "
+		 << csz << " common prefixes" << dendl;
 
   if (is_truncated) {
     *is_truncated = truncated;
