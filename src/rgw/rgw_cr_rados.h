@@ -673,12 +673,21 @@ class RGWGetBucketInstanceInfoCR : public RGWSimpleCoroutine {
 
   RGWAsyncGetBucketInstanceInfo *req{nullptr};
   
+private:
+  static inline const std::string key_to_biname(const std::string& key) {
+    auto pos = key.find('/');
+    if (pos == std::string::npos) {
+      return RGW_BUCKET_INSTANCE_MD_PREFIX + key;
+    }
+    return RGW_BUCKET_INSTANCE_MD_PREFIX + key.substr(0, pos) + ":"
+	+ key.substr(pos+1, std::string::npos);
+  }
 public:
   // metadata key constructor
   RGWGetBucketInstanceInfoCR(RGWAsyncRadosProcessor *_async_rados, RGWRados *_store,
                              const std::string& meta_key, RGWBucketInfo *_bucket_info)
     : RGWSimpleCoroutine(_store->ctx()), async_rados(_async_rados), store(_store),
-      oid(RGW_BUCKET_INSTANCE_MD_PREFIX + meta_key),
+      oid(key_to_biname(meta_key)),
       bucket_info(_bucket_info) {}
   // rgw_bucket constructor
   RGWGetBucketInstanceInfoCR(RGWAsyncRadosProcessor *_async_rados, RGWRados *_store,
