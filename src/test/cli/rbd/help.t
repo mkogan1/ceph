@@ -214,6 +214,7 @@
                    [--image-feature <image-feature>] [--image-shared] 
                    [--stripe-unit <stripe-unit>] [--stripe-count <stripe-count>] 
                    [--data-pool <data-pool>] 
+                   [--mirror-image-mode <mirror-image-mode>] 
                    [--journal-splay-width <journal-splay-width>] 
                    [--journal-object-size <journal-object-size>] 
                    [--journal-pool <journal-pool>] 
@@ -246,6 +247,7 @@
     --stripe-unit arg         stripe unit in B/K/M
     --stripe-count arg        stripe count
     --data-pool arg           data pool
+    --mirror-image-mode arg   mirror image mode [journal or snapshot]
     --journal-splay-width arg number of active journal objects
     --journal-object-size arg size of journal objects [4K <= size <= 64M]
     --journal-pool arg        pool for journal objects
@@ -416,6 +418,7 @@
                   [--image-feature <image-feature>] [--image-shared] 
                   [--stripe-unit <stripe-unit>] [--stripe-count <stripe-count>] 
                   [--data-pool <data-pool>] 
+                  [--mirror-image-mode <mirror-image-mode>] 
                   [--journal-splay-width <journal-splay-width>] 
                   [--journal-object-size <journal-object-size>] 
                   [--journal-pool <journal-pool>] [--sparse-size <sparse-size>] 
@@ -450,6 +453,7 @@
     --stripe-unit arg            stripe unit in B/K/M
     --stripe-count arg           stripe count
     --data-pool arg              data pool
+    --mirror-image-mode arg      mirror image mode [journal or snapshot]
     --journal-splay-width arg    number of active journal objects
     --journal-object-size arg    size of journal objects [4K <= size <= 64M]
     --journal-pool arg           pool for journal objects
@@ -468,6 +472,7 @@
                     [--image-feature <image-feature>] [--image-shared] 
                     [--stripe-unit <stripe-unit>] 
                     [--stripe-count <stripe-count>] [--data-pool <data-pool>] 
+                    [--mirror-image-mode <mirror-image-mode>] 
                     [--journal-splay-width <journal-splay-width>] 
                     [--journal-object-size <journal-object-size>] 
                     [--journal-pool <journal-pool>] 
@@ -496,6 +501,7 @@
     --stripe-unit arg         stripe unit in B/K/M
     --stripe-count arg        stripe count
     --data-pool arg           data pool
+    --mirror-image-mode arg   mirror image mode [journal or snapshot]
     --journal-splay-width arg number of active journal objects
     --journal-object-size arg size of journal objects [4K <= size <= 64M]
     --journal-pool arg        pool for journal objects
@@ -517,6 +523,7 @@
                        [--image-feature <image-feature>] [--image-shared] 
                        [--stripe-unit <stripe-unit>] 
                        [--stripe-count <stripe-count>] [--data-pool <data-pool>] 
+                       [--mirror-image-mode <mirror-image-mode>] 
                        [--journal-splay-width <journal-splay-width>] 
                        [--journal-object-size <journal-object-size>] 
                        [--journal-pool <journal-pool>] [--flatten] 
@@ -551,6 +558,7 @@
     --stripe-unit arg            stripe unit in B/K/M
     --stripe-count arg           stripe count
     --data-pool arg              data pool
+    --mirror-image-mode arg      mirror image mode [journal or snapshot]
     --journal-splay-width arg    number of active journal objects
     --journal-object-size arg    size of journal objects [4K <= size <= 64M]
     --journal-pool arg           pool for journal objects
@@ -1091,6 +1099,7 @@
                     [--image-feature <image-feature>] [--image-shared] 
                     [--stripe-unit <stripe-unit>] 
                     [--stripe-count <stripe-count>] [--data-pool <data-pool>] 
+                    [--mirror-image-mode <mirror-image-mode>] 
                     [--journal-splay-width <journal-splay-width>] 
                     [--journal-object-size <journal-object-size>] 
                     [--journal-pool <journal-pool>] 
@@ -1123,6 +1132,7 @@
     --stripe-unit arg         stripe unit in B/K/M
     --stripe-count arg        stripe count
     --data-pool arg           data pool
+    --mirror-image-mode arg   mirror image mode [journal or snapshot]
     --journal-splay-width arg number of active journal objects
     --journal-object-size arg size of journal objects [4K <= size <= 64M]
     --journal-pool arg        pool for journal objects
@@ -1469,6 +1479,7 @@
                                [--image-shared] [--stripe-unit <stripe-unit>] 
                                [--stripe-count <stripe-count>] 
                                [--data-pool <data-pool>] 
+                               [--mirror-image-mode <mirror-image-mode>] 
                                [--journal-splay-width <journal-splay-width>] 
                                [--journal-object-size <journal-object-size>] 
                                [--journal-pool <journal-pool>] [--flatten] 
@@ -1501,6 +1512,7 @@
     --stripe-unit arg         stripe unit in B/K/M
     --stripe-count arg        stripe count
     --data-pool arg           data pool
+    --mirror-image-mode arg   mirror image mode [journal or snapshot]
     --journal-splay-width arg number of active journal objects
     --journal-object-size arg size of journal objects [4K <= size <= 64M]
     --journal-pool arg        pool for journal objects
