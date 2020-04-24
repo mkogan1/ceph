@@ -1527,10 +1527,12 @@ int RGWLC::list_lc_progress(const string& marker, uint32_t max_entries,
 			    vector<cls_rgw_lc_entry>& progress_map)
 {
   int index = 0;
+  progress_map.clear();
   for(; index <max_objs; index++) {
+    vector<cls_rgw_lc_entry> entries;
     int ret =
       cls_rgw_lc_list(store->lc_pool_ctx, obj_names[index], marker,
-		      max_entries, progress_map);
+		      max_entries, entries);
     if (ret < 0) {
       if (ret == -ENOENT) {
         ldpp_dout(this, 10) << __func__ << "() ignoring unfound lc object="
@@ -1540,6 +1542,8 @@ int RGWLC::list_lc_progress(const string& marker, uint32_t max_entries,
         return ret;
       }
     }
+    progress_map.reserve(progress_map.size() + entries.size());
+    progress_map.insert(progress_map.end(), entries.begin(), entries.end());
   }
   return 0;
 }
