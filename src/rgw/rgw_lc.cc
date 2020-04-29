@@ -426,6 +426,7 @@ public:
       store(_store), bucket_info(_bucket_info),
       target(store, bucket_info), list_op(&target) {
     list_op.params.list_versions = bucket_info.versioned();
+    list_op.params.allow_unordered = true;
     delay_ms = store->ctx()->_conf.get_val<int64_t>("rgw_lc_thread_delay");
   }
 
