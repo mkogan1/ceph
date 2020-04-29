@@ -1617,9 +1617,6 @@ static inline void map_qs_metadata(struct req_state* s)
 
 int RGWPutObj_ObjStore_S3::get_params()
 {
-  if (!s->length)
-    return -ERR_LENGTH_REQUIRED;
-
   map<string, bufferlist> src_attrs;
   size_t pos;
   int ret;
