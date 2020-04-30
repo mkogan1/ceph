@@ -16,6 +16,8 @@
 #ifndef RGW_REST_LOG_H
 #define RGW_REST_LOG_H
 
+#include "rgw_rest.h"
+#include "rgw_rest_s3.h"
 #include "rgw_metadata.h"
 
 class RGWOp_BILog_List : public RGWRESTOp {
