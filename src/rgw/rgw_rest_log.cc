@@ -34,46 +34,24 @@
 #define LOG_CLASS_LIST_MAX_ENTRIES (1000)
 #define dout_subsys ceph_subsys_rgw
 
-static int parse_date_str(string& in, real_time& out) {
-  uint64_t epoch = 0;
-  uint64_t nsec = 0;
-
-  if (!in.empty()) {
-    if (utime_t::parse_date(in, &epoch, &nsec) < 0) {
-      dout(5) << "Error parsing date " << in << dendl;
-      return -EINVAL;
-    }
-  }
-  out = utime_t(epoch, nsec).to_real_time();
-  return 0;
-}
-
 void RGWOp_MDLog_List::execute() {
   string   period = s->info.args.get("period");
   string   shard = s->info.args.get("id");
   string   max_entries_str = s->info.args.get("max-entries");
-  string   st = s->info.args.get("start-time"),
-           et = s->info.args.get("end-time"),
-           marker = s->info.args.get("marker"),
+  string   marker = s->info.args.get("marker"),
            err;
-  real_time  ut_st, 
-             ut_et;
   void    *handle;
   unsigned shard_id, max_entries = LOG_CLASS_LIST_MAX_ENTRIES;
+
+  if (s->info.args.exists("start-time") ||
+      s->info.args.exists("end-time")) {
+    dout(5) << "start-time and end-time are no longer accepted" << dendl;
+    http_ret = -EINVAL;
+  }
 
   shard_id = (unsigned)strict_strtol(shard.c_str(), 10, &err);
   if (!err.empty()) {
     dout(5) << "Error parsing shard_id " << shard << dendl;
-    http_ret = -EINVAL;
-    return;
-  }
-
-  if (parse_date_str(st, ut_st) < 0) {
-    http_ret = -EINVAL;
-    return;
-  }
-
-  if (parse_date_str(et, ut_et) < 0) {
     http_ret = -EINVAL;
     return;
   }
@@ -88,7 +66,7 @@ void RGWOp_MDLog_List::execute() {
     if (max_entries > LOG_CLASS_LIST_MAX_ENTRIES) {
       max_entries = LOG_CLASS_LIST_MAX_ENTRIES;
     }
-  } 
+  }
 
   if (period.empty()) {
     ldout(s->cct, 5) << "Missing period id trying to use current" << dendl;
@@ -102,7 +80,7 @@ void RGWOp_MDLog_List::execute() {
 
   RGWMetadataLog meta_log{s->cct, store, period};
 
-  meta_log.init_list_entries(shard_id, ut_st, ut_et, marker, &handle);
+  meta_log.init_list_entries(shard_id, {}, {}, marker, &handle);
 
   http_ret = meta_log.list_entries(handle, max_entries, entries,
                                    &last_marker, &truncated);
@@ -193,16 +171,32 @@ void RGWOp_MDLog_ShardInfo::send_response() {
 }
 
 void RGWOp_MDLog_Delete::execute() {
-  string   st = s->info.args.get("start-time"),
-           et = s->info.args.get("end-time"),
-           start_marker = s->info.args.get("start-marker"),
-           end_marker = s->info.args.get("end-marker"),
+  string   marker = s->info.args.get("marker"),
            period = s->info.args.get("period"),
            shard = s->info.args.get("id"),
            err;
-  real_time  ut_st, 
-             ut_et;
   unsigned shard_id;
+
+
+  if (s->info.args.exists("start-time") ||
+      s->info.args.exists("end-time")) {
+    dout(5) << "start-time and end-time are no longer accepted" << dendl;
+    http_ret = -EINVAL;
+  }
+
+  if (s->info.args.exists("start-marker")) {
+    dout(5) << "start-marker is no longer accepted" << dendl;
+    http_ret = -EINVAL;
+  }
+
+  if (s->info.args.exists("end-marker")) {
+    if (!s->info.args.exists("marker")) {
+      marker = s->info.args.get("end-marker");
+    } else {
+      dout(5) << "end-marker and marker cannot both be provided" << dendl;
+      http_ret = -EINVAL;
+    }
+  }
 
   http_ret = 0;
 
@@ -212,17 +206,8 @@ void RGWOp_MDLog_Delete::execute() {
     http_ret = -EINVAL;
     return;
   }
-  if (et.empty() && end_marker.empty()) { /* bounding end */
-    http_ret = -EINVAL;
-    return;
-  }
 
-  if (parse_date_str(st, ut_st) < 0) {
-    http_ret = -EINVAL;
-    return;
-  }
-
-  if (parse_date_str(et, ut_et) < 0) {
+  if (marker.empty()) { /* bounding end */
     http_ret = -EINVAL;
     return;
   }
@@ -239,7 +224,7 @@ void RGWOp_MDLog_Delete::execute() {
   }
   RGWMetadataLog meta_log{s->cct, store, period};
 
-  http_ret = meta_log.trim(shard_id, ut_st, ut_et, start_marker, end_marker);
+  http_ret = meta_log.trim(shard_id, {}, {}, {}, marker);
 }
 
 void RGWOp_MDLog_Lock::execute() {
@@ -567,30 +552,22 @@ void RGWOp_BILog_Delete::execute() {
 void RGWOp_DATALog_List::execute() {
   string   shard = s->info.args.get("id");
 
-  string   st = s->info.args.get("start-time"),
-           et = s->info.args.get("end-time"),
-           max_entries_str = s->info.args.get("max-entries"),
+  string   max_entries_str = s->info.args.get("max-entries"),
            marker = s->info.args.get("marker"),
            err;
-  real_time  ut_st, 
-             ut_et;
   unsigned shard_id, max_entries = LOG_CLASS_LIST_MAX_ENTRIES;
+
+  if (s->info.args.exists("start-time") ||
+      s->info.args.exists("end-time")) {
+    dout(5) << "start-time and end-time are no longer accepted" << dendl;
+    http_ret = -EINVAL;
+  }
 
   s->info.args.get_bool("extra-info", &extra_info, false);
 
   shard_id = (unsigned)strict_strtol(shard.c_str(), 10, &err);
   if (!err.empty()) {
     dout(5) << "Error parsing shard_id " << shard << dendl;
-    http_ret = -EINVAL;
-    return;
-  }
-
-  if (parse_date_str(st, ut_st) < 0) {
-    http_ret = -EINVAL;
-    return;
-  }
-
-  if (parse_date_str(et, ut_et) < 0) {
     http_ret = -EINVAL;
     return;
   }
@@ -609,9 +586,9 @@ void RGWOp_DATALog_List::execute() {
 
   // Note that last_marker is updated to be the marker of the last
   // entry listed
-  http_ret = store->data_log->list_entries(shard_id, ut_st, ut_et,
-                                           max_entries, entries, marker,
-                                           &last_marker, &truncated);
+  http_ret = store->data_log->list_entries(shard_id, {}, {}, max_entries,
+					   entries, marker, &last_marker,
+					   &truncated);
 }
 
 void RGWOp_DATALog_List::send_response() {
@@ -800,17 +777,32 @@ void RGWOp_DATALog_Notify::execute() {
 }
 
 void RGWOp_DATALog_Delete::execute() {
-  string   st = s->info.args.get("start-time"),
-           et = s->info.args.get("end-time"),
-           start_marker = s->info.args.get("start-marker"),
-           end_marker = s->info.args.get("end-marker"),
+  string   marker = s->info.args.get("marker"),
            shard = s->info.args.get("id"),
            err;
-  real_time  ut_st, 
-             ut_et;
   unsigned shard_id;
 
   http_ret = 0;
+
+  if (s->info.args.exists("start-time") ||
+      s->info.args.exists("end-time")) {
+    dout(5) << "start-time and end-time are no longer accepted" << dendl;
+    http_ret = -EINVAL;
+  }
+
+  if (s->info.args.exists("start-marker")) {
+    dout(5) << "start-marker is no longer accepted" << dendl;
+    http_ret = -EINVAL;
+  }
+
+  if (s->info.args.exists("end-marker")) {
+    if (!s->info.args.exists("marker")) {
+      marker = s->info.args.get("end-marker");
+    } else {
+      dout(5) << "end-marker and marker cannot both be provided" << dendl;
+      http_ret = -EINVAL;
+    }
+  }
 
   shard_id = (unsigned)strict_strtol(shard.c_str(), 10, &err);
   if (!err.empty()) {
@@ -818,22 +810,12 @@ void RGWOp_DATALog_Delete::execute() {
     http_ret = -EINVAL;
     return;
   }
-  if (et.empty() && end_marker.empty()) { /* bounding end */
+  if (marker.empty()) { /* bounding end */
     http_ret = -EINVAL;
     return;
   }
 
-  if (parse_date_str(st, ut_st) < 0) {
-    http_ret = -EINVAL;
-    return;
-  }
-
-  if (parse_date_str(et, ut_et) < 0) {
-    http_ret = -EINVAL;
-    return;
-  }
-
-  http_ret = store->data_log->trim_entries(shard_id, ut_st, ut_et, start_marker, end_marker);
+  http_ret = store->data_log->trim_entries(shard_id, {}, {}, {}, marker);
 }
 
 // not in header to avoid pulling in rgw_sync.h
