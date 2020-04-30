@@ -7,6 +7,8 @@
     start and end dates, but does accept a single optional start marker.
   * "mdlog-trim", "datalog-trim", "sync-error-trim" only accept a
     single marker giving the end of the trimmed range.
+  * Similarly the date ranges and marker ranges have been removed on
+    the RESTful DATALog and MDLog list and trim operations.
 
 * RGW: The ``radosgw-admin`` sub-commands dealing with orphans --
   ``radosgw-admin orphans find``, ``radosgw-admin orphans finish``,
