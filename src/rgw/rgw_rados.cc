@@ -9997,14 +9997,38 @@ int RGWRados::cls_user_reset_stats(const string& user_id)
   rgw_raw_obj obj(svc.zone->get_zone_params().user_uid_pool, buckets_obj_id);
 
   rgw_rados_ref ref;
-  int r = get_raw_obj_ref(obj, &ref);
+  int rval, r = get_raw_obj_ref(obj, &ref);
   if (r < 0) {
     return r;
   }
 
-  librados::ObjectWriteOperation op;
-  ::cls_user_reset_stats(op);
-  return ref.ioctx.operate(ref.obj.oid, &op);
+  cls_user_reset_stats2_op call;
+  cls_user_reset_stats2_ret ret;
+
+  do {
+    buffer::list in, out;
+    librados::ObjectWriteOperation op;
+
+    call.time = real_clock::now();
+    ret.update_call(call);
+
+    encode(call, in);
+    op.exec("user", "reset_user_stats2", in, &out, &rval);
+    r = rgw_rados_operate(
+      ref.ioctx, ref.obj.oid, &op, librados::OPERATION_RETURNVEC,
+      null_yield);
+    if (r < 0) {
+      return r;
+    }
+    try {
+      auto bliter = out.cbegin();
+      decode(ret, bliter);
+    } catch (ceph::buffer::error& err) {
+      return -EINVAL;
+    }
+  } while (ret.truncated);
+
+  return rval;
 }
 
 int RGWRados::cls_user_get_header_async(const string& user_id, RGWGetUserHeader_CB *ctx)
