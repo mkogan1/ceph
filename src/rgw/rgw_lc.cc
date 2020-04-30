@@ -145,9 +145,9 @@ using WorkItem =
   boost::variant<void*,
 		 /* out-of-line delete */
 		 /* uncompleted MPU expiration */
-		 std::tuple<const lc_op&, rgw_bucket_dir_entry>,
+		 std::tuple<const lc_op, rgw_bucket_dir_entry>,
 		 /* out-of-line delete versioned */
-		 std::tuple<const lc_op&, rgw_bucket_dir_entry, bool>
+		 std::tuple<const lc_op, rgw_bucket_dir_entry, bool>
 		 >;
 
 class WorkQ : public Thread
@@ -484,7 +484,7 @@ int RGWLC::handle_multipart_expiration(
   list_op.params.filter = &mp_filter;
 
   auto pf = [&](RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {
-    auto wt = boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry>>(wi);
+    auto wt = boost::get<std::tuple<const lc_op, rgw_bucket_dir_entry>>(wi);
     //auto& op = std::get<0>(wt);
     auto& o = std::get<1>(wt);
     RGWMPObj mp_obj;
@@ -530,7 +530,7 @@ int RGWLC::handle_multipart_expiration(
 
       for (auto obj_iter = objs.begin(); obj_iter != objs.end(); ++obj_iter) {
         if (obj_has_expired(obj_iter->meta.mtime, prefix_iter->second.mp_expiration)) {
-	  std::tuple<const lc_op&, rgw_bucket_dir_entry>
+	  std::tuple<const lc_op, rgw_bucket_dir_entry>
 	    t1(prefix_iter->second, *obj_iter);
 	  WorkItem w1{std::move(t1)};
 	  worker->workpool->enqueue(w1);
@@ -640,7 +640,7 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
 					 WorkItem& wi) {
     auto cct = wk->get_lc()->cct;
     auto wt =
-      boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry>>(wi);
+      boost::get<std::tuple<const lc_op, rgw_bucket_dir_entry>>(wi);
     auto& op = std::get<0>(wt);
     auto& o = std::get<1>(wt);
     ldout(cct, 20) << __func__ << "(): key=" << o.key << dendl;
@@ -714,7 +714,7 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
     RGWLC::LCWorker* wk, WorkQ* wq, WorkItem& wi) {
     auto cct = wk->get_lc()->cct;
     auto wt =
-      boost::get<std::tuple<const lc_op&, rgw_bucket_dir_entry, bool>>(wi);
+      boost::get<std::tuple<const lc_op, rgw_bucket_dir_entry, bool>>(wi);
     //auto& op = std::get<0>(wt);
     auto& o = std::get<1>(wt);
     bool remove_indeed = std::get<2>(wt);
