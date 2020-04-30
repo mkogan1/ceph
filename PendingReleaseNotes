@@ -1,6 +1,13 @@
 >= 14.2.11
 ----------
 
+* The allowable options for some "radosgw-admin" commands have been changed.
+
+  * "mdlog-list", "datalog-list", "sync-error-list" no longer accepts
+    start and end dates, but does accept a single optional start marker.
+  * "mdlog-trim", "datalog-trim", "sync-error-trim" only accept a
+    single marker giving the end of the trimmed range.
+
 * RGW: The ``radosgw-admin`` sub-commands dealing with orphans --
   ``radosgw-admin orphans find``, ``radosgw-admin orphans finish``,
   ``radosgw-admin orphans list-jobs`` -- have been deprecated. They
