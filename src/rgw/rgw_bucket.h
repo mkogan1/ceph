@@ -514,19 +514,11 @@ class RGWDataChangesLog {
   void register_renew(rgw_bucket_shard& bs);
   void update_renewed(rgw_bucket_shard& bs, ceph::real_time expiration);
 
-  class ChangesRenewThread : public Thread {
-    CephContext* cct;
-    RGWDataChangesLog *log;
-    ceph::mutex lock = ceph::mutex("ChangesRenewThread::lock");
-    ceph::condition_variable cond;
-
-  public:
-    ChangesRenewThread(CephContext *_cct, RGWDataChangesLog *_log) : cct(_cct), log(_log) {}
-    void* entry() override;
-    void stop();
-  };
-
-  ChangesRenewThread *renew_thread;
+  ceph::mutex renew_lock = ceph::make_mutex("ChangesRenewThread::lock");
+  ceph::condition_variable renew_cond;
+  void renew_run();
+  void renew_stop();
+  std::thread renew_thread;
 
 public:
 
@@ -535,48 +527,40 @@ public:
     num_shards = cct->_conf->rgw_data_log_num_shards;
 
     oids = new std::string[num_shards];
-
-    std::string prefix = cct->_conf->rgw_data_log_obj_prefix;
-
-    if (prefix.empty()) {
-      prefix = "data_log";
-    }
-
     for (int i = 0; i < num_shards; i++) {
-      char buf[16];
-      snprintf(buf, sizeof(buf), "%s.%d", prefix.c_str(), i);
-      oids[i] = buf;
+      oids[i] = get_oid(i);
     }
 
-    renew_thread = new ChangesRenewThread(cct, this);
-    renew_thread->create("rgw_dt_lg_renew");
+    renew_thread = make_named_thread("rgw_dt_lg_renew",
+				     &RGWDataChangesLog::renew_run, this);
   }
 
   ~RGWDataChangesLog();
 
   int choose_oid(const rgw_bucket_shard& bs);
-  const std::string& get_oid(int shard_id) const { return oids[shard_id]; }
+  std::string get_oid(int shard_id) const;
   int add_entry(rgw_bucket& bucket, int shard_id);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int renew_entries();
-  int list_entries(int shard, const real_time& start_time, const real_time& end_time, int max_entries,
-		   list<rgw_data_change_log_entry>& entries,
-		   const string& marker,
-		   string *out_marker,
-		   bool *truncated);
-  int trim_entries(int shard_id, const real_time& start_time, const real_time& end_time,
-                   const string& start_marker, const string& end_marker);
+  int list_entries(int shard, int max_entries,
+		   std::vector<rgw_data_change_log_entry>& entries,
+		   std::optional<std::string_view> marker,
+		   std::string* out_marker, bool *truncated);
+  int trim_entries(int shard_id, std::string_view _marker);
+  int trim_entries(int shard_id, std::string_view _marker,
+		   librados::AioCompletion* c);
   int get_info(int shard_id, RGWDataChangesLogInfo *info);
   int lock_exclusive(int shard_id, timespan duration, string& zone_id, string& owner_id);
   int unlock(int shard_id, string& zone_id, string& owner_id);
   struct LogMarker {
     int shard = 0;
-    std::string marker;
+    std::optional<std::string> marker;
 
     LogMarker() = default;
   };
-  int list_entries(const real_time& start_time, const real_time& end_time, int max_entries,
-               list<rgw_data_change_log_entry>& entries, LogMarker& marker, bool *ptruncated);
+  int list_entries(int max_entries,
+		   std::vector<rgw_data_change_log_entry>& entries,
+		   LogMarker& marker, bool* ptruncated);
 
   void mark_modified(int shard_id, const rgw_bucket_shard& bs);
   void read_clear_modified(map<int, set<string> > &modified);
@@ -585,7 +569,7 @@ public:
     this->observer = observer;
   }
 
-  bool going_down();
+  bool going_down() const;
 };
 
 bool rgw_find_bucket_by_id(CephContext *cct, RGWMetadataManager *mgr, const string& marker,

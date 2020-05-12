@@ -586,7 +586,7 @@ void RGWOp_DATALog_List::execute() {
 
   // Note that last_marker is updated to be the marker of the last
   // entry listed
-  http_ret = store->data_log->list_entries(shard_id, {}, {}, max_entries,
+  http_ret = store->data_log->list_entries(shard_id, max_entries,
 					   entries, marker, &last_marker,
 					   &truncated);
 }
@@ -604,7 +604,7 @@ void RGWOp_DATALog_List::send_response() {
   s->formatter->dump_bool("truncated", truncated);
   {
     s->formatter->open_array_section("entries");
-    for (list<rgw_data_change_log_entry>::iterator iter = entries.begin();
+    for (auto iter = entries.begin();
 	 iter != entries.end(); ++iter) {
       rgw_data_change_log_entry& entry = *iter;
       if (!extra_info) {
@@ -815,7 +815,7 @@ void RGWOp_DATALog_Delete::execute() {
     return;
   }
 
-  http_ret = store->data_log->trim_entries(shard_id, {}, {}, {}, marker);
+  http_ret = store->data_log->trim_entries(shard_id, marker);
 }
 
 // not in header to avoid pulling in rgw_sync.h

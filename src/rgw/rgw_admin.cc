@@ -7853,11 +7853,16 @@ next:
     RGWDataChangesLog::LogMarker log_marker;
 
     do {
-      list<rgw_data_change_log_entry> entries;
+      std::vector<rgw_data_change_log_entry> entries;
       if (specified_shard_id) {
-        ret = log->list_entries(shard_id, {}, {}, max_entries - count, entries, marker, &marker, &truncated);
+        ret = log->list_entries(shard_id, max_entries - count, entries,
+				marker.empty() ?
+				std::nullopt :
+				std::make_optional(marker),
+				&marker, &truncated);
       } else {
-        ret = log->list_entries({}, {}, max_entries - count, entries, log_marker, &truncated);
+        ret = log->list_entries(max_entries - count, entries, log_marker,
+				&truncated);
       }
       if (ret < 0) {
         cerr << "ERROR: list_bi_log_entries(): " << cpp_strerror(-ret) << std::endl;
@@ -7866,9 +7871,9 @@ next:
 
       count += entries.size();
 
-      for (list<rgw_data_change_log_entry>::iterator iter = entries.begin(); iter != entries.end(); ++iter) {
-        rgw_data_change_log_entry& entry = *iter;
-        if (!extra_info) {
+      for (auto iter = entries.begin(); iter != entries.end(); ++iter) {
+	rgw_data_change_log_entry& entry = *iter;
+	if (!extra_info) {
           encode_json("entry", entry.entry, formatter);
         } else {
           encode_json("entry", entry, formatter);
@@ -7950,7 +7955,7 @@ next:
     // loop until -ENODATA
     do {
       auto datalog = store->data_log;
-      ret = datalog->trim_entries(shard_id, {}, {}, {}, marker);
+      ret = datalog->trim_entries(shard_id, marker);
     } while (ret == 0);
 
     if (ret < 0 && ret != -ENODATA) {
