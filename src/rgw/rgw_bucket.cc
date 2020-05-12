@@ -10,6 +10,10 @@
 #include <boost/utility/string_ref.hpp>
 #include <boost/format.hpp>
 
+#undef FMT_HEADER_ONLY
+#define FMT_HEADER_ONLY 1
+#include "fmt/format.h"
+
 #include "common/errno.h"
 #include "common/ceph_json.h"
 #include "include/scope_guard.h"
@@ -2426,6 +2430,14 @@ int RGWDataChangesLog::choose_oid(const rgw_bucket_shard& bs) {
     return (int)r;
 }
 
+std::string RGWDataChangesLog::get_oid(int i) const {
+  std::string_view prefix = cct->_conf->rgw_data_log_obj_prefix;
+  if (prefix.empty()) {
+    prefix = "data_log"sv;
+  }
+  return fmt::format("{}.{}", prefix, i);
+}
+
 int RGWDataChangesLog::renew_entries()
 {
   if (!store->svc.zone->need_to_log_data())
@@ -2623,24 +2635,21 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   return ret;
 }
 
-int RGWDataChangesLog::list_entries(int shard, const real_time& start_time, const real_time& end_time, int max_entries,
-				    list<rgw_data_change_log_entry>& entries,
-				    const string& marker,
-				    string *out_marker,
-				    bool *truncated) {
-  if (shard >= num_shards)
-    return -EINVAL;
-
+int RGWDataChangesLog::list_entries(int shard, int max_entries,
+				    std::vector<rgw_data_change_log_entry>& entries,
+				    std::optional<std::string_view> marker,
+				    string* out_marker, bool *truncated)
+{
+  assert(shard < num_shards);
   list<cls_log_entry> log_entries;
 
-  int ret = store->time_log_list(oids[shard], start_time, end_time,
-				 max_entries, log_entries, marker,
+  int ret = store->time_log_list(oids[shard], {}, {}, max_entries, log_entries,
+				 std::string(marker.value_or("")),
 				 out_marker, truncated);
   if (ret < 0)
     return ret;
 
-  list<cls_log_entry>::iterator iter;
-  for (iter = log_entries.begin(); iter != log_entries.end(); ++iter) {
+  for (auto iter = log_entries.begin(); iter != log_entries.end(); ++iter) {
     rgw_data_change_log_entry log_entry;
     log_entry.log_id = iter->id;
     real_time rt = iter->timestamp.to_real_time();
@@ -2658,15 +2667,17 @@ int RGWDataChangesLog::list_entries(int shard, const real_time& start_time, cons
   return 0;
 }
 
-int RGWDataChangesLog::list_entries(const real_time& start_time, const real_time& end_time, int max_entries,
-             list<rgw_data_change_log_entry>& entries, LogMarker& marker, bool *ptruncated) {
+int RGWDataChangesLog::list_entries(int max_entries, std::vector<rgw_data_change_log_entry>& entries,
+				    LogMarker& marker, bool* ptruncated)
+{
   bool truncated;
   entries.clear();
 
   for (; marker.shard < num_shards && (int)entries.size() < max_entries;
-       marker.shard++, marker.marker.clear()) {
-    int ret = list_entries(marker.shard, start_time, end_time, max_entries - entries.size(), entries,
-			   marker.marker, NULL, &truncated);
+       marker.shard++, marker.marker.reset()) {
+    int ret = list_entries(marker.shard, max_entries - entries.size(),
+			   entries, marker.marker, NULL, &truncated);
+
     if (ret == -ENOENT) {
       continue;
     }
@@ -2686,8 +2697,7 @@ int RGWDataChangesLog::list_entries(const real_time& start_time, const real_time
 
 int RGWDataChangesLog::get_info(int shard_id, RGWDataChangesLogInfo *info)
 {
-  if (shard_id >= num_shards)
-    return -EINVAL;
+  assert(shard_id < num_shards);
 
   string oid = oids[shard_id];
 
@@ -2703,14 +2713,19 @@ int RGWDataChangesLog::get_info(int shard_id, RGWDataChangesLogInfo *info)
   return 0;
 }
 
-int RGWDataChangesLog::trim_entries(int shard_id, const real_time& start_time, const real_time& end_time,
-                                    const string& start_marker, const string& end_marker)
+int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker)
 {
-  if (shard_id > num_shards)
-    return -EINVAL;
+  assert(shard_id < num_shards);
+  return store->time_log_trim(oids[shard_id], {}, {}, {}, std::string(marker),
+			      nullptr);
+}
 
-  return store->time_log_trim(oids[shard_id], start_time, end_time,
-                               start_marker, end_marker, nullptr);
+int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker,
+				    librados::AioCompletion* c)
+{
+  assert(shard_id < num_shards);
+  return store->time_log_trim(oids[shard_id], {}, {}, {}, std::string(marker),
+			      c);
 }
 
 int RGWDataChangesLog::lock_exclusive(int shard_id, timespan duration, string& zone_id, string& owner_id) {
@@ -2721,43 +2736,42 @@ int RGWDataChangesLog::unlock(int shard_id, string& zone_id, string& owner_id) {
   return store->unlock(store->svc.zone->get_zone_params().log_pool, oids[shard_id], zone_id, owner_id);
 }
 
-bool RGWDataChangesLog::going_down()
+bool RGWDataChangesLog::going_down() const
 {
   return down_flag;
 }
 
 RGWDataChangesLog::~RGWDataChangesLog() {
   down_flag = true;
-  renew_thread->stop();
-  renew_thread->join();
-  delete renew_thread;
+  if (renew_thread.joinable()) {
+    renew_stop();
+    renew_thread.join();
+  }
   delete[] oids;
 }
 
-void* RGWDataChangesLog::ChangesRenewThread::entry() {
+void RGWDataChangesLog::renew_run() {
   do {
     dout(2) << "RGWDataChangesLog::ChangesRenewThread: start" << dendl;
-    int r = log->renew_entries();
+    int r = renew_entries();
     if (r < 0) {
       dout(0) << "ERROR: RGWDataChangesLog::renew_entries returned error r=" << r << dendl;
     }
 
-    if (log->going_down())
+    if (going_down())
       break;
 
     int interval = cct->_conf->rgw_data_log_window * 3 / 4;
-    std::unique_lock l(lock);
-    cond.wait_for(l, interval * 1s);
+    std::unique_lock l(renew_lock);
+    renew_cond.wait_for(l, interval * 1s);
     l.unlock();
-  } while (!log->going_down());
-
-  return nullptr;
+  } while (!going_down());
 }
 
-void RGWDataChangesLog::ChangesRenewThread::stop()
+void RGWDataChangesLog::renew_stop()
 {
-  std::lock_guard l(lock);
-  cond.notify_all();
+  std::lock_guard l(renew_lock);
+  renew_cond.notify_all();
 }
 
 void RGWDataChangesLog::mark_modified(int shard_id, const rgw_bucket_shard& bs)
