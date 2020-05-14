@@ -265,6 +265,12 @@ public:
       }
     }
 
+  ~WorkPool() {
+    for (auto& wq : wqs) {
+      wq->join();
+    }
+  }
+
   void setf(WorkQ::work_f _f) {
     for (auto& wq : wqs) {
       wq->setf(_f);
