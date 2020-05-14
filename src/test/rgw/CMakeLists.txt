@@ -198,3 +198,8 @@ add_executable(unittest_rgw_kms test_rgw_kms.cc)
 add_ceph_unittest(unittest_rgw_kms)
 
 target_link_libraries(unittest_rgw_kms ${rgw_libs})
+
+# unittest_cls_fifo_legacy
+add_executable(unittest_cls_fifo_legacy test_cls_fifo_legacy.cc)
+target_link_libraries(unittest_cls_fifo_legacy radostest-cxx ${UNITTEST_LIBS}
+  ${rgw_libs})
