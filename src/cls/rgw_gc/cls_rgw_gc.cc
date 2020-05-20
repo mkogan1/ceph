@@ -506,6 +506,7 @@ static int cls_rgw_gc_queue_update_entry(cls_method_context_t hctx, bufferlist *
   if (has_urgent_data) {
     head.bl_urgent_data.clear();
     encode(urgent_data, head.bl_urgent_data);
+    CLS_LOG(10, "INFO: cls_gc_update_entry: urgent data size is: %u \n", head.bl_urgent_data.length());
   }
 
   return queue_write_head(hctx, head);

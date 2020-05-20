@@ -142,7 +142,7 @@ int queue_get_capacity(cls_method_context_t hctx, cls_queue_get_capacity_ret& op
 int queue_enqueue(cls_method_context_t hctx, cls_queue_enqueue_op& op, cls_queue_head& head)
 {
   if ((head.front.offset == head.tail.offset) && (head.tail.gen == head.front.gen + 1)) {
-    CLS_LOG(0, "ERROR: No space left in queue\n");
+    CLS_LOG(0, "ERROR: No space left in queue, front offset: %s and tail offset is: %s\n", head.front.to_str().c_str(), head.tail.to_str().c_str());
     return -ENOSPC;
   }
 
@@ -189,7 +189,7 @@ int queue_enqueue(cls_method_context_t hctx, cls_queue_enqueue_op& op, cls_queue
           }
           head.tail.offset += bl.length();
         } else {
-          CLS_LOG(0, "ERROR: No space left in queue\n");
+          CLS_LOG(0, "ERROR: No space left in queue, front offset: %s and tail offset is: %s\n", head.front.to_str().c_str(), head.tail.to_str().c_str());
           // return queue full error
           return -ENOSPC;
         }
@@ -204,7 +204,7 @@ int queue_enqueue(cls_method_context_t hctx, cls_queue_enqueue_op& op, cls_queue
         }
         head.tail.offset += bl.length();
       } else {
-        CLS_LOG(0, "ERROR: No space left in queue\n");
+        CLS_LOG(0, "ERROR: No space left in queue, front offset: %s and tail offset is: %s\n", head.front.to_str().c_str(), head.tail.to_str().c_str());
         // return queue full error
         return -ENOSPC;
       }
@@ -214,7 +214,7 @@ int queue_enqueue(cls_method_context_t hctx, cls_queue_enqueue_op& op, cls_queue
       head.tail.offset = head.max_head_size;
       head.tail.gen += 1;
     }
-    CLS_LOG(20, "INFO: queue_enqueue: New tail offset: %s \n", head.tail.to_str().c_str());
+    CLS_LOG(20, "INFO: queue_enqueue: New tail offset: %s, head offset is %s \n", head.tail.to_str().c_str(), head.front.to_str().c_str());
   } //end - for
 
   return 0;
