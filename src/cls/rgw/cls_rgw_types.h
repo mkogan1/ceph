@@ -9,6 +9,7 @@
 #include "common/Formatter.h"
 
 #include "rgw/rgw_basic_types.h"
+#include "rgw/rgw_bucket_layout.h"
 
 #define CEPH_RGW_REMOVE 'r'
 #define CEPH_RGW_UPDATE 'u'
@@ -638,22 +639,17 @@ struct rgw_bucket_category_stats {
 };
 WRITE_CLASS_ENCODER(rgw_bucket_category_stats)
 
-enum cls_rgw_reshard_status {
-  CLS_RGW_RESHARD_NOT_RESHARDING  = 0,
-  CLS_RGW_RESHARD_IN_PROGRESS     = 1,
-  CLS_RGW_RESHARD_DONE            = 2,
-};
 
-static inline std::string to_string(const enum cls_rgw_reshard_status status)
+inline std::string to_string(const rgw::BucketReshardState status)
 {
   switch (status) {
-  case CLS_RGW_RESHARD_NOT_RESHARDING:
+  case rgw::BucketReshardState::NOT_RESHARDING:
     return "not-resharding";
     break;
-  case CLS_RGW_RESHARD_IN_PROGRESS:
+  case rgw::BucketReshardState::IN_PROGRESS:
     return "in-progress";
     break;
-  case CLS_RGW_RESHARD_DONE:
+  case rgw::BucketReshardState::DONE:
     return "done";
     break;
   default:
@@ -663,14 +659,16 @@ static inline std::string to_string(const enum cls_rgw_reshard_status status)
 }
 
 struct cls_rgw_bucket_instance_entry {
-  cls_rgw_reshard_status reshard_status{CLS_RGW_RESHARD_NOT_RESHARDING};
-  string new_bucket_instance_id;
+  using RESHARD_STATUS = rgw::BucketReshardState;
+  
+  rgw::BucketReshardState reshard_status{RESHARD_STATUS::NOT_RESHARDING};
+  std::string bucket_instance_id;
   int32_t num_shards{-1};
 
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
     encode((uint8_t)reshard_status, bl);
-    encode(new_bucket_instance_id, bl);
+    encode(bucket_instance_id, bl);
     encode(num_shards, bl);
     ENCODE_FINISH(bl);
   }
@@ -679,8 +677,8 @@ struct cls_rgw_bucket_instance_entry {
     DECODE_START(1, bl);
     uint8_t s;
     decode(s, bl);
-    reshard_status = (cls_rgw_reshard_status)s;
-    decode(new_bucket_instance_id, bl);
+    reshard_status = (rgw::BucketReshardState)s;
+    decode(bucket_instance_id, bl);
     decode(num_shards, bl);
     DECODE_FINISH(bl);
   }
@@ -689,13 +687,15 @@ struct cls_rgw_bucket_instance_entry {
   static void generate_test_instances(list<cls_rgw_bucket_instance_entry*>& o);
 
   void clear() {
-    reshard_status = CLS_RGW_RESHARD_NOT_RESHARDING;
-    new_bucket_instance_id.clear();
+    reshard_status = RESHARD_STATUS::NOT_RESHARDING;
+    //bucket_instance_id.clear();
   }
 
-  void set_status(const string& new_instance_id, int32_t new_num_shards, cls_rgw_reshard_status s) {
+  void set_status(const std::string& instance_id,
+                 int32_t new_num_shards, 
+                 rgw::BucketReshardState s) {
     reshard_status = s;
-    new_bucket_instance_id = new_instance_id;
+    bucket_instance_id = instance_id;
     num_shards = new_num_shards;
   }
 
@@ -1163,10 +1163,10 @@ WRITE_CLASS_ENCODER(cls_rgw_lc_entry);
 struct cls_rgw_reshard_entry
 {
   ceph::real_time time;
-  string tenant;
-  string bucket_name;
-  string bucket_id;
-  string new_instance_id;
+  std::string tenant;
+  std::string bucket_name;
+  std::string bucket_id;
+  std::string instance_id;
   uint32_t old_num_shards{0};
   uint32_t new_num_shards{0};
 
@@ -1178,7 +1178,7 @@ struct cls_rgw_reshard_entry
     encode(tenant, bl);
     encode(bucket_name, bl);
     encode(bucket_id, bl);
-    encode(new_instance_id, bl);
+    encode(instance_id, bl);
     encode(old_num_shards, bl);
     encode(new_num_shards, bl);
     ENCODE_FINISH(bl);
@@ -1190,7 +1190,7 @@ struct cls_rgw_reshard_entry
     decode(tenant, bl);
     decode(bucket_name, bl);
     decode(bucket_id, bl);
-    decode(new_instance_id, bl);
+    decode(instance_id, bl);
     decode(old_num_shards, bl);
     decode(new_num_shards, bl);
     DECODE_FINISH(bl);
