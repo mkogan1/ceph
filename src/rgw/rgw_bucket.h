@@ -63,7 +63,10 @@ extern void rgw_parse_url_bucket(const string& bucket,
                                  const string& auth_tenant,
                                  string &tenant_name, string &bucket_name);
 
-extern void init_default_bucket_layout(CephContext *cct, RGWBucketInfo& info, const RGWZone& zone);
+void init_default_bucket_layout(CephContext *cct, rgw::BucketLayout& layout,
+				const RGWZone& zone,
+				std::optional<uint32_t> shards,
+				std::optional<rgw::BucketIndexType> type);
 
 struct RGWBucketCompleteInfo {
   RGWBucketInfo info;

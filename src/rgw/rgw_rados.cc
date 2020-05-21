@@ -2855,7 +2855,46 @@ int RGWRados::create_pool(const rgw_pool& pool)
   return rgw_init_ioctx(get_rados_handle(), pool, io_ctx, create);
 }
 
-int RGWRados::init_bucket_index(RGWBucketInfo& bucket_info, int num_shards)
+void RGWRados::get_bucket_index_objects(const string& bucket_oid_base,
+					uint32_t num_shards, std::optional<uint64_t> _gen_id,
+					map<int, string> *_bucket_objects,
+					int shard_id)
+{
+  auto& bucket_objects = *_bucket_objects;
+  auto gen_id = _gen_id.value_or(0);
+  if (!num_shards) {
+    bucket_objects[0] = bucket_oid_base;
+  } else {
+    char buf[bucket_oid_base.size() + 64];
+    if (shard_id < 0) {
+      for (uint32_t i = 0; i < num_shards; ++i) {
+        if (gen_id) {
+          snprintf(buf, sizeof(buf), "%s.%" PRIu64 ".%d", bucket_oid_base.c_str(), gen_id, i);
+          bucket_objects[i] = buf;
+          } else {
+            snprintf(buf, sizeof(buf), "%s.%d", bucket_oid_base.c_str(), i);
+            bucket_objects[i] = buf;
+          }
+      }
+    } else {
+      if ((uint32_t)shard_id > num_shards) {
+        return;
+      } else {
+		if (gen_id) {
+		  snprintf(buf, sizeof(buf), "%s.%" PRIu64 ".%d", bucket_oid_base.c_str(), gen_id, shard_id);
+		  bucket_objects[shard_id] = buf;
+		} else {
+		  // for backward compatibility, gen_id(0) will not be added in the object name
+		  snprintf(buf, sizeof(buf), "%s.%d", bucket_oid_base.c_str(), shard_id);
+		  bucket_objects[shard_id] = buf;
+		}
+      }
+    }
+  }
+}
+
+
+int RGWRados::init_bucket_index(RGWBucketInfo& bucket_info)
 {
   librados::IoCtx index_ctx;
 
@@ -2868,14 +2907,16 @@ int RGWRados::init_bucket_index(RGWBucketInfo& bucket_info, int num_shards)
   dir_oid.append(bucket_info.bucket.bucket_id);
 
   map<int, string> bucket_objs;
-  get_bucket_index_objects(dir_oid, num_shards, bucket_objs);
+  get_bucket_index_objects(dir_oid, bucket_info.layout.current_index.layout.normal.num_shards,
+			   std::nullopt, &bucket_objs);
 
   return CLSRGWIssueBucketIndexInit(index_ctx,
 				    bucket_objs,
 				    cct->_conf->rgw_bucket_index_max_aio)();
 }
 
-int RGWRados::clean_bucket_index(RGWBucketInfo& bucket_info, int num_shards)
+int RGWRados::clean_bucket_index(RGWBucketInfo& bucket_info,
+				 std::optional<uint64_t> gen)
 {
   librados::IoCtx index_ctx;
 
@@ -2888,7 +2929,9 @@ int RGWRados::clean_bucket_index(RGWBucketInfo& bucket_info, int num_shards)
   dir_oid.append(bucket_info.bucket.bucket_id);
 
   std::map<int, std::string> bucket_objs;
-  get_bucket_index_objects(dir_oid, num_shards, bucket_objs);
+  get_bucket_index_objects(dir_oid,
+			   bucket_info.layout.current_index.layout.normal.num_shards,
+			   gen.value_or(0), &bucket_objs);
 
   return CLSRGWIssueBucketIndexClean(index_ctx,
 				     bucket_objs,
@@ -2919,7 +2962,7 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
                             uint32_t *pmaster_num_shards,
 			    bool exclusive)
 {
-#define MAX_CREATE_RETRIES 20 /* need to bound retries */
+  static constexpr auto MAX_CREATE_RETRIES = 20; /* need to bound retries */
   rgw_placement_rule selected_placement_rule;
   RGWZonePlacementInfo rule_info;
 
@@ -2940,6 +2983,8 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
 
     RGWObjVersionTracker& objv_tracker = info.objv_tracker;
 
+    objv_tracker.read_version.clear();
+
     if (pobjv) {
       objv_tracker.write_version = *pobjv;
     } else {
@@ -2950,22 +2995,14 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
     info.owner = owner.user_id;
     info.zonegroup = zonegroup_id;
     info.placement_rule = selected_placement_rule;
-    info.layout.current_index.layout.type = rule_info.index_type;
     info.swift_ver_location = swift_ver_location;
     info.swift_versioning = (!swift_ver_location.empty());
-    if (pmaster_num_shards) {
-      info.layout.current_index.layout.normal.num_shards = *pmaster_num_shards;
-    } else {
-      info.layout.current_index.layout.normal.num_shards = bucket_index_max_shards;
-    }
-    info.layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
-    info.layout.current_index.layout.type = rule_info.index_type;
-    if (info.layout.current_index.layout.type == rgw::BucketIndexType::Normal) {
-      // use the same index layout for the bilog
-      const auto gen = info.layout.current_index.gen;
-      const auto& index = info.layout.current_index.layout.normal;
-      info.layout.logs.push_back(rgw::log_layout_from_index(gen, index));
-    }
+
+    init_default_bucket_layout(cct, info.layout, svc.zone->get_zone(),
+			       pmaster_num_shards ?
+			       std::optional{*pmaster_num_shards} :
+			       std::nullopt,
+			       rule_info.index_type);
 
     info.requester_pays = false;
     if (real_clock::is_zero(creation_time)) {
@@ -2977,26 +3014,20 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
       info.quota = *pquota_info;
     }
 
-    int r = init_bucket_index(info, info.layout.current_index.layout.normal.num_shards);
+    int r = init_bucket_index(info);
     if (r < 0) {
       return r;
     }
 
     ret = put_linked_bucket_info(info, exclusive, ceph::real_time(), pep_objv, &attrs, true);
+    if (ret == -ECANCELED) {
+      ret = -EEXIST;
+    }
     if (ret == -EEXIST) {
-      librados::IoCtx index_ctx;
-      map<int, string> bucket_objs;
-      const auto& latest_log = info.layout.logs.back();
-      const auto& index = rgw::log_to_index_layout(latest_log);
-      int r = open_bucket_index(info, index_ctx, index, bucket_objs);
-      if (r < 0)
-        return r;
-
-       /* we need to reread the info and return it, caller will have a use for it */
-      RGWObjVersionTracker instance_ver = info.objv_tracker;
-      info.objv_tracker.clear();
+      /* we need to reread the info and return it, caller will have a use for it */
       auto obj_ctx = svc.sysobj->init_obj_ctx();
-      r = get_bucket_info(obj_ctx, bucket.tenant, bucket.name, info, NULL, NULL);
+      RGWBucketInfo orig_info;
+      r = get_bucket_info(obj_ctx, bucket.tenant, bucket.name, orig_info, nullptr);
       if (r < 0) {
         if (r == -ENOENT) {
           continue;
@@ -3005,21 +3036,22 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
         return r;
       }
 
-      /* only remove it if it's a different bucket instance */
-      if (info.bucket.bucket_id != bucket.bucket_id) {
-        /* remove bucket meta instance */
-        r = rgw_bucket_instance_remove_entry(this,
+      if (orig_info.bucket.bucket_id != bucket.bucket_id) {
+	int r = clean_bucket_index(info, std::nullopt);
+        if (r < 0) {
+	  ldout(cct, 0) << "WARNING: could not remove bucket index (r=" << r << ")" << dendl;
+	}
+	r = rgw_bucket_instance_remove_entry(this,
 					     bucket.get_key(),
 					     info,
-					     &instance_ver);
-        if (r < 0)
-          return r;
-
-	/* remove bucket index objects asynchronously by best effort */
-	(void) CLSRGWIssueBucketIndexClean(index_ctx,
-					   bucket_objs,
-					   cct->_conf->rgw_bucket_index_max_aio)();
+					     &info.objv_tracker);
+	if (r < 0) {
+	  ldout(cct, 0) << "WARNING: " << __func__ << "(): failed to remove bucket instance info: bucket instance=" << info.bucket.get_key() << ": r=" << r << dendl;
+	  /* continue anyway */
+        }
       }
+
+      info = std::move(orig_info);
       /* ret == -ENOENT here */
     }
     return ret;
@@ -5531,10 +5563,8 @@ int RGWRados::open_bucket_index(const RGWBucketInfo& bucket_info,
     return ret;
   }
 
-  //auto gen = bucket_info.layout.current_index.gen;
-
- // TODO: need reshard changes to add gen_id here
-  get_bucket_index_objects(bucket_oid_base, bucket_info.layout.current_index.layout.normal.num_shards, bucket_objs, shard_id);
+  get_bucket_index_objects(bucket_oid_base, idx_layout.layout.normal.num_shards,
+			   idx_layout.gen, &bucket_objs, shard_id);
   if (bucket_instance_ids) {
     // TODO: generation need to be passed here
     get_bucket_instance_ids(bucket_info, shard_id, bucket_instance_ids);
@@ -5572,7 +5602,7 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
 
   ret = get_bucket_index_object(bucket_oid_base, obj_key,
 				bucket_info.layout.current_index.layout.normal.num_shards,
-				(RGWBucketInfo::BIShardsHashType)bucket_info.layout.current_index.layout.normal.hash_type, bucket_obj, shard_id);
+				bucket_info.layout.current_index.layout.normal.hash_type, bucket_obj, shard_id);
   if (ret < 0) {
     ldout(cct, 10) << "get_bucket_index_object() returned ret=" << ret << dendl;
     return ret;
@@ -5581,7 +5611,7 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
 }
 
 int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-                                      int shard_id, const rgw::bucket_index_layout_generation& idx_layout,
+                                      int shard_id, const rgw::bucket_index_layout_generation& target_layout,
 				      string *bucket_obj)
 {
   string bucket_oid_base;
@@ -5591,8 +5621,8 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
 
   RGWObjectCtx obj_ctx(this);
 
-  auto num_shards = bucket_info.layout.current_index.layout.normal.num_shards ? bucket_info.layout.current_index.layout.normal.num_shards : 1;
-  get_bucket_index_object(bucket_oid_base, num_shards, shard_id, idx_layout.gen, bucket_obj);
+  get_bucket_index_object(bucket_oid_base, target_layout.layout.normal.num_shards,
+			  shard_id, target_layout.gen, bucket_obj);
   return 0;
 }
 
@@ -10454,29 +10484,6 @@ int RGWRados::check_quota(const rgw_user& bucket_owner, rgw_bucket& bucket,
   return quota_handler->check_quota(bucket_owner, bucket, user_quota, bucket_quota, 1, obj_size);
 }
 
-void RGWRados::get_bucket_index_objects(const string& bucket_oid_base,
-					uint32_t num_shards,
-					map<int, string>& bucket_objects,
-					int shard_id) {
-  if (!num_shards) {
-    bucket_objects[0] = bucket_oid_base;
-  } else {
-    char buf[bucket_oid_base.size() + 32];
-    if (shard_id < 0) {
-      for (uint32_t i = 0; i < num_shards; ++i) {
-        snprintf(buf, sizeof(buf), "%s.%d", bucket_oid_base.c_str(), i);
-        bucket_objects[i] = buf;
-      }
-    } else {
-      if ((uint32_t)shard_id > num_shards) {
-        return;
-      }
-      snprintf(buf, sizeof(buf), "%s.%d", bucket_oid_base.c_str(), shard_id);
-      bucket_objects[shard_id] = buf;
-    }
-  }
-}
-
 void RGWRados::get_bucket_instance_ids(const RGWBucketInfo& bucket_info, int shard_id, map<int, string> *result)
 {
   const rgw_bucket& bucket = bucket_info.bucket;
@@ -10523,8 +10530,11 @@ int RGWRados::get_target_shard_id(const rgw::bucket_index_normal_layout& layout,
   return r;
 }
 
-void RGWRados::get_bucket_index_object(const string& bucket_oid_base, uint32_t num_shards,
-				       int shard_id, uint64_t gen_id, string *bucket_obj)
+void RGWRados::get_bucket_index_object(const string& bucket_oid_base,
+				       uint32_t num_shards,
+				       int shard_id,
+				       uint64_t gen_id,
+				       string *bucket_obj)
 {
   if (!num_shards) {
     // By default with no sharding, we use the bucket oid as itself
@@ -10542,12 +10552,16 @@ void RGWRados::get_bucket_index_object(const string& bucket_oid_base, uint32_t n
   }
 }
 
-int RGWRados::get_bucket_index_object(const string& bucket_oid_base, const string& obj_key,
-    uint32_t num_shards, RGWBucketInfo::BIShardsHashType hash_type, string *bucket_obj, int *shard_id)
+int RGWRados::get_bucket_index_object(const string& bucket_oid_base,
+				      const string& obj_key,
+				      uint32_t num_shards,
+				      rgw::BucketHashType hash_type,
+				      string *bucket_obj,
+				      int *shard_id)
 {
   int r = 0;
   switch (hash_type) {
-    case RGWBucketInfo::MOD:
+  case rgw::BucketHashType::Mod:
       if (!num_shards) {
         // By default with no sharding, we use the bucket oid as itself
         (*bucket_obj) = bucket_oid_base;

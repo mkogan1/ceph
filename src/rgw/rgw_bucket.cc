@@ -54,14 +54,29 @@ static constexpr size_t listing_max_entries = 1000;
 static RGWMetadataHandler *bucket_meta_handler = NULL;
 static RGWMetadataHandler *bucket_instance_meta_handler = NULL;
 
-void init_default_bucket_layout(CephContext *cct, RGWBucketInfo& info, const RGWZone& zone) {
-  info.layout.current_index.gen = 0;
-  info.layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
-  info.layout.current_index.layout.type = rgw::BucketIndexType::Normal;
+void init_default_bucket_layout(CephContext *cct, rgw::BucketLayout& layout,
+				const RGWZone& zone,
+				std::optional<uint32_t> shards,
+				std::optional<rgw::BucketIndexType> type) {
+  layout.current_index.gen = 0;
+  layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
 
-  info.layout.current_index.layout.normal.num_shards = (
-      cct->_conf->rgw_override_bucket_index_max_shards > 0 ?
-      cct->_conf->rgw_override_bucket_index_max_shards : zone.bucket_index_max_shards);
+  layout.current_index.layout.type =
+    type.value_or(rgw::BucketIndexType::Normal);
+
+  if (shards) {
+    layout.current_index.layout.normal.num_shards = *shards;
+  } else if (cct->_conf->rgw_override_bucket_index_max_shards > 0) {
+    layout.current_index.layout.normal.num_shards =
+      cct->_conf->rgw_override_bucket_index_max_shards;
+  } else {
+    layout.current_index.layout.normal.num_shards =
+      zone.bucket_index_max_shards;
+  }
+
+  if (layout.current_index.layout.type == rgw::BucketIndexType::Normal) {
+    layout.logs.push_back(log_layout_from_index(0, layout.current_index));
+  }
 }
 
 // define as static when RGWBucket implementation completes
@@ -2849,7 +2864,10 @@ public:
     if (from_remote_zone) {
       // don't sync bucket layout changes
       if (!exists) {
-	init_default_bucket_layout(store->ctx(), bci.info, store->svc.zone->get_zone());
+	init_default_bucket_layout(store->ctx(), bci.info.layout,
+				   store->svc.zone->get_zone(),
+				   std::nullopt,
+				   std::nullopt);
       } else {
 	bci.info.layout = old_bci.info.layout;
       }
@@ -2907,7 +2925,7 @@ public:
 
     objv_tracker = bci.info.objv_tracker;
 
-    ret = store->init_bucket_index(bci.info, bci.info.layout.current_index.layout.normal.num_shards);
+    ret = store->init_bucket_index(bci.info);
     if (ret < 0)
       return ret;
 

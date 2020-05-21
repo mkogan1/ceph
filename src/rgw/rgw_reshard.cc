@@ -706,14 +706,13 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
 
   ret = update_num_shards(num_shards);
   if (ret < 0) {
-    return ret;
+    // shard state is uncertain, but this will attempt to remove them anyway
     goto error_out;
   }
 
   if (reshard_log) {
     ret = reshard_log->update(bucket_info);
     if (ret < 0) {
-      return ret;
       goto error_out;
     }
   }
@@ -739,14 +738,14 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
 
   reshard_lock.unlock();
 
-  // resharding successful, so remove old bucket index shards; use
-  // best effort and don't report out an error; the lock isn't needed
-  // at this point since all we're using a best effor to to remove old
-  // shard objects
-  ret = store->clean_bucket_index(bucket_info,
-				  bucket_info.layout.current_index.layout.normal.num_shards);
-  if (ret < 0) {
-    lderr(store->ctx()) << "Error: " << __func__ <<
+   // resharding successful, so remove old bucket index shards; use
+   // best effort and don't report out an error; the lock isn't needed
+   // at this point since all we're using a best effor to to remove old
+   // shard objects
+
+   ret = store->clean_bucket_index(bucket_info, std::nullopt);
+   if (ret < 0) {
+     lderr(store->ctx()) << "Error: " << __func__ <<
       " failed to clean up old shards; " <<
       "RGWRados::clean_bucket_index returned " << ret << dendl;
   }
@@ -765,7 +764,7 @@ error_out:
   // since the real problem is the issue that led to this error code
   // path, we won't touch ret and instead use another variable to
   // temporarily error codes
-  int ret2 = store->clean_bucket_index(bucket_info, bucket_info.layout.current_index.layout.normal.num_shards);
+  int ret2 = store->clean_bucket_index(bucket_info, std::nullopt);
   if (ret2 < 0) {
     lderr(store->ctx()) << "Error: " << __func__ <<
       " failed to clean up shards from failed incomplete resharding; " <<
@@ -805,6 +804,11 @@ void RGWReshard::get_bucket_logshard_oid(const string& tenant, const string& buc
 
 int RGWReshard::add(cls_rgw_reshard_entry& entry)
 {
+  if (!store->svc.zone->can_reshard()) {
+    ldout(store->ctx(), 20) << __func__ << " Resharding is disabled"  << dendl;
+    return 0;
+  }
+
   string logshard_oid;
 
   get_bucket_logshard_oid(entry.tenant, entry.bucket_name, &logshard_oid);

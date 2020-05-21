@@ -2767,7 +2767,7 @@ int create_new_bucket_instance(RGWRados *store,
   new_bucket_info.layout.current_index.layout.normal.num_shards = new_num_shards;
   new_bucket_info.objv_tracker.clear();
 
-  int ret = store->init_bucket_index(new_bucket_info, new_bucket_info.layout.current_index.layout.normal.num_shards);
+  int ret = store->init_bucket_index(new_bucket_info);
   if (ret < 0) {
     cerr << "ERROR: failed to init new bucket indexes: " << cpp_strerror(-ret) << std::endl;
     return -ret;

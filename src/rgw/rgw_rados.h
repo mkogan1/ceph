@@ -1510,8 +1510,8 @@ public:
 
   int create_pool(const rgw_pool& pool);
 
-  int init_bucket_index(RGWBucketInfo& bucket_info, int num_shards);
-  int clean_bucket_index(RGWBucketInfo& bucket_info, int num_shards);
+  int init_bucket_index(RGWBucketInfo& bucket_info);
+  int clean_bucket_index(RGWBucketInfo& bucket_info, std::optional<uint64_t> gen);
   void create_bucket_id(string *bucket_id);
 
   bool get_obj_data_pool(const rgw_placement_rule& placement_rule, const rgw_obj& obj, rgw_pool *pool);
@@ -2473,17 +2473,6 @@ public:
                RGWObjVersionTracker *objv_tracker, ceph::real_time *pmtime);
  private:
   /**
-   * This is a helper method, it generates a list of bucket index objects with the given
-   * bucket base oid and number of shards.
-   *
-   * bucket_oid_base [in] - base name of the bucket index object;
-   * num_shards [in] - number of bucket index object shards.
-   * bucket_objs [out] - filled by this method, a list of bucket index objects.
-   */
-  void get_bucket_index_objects(const string& bucket_oid_base, uint32_t num_shards,
-      map<int, string>& bucket_objs, int shard_id = -1);
-
-  /**
    * Get the bucket index object with the given base bucket index object and object key,
    * and the number of bucket index shards.
    *
@@ -2495,11 +2484,21 @@ public:
    *
    * Return 0 on success, a failure code otherwise.
    */
-  int get_bucket_index_object(const string& bucket_oid_base, const string& obj_key,
-      uint32_t num_shards, RGWBucketInfo::BIShardsHashType hash_type, string *bucket_obj, int *shard);
+  int get_bucket_index_object(const string& bucket_oid_base,
+			      const string& obj_key,
+			      uint32_t num_shards,
+			      rgw::BucketHashType hash_type,
+			      string *bucket_obj,
+			      int *shard_id);
 
   void get_bucket_index_object(const string& bucket_oid_base, uint32_t num_shards,
                                int shard_id, uint64_t gen_id, string *bucket_obj);
+
+  void get_bucket_index_objects(const string& bucket_oid_base,
+				uint32_t num_shards, std::optional<uint64_t> _gen_id,
+				map<int, string> *_bucket_objects,
+				int shard_id = -1);
+
 
   /**
    * Check the actual on-disk state of the object specified
