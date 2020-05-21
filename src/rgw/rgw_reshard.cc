@@ -738,14 +738,13 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
 
   ret = update_num_shards(num_shards); //modifies existing bucket
   if (ret < 0) {
-    return ret;
+    // shard state is uncertain, but this will attempt to remove them anyway
     goto error_out;
   }
 
   if (reshard_log) {
     ret = reshard_log->update(bucket_info);
     if (ret < 0) {
-      return ret;
       goto error_out;
     }
   }
