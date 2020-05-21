@@ -60,6 +60,7 @@ class BucketReshardShard {
   RGWRados *store;
   const RGWBucketInfo& bucket_info;
   int num_shard;
+  const rgw::bucket_index_layout_generation& target_layout;
   RGWRados::BucketShard bs;
   vector<rgw_cls_bi_entry> entries;
   map<RGWObjCategory, rgw_bucket_category_stats> stats;
@@ -99,14 +100,15 @@ class BucketReshardShard {
   }
 
 public:
-  BucketReshardShard(RGWRados *_store, const RGWBucketInfo& _bucket_info,
-                     int _num_shard,
+  BucketReshardShard(rgw::sal::RGWRadosStore *_store, const RGWBucketInfo& _bucket_info,
+                     int _num_shard, const rgw::bucket_index_layout_generation& _target_layout,
                      deque<librados::AioCompletion *>& _completions) :
-    store(_store), bucket_info(_bucket_info), bs(store),
+    store(_store), bucket_info(_bucket_info), target_layout(_target_layout), bs(store->getRados()),
     aio_completions(_completions)
   {
-    num_shard = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? _num_shard : -1);
-    bs.init(bucket_info.bucket, num_shard, nullptr /* no RGWBucketInfo */);
+    num_shard = (target_layout.layout.normal.num_shards > 0 ? _num_shard : -1);
+
+    bs.init(bucket_info.bucket, num_shard, target_layout, nullptr /* no RGWBucketInfo */);
 
     max_aio_completions =
       store->ctx()->_conf.get_val<uint64_t>("rgw_reshard_max_aio");
@@ -190,10 +192,11 @@ public:
 		       int _num_target_shards) :
     store(_store), target_bucket_info(_target_bucket_info),
     num_target_shards(_num_target_shards)
-  {
+  { 
+    const auto& target_layout = target_bucket_info.layout.target_index;
     target_shards.resize(num_target_shards);
     for (int i = 0; i < num_target_shards; ++i) {
-      target_shards[i] = new BucketReshardShard(store, target_bucket_info, i, completions);
+      target_shards[i] = new BucketReshardShard(store, target_bucket_info, i, target_layout, completions);
     }
   }
 
@@ -315,42 +318,29 @@ int RGWBucketReshard::clear_index_shard_reshard_status(RGWRados* store,
   return 0;
 }
 
-static int create_new_bucket_instance(RGWRados *store,
+static int update_num_shards(rgw::sal::RGWRadosStore *store,
 				      int new_num_shards,
-				      const RGWBucketInfo& bucket_info,
-				      map<string, bufferlist>& attrs,
-				      RGWBucketInfo& new_bucket_info)
+				      RGWBucketInfo& bucket_info,
+				      map<string, bufferlist>& attrs)
 {
-  new_bucket_info = bucket_info;
 
-  store->create_bucket_id(&new_bucket_info.bucket.bucket_id);
-  new_bucket_info.bucket.oid.clear();
+  bucket_info.layout.target_index.layout.normal.num_shards = new_num_shards;
 
   bucket_info.layout.resharding = rgw::BucketReshardState::NONE;
 
-  new_bucket_info.new_bucket_instance_id.clear();
-  new_bucket_info.reshard_status = 0;
-
-  int ret = store->init_bucket_index(new_bucket_info, new_bucket_info.layout.current_index.layout.normal.num_shards);
+  int ret = store->getRados()->put_bucket_instance_info(bucket_info, true, real_time(), &attrs);
   if (ret < 0) {
-    cerr << "ERROR: failed to init new bucket indexes: " << cpp_strerror(-ret) << std::endl;
-    return ret;
-  }
-
-  ret = store->put_bucket_instance_info(new_bucket_info, true, real_time(), &attrs);
-  if (ret < 0) {
-    cerr << "ERROR: failed to store new bucket instance info: " << cpp_strerror(-ret) << std::endl;
+    cerr << "ERROR: failed to store updated bucket instance info: " << cpp_strerror(-ret) << std::endl;
     return ret;
   }
 
   return 0;
 }
 
-int RGWBucketReshard::create_new_bucket_instance(int new_num_shards,
-                                                 RGWBucketInfo& new_bucket_info)
+int RGWBucketReshard::update_num_shards(int new_num_shards)
 {
-  return ::create_new_bucket_instance(store, new_num_shards,
-				      bucket_info, bucket_attrs, new_bucket_info);
+  return ::update_num_shards(store, new_num_shards,
+				      bucket_info, bucket_attrs);
 }
 
 int RGWBucketReshard::cancel()
@@ -387,14 +377,11 @@ class BucketInfoReshardUpdate
 public:
   BucketInfoReshardUpdate(RGWRados *_store,
 			  RGWBucketInfo& _bucket_info,
-                          map<string, bufferlist>& _bucket_attrs,
-			  const string& new_bucket_id) :
+                          map<string, bufferlist>& _bucket_attrs) :
     store(_store),
     bucket_info(_bucket_info),
     bucket_attrs(_bucket_attrs)
-  {
-    bucket_info.new_bucket_instance_id = new_bucket_id;
-  }
+  {}
 
   ~BucketInfoReshardUpdate() {
     if (in_progress) {
@@ -405,13 +392,14 @@ public:
 	lderr(store->ctx()) << "Error: " << __func__ <<
 	  " clear_index_shard_status returned " << ret << dendl;
       }
-      bucket_info.new_bucket_instance_id.clear();
-      set_status(CLS_RGW_RESHARD_NOT_RESHARDING); // clears new_bucket_instance as well
+
+      // clears new_bucket_instance as well
+      set_status(rgw::BucketReshardState::NOT_RESHARDING);
     }
   }
 
   int start() {
-    int ret = set_status(CLS_RGW_RESHARD_IN_PROGRESS);
+    int ret = set_status(rgw::BucketReshardState::IN_PROGRESS);
     if (ret < 0) {
       return ret;
     }
@@ -420,7 +408,7 @@ public:
   }
 
   int complete() {
-    int ret = set_status(CLS_RGW_RESHARD_DONE);
+    int ret = set_status(rgw::BucketReshardState::DONE);
     if (ret < 0) {
       return ret;
     }
@@ -560,9 +548,13 @@ int RGWBucketReshard::do_reshard(int num_shards,
     return ret;
   }
 
-  int num_target_shards = (new_bucket_info.layout.current_index.layout.normal.num_shards > 0 ? new_bucket_info.layout.current_index.layout.normal.num_shards : 1);
+  //increment generation number
+  bucket_info.layout.target_index.gen++;
 
-  BucketReshardManager target_shards_mgr(store, new_bucket_info, num_target_shards);
+  auto target_shards = bucket_info.layout.target_index.layout.normal.num_shards;
+  int num_target_shards = (target_shards > 0 ? num_shards : 1);
+
+  BucketReshardManager target_shards_mgr(store, bucket_info, num_target_shards);
 
   bool verbose_json_out = verbose && (formatter != nullptr) && (out != nullptr);
 
@@ -576,19 +568,24 @@ int RGWBucketReshard::do_reshard(int num_shards,
     (*out) << "total entries:";
   }
 
+  auto current_shards = bucket_info.layout.current_index.layout.normal.num_shards;
   const int num_source_shards =
-    (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+    (current_shards > 0 ? current_shards : 1);
   string marker;
   for (int i = 0; i < num_source_shards; ++i) {
     bool is_truncated = true;
     marker.clear();
     while (is_truncated) {
       entries.clear();
-      ret = store->bi_list(bucket, i, string(), marker, max_entries, &entries, &is_truncated);
-      if (ret < 0 && ret != -ENOENT) {
-	derr << "ERROR: bi_list(): " << cpp_strerror(-ret) << dendl;
-	return ret;
-      }
+      ret = store->getRados()->bi_list(bucket_info, i, string(), marker, max_entries, &entries, &is_truncated);
+      if (ret < 0) {
+		if (ret == -ENOENT && i < (num_source_shards - 1)) {
+		  continue;
+		} else {
+		  derr << "ERROR: bi_list(): " << cpp_strerror(-ret) << dendl;
+		  return ret;
+		}
+	  }
 
       for (auto iter = entries.begin(); iter != entries.end(); ++iter) {
 	rgw_cls_bi_entry& entry = *iter;
