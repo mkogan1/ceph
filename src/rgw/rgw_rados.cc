@@ -3417,12 +3417,12 @@ int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info,
   return 0;
 }
 
-int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout, int sid)
+int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& target_layout, int sid)
 {
   bucket = bucket_info.bucket;
   shard_id = sid;
 
-  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, idx_layout, &bucket_obj);
+  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, target_layout, &bucket_obj);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -9541,6 +9541,7 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
     "[" << start_after.instance <<
     "]\", prefix=\"" << prefix <<
     "\" num_entries=" << num_entries <<
+    ", shard_id=" << shard_id <<
     ", list_versions=" << list_versions <<
     ", expansion_factor=" << expansion_factor << dendl;
 
@@ -10081,12 +10082,19 @@ int RGWRados::cls_bucket_head(const RGWBucketInfo& bucket_info,
   map<int, string> oids;
   map<int, struct rgw_cls_list_ret> list_results;
   int r = open_bucket_index(bucket_info, index_ctx, idx_layout, oids, list_results, shard_id, bucket_instance_ids);
-  if (r < 0)
+  if (r < 0) {
+    ldout(cct, 10) << "cls_bucket_head: open_bucket_index() returned "
+		   << r << dendl;
     return r;
+  }
 
   r = CLSRGWIssueGetDirHeader(index_ctx, oids, list_results, cct->_conf->rgw_bucket_index_max_aio)();
-  if (r < 0)
+  ldout(cct, 20) << "CLSRGWIssueGetDirHeader issued" << dendl;
+  if (r < 0) {
+    ldout(cct, 20) << "cls_bucket_head: CLSRGWIssueGetDirHeader() returned "
+                   << r << dendl;
     return r;
+  }
 
   map<int, struct rgw_cls_list_ret>::iterator iter = list_results.begin();
   for(; iter != list_results.end(); ++iter) {

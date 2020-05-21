@@ -78,8 +78,7 @@ private:
   // allocated in at once
   static const std::initializer_list<uint16_t> reshard_primes;
 
-  int create_new_bucket_instance(int new_num_shards,
-				 RGWBucketInfo& new_bucket_info);
+  int update_num_shards(int new_num_shards);
   int do_reshard(int num_shards,
 		 int max_entries,
                  bool verbose,
@@ -111,14 +110,14 @@ public:
   }
   static int set_resharding_status(RGWRados* store,
 				   const RGWBucketInfo& bucket_info,
-				   const string& new_instance_id,
+				   const string& instance_id,
 				   int32_t num_shards,
 				   cls_rgw_reshard_status status);
-  int set_resharding_status(const string& new_instance_id,
+  int set_resharding_status(const string& instance_id,
 			    int32_t num_shards,
 			    cls_rgw_reshard_status status) {
     return set_resharding_status(store, bucket_info,
-				 new_instance_id, num_shards, status);
+				 instance_id, num_shards, status);
   }
 
   static uint32_t get_max_prime_shards() {
