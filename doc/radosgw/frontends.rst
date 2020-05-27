@@ -104,6 +104,16 @@ Options
 :Type: Integer (0 or 1)
 :Default: 1
 
+``request_timeout_ms``
+
+:Description: The amount of time in milliseconds that Beast will wait
+              for more incoming data or outgoing data before giving up.
+              Setting this value to 0 will disable timeout.
+
+:Type: Integer
+:Default: ``65000``
+
+
 Civetweb
 ========
 
