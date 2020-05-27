@@ -1,60 +1,26 @@
 @import 'defaults';
 
-::ng-deep cd-login {
-  h1 {
-    margin: 0 0 30px 0;
-  }
+::ng-deep {
+  .login {
+    background-image: url('../../../../assets/redhat_new_background.svg');
+    background-size: cover;
+    background-position: center;
 
-  .form-group {
-    border-left: 4px solid white;
-    background-color: $color-password-toggle-bg;
-    height: auto;
-    margin-bottom: 2rem;
-
-    &:focus-within {
-      border-left: 4px solid $color-accent;
+    @media (min-width: $pf-global--breakpoint--xl) {
+      background-position-x: 30%;
     }
 
-    .invalid-feedback {
-      display: inline;
+    @media only screen and (min-width: $pf-global--breakpoint--xl) {
+      .pf-c-login__footer {
+        padding-left: 26%;
+      }
+    }
+
+    .pf-c-login__container {
+      margin-right: 22%;
+      min-width: 0;
+      padding-left: 0;
+      padding-right: 0;
     }
   }
-
-  .btn-password,
-  .btn-password:focus,
-  .form-control,
-  .form-control:focus {
-    border: none;
-    outline: none;
-    -webkit-box-shadow: none;
-    box-shadow: none;
-    color: $color-password-toggle-text;
-    background-color: $color-password-toggle-bg;
-    filter: none;
-  }
-
-  .placeholder {
-    color: $color-password-toggle-placeholder-text;
-  }
-
-  .btn-password:focus {
-    outline-color: $color-password-toggle-focus;
-  }
-}
-
-// This will override the colors applied by chrome
-@keyframes autofill {
-  to {
-    color: $color-password-toggle-text;
-    background-color: $color-password-toggle-bg;
-  }
-}
-
-input:-webkit-autofill {
-  animation-name: autofill;
-  animation-fill-mode: both;
-  box-shadow: 0 0 0px 1000px $color-password-toggle-bg inset;
-  -webkit-text-fill-color: $color-password-toggle-text;
-  transition-property: none;
-  border-radius: 0px;
 }

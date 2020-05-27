@@ -1,63 +1,103 @@
-<div *ngIf="isLoginActive">
-  <form name="loginForm"
-        (ngSubmit)="login()"
-        #loginForm="ngForm"
-        novalidate>
+<div class="login"
+     *ngIf="isLoginActive">
+  <div class="pf-c-login">
+    <div class="pf-c-login__container">
+      <header class="pf-c-login__header">
+        <img class="pf-c-brand"
+             src="assets/Logo-Red_Hat-Ceph_Storage-A-Reverse-RGB.png"
+             alt="Red Hat Ceph Storage Dashboard">
+      </header>
+      <main class="pf-c-login__main">
+        <header class="pf-c-login__main-header">
+          <h1 class="pf-c-title pf-m-3xl">Login to your account</h1>
+        </header>
+        <div class="pf-c-login__main-body">
+          <form name="loginForm"
+                (ngSubmit)="login()"
+                #loginForm="ngForm"
+                novalidate
+                class="pf-c-form">
+            <p class="pf-c-form__helper-text pf-m-error pf-m-hidden has-feedback">
+              <i class="fas fa-exclamation-circle pf-c-form__helper-text-icon"
+                 aria-hidden="true"></i>
+                Invalid login credentials.
+            </p>
 
-    <!-- Username -->
-    <div class="form-group has-feedback d-flex flex-column py-3">
-      <label class="placeholder pl-4"
-             for="username"
-             i18n>Username</label>
-      <input id="username"
-             name="username"
-             [(ngModel)]="model.username"
-             #username="ngModel"
-             type="text"
-             [attr.aria-invalid]="username.invalid"
-             aria-labelledby="username"
-             class="form-control pl-4"
-             required
-             autofocus>
-      <div class="invalid-feedback pl-4"
-           *ngIf="(loginForm.submitted || username.dirty) && username.invalid"
-           i18n>Username is required</div>
-    </div>
+            <!-- Username -->
+            <div class="pf-c-form__group">
+              <label class="pf-c-form__label"
+                     for="username">
+                <span class="pf-c-form__label-text">Username</span>
+                <span class="pf-c-form__label-required"
+                      aria-hidden="true">&#42;</span>
+              </label>
+              <input id="username"
+                     name="username"
+                     [(ngModel)]="model.username"
+                     #username="ngModel"
+                     type="text"
+                     [attr.aria-invalid]="username.invalid"
+                     aria-labelledby="username"
+                     placeholder="Enter your username..."
+                     class="pf-c-form-control"
+                     required
+                     autofocus>
+              <div class="invalid-feedback"
+                   *ngIf="(loginForm.submitted || username.dirty) && username.invalid"
+                   i18n>Username is required</div>
+            </div>
 
-    <!-- Password -->
-    <div class="form-group has-feedback"
-         id="password-div">
-      <div class="input-group d-flex flex-nowrap">
-        <div class="d-flex flex-column flex-grow-1 py-3">
-          <label class="placeholder pl-4"
-                 for="password"
-                 i18n>Password</label>
-          <input id="password"
-                 name="password"
-                 [(ngModel)]="model.password"
-                 #password="ngModel"
-                 type="password"
-                 [attr.aria-invalid]="password.invalid"
-                 aria-labelledby="password"
-                 class="form-control pl-4"
-                 required>
-          <div class="invalid-feedback pl-4"
-               *ngIf="(loginForm.submitted || password.dirty) && password.invalid"
-               i18n>Password is required</div>
+            <!-- Password -->
+            <div class="pf-c-form__group">
+              <label class="pf-c-form__label"
+                     for="password">
+                <span class="pf-c-form__label-text">Password</span>
+                <span class="pf-c-form__label-required"
+                      aria-hidden="true">&#42;</span>
+              </label>
+              <input id="password"
+                     name="password"
+                     [(ngModel)]="model.password"
+                     #password="ngModel"
+                     type="password"
+                     [attr.aria-invalid]="password.invalid"
+                     aria-labelledby="password"
+                     placeholder="Enter your password..."
+                     class="pf-c-form-control"
+                     required>
+              <div class="invalid-feedback"
+                   *ngIf="(loginForm.submitted || password.dirty) && password.invalid"
+                   i18n>Password is required</div>
+            </div>
+            <div class="pf-c-form__group pf-m-action">
+              <button class="pf-c-button pf-m-primary pf-m-block"
+                      type="submit"
+                      [disabled]="loginForm.invalid">
+                        Log In
+              </button>
+            </div>
+          </form>
         </div>
-        <span class="form-group-append">
-          <button type="button"
-                  class="btn btn-outline-light btn-password h-100 px-4"
-                  cdPasswordButton="password">
-          </button>
-        </span>
-      </div>
+      </main>
+      <footer class="pf-c-login__footer">
+        <ul class="pf-c-list pf-m-inline">
+          <li>
+            <a href="https://www.redhat.com/en/about/all-policies-guidelines">
+              Terms of Use
+            </a>
+          </li>
+          <li>
+            <a href="https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/">
+              Help
+            </a>
+          </li>
+          <li>
+            <a href="https://www.redhat.com/en/about/privacy-policy">
+              Privacy Policy
+            </a>
+          </li>
+        </ul>
+      </footer>
     </div>
-
-    <input type="submit"
-           class="btn btn-secondary px-5 py-2"
-           [disabled]="loginForm.invalid"
-           value="Login"
-           i18n-value>
-  </form>
+  </div>
 </div>
