@@ -62,6 +62,7 @@ size_t RGWCivetWeb::read_data(char *buf, size_t len)
   for (c = 0; c < len; c += ret) {
     ret = mg_read(conn, buf+c, len-c);
     if (ret < 0) {
+      mg_set_must_close(conn, 1);	/* mark connection to be closed... */
       throw rgw::io::Exception(EIO, std::system_category());
     }
     if (!ret) {
