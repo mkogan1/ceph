@@ -5,6 +5,7 @@ import { RouterModule } from '@angular/router';
 import { BlockUIModule } from 'ng-block-ui';
 
 import { SharedModule } from '../shared/shared.module';
+import { ErrorComponent } from './error/error.component';
 import { ForbiddenComponent } from './forbidden/forbidden.component';
 import { BlankLayoutComponent } from './layouts/blank-layout/blank-layout.component';
 import { LoginLayoutComponent } from './layouts/login-layout/login-layout.component';
@@ -17,6 +18,7 @@ import { NotFoundComponent } from './not-found/not-found.component';
   exports: [NavigationModule],
   declarations: [
     NotFoundComponent,
+    ErrorComponent,
     ForbiddenComponent,
     WorkbenchLayoutComponent,
     BlankLayoutComponent,
