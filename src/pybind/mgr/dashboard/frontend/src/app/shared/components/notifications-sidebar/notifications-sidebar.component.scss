@@ -33,8 +33,24 @@ ngx-simplebar {
   font-size: 12px;
 }
 
-.btn-link .fa-trash-o {
-  color: $color-black;
+.pf-m-secondary {
+  margin-left: 25%;
+}
+
+.btn-link {
+  padding-left: 0px;
+  padding-right: 0px;
+  padding-top: 0px;
+  width: 35px;
+
+  .fa-trash {
+    width: 50px;
+    padding-top: 0px;
+  }
+}
+
+.close {
+  margin-left: 39%;
 }
 
 table {

@@ -102,7 +102,8 @@ $color-password-toggle-focus: $color-primary !default;
 $color-info-card-border: $color-soft-gray !default;
 
 /*Navigation*/
-$color-navbar-bg: $color-secondary !default;
+$color-navbar-bg: $pf-global--BackgroundColor--dark-100 !default;
+$color-sidebar-bg: $pf-global--BackgroundColor--dark-300 !default;
 $color-navbar-brand: $color-white-gray !default;
 $color-nav-top-bar: $color-primary !default;
 $color-nav-bottom-bar: $color-primary !default;
@@ -115,7 +116,7 @@ $color-nav-links-hover: $color-primary !default;
 $color-nav-active-link-bg: $color-primary !default;
 $color-nav-border-top-collapse: $color-white-gray !default;
 
-$navbar-height: 43px;
+$navbar-height: 55px;
 $pwd-exp-height: 37.6px;
 
 /*Helper*/

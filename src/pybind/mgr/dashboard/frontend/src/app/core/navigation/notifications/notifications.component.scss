@@ -7,3 +7,18 @@
 .running:hover i {
   color: white;
 }
+
+.pf-c-dropdown {
+  padding-top: 8px;
+  padding-right: 2px;
+}
+
+.pf-c-dropdown__toggle {
+  color: white;
+  background-color: $color-navbar-bg;
+}
+.pf-icon-chat {
+  color: white;
+  width: 45px;
+  height: 28px;
+}

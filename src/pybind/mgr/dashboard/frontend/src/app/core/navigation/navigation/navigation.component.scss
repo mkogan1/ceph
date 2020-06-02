@@ -6,8 +6,16 @@
 
 ::ng-deep .cd-navbar-top {
   .cd-navbar-brand {
+    .py-0 {
+      padding-left: 0px;
+      padding-right: 0px;
+      font-size: 0.65em;
+      color: #fff;
+    }
+
     background: $color-navbar-bg;
-    border-top: 4px solid $color-nav-top-bar;
+    padding-left: 1.15rem;
+    height: 55px;
 
     &.isPwdDisplayed {
       top: $pwd-exp-height;
@@ -21,7 +29,7 @@
     }
 
     .navbar-brand > img {
-      height: 25px;
+      height: 34px;
     }
 
     .navbar-toggler {
@@ -71,14 +79,6 @@
     color: $color-nav-links;
   }
 
-  .navbar-nav > li > .cd-navbar > [dropdown] > a:hover,
-  .navbar-nav > li > .cd-navbar > [dropdown].open > a,
-  .navbar-nav > li > .cd-navbar > a:hover,
-  .navbar-nav > li > a:hover,
-  .navbar-nav > li:hover {
-    background-color: $color-nav-links-hover;
-  }
-
   .navbar-nav > .open > .cd-navbar > [dropdown] > a,
   .navbar-nav > .open > .cd-navbar > [dropdown] > a:hover,
   .navbar-nav > .open > .cd-navbar > a,
@@ -88,9 +88,7 @@
   .navbar-nav > .open > a,
   .navbar-nav > .open > a:focus,
   .navbar-nav > .open > a:hover {
-    color: $color-nav-links;
     border-color: transparent;
-    background-color: transparent;
   }
 
   @media (min-width: $screen-md-min) {
@@ -138,15 +136,7 @@
     SIDEBAR STYLE
 --------------------------------------------------- */
 
-$sidebar-width: 200px;
-
-.cd-navbar-primary .active > a,
-.cd-navbar-primary > .active > a:focus,
-.cd-navbar-primary > .active > a:hover {
-  color: $color-nav-links !important;
-  background-color: $color-nav-links-hover !important;
-  border: 0 !important;
-}
+$sidebar-width: 230px;
 
 .wrapper {
   display: flex;
@@ -155,7 +145,7 @@ $sidebar-width: 200px;
   #sidebar {
     width: $sidebar-width;
     top: $navbar-height;
-    background: $color-navbar-bg;
+    background: $color-sidebar-bg;
     overflow-y: auto;
     position: fixed;
     bottom: 0;
@@ -167,7 +157,6 @@ $sidebar-width: 200px;
     &.active {
       margin-left: -$sidebar-width;
     }
-
     ul {
       &.component {
         padding: 20px 0;
@@ -179,55 +168,26 @@ $sidebar-width: 200px;
         padding: 10px;
       }
 
-      li a {
-        padding: 10px;
-        font-size: 1.1em;
-        display: block;
-        color: #fff;
-
-        &:hover {
-          color: #fff;
-          background: $color-primary;
-        }
-
-        & > .badge {
-          margin-left: 5px;
-        }
-
+      li a,
+      a:focus {
         text-decoration: none;
+        outline: none;
+      }
+      & > .badge {
+        margin-left: 5px;
       }
 
       li.active > a,
       li > a a[aria-expanded='true'] {
         color: #fff;
+        outline: none;
       }
     }
   }
 
-  a.dropdown-toggle {
-    position: relative;
-
-    &::after {
-      position: absolute;
-      right: 20px;
-      content: '\f054';
-      font-family: 'ForkAwesome';
-      border: 0;
-      font-size: 1rem;
-      transition: transform 0.3s ease-in-out;
-    }
-
-    &[aria-expanded='true']::after {
-      transform: rotate(90deg);
-    }
+  ul ul {
+    background: lighten($color-sidebar-bg, 10);
   }
-
-  ul ul a {
-    font-size: 0.9em !important;
-    padding-left: 30px !important;
-    background: lighten($color-navbar-bg, 10);
-  }
-
   .cd-navbar-primary a:focus {
     outline: none;
   }

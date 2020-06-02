@@ -1,37 +1,42 @@
 <div dropdown
-     class="btn-group">
-  <a dropdownToggle
-     class="dropdown-toggle"
-     i18n-title
-     title="Logged in user">
-    <i [ngClass]="[icons.user]"></i>
+     class="pf-c-dropdown">
+  <button dropdownToggle
+          class="pf-c-dropdown__toggle pf-m-primary"
+          i18n-title
+          aria-expanded="false"
+          title="Logged in user">
+    <i class="pf-icon pf-icon-user"></i>
     <span i18n
           class="d-md-none">Logged in user</span>
-  </a>
+    <i class="fas fa-caret-down pf-c-dropdown__toggle-icon"
+       aria-hidden="true"></i>
+  </button>
   <ul *dropdownMenu
       class="dropdown-menu dropdown-menu-right"
       role="menu">
     <li class="disabled"
         role="menuitem">
       <a i18n
-         class="dropdown-item disabled"
+         class="pf-c-dropdown__menu-item"
          href="#">Signed in as
       <strong>{{ username }}</strong></a>
     </li>
-    <li class="dropdown-divider"></li>
+    <li class="pf-c-dropdown__separator"></li>
     <li *ngIf="!sso"
-        role="menuitem">
-      <a class="dropdown-item"
-         routerLink="/user-profile/edit">
-        <i [ngClass]="[icons.lock]"></i>
-        <span i18n>Change password</span>
+        role="separator">
+      <a class="pf-c-dropdown__menu-item"
+         routerLink="/user-profile/edit"
+         i18n>
+        <i class="pf-icon pf-icon-key"></i>
+        Change password
       </a>
     </li>
     <li role="menuitem">
-      <a class="dropdown-item"
-         (click)="logout()">
-        <i [ngClass]="[icons.signOut]"></i>
-        <span i18n>Sign out</span>
+      <a class="pf-c-dropdown__menu-item"
+         (click)="logout()"
+         i18n>
+        <i class="pf-icon pf-icon-locked"></i>
+        Sign out
       </a>
     </li>
   </ul>

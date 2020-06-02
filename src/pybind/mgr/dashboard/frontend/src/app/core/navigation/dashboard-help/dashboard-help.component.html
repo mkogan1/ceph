@@ -6,34 +6,37 @@
          name="token" />
 </form>
 
-<div class="btn-group"
+<div class="pf-c-dropdown"
      dropdown>
-  <a dropdownToggle
-     class="dropdown-toggle"
-     i18n-title
-     title="Help">
-    <i [ngClass]="[icons.questionCircle]"></i>
+  <button dropdownToggle
+          class="pf-c-dropdown__toggle pf-m-primary"
+          i18n-title
+          aria-expanded="false"
+          title="Help">
+    <i class="pf-icon pf-icon-help"></i>
     <span i18n
           class="d-md-none">Help</span>
-  </a>
+    <i class="fas fa-caret-down pf-c-dropdown__toggle-icon"
+       aria-hidden="true"></i>
+  </button>
   <ul *dropdownMenu
       class="dropdown-menu dropdown-menu-right"
       role="menu">
     <li>
       <a i18n
-         class="dropdown-item"
+         class="pf-c-dropdown__menu-item"
          [ngClass]="{'disabled': !docsUrl}"
          href="{{ docsUrl }}"
          target="_blank">Documentation</a>
     </li>
     <li>
       <a i18n
-         class="dropdown-item"
+         class="pf-c-dropdown__menu-item"
          (click)="goToApiDocs()">API</a>
     </li>
     <li>
       <a i18n
-         class="dropdown-item"
+         class="pf-c-dropdown__menu-item"
          (click)="openAboutModal()">About</a>
     </li>
   </ul>
