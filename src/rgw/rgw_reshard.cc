@@ -526,11 +526,12 @@ int RGWBucketReshard::do_reshard(int num_shards,
   int ret = 0;
 
   if (out) {
-    (*out) << "tenant: " << bucket_info.bucket.tenant << std::endl;
-    (*out) << "bucket name: " << bucket_info.bucket.name << std::endl;
-    (*out) << "old bucket instance id: " << bucket_info.bucket.bucket_id <<
+    (*out) << "Planned resharding, provided no issues encountered:" << std::endl;
+    (*out) << "    tenant: " << bucket_info.bucket.tenant << std::endl;
+    (*out) << "    bucket name: " << bucket_info.bucket.name << std::endl;
+    (*out) << "    old bucket instance id: " << bucket_info.bucket.bucket_id <<
       std::endl;
-    (*out) << "new bucket instance id: " << new_bucket_info.bucket.bucket_id <<
+    (*out) << "    new bucket instance id: " << new_bucket_info.bucket.bucket_id <<
       std::endl;
   }
 
@@ -547,9 +548,27 @@ int RGWBucketReshard::do_reshard(int num_shards,
   // complete successfully
   BucketInfoReshardUpdate bucket_info_updater(store, bucket_info, bucket_attrs, new_bucket_info.bucket.bucket_id);
 
-  ret = bucket_info_updater.start();
+  constexpr int max_attempts = 5;
+
+  for (int attempt = 0; attempt < max_attempts; ++attempt) {
+    // exponential back-off
+    if (attempt > 0) {
+      sleep(1 << attempt);
+    }
+
+    ret = bucket_info_updater.start();
+    if (ret == -ECANCELED) {
+      ldout(store->ctx(), 5) << __func__ <<
+	": attempt to note reshard start raced on attempt " << (1+attempt) <<
+	" of " << max_attempts << dendl;
+    } else {
+      break;
+    }
+  }
   if (ret < 0) {
-    ldout(store->ctx(), 0) << __func__ << ": failed to update bucket info ret=" << ret << dendl;
+    ldout(store->ctx(), 0) << __func__ <<
+      ": resharding attempt cancelled; failed to update bucket info on "
+      "start ret=" << ret << dendl;
     return ret;
   }
 
@@ -668,9 +687,25 @@ int RGWBucketReshard::do_reshard(int num_shards,
     return ret;
   }
 
-  ret = bucket_info_updater.complete();
+  for (int attempt = 0; attempt < max_attempts; ++attempt) {
+    // exponential back-off
+    if (attempt > 0) {
+      sleep(1 << attempt);
+    }
+
+    ret = bucket_info_updater.complete();
+    if (ret == -ECANCELED) {
+      ldout(store->ctx(), 5) << __func__ <<
+	": attempt to note reshard completion raced on attempt " <<
+	(1+attempt) << " of " << max_attempts << dendl;
+    } else {
+      break;
+    }
+  }
   if (ret < 0) {
-    ldout(store->ctx(), 0) << __func__ << ": failed to update bucket info ret=" << ret << dendl;
+    ldout(store->ctx(), 0) << __func__ <<
+      ": failed to update bucket info on completion ret=" << ret <<
+      "; ignoring" << dendl;
     /* don't error out, reshard process succeeded */
   }
 
