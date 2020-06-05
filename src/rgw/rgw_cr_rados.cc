@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab
 
 #include "include/compat.h"
+#include "rgw_datalog.h"
 #include "rgw_rados.h"
 #include "rgw_zone.h"
 #include "rgw_coroutine.h"
@@ -851,6 +852,37 @@ int RGWSyncLogTrimCR::request_complete()
   return 0;
 }
 
+DatalogTrimImplCR::DatalogTrimImplCR(RGWRados* store, int shard,
+				     const std::string& marker,
+				     std::string* last_trim_marker)
+  : RGWSimpleCoroutine(store->ctx()), store(store), shard(shard),
+    marker(marker), last_trim_marker(last_trim_marker)
+{
+  set_description() << "Datalog trim shard=" << shard
+		    << " marker=" << marker;
+}
+
+int DatalogTrimImplCR::send_request()
+{
+  set_status() << "sending request";
+  cn = stack->create_completion_notifier();
+  return store->data_log->trim_entries(shard, marker,
+				       cn->completion());
+}
+
+int DatalogTrimImplCR::request_complete() {
+  int r = cn->completion()->get_return_value();
+  set_status() << "request complete; ret=" << r;
+  if (r != -ENODATA) {
+    return r;
+  }
+  // nothing left to trim, update last_trim_marker
+  if (*last_trim_marker < marker &&
+      marker != store->data_log->max_marker()) {
+    *last_trim_marker = marker;
+  }
+  return 0;
+}
 
 int RGWAsyncStatObj::_send_request()
 {

@@ -11,6 +11,7 @@
 
 
 #include "rgw_coroutine.h"
+#include "rgw_datalog.h"
 #include "rgw_http_client.h"
 #include "rgw_bucket.h"
 
