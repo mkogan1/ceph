@@ -1291,6 +1291,22 @@ class RGWSyncLogTrimCR : public RGWRadosTimelogTrimCR {
   int request_complete() override;
 };
 
+class DatalogTrimImplCR : public RGWSimpleCoroutine {
+  RGWRados *store;
+  boost::intrusive_ptr<RGWAioCompletionNotifier> cn;
+  int shard;
+  std::string marker;
+  std::string *last_trim_marker;
+
+ public:
+  DatalogTrimImplCR(RGWRados *store, int shard,
+		    const std::string& marker,
+		    std::string* last_trim_marker);
+
+  int send_request() override;
+  int request_complete() override;
+};
+
 class RGWAsyncStatObj : public RGWAsyncRadosRequest {
   RGWRados *store;
   RGWBucketInfo bucket_info;
