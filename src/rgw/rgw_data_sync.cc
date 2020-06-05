@@ -11,6 +11,7 @@
 #include "common/errno.h"
 
 #include "rgw_common.h"
+#include "rgw_datalog.h"
 #include "rgw_rados.h"
 #include "rgw_zone.h"
 #include "rgw_sync.h"
@@ -3557,7 +3558,7 @@ void take_min_markers(IterIn first, IterIn last, IterOut dest)
 } // anonymous namespace
 
 class DataLogTrimCR : public RGWCoroutine {
-  using TrimCR = RGWSyncLogTrimCR;
+  using TrimCR = DatalogTrimImplCR;
   RGWRados *store;
   RGWHTTPManager *http;
   const int num_shards;
@@ -3569,12 +3570,13 @@ class DataLogTrimCR : public RGWCoroutine {
 
  public:
   DataLogTrimCR(RGWRados *store, RGWHTTPManager *http,
-                   int num_shards, std::vector<std::string>& last_trim)
+		int num_shards, std::vector<std::string>& last_trim)
     : RGWCoroutine(store->ctx()), store(store), http(http),
       num_shards(num_shards),
       zone_id(store->svc.zone->get_zone().id),
       peer_status(store->svc.zone->get_zone_data_notify_to_map().size()),
-      min_shard_markers(num_shards, TrimCR::max_marker),
+      min_shard_markers(num_shards,
+			std::string(store->data_log->max_marker())),
       last_trim(last_trim)
   {}
 
@@ -3633,8 +3635,7 @@ int DataLogTrimCR::operate()
         ldout(cct, 10) << "trimming log shard " << i
             << " at marker=" << m
             << " last_trim=" << last_trim[i] << dendl;
-        spawn(new TrimCR(store, store->data_log->get_oid(i),
-                         m, &last_trim[i]),
+        spawn(new TrimCR(store, i, m, &last_trim[i]),
               true);
       }
     }

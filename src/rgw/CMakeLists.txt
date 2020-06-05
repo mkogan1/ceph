@@ -135,7 +135,8 @@ set(librgw_common_srcs
   rgw_kms.cc
   rgw_url.cc
   rgw_oidc_provider
-  cls_fifo_legacy.cc)
+  cls_fifo_legacy.cc
+  rgw_datalog.cc)
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)
   find_package(RabbitMQ REQUIRED)

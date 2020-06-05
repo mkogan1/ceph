@@ -34,6 +34,7 @@ extern "C"{
 #include "global/global_init.h"
 #include "rgw/rgw_common.h"
 #include "rgw/rgw_bucket.h"
+#include "rgw/rgw_datalog.h"
 #include "rgw/rgw_rados.h"
 #include "include/utime.h"
 #include "include/object.h"
