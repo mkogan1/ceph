@@ -51,3 +51,8 @@
 
   or use any other convenient way to restore the schedule after the
   upgrade.
+
+* CephFS: Automatic static subtree partitioning policies may now be configured
+  using the new distributed and random ephemeral pinning extended attributes on
+  directories. See the documentation for more information:
+  https://docs.ceph.com/docs/master/cephfs/multimds/
