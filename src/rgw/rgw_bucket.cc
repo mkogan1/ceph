@@ -1856,7 +1856,7 @@ void get_stale_instances(RGWRados *store, const std::string& bucket_name,
                           << cpp_strerror(-r) << dendl;
       continue;
     }
-    if (binfo.reshard_status == rgw::BucketReshardState::DONE)
+    if (binfo.reshard_status == cls_rgw_reshard_status::DONE)
       stale_instances.emplace_back(std::move(binfo));
     else {
       other_instances.emplace_back(std::move(binfo));
