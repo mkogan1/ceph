@@ -2931,7 +2931,7 @@ int RGWRados::clean_bucket_index(RGWBucketInfo& bucket_info,
   std::map<int, std::string> bucket_objs;
   get_bucket_index_objects(dir_oid,
 			   bucket_info.layout.current_index.layout.normal.num_shards,
-			   gen.value_or(0), &bucket_objs);
+			   gen, &bucket_objs);
 
   return CLSRGWIssueBucketIndexClean(index_ctx,
 				     bucket_objs,
