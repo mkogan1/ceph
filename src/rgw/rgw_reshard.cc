@@ -548,12 +548,12 @@ int RGWBucketReshard::do_reshard(int num_shards,
   // complete successfully
   BucketInfoReshardUpdate bucket_info_updater(store, bucket_info, bucket_attrs, new_bucket_info.bucket.bucket_id);
 
-  constexpr int max_attempts = 5;
+  constexpr int max_attempts = 6;
 
   for (int attempt = 0; attempt < max_attempts; ++attempt) {
     // exponential back-off
     if (attempt > 0) {
-      sleep(1 << attempt);
+      sleep(1 << (attempt - 1));
     }
 
     ret = bucket_info_updater.start();
@@ -689,7 +689,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
   for (int attempt = 0; attempt < max_attempts; ++attempt) {
     // exponential back-off
     if (attempt > 0) {
-      sleep(1 << attempt);
+      sleep(1 << (attempt - 1));
     }
 
     ret = bucket_info_updater.complete();
