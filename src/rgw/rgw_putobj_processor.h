@@ -113,7 +113,7 @@ class ManifestObjectProcessor : public HeadObjectProcessor,
                                 public StripeGenerator {
  protected:
   RGWRados *const store;
-  const RGWBucketInfo& bucket_info;
+  RGWBucketInfo& bucket_info;
   rgw_placement_rule tail_placement_rule;
   rgw_user owner;
   RGWObjectCtx& obj_ctx;
@@ -130,7 +130,7 @@ class ManifestObjectProcessor : public HeadObjectProcessor,
 
  public:
   ManifestObjectProcessor(Aio *aio, RGWRados *store,
-                          const RGWBucketInfo& bucket_info,
+                          RGWBucketInfo& bucket_info,
                           const rgw_placement_rule *ptail_placement_rule,
                           const rgw_user& owner, RGWObjectCtx& obj_ctx,
                           const rgw_obj& head_obj)
@@ -168,7 +168,7 @@ class AtomicObjectProcessor : public ManifestObjectProcessor {
   int process_first_chunk(bufferlist&& data, DataProcessor **processor) override;
  public:
   AtomicObjectProcessor(Aio *aio, RGWRados *store,
-                        const RGWBucketInfo& bucket_info,
+                        RGWBucketInfo& bucket_info,
                         const rgw_placement_rule *ptail_placement_rule,
                         const rgw_user& owner,
                         RGWObjectCtx& obj_ctx, const rgw_obj& head_obj,
@@ -210,7 +210,7 @@ class MultipartObjectProcessor : public ManifestObjectProcessor {
   int prepare_head();
  public:
   MultipartObjectProcessor(Aio *aio, RGWRados *store,
-                           const RGWBucketInfo& bucket_info,
+                           RGWBucketInfo& bucket_info,
                            const rgw_placement_rule *ptail_placement_rule,
                            const rgw_user& owner, RGWObjectCtx& obj_ctx,
                            const rgw_obj& head_obj,
@@ -249,7 +249,7 @@ class MultipartObjectProcessor : public ManifestObjectProcessor {
     int process_first_chunk(bufferlist&& data, DataProcessor **processor) override;
 
   public:
-    AppendObjectProcessor(Aio *aio, RGWRados *store, const RGWBucketInfo& bucket_info,
+    AppendObjectProcessor(Aio *aio, RGWRados *store, RGWBucketInfo& bucket_info,
                           const rgw_placement_rule *ptail_placement_rule,
                           const rgw_user& owner, RGWObjectCtx& obj_ctx,const rgw_obj& head_obj,
                           const std::string& unique_tag, uint64_t position, uint64_t *cur_accounted_size)
