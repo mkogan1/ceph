@@ -5,8 +5,14 @@
 #define FMT_HEADER_ONLY 1
 #include "fmt/format.h"
 
+#include "common/errno.h"
+
+#include "librados/AioCompletionImpl.h"
+
 #include "rgw/rgw_datalog.h"
+#include "rgw/rgw_tools.h"
 #include "rgw/rgw_zone.h"
+#include "rgw/cls_fifo_legacy.h"
 
 static constexpr auto dout_subsys = ceph_subsys_rgw;
 
@@ -56,20 +62,561 @@ void rgw_data_change_log_entry::decode_json(JSONObj* obj) {
   JSONDecoder::decode_json("entry", entry, obj);
 }
 
-int RGWDataChangesLog::choose_oid(const rgw_bucket_shard& bs) {
-    const string& name = bs.bucket.name;
-    int shard_shift = (bs.shard_id > 0 ? bs.shard_id : 0);
-    uint32_t r = (ceph_str_hash_linux(name.c_str(), name.size()) + shard_shift) % num_shards;
-
-    return (int)r;
+int RGWDataChangesBE::remove(CephContext* cct, librados::Rados* rados,
+			     const rgw_pool& log_pool)
+{
+  auto num_shards = cct->_conf->rgw_data_log_num_shards;
+  librados::IoCtx ioctx;
+  auto r = rgw_init_ioctx(rados, log_pool.name, ioctx,
+			  false, false);
+  if (r < 0) {
+    if (r == -ENOENT) {
+      return 0;
+    } else {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": rgw_init_ioctx failed: " << log_pool.name
+		 << ": " << cpp_strerror(-r) << dendl;
+      return r;
+    }
+  }
+  for (auto i = 0; i < num_shards; ++i) {
+    auto oid = get_oid(cct, i);
+    librados::ObjectWriteOperation op;
+    op.remove();
+    auto r = rgw_rados_operate(ioctx, oid, &op, null_yield);
+    if (r < 0 && r != -ENOENT) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": remove failed: " << log_pool.name << "/" << oid
+		 << ": " << cpp_strerror(-r) << dendl;
+    }
+  }
+  return 0;
 }
 
-std::string RGWDataChangesLog::get_oid(int i) const {
-  std::string_view prefix = cct->_conf->rgw_data_log_obj_prefix;
-  if (prefix.empty()) {
-    prefix = "data_log"sv;
+
+class RGWDataChangesOmap final : public RGWDataChangesBE {
+  using centries = std::list<cls_log_entry>;
+  RGWRados* store;
+  std::vector<std::string> oids;
+public:
+  RGWDataChangesOmap(CephContext* cct, RGWRados* store)
+    : RGWDataChangesBE(cct), store(store) {
+    auto num_shards = cct->_conf->rgw_data_log_num_shards;
+    oids.reserve(num_shards);
+    for (auto i = 0; i < num_shards; ++i) {
+      oids.push_back(get_oid(i));
+    }
   }
-  return fmt::format("{}.{}", prefix, i);
+  ~RGWDataChangesOmap() override = default;
+  static int exists(CephContext* cct, RGWRados* store, bool* exists,
+		    bool* has_entries) {
+    auto num_shards = cct->_conf->rgw_data_log_num_shards;
+    std::string out_marker;
+    bool truncated = false;
+    std::list<cls_log_entry> log_entries;
+    const cls_log_header empty_info;
+    *exists = false;
+    *has_entries = false;
+    for (auto i = 0; i < num_shards; ++i) {
+      cls_log_header info;
+      auto oid = get_oid(cct, i);
+      auto r = store->time_log_info(oid, &info);
+      if (r < 0 && r != -ENOENT) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": failed to get info " << oid << ": " << cpp_strerror(-r)
+		   << dendl;
+	return r;
+      } else if ((r == -ENOENT) || (info == empty_info)) {
+	continue;
+      }
+      *exists = true;
+      r = store->time_log_list(oid, {}, {}, 100, log_entries, "", &out_marker,
+			       &truncated);
+      if (r < 0) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": failed to list " << oid << ": " << cpp_strerror(-r)
+		   << dendl;
+	return r;
+      } else if (!log_entries.empty()) {
+	*has_entries = true;
+	break; // No reason to continue, once we have both existence
+	       // AND non-emptiness
+      }
+    }
+    return 0;
+  }
+
+  void prepare(ceph::real_time ut, const std::string& key,
+	       ceph::buffer::list&& entry, entries& out) override {
+    if (!std::holds_alternative<centries>(out)) {
+      ceph_assert(std::visit([](const auto& v) { return std::empty(v); }, out));
+      out = centries();
+    }
+
+    cls_log_entry e;
+    store->time_log_prepare_entry(e, ut, {}, key, entry);
+    std::get<centries>(out).push_back(std::move(e));
+  }
+  int push(int index, entries&& items) override {
+    auto r = store->time_log_add(oids[index], std::get<centries>(items),
+				 nullptr, true);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": failed to push to " << oids[index] << cpp_strerror(-r)
+		 << dendl;
+    }
+    return r;
+  }
+  int push(int index, ceph::real_time now,
+	   const std::string& key,
+	   ceph::buffer::list&& bl) override {
+    auto r = store->time_log_add(oids[index], now, {}, key, bl);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": failed to push to " << oids[index]
+		 << cpp_strerror(-r) << dendl;
+    }
+    return r;
+  }
+  int list(int index, int max_entries,
+	   std::vector<rgw_data_change_log_entry>& entries,
+	   std::optional<std::string_view> marker,
+	   std::string* out_marker, bool* truncated) override {
+    std::list<cls_log_entry> log_entries;
+    auto r = store->time_log_list(oids[index], {}, {},
+				  max_entries, log_entries,
+				  std::string(marker.value_or("")),
+				  out_marker, truncated);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": failed to list " << oids[index]
+		 << cpp_strerror(-r) << dendl;
+      return r;
+    }
+    for (auto iter = log_entries.begin(); iter != log_entries.end(); ++iter) {
+      rgw_data_change_log_entry log_entry;
+      log_entry.log_id = iter->id;
+      auto rt = iter->timestamp.to_real_time();
+      log_entry.log_timestamp = rt;
+      auto liter = iter->data.cbegin();
+      try {
+	decode(log_entry.entry, liter);
+      } catch (ceph::buffer::error& err) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": failed to decode data changes log entry: "
+		   << err.what() << dendl;
+	return -EIO;
+      }
+      entries.push_back(log_entry);
+    }
+    return 0;
+  }
+  int get_info(int index, RGWDataChangesLogInfo *info) override {
+    cls_log_header header;
+    auto r = store->time_log_info(oids[index], &header);
+    if (r == -ENOENT) r = 0;
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": failed to get info from " << oids[index]
+		 << cpp_strerror(-r) << dendl;
+    } else {
+      info->marker = header.max_marker;
+      info->last_update = header.max_time.to_real_time();
+    }
+    return r;
+  }
+  int trim(int index, std::string_view marker) override {
+    auto r = store->time_log_trim(oids[index], {}, {},
+				  {}, std::string(marker), nullptr);
+
+    if (r == -ENOENT) r = 0;
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": failed to get info from " << oids[index]
+		 << cpp_strerror(-r) << dendl;
+    }
+    return r;
+  }
+  int trim(int index, std::string_view marker,
+	   librados::AioCompletion* c) override {
+    auto r = store->time_log_trim(oids[index], {}, {},
+				  {}, std::string(marker), c);
+
+    if (r == -ENOENT) r = 0;
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": failed to get info from " << oids[index]
+		 << cpp_strerror(-r) << dendl;
+    }
+    return r;
+  }
+  std::string_view max_marker() const override {
+    return "99999999"sv;
+  }
+};
+
+class RGWDataChangesNOP final : public RGWDataChangesBE {
+public:
+  RGWDataChangesNOP(CephContext* cct)
+    : RGWDataChangesBE(cct)  {}
+  ~RGWDataChangesNOP() override = default;
+  void prepare(ceph::real_time, const std::string&,
+	       ceph::buffer::list&&, entries&) override {
+  }
+  int push(int, entries&&) override {
+    return -ENOSYS;
+  }
+  int push(int, ceph::real_time, const std::string&,
+	   ceph::buffer::list&&) override {
+    return -ENOSYS;
+  }
+  int list(int, int, std::vector<rgw_data_change_log_entry>&,
+	   std::optional<std::string_view>,
+	   std::string*, bool*) override {
+    return -ENOSYS;
+  }
+  int get_info(int index, RGWDataChangesLogInfo*) override {
+    return -ENOSYS;
+  }
+  int trim(int, std::string_view) override {
+    return -ENOSYS;
+  }
+  int trim(int, std::string_view, librados::AioCompletion*) override {
+    return -ENOSYS;
+  }
+  std::string_view max_marker() const override {
+    return "ERROR"sv;
+  }
+};
+
+class RGWDataChangesFIFO final : public RGWDataChangesBE {
+  using centries = std::vector<ceph::buffer::list>;
+  std::vector<std::unique_ptr<rgw::cls::fifo::FIFO>> fifos;
+public:
+  RGWDataChangesFIFO(CephContext* cct, librados::Rados* rados,
+		     const rgw_pool& log_pool)
+    : RGWDataChangesBE(cct) {
+    librados::IoCtx ioctx;
+    auto shards = cct->_conf->rgw_data_log_num_shards;
+    auto r = rgw_init_ioctx(rados, log_pool.name, ioctx,
+			    true, false);
+    if (r < 0) {
+      throw std::system_error(-r, std::system_category());
+    }
+    fifos.resize(shards);
+    for (auto i = 0; i < shards; ++i) {
+      r = rgw::cls::fifo::FIFO::create(ioctx, get_oid(i),
+				       &fifos[i], null_yield);
+      if (r < 0) {
+	throw std::system_error(-r, std::system_category());
+      }
+    }
+    ceph_assert(fifos.size() == unsigned(shards));
+    ceph_assert(std::none_of(fifos.cbegin(), fifos.cend(),
+			     [](const auto& p) {
+			       return p == nullptr;
+			     }));
+  }
+  ~RGWDataChangesFIFO() override = default;
+  static int exists(CephContext* cct, librados::Rados* rados,
+		    const rgw_pool& log_pool, bool* exists, bool* has_entries) {
+    auto num_shards = cct->_conf->rgw_data_log_num_shards;
+    librados::IoCtx ioctx;
+    auto r = rgw_init_ioctx(rados, log_pool.name, ioctx,
+			    false, false);
+    if (r < 0) {
+      if (r == -ENOENT) {
+	return 0;
+      } else {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": rgw_init_ioctx failed: " << log_pool.name
+		   << ": " << cpp_strerror(-r) << dendl;
+	return r;
+      }
+    }
+    *exists = false;
+    *has_entries = false;
+    for (auto i = 0; i < num_shards; ++i) {
+      std::unique_ptr<rgw::cls::fifo::FIFO> fifo;
+      auto oid = get_oid(cct, i);
+      std::vector<rgw::cls::fifo::list_entry> log_entries;
+      bool more = false;
+      auto r = rgw::cls::fifo::FIFO::open(ioctx, oid,
+					  &fifo, null_yield);
+      if (r == -ENOENT || r == -ENODATA) {
+	continue;
+      } else if (r < 0) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": unable to open FIFO: " << log_pool << "/" << oid
+		   << ": " << cpp_strerror(-r) << dendl;
+	return r;
+      }
+      *exists = true;
+      r = fifo->list(1, nullopt, &log_entries, &more,
+		     null_yield);
+      if (r < 0) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": unable to list entries: " << log_pool << "/" << oid
+		   << ": " << cpp_strerror(-r) << dendl;
+      } else if (!log_entries.empty()) {
+	*has_entries = true;
+	break;
+      }
+    }
+    return 0;
+  }
+  void prepare(ceph::real_time, const std::string&,
+	       ceph::buffer::list&& entry, entries& out) override {
+    if (!std::holds_alternative<centries>(out)) {
+      ceph_assert(std::visit([](auto& v) { return std::empty(v); }, out));
+      out = centries();
+    }
+    std::get<centries>(out).push_back(std::move(entry));
+  }
+  int push(int index, entries&& items) override {
+    auto r = fifos[index]->push(std::get<centries>(items), null_yield);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": unable to push to FIFO: " << get_oid(index)
+		 << ": " << cpp_strerror(-r) << dendl;
+    }
+    return r;
+  }
+  int push(int index, ceph::real_time,
+	   const std::string&,
+	   ceph::buffer::list&& bl) override {
+    auto r = fifos[index]->push(std::move(bl), null_yield);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": unable to push to FIFO: " << get_oid(index)
+		 << ": " << cpp_strerror(-r) << dendl;
+    }
+    return r;
+  }
+  int list(int index, int max_entries,
+	   std::vector<rgw_data_change_log_entry>& entries,
+	   std::optional<std::string_view> marker,
+	   std::string* out_marker, bool* truncated) override {
+    std::vector<rgw::cls::fifo::list_entry> log_entries;
+    bool more = false;
+    auto r = fifos[index]->list(max_entries, marker, &log_entries, &more,
+				null_yield);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": unable to list FIFO: " << get_oid(index)
+		 << ": " << cpp_strerror(-r) << dendl;
+      return r;
+    }
+    for (const auto& entry : log_entries) {
+      rgw_data_change_log_entry log_entry;
+      log_entry.log_id = entry.marker;
+      log_entry.log_timestamp = entry.mtime;
+      auto liter = entry.data.cbegin();
+      try {
+	decode(log_entry.entry, liter);
+      } catch (const buffer::error& err) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": failed to decode data changes log entry: "
+		   << err.what() << dendl;
+	return -EIO;
+      }
+      entries.push_back(std::move(log_entry));
+    }
+    if (truncated)
+      *truncated = more;
+    if (out_marker && !log_entries.empty()) {
+      *out_marker = log_entries.back().marker;
+    }
+    return 0;
+  }
+  int get_info(int index, RGWDataChangesLogInfo *info) override {
+    auto& fifo = fifos[index];
+    auto r = fifo->read_meta(null_yield);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": unable to get FIFO metadata: " << get_oid(index)
+		 << ": " << cpp_strerror(-r) << dendl;
+      return r;
+    }
+    auto m = fifo->meta();
+    auto p = m.head_part_num;
+    if (p < 0) {
+      info->marker = rgw::cls::fifo::marker{}.to_string();
+      info->last_update = ceph::real_clock::zero();
+      return 0;
+    }
+    rgw::cls::fifo::part_info h;
+    r = fifo->get_part_info(p, &h, null_yield);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": unable to get part info: " << get_oid(index) << "/" << p
+		 << ": " << cpp_strerror(-r) << dendl;
+      return r;
+    }
+    info->marker = rgw::cls::fifo::marker{p, h.last_ofs}.to_string();
+    info->last_update = h.max_time;
+    return 0;
+  }
+  int trim(int index, std::string_view marker) override {
+    auto r = fifos[index]->trim(marker, null_yield);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": unable to trim FIFO: " << get_oid(index)
+		 << ": " << cpp_strerror(-r) << dendl;
+    }
+    return r;
+  }
+  int trim(int index, std::string_view marker,
+	   librados::AioCompletion* c) override {
+    int r = 0;
+    if (marker == rgw::cls::fifo::marker(0, 0).to_string()) {
+      auto pc = c->pc;
+      pc->get();
+      pc->lock.lock();
+      pc->rval = 0;
+      pc->complete = true;
+      pc->lock.unlock();
+      auto cb_complete = pc->callback_complete;
+      auto cb_complete_arg = pc->callback_complete_arg;
+      if (cb_complete)
+	cb_complete(pc, cb_complete_arg);
+
+      auto cb_safe = pc->callback_safe;
+      auto cb_safe_arg = pc->callback_safe_arg;
+      if (cb_safe)
+	cb_safe(pc, cb_safe_arg);
+
+      pc->lock.lock();
+      pc->callback_complete = NULL;
+      pc->callback_safe = NULL;
+      pc->cond.Signal();
+      pc->put_unlock();
+    } else {
+      r = fifos[index]->trim(marker, c);
+      if (r < 0) {
+	lderr(cct) << __PRETTY_FUNCTION__
+		   << ": unable to trim FIFO: " << get_oid(index)
+		   << ": " << cpp_strerror(-r) << dendl;
+      }
+    }
+    return r;
+  }
+  std::string_view max_marker() const override {
+    static const std::string mm =
+      rgw::cls::fifo::marker::max().to_string();
+    return std::string_view(mm);
+  }
+};
+
+RGWDataChangesLog::RGWDataChangesLog(CephContext* cct, RGWRados* store)
+  : cct(cct), store(store),
+    num_shards(cct->_conf->rgw_data_log_num_shards),
+    changes(cct->_conf->rgw_data_log_changes_size)
+{
+  if (!store->svc.zone->need_to_log_data()) {
+    be = std::make_unique<RGWDataChangesNOP>(cct);
+    renew_thread = make_named_thread("rgw_dt_lg_renew",
+				     &RGWDataChangesLog::renew_run, this);
+    return;
+  }
+  auto backing = cct->_conf.get_val<std::string>("rgw_data_log_backing");
+  // Should be guaranteed by `set_enum_allowed`
+  ceph_assert(backing == "auto" || backing == "fifo" || backing == "omap");
+  auto log_pool = store->svc.zone->get_zone_params().log_pool;
+  bool omapexists = false, omaphasentries = false;
+  auto r = RGWDataChangesOmap::exists(cct, store, &omapexists, &omaphasentries);
+  if (r < 0) {
+    lderr(cct) << __PRETTY_FUNCTION__
+	       << ": Error when checking for existing Omap datalog backend: "
+	       << cpp_strerror(-r) << dendl;
+  }
+  bool fifoexists = false, fifohasentries = false;
+  r = RGWDataChangesFIFO::exists(cct, store->get_rados_handle(), log_pool,
+				 &fifoexists, &fifohasentries);
+  if (r < 0) {
+    lderr(cct) << __PRETTY_FUNCTION__
+	       << ": Error when checking for existing FIFO datalog backend: "
+	       << cpp_strerror(-r) << dendl;
+  }
+  bool has_entries = omaphasentries || fifohasentries;
+  bool remove = false;
+
+  if (omapexists && fifoexists) {
+    if (has_entries) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": Both Omap and FIFO backends exist, cannot continue."
+		 << dendl;
+      throw std::system_error(EINVAL, std::system_category());
+    }
+    ldout(cct, 0)
+      << __PRETTY_FUNCTION__
+      << ": Both Omap and FIFO backends exist, but are empty. Will remove."
+      << dendl;
+    remove = true;
+  }
+  if (backing == "omap" && fifoexists) {
+    if (has_entries) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": Omap requested, but FIFO backend exists, cannot continue."
+		 << dendl;
+      throw std::system_error(EINVAL, std::system_category());
+    }
+    ldout(cct, 0) << __PRETTY_FUNCTION__
+		  << ": Omap requested, FIFO exists, but is empty. Deleting."
+		  << dendl;
+    remove = true;
+  }
+  if (backing == "fifo" && omapexists) {
+    if (has_entries) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": FIFO requested, but Omap backend exists, cannot continue."
+		 << dendl;
+      throw std::system_error(EINVAL, std::system_category());
+    }
+    ldout(cct, 0) << __PRETTY_FUNCTION__
+		  << ": FIFO requested, Omap exists, but is empty. Deleting."
+		  << dendl;
+    remove = true;
+  }
+
+  if (remove) {
+    r = RGWDataChangesBE::remove(cct, store->get_rados_handle(), log_pool);
+    if (r < 0) {
+      lderr(cct) << __PRETTY_FUNCTION__
+		 << ": remove failed, cannot continue."
+		 << dendl;
+      throw std::system_error(-r, std::system_category());
+    }
+    omapexists = false;
+    fifoexists = false;
+  }
+
+  try {
+    if (backing == "omap" || (backing == "auto" && omapexists)) {
+      be = std::make_unique<RGWDataChangesOmap>(cct, store);
+    } else if (backing != "omap") {
+      be = std::make_unique<RGWDataChangesFIFO>(cct, store->get_rados_handle(),
+						log_pool);
+    }
+  } catch (const std::system_error& e) {
+    lderr(cct) << __PRETTY_FUNCTION__
+	       << ": Error when starting backend: "
+	       << e.what() << dendl;
+    throw;
+  }
+
+  ceph_assert(be);
+  renew_thread = make_named_thread("rgw_dt_lg_renew",
+				   &RGWDataChangesLog::renew_run, this);
+}
+
+
+int RGWDataChangesLog::choose_oid(const rgw_bucket_shard& bs) {
+  const auto& name = bs.bucket.name;
+  auto shard_shift = (bs.shard_id > 0 ? bs.shard_id : 0);
+  auto r = (ceph_str_hash_linux(name.data(), name.size()) +
+	    shard_shift) % num_shards;
+  return static_cast<int>(r);
 }
 
 int RGWDataChangesLog::renew_entries()
@@ -79,21 +626,18 @@ int RGWDataChangesLog::renew_entries()
 
   /* we can't keep the bucket name as part of the cls_log_entry, and we need
    * it later, so we keep two lists under the map */
-  std::map<int, pair<list<rgw_bucket_shard>, list<cls_log_entry>>> m;
+  bc::flat_map<int, std::pair<std::vector<rgw_bucket_shard>,
+			      RGWDataChangesBE::entries>> m;
 
   std::unique_lock l(lock);
-  std::map<rgw_bucket_shard, bool> entries;
+  decltype(cur_cycle) entries;
   entries.swap(cur_cycle);
   l.unlock();
 
   std::string section;
   auto ut = real_clock::now();
-  for (auto iter = entries.begin(); iter != entries.end(); ++iter) {
-    const auto& bs = iter->first;
-
-    int index = choose_oid(bs);
-
-    cls_log_entry entry;
+  for (const auto& bs : entries) {
+    auto index = choose_oid(bs);
 
     rgw_data_change change;
     bufferlist bl;
@@ -102,56 +646,53 @@ int RGWDataChangesLog::renew_entries()
     change.timestamp = ut;
     encode(change, bl);
 
-    store->time_log_prepare_entry(entry, ut, section, change.key, bl);
-
     m[index].first.push_back(bs);
-    m[index].second.emplace_back(std::move(entry));
+    be->prepare(ut, change.key, std::move(bl), m[index].second);
   }
 
-  for (auto miter = m.begin(); miter != m.end(); ++miter) {
-    auto& entries = miter->second.second;
+  for (auto& [index, p] : m) {
+    auto& [buckets, entries] = p;
 
     auto now = real_clock::now();
 
-    int ret = store->time_log_add(oids[miter->first], entries, NULL);
+    auto ret = be->push(index, std::move(entries));
     if (ret < 0) {
       /* we don't really need to have a special handling for failed cases here,
        * as this is just an optimization. */
-      lderr(cct) << "ERROR: store->time_log_add() returned " << ret << dendl;
+      lderr(cct) << "ERROR: svc.cls->timelog.add() returned " << ret << dendl;
       return ret;
     }
 
-    real_time expiration = now;
-    expiration += make_timespan(cct->_conf->rgw_data_log_window);
-
-    auto& buckets = miter->second.first;
-    for (auto liter = buckets.begin(); liter != buckets.end(); ++liter) {
-      update_renewed(*liter, expiration);
+    auto expiration = now;
+    expiration += ceph::make_timespan(cct->_conf->rgw_data_log_window);
+    for (auto& bs : buckets) {
+      update_renewed(bs, expiration);
     }
   }
 
   return 0;
 }
 
-void RGWDataChangesLog::_get_change(const rgw_bucket_shard& bs, ChangeStatusPtr& status)
+void RGWDataChangesLog::_get_change(const rgw_bucket_shard& bs,
+				    ChangeStatusPtr& status)
 {
-  ceph_assert(lock.is_locked());
+  ceph_assert(ceph_mutex_is_locked(lock));
   if (!changes.find(bs, status)) {
     status = ChangeStatusPtr(new ChangeStatus);
     changes.add(bs, status);
   }
 }
 
-void RGWDataChangesLog::register_renew(rgw_bucket_shard& bs)
+void RGWDataChangesLog::register_renew(const rgw_bucket_shard& bs)
 {
-  std::lock_guard l(lock);
-  cur_cycle[bs] = true;
+  std::scoped_lock l{lock};
+  cur_cycle.insert(bs);
 }
 
-void RGWDataChangesLog::update_renewed(rgw_bucket_shard& bs,
+void RGWDataChangesLog::update_renewed(const rgw_bucket_shard& bs,
 				       real_time expiration)
 {
-  std::lock_guard l(lock);
+  std::scoped_lock l{lock};
   ChangeStatusPtr status;
   _get_change(bs, status);
 
@@ -167,7 +708,11 @@ int RGWDataChangesLog::get_log_shard_id(rgw_bucket& bucket, int shard_id) {
   return choose_oid(bs);
 }
 
-int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
+std::string RGWDataChangesLog::get_oid(int i) const {
+  return be->get_oid(i);
+}
+
+int RGWDataChangesLog::add_entry(const rgw_bucket& bucket, int shard_id) {
   if (!store->svc.zone->need_to_log_data())
     return 0;
 
@@ -181,13 +726,11 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   mark_modified(index, bs);
 
   std::unique_lock l(lock);
-
   ChangeStatusPtr status;
   _get_change(bs, status);
-
   l.unlock();
 
-  real_time now = real_clock::now();
+  auto now = real_clock::now();
 
   std::unique_lock sl(status->lock);
 
@@ -198,7 +741,6 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   if (now < status->cur_expiration) {
     /* no need to send, recently completed */
     sl.unlock();
-
     register_renew(bs);
     return 0;
   }
@@ -224,10 +766,8 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   status->cond = new RefCountedCond;
   status->pending = true;
 
-  string& oid = oids[index];
-  real_time expiration;
-
-  int ret;
+  ceph::real_time expiration;
+  int ret = 0;
 
   do {
     status->cur_sent = now;
@@ -237,17 +777,15 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
 
     sl.unlock();
 
-    bufferlist bl;
+    ceph::buffer::list bl;
     rgw_data_change change;
     change.entity_type = ENTITY_TYPE_BUCKET;
     change.key = bs.get_key();
     change.timestamp = now;
     encode(change, bl);
-    string section;
-
     ldout(cct, 20) << "RGWDataChangesLog::add_entry() sending update with now=" << now << " cur_expiration=" << expiration << dendl;
 
-    ret = store->time_log_add(oid, now, section, change.key, bl);
+    ret = be->push(index, now, change.key, std::move(bl));
 
     now = real_clock::now();
 
@@ -258,7 +796,8 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   cond = status->cond;
 
   status->pending = false;
-  status->cur_expiration = status->cur_sent; /* time of when operation started, not completed */
+  /* time of when operation started, not completed */
+  status->cur_expiration = status->cur_sent;
   status->cur_expiration += make_timespan(cct->_conf->rgw_data_log_window);
   status->cond = nullptr;
   sl.unlock();
@@ -275,43 +814,20 @@ int RGWDataChangesLog::list_entries(int shard, int max_entries,
 				    std::string* out_marker, bool* truncated)
 {
   assert(shard < num_shards);
-  list<cls_log_entry> log_entries;
-
-  int ret = store->time_log_list(oids[shard], {}, {}, max_entries, log_entries,
-				 std::string(marker.value_or("")),
-				 out_marker, truncated);
-  if (ret < 0)
-    return ret;
-
-  for (auto iter = log_entries.begin(); iter != log_entries.end(); ++iter) {
-    rgw_data_change_log_entry log_entry;
-    log_entry.log_id = iter->id;
-    real_time rt = iter->timestamp.to_real_time();
-    log_entry.log_timestamp = rt;
-    auto liter = iter->data.cbegin();
-    try {
-      decode(log_entry.entry, liter);
-    } catch (buffer::error& err) {
-      lderr(cct) << "ERROR: failed to decode data changes log entry" << dendl;
-      return -EIO;
-    }
-    entries.push_back(log_entry);
-  }
-
-  return 0;
+  return be->list(shard, max_entries, entries, std::string(marker.value_or("")),
+		  out_marker, truncated);
 }
 
-int RGWDataChangesLog::list_entries(int max_entries, std::vector<rgw_data_change_log_entry>& entries,
-				    LogMarker& marker, bool* ptruncated)
+int RGWDataChangesLog::list_entries(int max_entries,
+				    std::vector<rgw_data_change_log_entry>& entries,
+				    LogMarker& marker, bool *ptruncated)
 {
   bool truncated;
   entries.clear();
-
-  for (; marker.shard < num_shards && (int)entries.size() < max_entries;
+  for (; marker.shard < num_shards && int(entries.size()) < max_entries;
        marker.shard++, marker.marker.reset()) {
     int ret = list_entries(marker.shard, max_entries - entries.size(),
 			   entries, marker.marker, NULL, &truncated);
-
     if (ret == -ENOENT) {
       continue;
     }
@@ -323,43 +839,27 @@ int RGWDataChangesLog::list_entries(int max_entries, std::vector<rgw_data_change
       return 0;
     }
   }
-
   *ptruncated = (marker.shard < num_shards);
-
   return 0;
 }
 
-int RGWDataChangesLog::get_info(int shard_id, RGWDataChangesLogInfo* info)
+int RGWDataChangesLog::get_info(int shard_id, RGWDataChangesLogInfo *info)
 {
   assert(shard_id < num_shards);
-
-  string oid = oids[shard_id];
-
-  cls_log_header header;
-
-  int ret = store->time_log_info(oid, &header);
-  if ((ret < 0) && (ret != -ENOENT))
-    return ret;
-
-  info->marker = header.max_marker;
-  info->last_update = header.max_time.to_real_time();
-
-  return 0;
+  return be->get_info(shard_id, info);
 }
 
 int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker)
 {
   assert(shard_id < num_shards);
-  return store->time_log_trim(oids[shard_id], {}, {}, {}, std::string(marker),
-			      nullptr);
+  return be->trim(shard_id, marker);
 }
 
 int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker,
 				    librados::AioCompletion* c)
 {
   assert(shard_id < num_shards);
-  return store->time_log_trim(oids[shard_id], {}, {}, {}, std::string(marker),
-			      c);
+  return be->trim(shard_id, marker, c);
 }
 
 int RGWDataChangesLog::lock_exclusive(int shard_id, timespan duration, string& zone_id, string& owner_id) {
@@ -385,7 +885,6 @@ RGWDataChangesLog::~RGWDataChangesLog() {
     renew_stop();
     renew_thread.join();
   }
-  delete[] oids;
 }
 
 void RGWDataChangesLog::renew_run() {
@@ -415,25 +914,14 @@ void RGWDataChangesLog::renew_stop()
 void RGWDataChangesLog::mark_modified(int shard_id, const rgw_bucket_shard& bs)
 {
   auto key = bs.get_key();
-
-  std::shared_lock rl(modified_lock);
-  auto iter = modified_shards.find(shard_id);
-  if (iter != modified_shards.end()) {
-    auto& keys = iter->second;
-    if (keys.find(key) != keys.end()) {
-      rl.unlock();
+  {
+    std::shared_lock rl{modified_lock}; // read lock to check for existence
+    auto shard = modified_shards.find(shard_id);
+    if (shard != modified_shards.end() && shard->second.count(key)) {
       return;
     }
   }
-  rl.unlock();
 
-  std::unique_lock wl(modified_lock);
+  std::unique_lock wl{modified_lock}; // write lock for insertion
   modified_shards[shard_id].insert(key);
-}
-
-void RGWDataChangesLog::read_clear_modified(map<int, set<string> > &modified)
-{
-  std::unique_lock wl(modified_lock);
-  modified.swap(modified_shards);
-  modified_shards.clear();
 }
