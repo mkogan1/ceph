@@ -601,7 +601,8 @@ public:
     http_manager.start();
   }
 
-  int notify_all(map<string, RGWRESTConn *>& conn_map, map<int, set<string> >& shards) {
+  int notify_all(map<string, RGWRESTConn *>& conn_map,
+		 bc::flat_map<int, bc::flat_set<std::string>>& shards) {
     rgw_http_param_pair pairs[] = { { "type", "data" },
                                     { "notify", NULL },
                                     { "source-zone", store->svc.zone->get_zone_params().get_id().c_str() },
@@ -611,7 +612,7 @@ public:
     for (map<string, RGWRESTConn *>::iterator iter = conn_map.begin(); iter != conn_map.end(); ++iter) {
       RGWRESTConn *conn = iter->second;
       RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), this);
-      stack->call(new RGWPostRESTResourceCR<map<int, set<string> >, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
+      stack->call(new RGWPostRESTResourceCR<bc::flat_map<int, bc::flat_set<std::string>>, int>(store->ctx(), conn, &http_manager, "/admin/log", pairs, shards, NULL));
 
       stacks.push_back(stack);
     }
@@ -735,15 +736,13 @@ int RGWDataNotifier::process()
     return 0;
   }
 
-  map<int, set<string> > shards;
-
-  store->data_log->read_clear_modified(shards);
+  auto shards = store->data_log->read_clear_modified();
 
   if (shards.empty()) {
     return 0;
   }
 
-  for (map<int, set<string> >::iterator iter = shards.begin(); iter != shards.end(); ++iter) {
+  for (auto iter = shards.begin(); iter != shards.end(); ++iter) {
     ldout(cct, 20) << __func__ << "(): notifying datalog change, shard_id=" << iter->first << ": " << iter->second << dendl;
   }
 
@@ -1409,7 +1408,11 @@ int RGWRados::init_rados()
   }
 
   meta_mgr = new RGWMetadataManager(cct, this);
-  data_log = new RGWDataChangesLog(cct, this);
+  try {
+    data_log = new RGWDataChangesLog(cct, this);
+  } catch (const std::system_error& e) {
+    ret = e.code().value();
+  }
   cr_registry = crs.release();
   return ret;
 }
