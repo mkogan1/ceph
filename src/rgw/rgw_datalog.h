@@ -6,20 +6,40 @@
 
 #include <atomic>
 #include <cstdint>
+#include <list>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
+#include <boost/container/flat_map.hpp>
+
+#undef FMT_HEADER_ONLY
+#define FMT_HEADER_ONLY 1
+#include <fmt/format.h>
+
+#include "include/rados/librados.hpp"
+
+#include "include/buffer.h"
 #include "include/encoding.h"
 
 #include "common/ceph_context.h"
-#include "common/ceph_mutex.h"
 #include "common/ceph_json.h"
+#include "common/ceph_mutex.h"
 #include "common/ceph_time.h"
 #include "common/Formatter.h"
+#include "common/lru_map.h"
+#include "common/RefCountedObj.h"
 
+#include "cls/log/cls_log_types.h"
+
+#include "rgw_basic_types.h"
 #include "rgw/rgw_rados.h"
+#include "rgw_zone.h"
+
+namespace bc = boost::container;
 
 enum DataLogEntityType {
   ENTITY_TYPE_UNKNOWN = 0,
@@ -89,14 +109,60 @@ struct RGWDataChangesLogInfo {
   void decode_json(JSONObj* obj);
 };
 
-namespace rgw {
-struct BucketChangeObserver;
-}
+class RGWDataChangesBE {
+protected:
+  CephContext* const cct;
+private:
+  std::string prefix;
+  static std::string_view get_prefix(CephContext* cct) {
+    std::string_view prefix = cct->_conf->rgw_data_log_obj_prefix;
+    if (prefix.empty()) {
+      prefix = "data_log"sv;
+    }
+    return prefix;
+  }
+public:
+  using entries = std::variant<std::list<cls_log_entry>,
+			       std::vector<ceph::buffer::list>>;
+
+  RGWDataChangesBE(CephContext* const cct)
+    : cct(cct), prefix(get_prefix(cct)) {}
+  virtual ~RGWDataChangesBE() = default;
+
+  static std::string get_oid(CephContext* cct, int i) {
+    return fmt::format("{}.{}", get_prefix(cct), i);
+  }
+  std::string get_oid(int i) {
+    return fmt::format("{}.{}", prefix, i);
+  }
+  static int remove(CephContext* cct, librados::Rados* rados,
+		    const rgw_pool& log_pool);
+
+
+  virtual void prepare(ceph::real_time now,
+		       const std::string& key,
+		       ceph::buffer::list&& entry,
+		       entries& out) = 0;
+  virtual int push(int index, entries&& items) = 0;
+  virtual int push(int index, ceph::real_time now,
+		   const std::string& key,
+		   ceph::buffer::list&& bl) = 0;
+  virtual int list(int shard, int max_entries,
+		   std::vector<rgw_data_change_log_entry>& entries,
+		   std::optional<std::string_view> marker,
+		   std::string* out_marker, bool* truncated) = 0;
+  virtual int get_info(int index, RGWDataChangesLogInfo *info) = 0;
+  virtual int trim(int index, std::string_view marker) = 0;
+  virtual int trim(int index, std::string_view marker,
+		   librados::AioCompletion* c) = 0;
+  virtual std::string_view max_marker() const = 0;
+};
 
 class RGWDataChangesLog {
   CephContext* cct;
   RGWRados* store;
   rgw::BucketChangeObserver* observer = nullptr;
+  std::unique_ptr<RGWDataChangesBE> be;
 
   int num_shards;
   std::string* oids;
@@ -104,7 +170,7 @@ class RGWDataChangesLog {
   ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::lock");
   ceph::shared_mutex modified_lock =
     ceph::make_shared_mutex("RGWDataChangesLog::modified_lock");
-  std::map<int, std::set<std::string>> modified_shards;
+  bc::flat_map<int, bc::flat_set<std::string>> modified_shards;
 
   std::atomic<bool> down_flag = { false };
 
@@ -114,21 +180,17 @@ class RGWDataChangesLog {
     bool pending = false;
     RefCountedCond* cond = nullptr;
     ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::ChangeStatus");
-
-    ChangeStatus() = default;
-
-    ~ChangeStatus() = default;
   };
 
   using ChangeStatusPtr = std::shared_ptr<ChangeStatus>;
 
   lru_map<rgw_bucket_shard, ChangeStatusPtr> changes;
 
-  std::map<rgw_bucket_shard, bool> cur_cycle;
+  bc::flat_set<rgw_bucket_shard> cur_cycle;
 
   void _get_change(const rgw_bucket_shard& bs, ChangeStatusPtr& status);
-  void register_renew(rgw_bucket_shard& bs);
-  void update_renewed(rgw_bucket_shard& bs, ceph::real_time expiration);
+  void register_renew(const rgw_bucket_shard& bs);
+  void update_renewed(const rgw_bucket_shard& bs, ceph::real_time expiration);
   bool going_down() const;
   int choose_oid(const rgw_bucket_shard& bs);
 
@@ -142,30 +204,18 @@ class RGWDataChangesLog {
 
 public:
 
-  RGWDataChangesLog(CephContext* cct, RGWRados* store)
-    : cct(cct), store(store), changes(cct->_conf->rgw_data_log_changes_size) {
-    num_shards = cct->_conf->rgw_data_log_num_shards;
-
-    oids = new std::string[num_shards];
-    for (int i = 0; i < num_shards; i++) {
-      oids[i] = get_oid(i);
-    }
-
-    renew_thread = make_named_thread("rgw_dt_lg_renew",
-				     &RGWDataChangesLog::renew_run, this);
-  }
-
+  RGWDataChangesLog(CephContext* cct, RGWRados* store);
   ~RGWDataChangesLog();
 
   std::string get_oid(int shard_id) const;
-  int add_entry(rgw_bucket& bucket, int shard_id);
+  int add_entry(const rgw_bucket& bucket, int shard_id);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int list_entries(int shard, int max_entries,
 		   std::vector<rgw_data_change_log_entry>& entries,
 		   std::optional<std::string_view> marker,
 		   std::string* out_marker, bool* truncated);
-  int trim_entries(int shard_id, std::string_view _marker);
-  int trim_entries(int shard_id, std::string_view _marker,
+  int trim_entries(int shard_id, std::string_view marker);
+  int trim_entries(int shard_id, std::string_view marker,
 		   librados::AioCompletion* c);
   int get_info(int shard_id, RGWDataChangesLogInfo* info);
   int lock_exclusive(int shard_id, timespan duration, string& zone_id, string& owner_id);
@@ -176,12 +226,18 @@ public:
 
     LogMarker() = default;
   };
+
   int list_entries(int max_entries,
 		   std::vector<rgw_data_change_log_entry>& entries,
 		   LogMarker& marker, bool* ptruncated);
-
   void mark_modified(int shard_id, const rgw_bucket_shard& bs);
-  void read_clear_modified(map<int, set<string> > &modified);
+  auto read_clear_modified() {
+    std::unique_lock wl{modified_lock};
+    decltype(modified_shards) modified;
+    modified.swap(modified_shards);
+    modified_shards.clear();
+    return modified;
+  }
 
   void set_observer(rgw::BucketChangeObserver* observer) {
     this->observer = observer;
@@ -189,6 +245,5 @@ public:
   // a marker that compares greater than any other
   std::string_view max_marker() const;
 };
-
 
 #endif
