@@ -131,6 +131,7 @@ template <typename Stream>
 void handle_connection(boost::asio::io_context& context,
                        RGWProcessEnv& env, Stream& stream,
                        parse_buffer& buffer, bool is_ssl,
+                       bool ignore_bad_content_length,
                        SharedMutex& pause_mutex,
                        rgw::dmclock::Scheduler *scheduler,
                        boost::system::error_code& ec,
@@ -150,6 +151,9 @@ void handle_connection(boost::asio::io_context& context,
     rgw::asio::parser_type parser;
     parser.header_limit(header_limit);
     parser.body_limit(body_limit);
+#ifdef HAVE_BOOST_IGNORE_BAD_CONTENT_LENGTH
+    parser.ignore_bad_content_length(ignore_bad_content_length);
+#endif
 
     // parse the header
     http::async_read_header(stream, buffer, parser, yield[ec]);
@@ -314,6 +318,7 @@ class AsioFrontend {
     tcp::socket socket;
     bool use_ssl = false;
     bool use_nodelay = false;
+    bool ignore_bad_content_length;
 
     explicit Listener(boost::asio::io_context& context)
       : acceptor(context), socket(context) {}
@@ -494,7 +499,24 @@ int AsioFrontend::init()
       l.use_nodelay = (nodelay->second == "1");
     }
   }
-  
+  // parse enable unsafe request smuggling
+  {
+    int enable_unsafe = 1;
+    auto allow_request_smuggling = config.find("enable_unsafe_request_smuggling");
+    if (allow_request_smuggling != config.end()) {
+#ifndef HAVE_BOOST_IGNORE_BAD_CONTENT_LENGTH
+      static int complained;
+      if (!complained) {
+	  ldout(ctx(), 0) << "WARNING: this version of boost lacks support for enable_unsafe_request_smuggling" << dendl;
+	  complained = 1;
+      }
+#endif
+      enable_unsafe = (allow_request_smuggling->second == "1");
+    }
+    for (auto& l : listeners) {
+      l.ignore_bad_content_length = enable_unsafe;
+    }
+  }
 
   bool socket_bound = false;
   // start listeners
@@ -663,7 +685,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
   if (l.use_ssl) {
     spawn::spawn(context,
-      [this, s=std::move(socket)] (spawn::yield_context yield) mutable {
+      [this, s=std::move(socket), ic=l.ignore_bad_content_length] (spawn::yield_context yield) mutable {
         Connection conn{s};
         auto c = connections.add(conn);
         // wrap the socket in an ssl stream
@@ -678,7 +700,8 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
           return;
         }
         buffer->consume(bytes);
-        handle_connection(context, env, stream, *buffer, true, pause_mutex,
+        handle_connection(context, env, stream, *buffer, true,
+                          ic, pause_mutex,
                           scheduler.get(), ec, yield);
         if (!ec) {
           // ssl shutdown (ignoring errors)
@@ -691,12 +714,13 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
   {
 #endif // WITH_RADOSGW_BEAST_OPENSSL
     spawn::spawn(context,
-      [this, s=std::move(socket)] (spawn::yield_context yield) mutable {
+      [this, s=std::move(socket), ic=l.ignore_bad_content_length] (spawn::yield_context yield) mutable {
         Connection conn{s};
         auto c = connections.add(conn);
         auto buffer = std::make_unique<parse_buffer>();
         boost::system::error_code ec;
-        handle_connection(context, env, s, *buffer, false, pause_mutex,
+        handle_connection(context, env, s, *buffer, false,
+                          ic, pause_mutex,
                           scheduler.get(), ec, yield);
         s.shutdown(tcp::socket::shutdown_both, ec);
       }, make_stack_allocator());
