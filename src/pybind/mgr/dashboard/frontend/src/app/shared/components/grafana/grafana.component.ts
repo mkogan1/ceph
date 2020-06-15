@@ -3,6 +3,7 @@ import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 
 import { I18n } from '@ngx-translate/i18n-polyfill';
 
+import { DocUrls } from '../../../shared/constants/app.constants';
 import { Icons } from '../../../shared/enum/icons.enum';
 import { CephReleaseNamePipe } from '../../../shared/pipes/ceph-release-name.pipe';
 import { SummaryService } from '../../../shared/services/summary.service';
@@ -184,10 +185,9 @@ export class GrafanaComponent implements OnInit, OnChanges {
         return;
       }
 
+      // @ts-ignore
       const releaseName = this.cephReleaseNamePipe.transform(summary.version);
-      this.docsUrl =
-        `http://docs.ceph.com/docs/${releaseName}/mgr/dashboard/` +
-        `#enabling-the-embedding-of-grafana-dashboards`;
+      this.docsUrl = DocUrls.monitoring;
 
       setTimeout(() => {
         subs.unsubscribe();

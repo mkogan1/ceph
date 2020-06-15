@@ -4,6 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { TabDirective, TabsetComponent } from 'ngx-bootstrap/tabs';
 
 import { PrometheusService } from '../../../../shared/api/prometheus.service';
+import { DocUrls } from '../../../../shared/constants/app.constants';
 import { CephReleaseNamePipe } from '../../../../shared/pipes/ceph-release-name.pipe';
 import { PrometheusAlertService } from '../../../../shared/services/prometheus-alert.service';
 import { SummaryService } from '../../../../shared/services/summary.service';
@@ -43,8 +44,9 @@ export class MonitoringListComponent implements OnInit {
         return;
       }
 
+      // @ts-ignore
       const releaseName = this.cephReleaseNamePipe.transform(summary.version);
-      this.docsUrl = `https://docs.ceph.com/docs/${releaseName}/mgr/dashboard/#enabling-prometheus-alerting`;
+      this.docsUrl = DocUrls.alerting;
 
       setTimeout(() => {
         subs.unsubscribe();

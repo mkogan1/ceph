@@ -8,7 +8,7 @@ import { Subscription } from 'rxjs';
 import { IscsiService } from '../../../shared/api/iscsi.service';
 import { ListWithDetails } from '../../../shared/classes/list-with-details.class';
 import { CriticalConfirmationModalComponent } from '../../../shared/components/critical-confirmation-modal/critical-confirmation-modal.component';
-import { ActionLabelsI18n } from '../../../shared/constants/app.constants';
+import { ActionLabelsI18n, DocUrls } from '../../../shared/constants/app.constants';
 import { TableComponent } from '../../../shared/datatable/table/table.component';
 import { CellTemplate } from '../../../shared/enum/cell-template.enum';
 import { Icons } from '../../../shared/enum/icons.enum';
@@ -147,8 +147,9 @@ export class IscsiTargetListComponent extends ListWithDetails implements OnInit,
         });
       } else {
         const summary = this.summaryservice.getCurrentSummary();
+        // @ts-ignore
         const releaseName = this.cephReleaseNamePipe.transform(summary.version);
-        this.docsUrl = `http://docs.ceph.com/docs/${releaseName}/mgr/dashboard/#enabling-iscsi-management`;
+        this.docsUrl = DocUrls.iscsi;
         this.status = result.message;
       }
     });

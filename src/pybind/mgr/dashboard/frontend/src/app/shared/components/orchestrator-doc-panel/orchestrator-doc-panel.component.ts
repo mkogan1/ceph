@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 
+import { DocUrls } from '../../../shared/constants/app.constants';
 import { CephReleaseNamePipe } from '../../pipes/ceph-release-name.pipe';
 import { SummaryService } from '../../services/summary.service';
 
@@ -21,9 +22,9 @@ export class OrchestratorDocPanelComponent implements OnInit {
       if (!summary) {
         return;
       }
-
+      // @ts-ignore
       const releaseName = this.cephReleaseNamePipe.transform(summary.version);
-      this.docsUrl = `http://docs.ceph.com/docs/${releaseName}/mgr/orchestrator/`;
+      this.docsUrl = DocUrls.orchestrator;
 
       setTimeout(() => {
         subs.unsubscribe();
