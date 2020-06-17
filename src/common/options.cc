@@ -7385,6 +7385,10 @@ std::vector<Option> get_rgw_options() {
     .set_description("Session token max duration")
     .set_long_description("Max duration in seconds for which the session token is valid."),
 
+    Option("rgw_sts_min_session_duration", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+    .set_default(900)
+    .set_description("Minimum allowed duration of a session"),
+
     Option("rgw_max_listing_results", Option::TYPE_UINT,
 	   Option::LEVEL_ADVANCED)
     .set_default(1000)
@@ -7499,6 +7503,7 @@ std::vector<Option> get_rgw_options() {
     .set_description("mclock limit for metadata requests")
     .add_see_also("rgw_dmclock_metadata_res")
     .add_see_also("rgw_dmclock_metadata_wgt"),
+
   });
 }
 
