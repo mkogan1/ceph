@@ -445,36 +445,29 @@ int queue_remove_entries(cls_method_context_t hctx, const cls_queue_remove_op& o
   if (end_marker.offset > head.front.offset && end_marker.gen == head.front.gen) {
     uint64_t len = end_marker.offset - head.front.offset;
     if (len > 0) {
-      bl.append_zero(len);
-      CLS_LOG(5, "INFO: queue_remove_entries: Zeroing out entries at offset = :%s and len = %lu\n", head.front.to_str().c_str(), len);
-      auto ret = cls_cxx_write2(hctx, head.front.offset, bl.length(), &bl, CEPH_OSD_OP_FLAG_FADVISE_SEQUENTIAL);
+      auto ret = cls_cxx_write_zero(hctx, head.front.offset, len);
       if (ret < 0) {
-        CLS_LOG(5, "INFO: queue_remove_entries: Failed to zero out entries\n");
-        CLS_LOG(10, "INFO: queue_remove_entries: Start offset = %s\n", head.front.to_str().c_str());
+        CLS_LOG(5, "INFO: queue_remove_entries: Failed to zero out entries");
+        CLS_LOG(10, "INFO: queue_remove_entries: Start offset = %s", head.front.to_str().c_str());
         return ret;
       }
     }
   } else if ((head.front.offset >= end_marker.offset) && (end_marker.gen == head.front.gen + 1)) { //start offset > end offset
     uint64_t len = head.queue_size - head.front.offset;
     if (len > 0) {
-      bl.append_zero(len);
-      CLS_LOG(5, "INFO: queue_remove_entries: Zeroing out entries at offset = :%s and len = %lu\n", head.front.to_str().c_str(), len);
-      auto ret = cls_cxx_write2(hctx, head.front.offset, bl.length(), &bl, CEPH_OSD_OP_FLAG_FADVISE_SEQUENTIAL);
+      auto ret = cls_cxx_write_zero(hctx, head.front.offset, len);
       if (ret < 0) {
-        CLS_LOG(5, "INFO: queue_remove_entries: Failed to zero out entries\n");
-        CLS_LOG(10, "INFO: queue_remove_entries: Start offset = %s\n", head.front.to_str().c_str());
+        CLS_LOG(5, "INFO: queue_remove_entries: Failed to zero out entries");
+        CLS_LOG(10, "INFO: queue_remove_entries: Start offset = %s", head.front.to_str().c_str());
         return ret;
       }
     }
-    bl.clear();
     len = end_marker.offset - head.max_head_size;
     if (len > 0) {
-      bl.append_zero(len);
-      CLS_LOG(5, "INFO: queue_remove_entries: Zeroing out entries at offset = :%lu and len = %lu\n", head.max_head_size, len);
-      auto ret = cls_cxx_write2(hctx, head.max_head_size, bl.length(), &bl, CEPH_OSD_OP_FLAG_FADVISE_SEQUENTIAL);
+      auto ret = cls_cxx_write_zero(hctx, head.max_head_size, len);
       if (ret < 0) {
-        CLS_LOG(5, "INFO: queue_remove_entries: Failed to zero out entries\n");
-        CLS_LOG(10, "INFO: queue_remove_entries: Start offset = %lu\n", head.max_head_size);
+        CLS_LOG(5, "INFO: queue_remove_entries: Failed to zero out entries");
+        CLS_LOG(10, "INFO: queue_remove_entries: Start offset = %lu", head.max_head_size);
         return ret;
       }
     }
