@@ -1,3 +1,51 @@
 /* Vendor specific scss */
 
 @import 'defaults';
+
+.btn {
+  @extend .pf-c-button;
+}
+
+.btn-primary,
+.btn-primary.dropdown-toggle,
+.btn-secondary,
+.btn-secondary.btn-primary.dropdown-toggle  {
+  @extend .pf-c-button, .pf-m-primary;
+  &:hover,
+  &:focus,
+  &.focus,
+  &:not(:disabled):not(.disabled):active,
+  &:not(:disabled):not(.disabled).active {
+    background-color: $pf-global--primary-color--200;
+  }
+  &.disabled {
+    background-color: $pf-global--disabled-color--200;
+    color: $pf-global--disabled-color--100;
+  }
+}
+
+.badge {
+  @extend .pf-c-label, .pf-m-compact;
+}
+
+.badge-success {
+  background-color: $pf-color-green-400;
+}
+
+.badge-danger {
+  background-color: $pf-global--danger-color--100;
+}
+
+// Custom badges.
+.badge-hdd {
+  color: $color-solid-white;
+  background-color: $color-blue-gray;
+}
+.badge-ssd {
+  color: $color-solid-white;
+  background-color: $color-blue;
+}
+.badge-tab {
+  color: $color-solid-gray;
+  background-color: $color-light-shade-gray;
+}
