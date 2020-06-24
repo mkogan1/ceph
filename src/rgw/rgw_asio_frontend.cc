@@ -46,13 +46,17 @@ class StreamIO : public rgw::asio::ClientIO {
   CephContext* const cct;
   Stream& stream;
   parse_buffer& buffer;
+  bool& must_close;
  public:
   StreamIO(CephContext *cct, Stream& stream, rgw::asio::parser_type& parser,
+           bool& must_close,
+           spawn::yield_context yield,
            parse_buffer& buffer, bool is_ssl,
            const tcp::endpoint& local_endpoint,
            const tcp::endpoint& remote_endpoint)
       : ClientIO(parser, is_ssl, local_endpoint, remote_endpoint),
-        cct(cct), stream(stream), buffer(buffer)
+        cct(cct), stream(stream), buffer(buffer),
+        must_close(must_close)
   {}
 
   size_t write_data(const char* buf, size_t len) override {
@@ -82,6 +86,7 @@ class StreamIO : public rgw::asio::ClientIO {
         break;
       }
       if (ec) {
+        must_close = true;
         ldout(cct, 4) << "failed to read body: " << ec.message() << dendl;
         throw rgw::io::Exception(ec.value(), std::system_category());
       }
@@ -133,6 +138,7 @@ void handle_connection(boost::asio::io_context& context,
   static constexpr size_t header_limit = 4096;
   // don't impose a limit on the body, since we read it in pieces
   static constexpr size_t body_limit = std::numeric_limits<size_t>::max();
+  bool must_close = false;
 
   auto cct = env.store->ctx();
 
@@ -189,7 +195,8 @@ void handle_connection(boost::asio::io_context& context,
         return;
       }
 
-      StreamIO real_client{cct, stream, parser, buffer, is_ssl,
+      StreamIO real_client{cct, stream, parser,
+                           must_close, yield, buffer, is_ssl,
                            socket.local_endpoint(),
                            remote_endpoint};
 
@@ -220,7 +227,7 @@ void handle_connection(boost::asio::io_context& context,
       }
     }
 
-    if (!parser.keep_alive()) {
+    if (must_close || !parser.keep_alive()) {
       return;
     }
 
