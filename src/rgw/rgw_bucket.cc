@@ -119,6 +119,11 @@ int rgw_read_user_buckets(RGWRados * store,
   int ret;
   buckets.clear();
   std::string buckets_obj_id;
+  if (user_id.id == RGW_USER_ANON_ID) {
+    ldout(store->ctx(), 20) << "rgw_read_user_buckets(): anonymous user" << dendl;
+    *is_truncated = false;
+    return 0;
+  }
   rgw_get_buckets_obj(user_id, buckets_obj_id);
   rgw_raw_obj obj(store->svc.zone->get_zone_params().user_uid_pool, buckets_obj_id);
 

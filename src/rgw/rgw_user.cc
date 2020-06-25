@@ -266,6 +266,10 @@ int rgw_get_user_info_from_index(RGWRados * const store,
                                  RGWObjVersionTracker * const objv_tracker,
                                  real_time * const pmtime)
 {
+  if(info.user_id.id == RGW_USER_ANON_ID) {
+    ldout(store->ctx(), 20) << "rgw_get_user_info_from_index(): anonymous user" << dendl;
+    return -ENOENT;
+  }
   if (auto e = uinfo_cache.find(key)) {
     info = e->info;
     if (objv_tracker)
@@ -324,6 +328,10 @@ int rgw_get_user_info_by_uid(RGWRados *store,
   bufferlist bl;
   RGWUID user_id;
 
+  if(uid.id == RGW_USER_ANON_ID) {
+    ldout(store->ctx(), 20) << "rgw_get_user_info_by_uid(): anonymous user" << dendl;
+    return -ENOENT;
+  }
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   string oid = uid.to_str();
   int ret = rgw_get_system_obj(store, obj_ctx, store->svc.zone->get_zone_params().user_uid_pool, oid, bl, objv_tracker, pmtime, pattrs, cache_info);
@@ -394,6 +402,10 @@ int rgw_get_user_attrs_by_uid(RGWRados *store,
                               map<string, bufferlist>& attrs,
                               RGWObjVersionTracker *objv_tracker)
 {
+  if(user_id.id == RGW_USER_ANON_ID) {
+    ldout(store->ctx(), 20) << "rgw_get_user_attrs_by_uid(): anonymous user" << dendl;
+    return -ENOENT;
+  }
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   rgw_raw_obj obj(store->svc.zone->get_zone_params().user_uid_pool, user_id.to_str());
   auto src = obj_ctx.get_obj(obj);
