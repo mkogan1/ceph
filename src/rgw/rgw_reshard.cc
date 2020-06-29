@@ -390,7 +390,7 @@ public:
       }
       set_status(rgw::BucketReshardState::None);
     }
-  }
+  } 
 
   int start() {
     int ret = set_status(rgw::BucketReshardState::InProgress);
@@ -655,12 +655,6 @@ int RGWBucketReshard::do_reshard(int num_shards,
     return ret;
   }
 
-  ret = bucket_info_updater.complete();
-  if (ret < 0) {
-    ldout(store->ctx(), 0) << __func__ << ": failed to update bucket info ret=" << ret << dendl;
-    /* don't error out, reshard process succeeded */
-  }
-
   return 0;
   // NB: some error clean-up is done by ~BucketInfoReshardUpdate
 } // RGWBucketReshard::do_reshard
@@ -715,14 +709,6 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
     if (ret < 0) {
       goto error_out;
     }
-  }
-
-  // set resharding status of current bucket_info & shards with
-  // information about planned resharding
-  ret = set_resharding_status(cls_rgw_reshard_status::IN_PROGRESS);
-  if (ret < 0) {
-    return ret;
-    goto error_out;
   }
 
   ret = do_reshard(num_shards,
