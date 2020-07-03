@@ -5,3 +5,5 @@ $pf-global--fonticon-path: '~@patternfly/patternfly/assets/pficon';
 $pf-global--image-path: '~@patternfly/patternfly/assets/images';
 
 @import '~@patternfly/patternfly/patternfly.scss';
+@import '~@patternfly/patternfly/patternfly-addons.scss';
+@import '~@patternfly/patternfly/patternfly-charts.scss';

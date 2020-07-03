@@ -18,12 +18,18 @@ $card-font-max-size: 21px;
   );
 
   .card-body {
-    padding-top: 40px !important;
+    padding-top: 2rem !important;
+    padding-bottom: 0.3rem;
 
     .card-title {
       position: absolute;
-      left: 0;
-      top: 0;
+      left: -3rem;
+      top: -2.2rem;
+
+      // title underline
+      border-bottom: 1px solid $color-info-card-border;
+      width: 100%;
+      padding-bottom: 0.2rem;
     }
   }
 }
