@@ -21,6 +21,7 @@ protected:
   static constexpr uint64_t MAX_ROLE_SESSION_SIZE = 64;
   uint64_t MIN_DURATION_IN_SECS;
   uint64_t MAX_DURATION_IN_SECS;
+  CephContext* cct;
   uint64_t duration;
   string err_msg;
   string iamPolicy;
