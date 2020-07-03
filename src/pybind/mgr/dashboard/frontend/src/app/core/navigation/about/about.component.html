@@ -1,47 +1,65 @@
-<div class="about-container">
-  <div class="modal-header">
-    <button type="button"
-            class="close float-right"
+<div class="pf-c-about-modal-box"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="about-modal-title">
+  <div class="pf-c-about-modal-box__brand">
+    <img class="pf-c-about-modal-box__brand-image"
+         src="assets/Logo-RedHat-A-Reverse-RGB.svg"
+         alt="{{ projectConstants.organization }}">
+  </div>
+  <div class="pf-c-about-modal-box__close">
+    <button class="pf-c-button pf-m-plain"
+            type="button"
             aria-label="Close"
             (click)="modalRef.hide()">
-      <span aria-hidden="true">&times;</span>
+      <i class="fas fa-times"
+         aria-hidden="true"></i>
     </button>
   </div>
-  <div class="modal-body">
-    <img src="assets/Ceph_Logo_Standard_RGB_Reversed_120411_fa.png"
-         class="ceph-logo"
-         alt="{{ projectConstants.organization }}">
-    <h3>
-      <strong>{{ projectConstants.projectName }}</strong>
-    </h3>
-    <div class="product-versions">
-      <strong>Version</strong>
-      <br>
-      {{ versionNumber }}
-      {{ versionHash }}
-      <br>
-      {{ versionName }}
-    </div>
-    <br>
-    <dl>
-      <dt>Ceph Manager</dt>
-      <dd>{{ hostAddr }}</dd>
-      <dt>User</dt>
-      <dd>{{ modalVariables.user }}</dd>
-      <dt>User Role</dt>
-      <dd>{{ modalVariables.role }}</dd>
-      <dt>Browser</dt>
-      <dd>{{ modalVariables.browserName }}</dd>
-      <dt>Browser Version</dt>
-      <dd>{{ modalVariables.browserVersion }}</dd>
-      <dt>Browser OS</dt>
-      <dd>{{ modalVariables.browserOS }}</dd>
-    </dl>
+  <div class="pf-c-about-modal-box__header">
+    <h2 class="pf-c-title pf-m-4xl"
+        id="about-modal-title">
+      {{ projectConstants.projectName }}
+    </h2>
   </div>
-  <div class="modal-footer">
-    <div class="text-left">
+  <div class="pf-c-about-modal-box__hero">
+  </div>
+  <div class="pf-c-about-modal-box__content">
+    <div class="pf-c-about-modal-box__body">
+    <ul class="list-unstyled">
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">Version</strong>
+        <span class="col-xs-7 col-sm-7">{{ projectConstants.version }}</span>
+      </li>
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">Ceph Manager</strong>
+        <span class="col-xs-7 col-sm-7">{{ hostAddr }}</span>
+      </li>
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">User</strong>
+        <span class="col-xs-7 col-sm-7">{{ modalVariables.user }}</span>
+      </li>
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">User Role</strong>
+        <span class="col-xs-7 col-sm-7">{{ modalVariables.role }}</span>
+      </li>
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">Browser</strong>
+        <span class="col-xs-7 col-sm-7">{{ modalVariables.browserName }}</span>
+      </li>
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">Browser Version</strong>
+        <span class="col-xs-7 col-sm-7">{{ modalVariables.browserVersion }}</span>
+      </li>
+      <li class="row">
+        <strong class="col-xs-5 col-sm-5">Browser OS</strong>
+        <span class="col-xs-7 col-sm-7">{{ modalVariables.browserOS }}</span>
+      </li>
+    </ul>
+  </div>
+    <p class="pf-c-about-modal-box__strapline">
       {{ copyright }}
       {{ projectConstants.license }}
-    </div>
+    </p>
   </div>
 </div>

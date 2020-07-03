@@ -1,10 +1,20 @@
-.about-container {
-  background-color: #374249;
-  background-image: url('assets/ceph_background.gif');
-  background-position: right bottom;
+.pf-c-about-modal-box {
+  font-size: 1.2rem;
+  overflow-y: hidden;
+  width: 65vw;
+  left: -14vw;
+  height: 80vh;
+}
+.pf-c-about-modal-box__hero {
+  background-image: url('assets/redhat_new_background.svg');
+  background-size: cover;
   background-repeat: no-repeat;
-  color: #fff;
-  text-shadow: 1px 1px #374249;
+  background-attachment: inherit;
+  background-position: 70% -12px;
+  background-color: #1a1a1a;
+}
+.product-versions {
+  margin-top: 30px;
 }
 .product-versions {
   margin-top: 30px;
@@ -15,21 +25,15 @@
 .modal-header {
   border-bottom: none;
 }
-.modal-header .close {
-  color: #fff;
-  font-size: 2em;
-}
 .modal-body {
   padding-left: 80px;
   padding-right: 80px;
-}
-.ceph-logo {
-  width: 25%;
-  margin-bottom: 30px;
-  object-position: -20px 0;
 }
 .modal-footer {
   display: block;
   border-top: none;
   padding: 15px 80px 35px 80px;
+}
+.modal-content {
+  border: unset !important;
 }

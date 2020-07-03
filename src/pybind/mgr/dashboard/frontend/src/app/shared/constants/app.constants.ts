@@ -3,9 +3,12 @@ import { Injectable } from '@angular/core';
 import { I18n } from '@ngx-translate/i18n-polyfill';
 
 export class AppConstants {
-  public static readonly organization = 'ceph';
-  public static readonly projectName = 'Ceph Dashboard';
-  public static readonly license = 'Free software (LGPL 2.1).';
+  public static readonly version = '5.0';
+  public static readonly organization = 'Redhat';
+  public static readonly projectName = 'Red Hat Ceph Storage Dashboard';
+  public static readonly contributors = ' Red Hat Inc. and contributors';
+  public static readonly license =
+    'Licensed under Creative Commons Attribution Share Alike 3.0 (CC-BY-SA-3.0)';
 }
 
 export enum URLVerbs {
