@@ -19,6 +19,7 @@ export class DocUrls {
   public static readonly nfs = `${DocUrls.base}object-gateway#nfs-ganesha`;
   public static readonly monitoring = `${DocUrls.base}managing-the-cluster#managing-the-prometheus-environment_dash`;
   public static readonly alerting = `${DocUrls.base}managing-the-cluster#viewing-and-managing-alerts`;
+  public static readonly pgCalc = 'https://access.redhat.com/labs/cephpgc/';
   public static readonly orchestrator =
     'https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/5/html/operations_guide/orchestrator/';
 }
