@@ -338,10 +338,11 @@ int RGWRadosBucket::read_usage(const DoutPrefixProvider *dpp, uint64_t start_epo
 			       RGWUsageIter& usage_iter,
 			       map<rgw_user_bucket, rgw_usage_log_entry>& usage)
 {
-    return store->getRados()->read_usage(dpp, owner->get_id(), get_name(), start_epoch,
-					 end_epoch, max_entries, is_truncated,
-					 usage_iter, usage);
+  return store->getRados()->read_usage(dpp, owner->get_id(), get_name(), start_epoch,
+				       end_epoch, max_entries, is_truncated,
+				       usage_iter, usage);
 }
+
 
 int RGWRadosBucket::set_acl(const DoutPrefixProvider *dpp, RGWAccessControlPolicy &acl, optional_yield y)
 {
