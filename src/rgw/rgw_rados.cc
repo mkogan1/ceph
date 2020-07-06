@@ -3403,7 +3403,8 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 }
 
 int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
-				int sid, const rgw::bucket_index_layout_generation& idx_layout,
+				int sid, const rgw::bucket_index_layout_generation& current_layout,
+				std::optional<rgw::bucket_index_layout_generation> target_layout,
 				RGWBucketInfo* bucket_info_out)
 {
   bucket = _bucket;
@@ -3422,7 +3423,13 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 
   string oid;
 
-  ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, idx_layout, &bucket_obj);
+  if (target_layout) {
+    ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, target_layout->layout.normal.num_shards,
+					 target_layout->gen, &bucket_obj);
+  } else {
+    ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, current_layout.layout.normal.num_shards,
+					 current_layout.gen, &bucket_obj);
+  }
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -3449,12 +3456,12 @@ int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info,
   return 0;
 }
 
-int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& target_layout, int sid)
+int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& current_layout, int sid)
 {
   bucket = bucket_info.bucket;
   shard_id = sid;
 
-  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, target_layout, &bucket_obj);
+  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, current_layout.layout.normal.num_shards, std::nullopt, &bucket_obj);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -5610,8 +5617,11 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
   return 0;
 }
 
-int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-                                      int shard_id, const rgw::bucket_index_layout_generation& target_layout,
+int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info,
+				      librados::IoCtx& index_ctx,
+                                      int shard_id,
+				      uint32_t num_shards,
+				      std::optional<uint64_t> gen,
 				      string *bucket_obj)
 {
   string bucket_oid_base;
@@ -5619,10 +5629,8 @@ int RGWRados::open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados
   if (ret < 0)
     return ret;
 
-  RGWObjectCtx obj_ctx(this);
-
-  get_bucket_index_object(bucket_oid_base, target_layout.layout.normal.num_shards,
-			  shard_id, target_layout.gen, bucket_obj);
+  get_bucket_index_object(bucket_oid_base, num_shards, shard_id, gen,
+			  bucket_obj);
   return 0;
 }
 
@@ -9347,7 +9355,9 @@ int RGWRados::bi_remove(BucketShard& bs)
 int RGWRados::bi_list(const RGWBucketInfo& bucket_info, int shard_id, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated)
 {
   BucketShard bs(this);
-  int ret = bs.init(bucket_info.bucket, shard_id, bucket_info.layout.current_index, nullptr /* no RGWBucketInfo */);
+  int ret = bs.init(bucket_info.bucket, shard_id,
+		    bucket_info.layout.current_index,
+		    std::nullopt, nullptr /* no RGWBucketInfo */);
   if (ret < 0) {
     ldout(cct, 5) << "bs.init() returned ret=" << ret << dendl;
     return ret;
@@ -10516,17 +10526,19 @@ int RGWRados::get_target_shard_id(const rgw::bucket_index_normal_layout& layout,
 void RGWRados::get_bucket_index_object(const string& bucket_oid_base,
 				       uint32_t num_shards,
 				       int shard_id,
-				       uint64_t gen_id,
+				       std::optional<uint64_t> _gen_id,
 				       string *bucket_obj)
 {
+  auto gen_id = _gen_id.value_or(0);
   if (!num_shards) {
     // By default with no sharding, we use the bucket oid as itself
     (*bucket_obj) = bucket_oid_base;
   } else {
     char buf[bucket_oid_base.size() + 64];
-    if (gen_id != 0) {
+    if (gen_id) {
       snprintf(buf, sizeof(buf), "%s.%" PRIu64 ".%d", bucket_oid_base.c_str(), gen_id, shard_id);
       (*bucket_obj) = buf;
+	  ldout(cct, 10) << "bucket_obj is " << (*bucket_obj) << dendl;
     } else {
       // for backward compatibility, gen_id(0) will not be added in the object name
       snprintf(buf, sizeof(buf), "%s.%d", bucket_oid_base.c_str(), shard_id);

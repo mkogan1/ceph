@@ -2065,7 +2065,8 @@ static int purge_bucket_instance(RGWRados *store, const RGWBucketInfo& bucket_in
   int max_shards = index.layout.normal.num_shards;
   for (int i = 0; i < max_shards; i++) {
     RGWRados::BucketShard bs(store);
-    int ret = bs.init(bucket_info.bucket, i, bucket_info.layout.current_index, nullptr);
+    int ret = bs.init(bucket_info.bucket, i, bucket_info.layout.current_index,
+                      std::nullopt, nullptr);
     if (ret < 0) {
       cerr << "ERROR: bs.init(bucket=" << bucket_info.bucket << ", shard=" << i
            << "): " << cpp_strerror(-ret) << std::endl;

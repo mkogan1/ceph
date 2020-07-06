@@ -1236,9 +1236,13 @@ class RGWRados : public AdminSocketHook
   int open_bucket_index_base(const RGWBucketInfo& bucket_info, librados::IoCtx&  index_ctx,
       string& bucket_oid_base);
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-      const string& obj_key, string *bucket_obj, int *shard_id);
-  int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-                              int shard_id, const rgw::bucket_index_layout_generation& idx_layout, string *bucket_obj);
+			      const string& obj_key, string *bucket_obj, int *shard_id);
+  int open_bucket_index_shard(const RGWBucketInfo& bucket_info,
+			      librados::IoCtx& index_ctx,
+                              int shard_id,
+			      uint32_t num_shards,
+			      std::optional<uint64_t> gen,
+			      string *bucket_obj);
   int open_bucket_index(const RGWBucketInfo& bucket_info,
 			librados::IoCtx& index_ctx,
 			const rgw::bucket_index_layout_generation& idx_layout,
@@ -1542,7 +1546,7 @@ public:
 
     explicit BucketShard(RGWRados *_store) : store(_store), shard_id(-1) {}
     int init(const rgw_bucket& _bucket, const rgw_obj& obj, RGWBucketInfo* out);
-    int init(const rgw_bucket& _bucket, int sid, const rgw::bucket_index_layout_generation& idx_layout, RGWBucketInfo* out);
+    int init(const rgw_bucket& _bucket, int sid, const rgw::bucket_index_layout_generation& idx_layout, std::optional<rgw::bucket_index_layout_generation> target_layout, RGWBucketInfo* out);
     int init(const RGWBucketInfo& bucket_info, const rgw_obj& obj);
     int init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout, int sid);
   };
@@ -2490,8 +2494,11 @@ public:
 			      string *bucket_obj,
 			      int *shard_id);
 
-  void get_bucket_index_object(const string& bucket_oid_base, uint32_t num_shards,
-                               int shard_id, uint64_t gen_id, string *bucket_obj);
+  void get_bucket_index_object(const string& bucket_oid_base,
+			       uint32_t num_shards,
+                               int shard_id,
+			       std::optional<uint64_t> gen_id,
+			       string *bucket_obj);
 
   void get_bucket_index_objects(const string& bucket_oid_base,
 				uint32_t num_shards, std::optional<uint64_t> _gen_id,
