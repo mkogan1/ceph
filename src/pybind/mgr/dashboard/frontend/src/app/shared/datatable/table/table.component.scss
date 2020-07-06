@@ -7,6 +7,11 @@
   line-height: 1;
 }
 
+.btn {
+  padding: 0.5rem 1rem;
+  line-height: 1;
+}
+
 .dataTables_wrapper {
   margin-bottom: 25px;
   .separator {
@@ -80,7 +85,7 @@
     width: 40%;
     max-width: 250px;
     .form-control {
-      height: 30px;
+      height: 44px;
     }
     .input-group-prepend {
       padding-right: 5px;
