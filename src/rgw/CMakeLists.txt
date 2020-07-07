@@ -421,7 +421,5 @@ if(WITH_TESTS)
     DESTINATION bin)
 endif(WITH_TESTS)
 
-configure_file(${CMAKE_SOURCE_DIR}/src/rgw/rgw-orphan-list.in
-  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rgw-orphan-list @ONLY)
-install(PROGRAMS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rgw-orphan-list
+install(PROGRAMS rgw-orphan-list
   DESTINATION bin)
