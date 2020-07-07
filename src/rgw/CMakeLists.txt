@@ -268,7 +268,5 @@ set_target_properties(rgw PROPERTIES OUTPUT_NAME rgw VERSION 2.0.0
   SOVERSION 2)
 install(TARGETS rgw DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-configure_file(${CMAKE_SOURCE_DIR}/src/rgw/rgw-orphan-list.in
-  ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rgw-orphan-list @ONLY)
-install(PROGRAMS ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rgw-orphan-list
+install(PROGRAMS rgw-orphan-list
   DESTINATION bin)
