@@ -58,8 +58,7 @@ static int _set_affinity(int id)
 Thread::Thread()
   : thread_id(0),
     pid(0),
-    cpuid(-1),
-    thread_name(NULL)
+    cpuid(-1)
 {
 }
 
@@ -80,7 +79,7 @@ void *Thread::entry_wrapper()
   if (pid && cpuid >= 0)
     _set_affinity(cpuid);
 
-  ceph_pthread_setname(pthread_self(), thread_name);
+  ceph_pthread_setname(pthread_self(), thread_name.c_str());
   return entry();
 }
 
