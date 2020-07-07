@@ -9,7 +9,7 @@
 .btn-primary,
 .btn-primary.dropdown-toggle,
 .btn-secondary,
-.btn-secondary.btn-primary.dropdown-toggle  {
+.btn-secondary.btn-primary.dropdown-toggle {
   @extend .pf-c-button, .pf-m-primary;
   &:hover,
   &:focus,

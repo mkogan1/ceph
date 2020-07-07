@@ -14,7 +14,7 @@ import { ErasureCodeProfileService } from '../../../shared/api/erasure-code-prof
 import { PoolService } from '../../../shared/api/pool.service';
 import { CriticalConfirmationModalComponent } from '../../../shared/components/critical-confirmation-modal/critical-confirmation-modal.component';
 import { SelectOption } from '../../../shared/components/select/select-option.model';
-import { ActionLabelsI18n, URLVerbs, DocUrls } from '../../../shared/constants/app.constants';
+import { ActionLabelsI18n, DocUrls, URLVerbs } from '../../../shared/constants/app.constants';
 import { Icons } from '../../../shared/enum/icons.enum';
 import { CdFormGroup } from '../../../shared/forms/cd-form-group';
 import { CdValidators } from '../../../shared/forms/cd-validators';
