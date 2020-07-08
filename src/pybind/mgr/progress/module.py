@@ -455,6 +455,10 @@ class Module(MgrModule):
             self._osdmap_changed(old_osdmap, self._latest_osdmap)
         elif notify_type == "pg_summary":
             data = self.get("pg_dump")
+            # if there are no events we will skip this here to avoid 
+            # expensive get calls
+            if len(self._events) == 0:
+                return
             for ev_id, ev in self._events.items():
                 if isinstance(ev, PgRecoveryEvent):
                     ev.pg_update(data, self.log)
