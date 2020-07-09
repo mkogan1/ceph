@@ -3713,7 +3713,7 @@ static int rgw_cls_lc_get_next_entry(cls_method_context_t hctx, bufferlist *in, 
   cls_rgw_lc_get_next_entry_op op;
   try {
     decode(op, in_iter);
-  } catch (buffer::error& err) {
+  } catch (ceph::buffer::error& err) {
     CLS_LOG(1, "ERROR: rgw_cls_lc_get_next_entry: failed to decode op\n");
     return -EINVAL;
   }
@@ -3726,11 +3726,11 @@ static int rgw_cls_lc_get_next_entry(cls_method_context_t hctx, bufferlist *in, 
     return ret;
   cls_rgw_lc_entry entry;
   if (!vals.empty()) {
-    it=vals.begin();
+    auto it = vals.begin();
     in_iter = it->second.begin();
     try {
       decode(entry, in_iter);
-    } catch (buffer::error& err) {
+    } catch (ceph::buffer::error& err) {
       CLS_LOG(1, "ERROR: rgw_cls_lc_get_next_entry(): failed to decode entry\n");
       return -EIO;
     }
@@ -3747,7 +3747,7 @@ static int rgw_cls_lc_list_entries(cls_method_context_t hctx, bufferlist *in,
   auto in_iter = in->cbegin();
   try {
     decode(op, in_iter);
-  } catch (buffer::error& err) {
+  } catch (ceph::buffer::error& err) {
     CLS_LOG(1, "ERROR: rgw_cls_lc_list_entries(): failed to decode op\n");
     return -EINVAL;
   }
