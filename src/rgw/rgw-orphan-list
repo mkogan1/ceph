@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # version 1
 
@@ -27,16 +27,30 @@ error_out() {
     exit 1
 }
 
-echo "Available pools:"
-rados lspools >"$temp_file" 2>"$lspools_err"
-if [ "$?" -ne 0 ] ;then
-    error_out "rados lspools" "$lspools_err"
-fi
-sed 's/^/    /' $temp_file # list pools and indent
-printf "Which pool do you want to search for orphans? "
-read pool
+prompt_pool() {
+    echo "Available pools:"
+    rados lspools >"$temp_file" 2>"$lspools_err"
+    if [ "$?" -ne 0 ] ;then
+	error_out "rados lspools" "$lspools_err"
+    fi
+    sed 's/^/    /' $temp_file # list pools and indent
+    printf "Which pool do you want to search for orphans? "
+    local mypool
+    read mypool
+    echo $mypool
+}
 
-echo "Note: files produced will be tagged with the current timestamp -- ${timestamp}."
+if [ $# -eq 0 ] ;then
+    pool="$(prompt_pool)"
+elif [ $# -eq 1 ] ;then
+    pool="$1"
+else
+    error_out "Usage: $0 [pool]"
+fi
+
+echo "Pool is \"$pool\"."
+
+echo "Note: output files produced will be tagged with the current timestamp -- ${timestamp}."
 
 echo "running 'rados ls' at $(date)"
 rados ls --pool="$pool" >"$rados_out" 2>"$rados_err"
@@ -62,8 +76,8 @@ if [ "${PIPESTATUS[0]}" -gt 1 ] ;then
     error_out "ceph-diff-sorted"
 fi
 
-found="$(wc -l <$delta_out)"
-possible="$(wc -l <$rados_out)"
+found="$(wc -l < $delta_out)"
+possible="$(wc -l < $rados_out)"
 percentage=$(expr 100 \* $found / $possible)
 
 echo "$found potential orphans found out of a possible $possible (${percentage}%)."
