@@ -3289,8 +3289,7 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 }
 
 int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
-				int sid, const rgw::bucket_index_layout_generation& current_layout,
-        std::optional<rgw::bucket_index_layout_generation> target_layout,
+				int sid, std::optional<rgw::bucket_index_layout_generation> idx_layout,
 				RGWBucketInfo* bucket_info_out)
 {
   bucket = _bucket;
@@ -3308,13 +3307,9 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 
   string oid;
 
-  if (target_layout) {
-    ret = store->svc.bi_rados->open_bucket_index_shard(*bucket_info_p, shard_id, target_layout->layout.normal.num_shards,
-                                                      target_layout->gen, &bucket_obj);
-  } else {
-    ret = store->svc.bi_rados->open_bucket_index_shard(*bucket_info_p, shard_id, current_layout.layout.normal.num_shards,
-                                                      current_layout.gen, &bucket_obj);
-  }
+  ret = store->svc.bi_rados->open_bucket_index_shard(*bucket_info_p, shard_id, idx_layout->layout.normal.num_shards,
+                                                    idx_layout->gen, &bucket_obj);
+
   if (ret < 0) {
   ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
   return ret;
@@ -6280,14 +6275,14 @@ int RGWRados::Object::prepare_atomic_modification(ObjectWriteOperation& op, bool
  * bl: the contents of the attr
  * Returns: 0 on success, -ERR# otherwise.
  */
-int RGWRados::set_attr(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl)
+int RGWRados::set_attr(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl)
 {
   map<string, bufferlist> attrs;
   attrs[name] = bl;
   return set_attrs(ctx, bucket_info, obj, attrs, NULL);
 }
 
-int RGWRados::set_attrs(void *ctx, const RGWBucketInfo& bucket_info, rgw_obj& src_obj,
+int RGWRados::set_attrs(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& src_obj,
                         map<string, bufferlist>& attrs,
                         map<string, bufferlist>* rmattrs)
 {
@@ -6975,7 +6970,7 @@ int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb)
 }
 
 int RGWRados::iterate_obj(RGWObjectCtx& obj_ctx,
-                          const RGWBucketInfo& bucket_info, const rgw_obj& obj,
+                          RGWBucketInfo& bucket_info, const rgw_obj& obj,
                           off_t ofs, off_t end, uint64_t max_chunk_size,
                           iterate_obj_cb cb, void *arg)
 {
@@ -7305,7 +7300,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
   return -ERR_BUSY_RESHARDING;
 }
 
-int RGWRados::bucket_index_link_olh(RGWBucketInfo bucket_info, RGWObjState& olh_state, const rgw_obj& obj_instance,
+int RGWRados::bucket_index_link_olh(RGWBucketInfo& bucket_info, RGWObjState& olh_state, const rgw_obj& obj_instance,
                                     bool delete_marker,
                                     const string& op_tag,
                                     struct rgw_bucket_dir_entry_meta *meta,
@@ -7355,7 +7350,7 @@ void RGWRados::bucket_index_guard_olh_op(RGWObjState& olh_state, ObjectOperation
   op.cmpxattr(RGW_ATTR_OLH_ID_TAG, CEPH_OSD_CMPXATTR_OP_EQ, olh_state.olh_tag);
 }
 
-int RGWRados::bucket_index_unlink_instance(RGWBucketInfo bucket_info, const rgw_obj& obj_instance,
+int RGWRados::bucket_index_unlink_instance(RGWBucketInfo& bucket_info, const rgw_obj& obj_instance,
                                            const string& op_tag, const string& olh_tag, uint64_t olh_epoch, rgw_zone_set *_zones_trace)
 {
   rgw_rados_ref ref;
@@ -7388,7 +7383,7 @@ int RGWRados::bucket_index_unlink_instance(RGWBucketInfo bucket_info, const rgw_
   return 0;
 }
 
-int RGWRados::bucket_index_read_olh_log(RGWBucketInfo bucket_info, RGWObjState& state,
+int RGWRados::bucket_index_read_olh_log(RGWBucketInfo& bucket_info, RGWObjState& state,
                                         const rgw_obj& obj_instance, uint64_t ver_marker,
                                         map<uint64_t, vector<rgw_bucket_olh_log_entry> > *log,
                                         bool *is_truncated)
@@ -7481,7 +7476,7 @@ int RGWRados::repair_olh(RGWObjState* state, const RGWBucketInfo& bucket_info,
   return 0;
 }
 
-int RGWRados::bucket_index_trim_olh_log(RGWBucketInfo bucket_info, RGWObjState& state, const rgw_obj& obj_instance, uint64_t ver)
+int RGWRados::bucket_index_trim_olh_log(RGWBucketInfo& bucket_info, RGWObjState& state, const rgw_obj& obj_instance, uint64_t ver)
 {
   rgw_rados_ref ref;
   int r = get_obj_head_ref(bucket_info, obj_instance, &ref);
@@ -7516,7 +7511,7 @@ int RGWRados::bucket_index_trim_olh_log(RGWBucketInfo bucket_info, RGWObjState& 
   return 0;
 }
 
-int RGWRados::bucket_index_clear_olh(RGWBucketInfo bucket_info, RGWObjState& state, const rgw_obj& obj_instance)
+int RGWRados::bucket_index_clear_olh(RGWBucketInfo& bucket_info, RGWObjState& state, const rgw_obj& obj_instance)
 {
   rgw_rados_ref ref;
   int r = get_obj_head_ref(bucket_info, obj_instance, &ref);
@@ -7556,7 +7551,7 @@ static int decode_olh_info(CephContext* cct, const bufferlist& bl, RGWOLHInfo *o
   }
 }
 
-int RGWRados::apply_olh_log(RGWObjectCtx& obj_ctx, RGWObjState& state, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
+int RGWRados::apply_olh_log(RGWObjectCtx& obj_ctx, RGWObjState& state, RGWBucketInfo& bucket_info, const rgw_obj& obj,
                             bufferlist& olh_tag, map<uint64_t, vector<rgw_bucket_olh_log_entry> >& log,
                             uint64_t *plast_ver, rgw_zone_set* zones_trace)
 {
@@ -7723,7 +7718,7 @@ int RGWRados::apply_olh_log(RGWObjectCtx& obj_ctx, RGWObjState& state, const RGW
 /*
  * read olh log and apply it
  */
-int RGWRados::update_olh(RGWObjectCtx& obj_ctx, RGWObjState *state, const RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_zone_set *zones_trace)
+int RGWRados::update_olh(RGWObjectCtx& obj_ctx, RGWObjState *state, RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_zone_set *zones_trace)
 {
   map<uint64_t, vector<rgw_bucket_olh_log_entry> > log;
   bool is_truncated;
@@ -7973,7 +7968,7 @@ int RGWRados::remove_olh_pending_entries(const RGWBucketInfo& bucket_info, RGWOb
   return 0;
 }
 
-int RGWRados::follow_olh(const RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx, RGWObjState *state, const rgw_obj& olh_obj, rgw_obj *target)
+int RGWRados::follow_olh(RGWBucketInfo& bucket_info, RGWObjectCtx& obj_ctx, RGWObjState *state, const rgw_obj& olh_obj, rgw_obj *target)
 {
   map<string, bufferlist> pending_entries;
   rgw_filter_attrset(state->attrset, RGW_ATTR_OLH_PENDING_PREFIX, &pending_entries);
@@ -9065,7 +9060,7 @@ int RGWRados::bi_list(rgw_bucket& bucket, int shard_id, const string& filter_obj
 {
   BucketShard bs(this);
   const auto& current = bucket_info.layout.current_index;
-  int ret = bs.init(bucket_info.bucket, shard_id, current, std::nullopt, nullptr /* no RGWBucketInfo */);
+  int ret = bs.init(bucket_info.bucket, shard_id, current, nullptr /* no RGWBucketInfo */);
   if (ret < 0) {
     ldout(cct, 5) << "bs.init() returned ret=" << ret << dendl;
     return ret;
@@ -9688,7 +9683,7 @@ int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info, list<rgw_obj_in
 }
 
 int RGWRados::check_disk_state(librados::IoCtx io_ctx,
-                               const RGWBucketInfo& bucket_info,
+                               RGWBucketInfo& bucket_info,
                                rgw_bucket_dir_entry& list_state,
                                rgw_bucket_dir_entry& object,
                                bufferlist& suggested_updates)
