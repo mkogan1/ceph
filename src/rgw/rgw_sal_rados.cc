@@ -343,7 +343,6 @@ int RGWRadosBucket::read_usage(const DoutPrefixProvider *dpp, uint64_t start_epo
 				       usage_iter, usage);
 }
 
-
 int RGWRadosBucket::set_acl(const DoutPrefixProvider *dpp, RGWAccessControlPolicy &acl, optional_yield y)
 {
   bufferlist aclbl;

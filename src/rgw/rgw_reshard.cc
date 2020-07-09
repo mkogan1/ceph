@@ -110,8 +110,8 @@ public:
   {
     num_shard = (bucket_info.layout.target_index->layout.normal.num_shards > 0 ? _num_shard : -1);
 
-    bs.init(bucket_info.bucket, num_shard, bucket_info.layout.current_index,
-            bucket_info.layout.target_index, nullptr /* no RGWBucketInfo */, dpp);
+    bs.init(bucket_info.bucket, num_shard, bucket_info.layout.target_index,
+            nullptr /* no RGWBucketInfo */, dpp);
 
     max_aio_completions =
       store->ctx()->_conf.get_val<uint64_t>("rgw_reshard_max_aio");
@@ -327,12 +327,12 @@ static int update_num_shards(rgw::sal::RGWRadosStore *store,
 			     map<string, bufferlist>& attrs,
 			     const DoutPrefixProvider *dpp)
 {
-  if (!bucket_info.layout.target_index) {
-    bucket_info.layout.target_index.emplace();
-  }
+  assert(!bucket_info.layout.target_index);
+  bucket_info.layout.target_index.emplace();
+
   bucket_info.layout.target_index->layout.normal.num_shards = new_num_shards;
 
-  bucket_info.layout.resharding = rgw::BucketReshardState::None;
+  bucket_info.layout.resharding = rgw::BucketReshardState::InProgress;
 
   int ret = store->getRados()->put_bucket_instance_info(bucket_info, true, real_time(), &attrs, dpp);
   if (ret < 0) {
@@ -536,6 +536,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
   // complete successfully
   BucketInfoReshardUpdate bucket_info_updater(dpp, store, bucket_info, bucket_attrs);
 
+
   int ret = bucket_info_updater.start();
   if (ret < 0) {
     ldpp_dout(dpp, 0) << __func__ << ": failed to update bucket info ret=" << ret << dendl;
@@ -657,6 +658,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
 
   //overwrite current_index for the next reshard process
   bucket_info.layout.current_index = *bucket_info.layout.target_index;
+  bucket_info.layout.target_index = std::nullopt; // target_layout doesn't need to exist after reshard
   bucket_info.layout.resharding = rgw::BucketReshardState::None;
   ret = store->getRados()->put_bucket_instance_info(bucket_info, false,
 						    real_time(), &bucket_attrs, dpp);
