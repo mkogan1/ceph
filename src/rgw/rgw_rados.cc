@@ -3403,8 +3403,7 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 }
 
 int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
-				int sid, const rgw::bucket_index_layout_generation& current_layout,
-				std::optional<rgw::bucket_index_layout_generation> target_layout,
+				int sid, std::optional<rgw::bucket_index_layout_generation> idx_layout,
 				RGWBucketInfo* bucket_info_out)
 {
   bucket = _bucket;
@@ -3423,13 +3422,9 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
 
   string oid;
 
-  if (target_layout) {
-    ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, target_layout->layout.normal.num_shards,
-					 target_layout->gen, &bucket_obj);
-  } else {
-    ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, current_layout.layout.normal.num_shards,
-					 current_layout.gen, &bucket_obj);
-  }
+  ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, idx_layout->layout.normal.num_shards,
+				       idx_layout->gen, &bucket_obj);
+
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -5744,9 +5739,8 @@ int RGWRados::bucket_set_reshard(const RGWBucketInfo& bucket_info, const cls_rgw
   return CLSRGWIssueSetBucketResharding(index_ctx, bucket_objs, entry, cct->_conf->rgw_bucket_index_max_aio)();
 }
 
-int RGWRados::defer_gc(void *ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj)
+int RGWRados::defer_gc(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj)
 {
-  RGWObjectCtx *rctx = static_cast<RGWObjectCtx *>(ctx);
   std::string oid, key;
   get_obj_bucket_and_oid_loc(obj, oid, key);
   if (!rctx)
@@ -6557,14 +6551,14 @@ int RGWRados::Object::prepare_atomic_modification(ObjectWriteOperation& op, bool
  * bl: the contents of the attr
  * Returns: 0 on success, -ERR# otherwise.
  */
-int RGWRados::set_attr(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl)
+int RGWRados::set_attr(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl)
 {
   map<string, bufferlist> attrs;
   attrs[name] = bl;
-  return set_attrs(ctx, bucket_info, obj, attrs, NULL);
+  return set_attrs(rctx, bucket_info, obj, attrs, NULL);
 }
 
-int RGWRados::set_attrs(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& src_obj,
+int RGWRados::set_attrs(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, rgw_obj& src_obj,
                         map<string, bufferlist>& attrs,
                         map<string, bufferlist>* rmattrs)
 {
@@ -6578,7 +6572,6 @@ int RGWRados::set_attrs(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& src_obj,
   if (r < 0) {
     return r;
   }
-  RGWObjectCtx *rctx = static_cast<RGWObjectCtx *>(ctx);
 
   ObjectWriteOperation op;
   RGWObjState *state = NULL;
@@ -9357,7 +9350,7 @@ int RGWRados::bi_list(const RGWBucketInfo& bucket_info, int shard_id, const stri
   BucketShard bs(this);
   int ret = bs.init(bucket_info.bucket, shard_id,
 		    bucket_info.layout.current_index,
-		    std::nullopt, nullptr /* no RGWBucketInfo */);
+		    nullptr /* no RGWBucketInfo */);
   if (ret < 0) {
     ldout(cct, 5) << "bs.init() returned ret=" << ret << dendl;
     return ret;

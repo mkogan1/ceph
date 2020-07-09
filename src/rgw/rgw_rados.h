@@ -1546,7 +1546,7 @@ public:
 
     explicit BucketShard(RGWRados *_store) : store(_store), shard_id(-1) {}
     int init(const rgw_bucket& _bucket, const rgw_obj& obj, RGWBucketInfo* out);
-    int init(const rgw_bucket& _bucket, int sid, const rgw::bucket_index_layout_generation& idx_layout, std::optional<rgw::bucket_index_layout_generation> target_layout, RGWBucketInfo* out);
+    int init(const rgw_bucket& _bucket, int sid, std::optional<rgw::bucket_index_layout_generation> current_layout, RGWBucketInfo* out);
     int init(const RGWBucketInfo& bucket_info, const rgw_obj& obj);
     int init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout, int sid);
   };
@@ -2099,9 +2099,9 @@ public:
    * bl: the contents of the attr
    * Returns: 0 on success, -ERR# otherwise.
    */
-  int set_attr(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl);
+  int set_attr(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl);
 
-  int set_attrs(void *ctx, RGWBucketInfo& bucket_info, rgw_obj& obj,
+  int set_attrs(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, rgw_obj& obj,
 		map<string, bufferlist>& attrs,
 		map<string, bufferlist>* rmattrs);
 
@@ -2398,7 +2398,7 @@ public:
   int list_gc_objs(int *index, string& marker, uint32_t max, bool expired_only, std::list<cls_rgw_gc_obj_info>& result, bool *truncated, bool& processing_queue);
   int process_gc(bool expired_only);
   bool process_expire_objects();
-  int defer_gc(void *ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj);
+  int defer_gc(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj);
 
   int process_lc();
   int list_lc_progress(string& marker, uint32_t max_entries,
