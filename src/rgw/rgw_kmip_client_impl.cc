@@ -464,6 +464,10 @@ RGWKmipHandles::do_one_entry(RGWKMIPTransceiver &element)
 	enum result_status rs;
 	ResponseBatchItem *req;
 
+	if (!h) {
+		element.ret = -ERR_SERVICE_UNAVAILABLE;
+		return element.ret;
+	}
 	memset(a, 0, sizeof *a);
 	for (i = 0; i < (int)(sizeof a/sizeof *a); ++i)
 		kmip_init_attribute(a+i);
