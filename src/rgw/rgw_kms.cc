@@ -260,14 +260,14 @@ private:
 	int ret;
 protected:
 	KmipGetTheKey(CephContext *cct) : cct(cct) {}
-	KmipGetTheKey& keyid_to_keyname(std::string_view key_id);
+	KmipGetTheKey& keyid_to_keyname(boost::string_view key_id);
 	KmipGetTheKey& get_uniqueid_for_keyname();
 	int get_key_for_uniqueid(std::string &);
 	friend KmipSecretEngine;
 };
 
 KmipGetTheKey&
-KmipGetTheKey::keyid_to_keyname(std::string_view key_id)
+KmipGetTheKey::keyid_to_keyname(boost::string_view key_id)
 {
 	work = cct->_conf->rgw_crypt_kmip_kms_key_template;
 	std::string keyword = "$keyid";
@@ -333,7 +333,7 @@ class KmipSecretEngine: public SecretEngine {
 protected:
   CephContext *cct;
 
-  int send_request(std::string_view key_id, JSONParser* parser) override
+  int send_request(boost::string_view key_id, JSONParser* parser) override
   {
     return -EINVAL;
   }
@@ -348,7 +348,7 @@ public:
     this->cct = cct;
   }
 
-  int get_key(std::string_view key_id, std::string& actual_key)
+  int get_key(boost::string_view key_id, std::string& actual_key)
   {
 	int r;
 	r = KmipGetTheKey{cct}
@@ -493,7 +493,7 @@ static int get_actual_key_from_vault(CephContext *cct,
 
 
 static int get_actual_key_from_kmip(CephContext *cct,
-                                     std::string_view key_id,
+                                     boost::string_view key_id,
                                      std::string& actual_key)
 {
   std::string secret_engine = RGW_SSE_KMS_KMIP_SE_KV;
