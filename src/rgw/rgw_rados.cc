@@ -2898,7 +2898,7 @@ int RGWRados::create_bucket(const RGWUserInfo& owner, rgw_bucket& bucket,
       info.quota = *pquota_info;
     }
 
-    int r = init_bucket_index(info, info.layout.current_index.layout.normal.num_shards);
+    int r = svc.bi->init_index(info, info.layout.current_index);
     if (r < 0) {
       return r;
     }
@@ -3341,7 +3341,7 @@ int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::buc
   bucket = bucket_info.bucket;
   shard_id = sid;
 
-  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, &bucket_obj);
+  int ret = store->svc.bi_rados->open_bucket_index_shard(bucket_info, shard_id, current_layout.layout.normal.num_shards, current_layout.gen, &bucket_obj);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
