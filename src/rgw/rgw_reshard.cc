@@ -531,6 +531,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
   }
 
   //increment generation number
+  bucket_info.layout.target_index->gen = bucket_info.layout.current_index.gen;
   bucket_info.layout.target_index->gen++;
 
   int num_target_shards = bucket_info.layout.target_index->layout.normal.num_shards;
@@ -635,7 +636,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
   } else if (out) {
     (*out) << " " << total_entries << std::endl;
   }
-
+  
   ret = target_shards_mgr.finish();
   if (ret < 0) {
     lderr(store->ctx()) << "ERROR: failed to reshard" << dendl;
@@ -650,6 +651,11 @@ int RGWBucketReshard::do_reshard(int num_shards,
   if (ret < 0) {
     ldout(store->ctx(), -1) << "ERROR: failed writing bucket instance info: " << dendl;
     return ret;
+  }
+
+  ret = store->init_bucket_index(bucket_info, bucket_info.layout.current_index);
+  if (ret < 0) {
+      return ret;
   }
 
   return 0;
@@ -725,7 +731,7 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
    // at this point since all we're using a best effor to to remove old
    // shard objects
 
-   ret = store->clean_bucket_index(bucket_info, std::nullopt);
+   ret = store->clean_bucket_index(bucket_info, bucket_info.layout.current_index.gen);
    if (ret < 0) {
      lderr(store->ctx()) << "Error: " << __func__ <<
       " failed to clean up old shards; " <<

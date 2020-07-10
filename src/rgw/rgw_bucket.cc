@@ -2925,7 +2925,7 @@ public:
 
     objv_tracker = bci.info.objv_tracker;
 
-    ret = store->init_bucket_index(bci.info);
+    ret = store->init_bucket_index(bci.info, bci.info.layout.current_index);
     if (ret < 0)
       return ret;
 

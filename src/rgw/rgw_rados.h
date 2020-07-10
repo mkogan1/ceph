@@ -1241,7 +1241,7 @@ class RGWRados : public AdminSocketHook
 			      librados::IoCtx& index_ctx,
                               int shard_id,
 			      uint32_t num_shards,
-			      std::optional<uint64_t> gen,
+			      uint64_t gen,
 			      string *bucket_obj);
   int open_bucket_index(const RGWBucketInfo& bucket_info,
 			librados::IoCtx& index_ctx,
@@ -1514,8 +1514,8 @@ public:
 
   int create_pool(const rgw_pool& pool);
 
-  int init_bucket_index(RGWBucketInfo& bucket_info);
-  int clean_bucket_index(RGWBucketInfo& bucket_info, std::optional<uint64_t> gen);
+  int init_bucket_index(RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout);
+  int clean_bucket_index(RGWBucketInfo& bucket_info, uint64_t gen);
   void create_bucket_id(string *bucket_id);
 
   bool get_obj_data_pool(const rgw_placement_rule& placement_rule, const rgw_obj& obj, rgw_pool *pool);
@@ -2497,11 +2497,11 @@ public:
   void get_bucket_index_object(const string& bucket_oid_base,
 			       uint32_t num_shards,
                                int shard_id,
-			       std::optional<uint64_t> gen_id,
+			       uint64_t gen_id,
 			       string *bucket_obj);
 
   void get_bucket_index_objects(const string& bucket_oid_base,
-				uint32_t num_shards, std::optional<uint64_t> _gen_id,
+ uint32_t num_shards, uint64_t gen_id,
 				map<int, string> *_bucket_objects,
 				int shard_id = -1);
 
