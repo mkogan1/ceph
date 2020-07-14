@@ -1515,7 +1515,7 @@ public:
   int create_pool(const rgw_pool& pool);
 
   int init_bucket_index(RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout);
-  int clean_bucket_index(RGWBucketInfo& bucket_info, uint64_t gen);
+  int clean_bucket_index(RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout);
   void create_bucket_id(string *bucket_id);
 
   bool get_obj_data_pool(const rgw_placement_rule& placement_rule, const rgw_obj& obj, rgw_pool *pool);
@@ -2491,6 +2491,7 @@ public:
 			      const string& obj_key,
 			      uint32_t num_shards,
 			      rgw::BucketHashType hash_type,
+			      uint64_t gen_id,
 			      string *bucket_obj,
 			      int *shard_id);
 
