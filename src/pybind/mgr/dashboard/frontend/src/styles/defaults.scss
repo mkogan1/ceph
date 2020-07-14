@@ -55,21 +55,21 @@ $color-brand-teal: #2b99a8 !default;
 $color-brand-gray: #374249 !default;
 $color-mirage-gray: #333e46 !default;
 
-$color-text: $pf-global--Color--100 !default;
+$color-text: $pf-color-black-900 !default;
 $color-primary: $color-brand-teal !default;
 $color-secondary: $color-brand-gray !default;
 $color-accent: #ef5c55 !default;
-$color-info: $pf-global--info-color--100 !default;
-$color-success: $pf-global--success-color--100 !default;
-$color-warning: $pf-global--warning-color--100 !default;
-$color-danger: $pf-global--danger-color--100 !default;
+$color-info: $pf-color-blue-200 !default;
+$color-success: $pf-color-light-green-400 !default;
+$color-warning: $pf-color-gold-400 !default;
+$color-danger: $pf-color-red-100 !default;
 
 $color-app-bg: $color-solid-white !default;
 // $color-bg-darken: $color-dark-gray !default;
 $color-links: #0088ce !default;
-$color-links-focus: $pf-global--link--Color--hover !default;
+$color-links-focus: $pf-color-blue-500 !default;
 $color-breadcrumb: $color-text !default;
-$color-breadcrumb-divider: $pf-global--BorderColor--200 !default;
+$color-breadcrumb-divider: $pf-color-black-500 !default;
 // $color-button-text: $color-white-gray !default;
 $color-button: $color-primary !default;
 // $color-button-hover: darken($color-primary, 3) !default;
@@ -108,8 +108,8 @@ $color-password-toggle-focus: $color-primary !default;
 $color-info-card-border: $color-soft-gray !default;
 
 /*Navigation*/
-$color-navbar-bg: $pf-global--BackgroundColor--dark-100 !default;
-$color-sidebar-bg: $pf-global--BackgroundColor--dark-300 !default;
+$color-navbar-bg: $pf-color-black-900 !default;
+$color-sidebar-bg: $pf-color-black-850 !default;
 $color-navbar-brand: $color-white-gray !default;
 $color-nav-top-bar: $color-primary !default;
 $color-nav-bottom-bar: $color-primary !default;

@@ -22,6 +22,7 @@ $badge-font-size: 1rem;
 $form-feedback-font-size: 100%;
 $popover-max-width: 350px;
 
+@import '~@patternfly/patternfly/sass-utilities/_all';
 @import '~bootstrap/scss/bootstrap';
 @import '~fork-awesome/scss/fork-awesome';
 @import 'app/ceph/dashboard/info-card/info-card-popover.scss';

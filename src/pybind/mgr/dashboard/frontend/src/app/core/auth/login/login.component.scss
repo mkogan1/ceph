@@ -6,11 +6,11 @@
     background-size: cover;
     background-position: center;
 
-    @media (min-width: $pf-global--breakpoint--xl) {
+    @media (min-width: $screen-xl-min) {
       background-position-x: 30%;
     }
 
-    @media only screen and (min-width: $pf-global--breakpoint--xl) {
+    @media only screen and (min-width: $screen-xl-min) {
       .pf-c-login__footer {
         padding-left: 26%;
       }

@@ -2,6 +2,13 @@
 
 @import 'defaults';
 
+$pf-global--font-path: '~@patternfly/patternfly/assets/fonts';
+$fa-font-path: '~@patternfly/patternfly/assets/fonts/webfonts';
+$pf-global--fonticon-path: '~@patternfly/patternfly/assets/pficon';
+$pf-global--image-path: '~@patternfly/patternfly/assets/images';
+
+@import '~@patternfly/patternfly/patternfly';
+
 .toast-success {
   background-color: $color-success;
 }
