@@ -7,9 +7,11 @@
   line-height: 1;
 }
 
-.btn {
+.btn-light {
   padding: 0.5rem 1rem;
   line-height: 1;
+  height: 1.875em;
+  padding-top: 4px;
 }
 
 .dataTables_wrapper {
@@ -85,13 +87,10 @@
     width: 40%;
     max-width: 250px;
     .form-control {
-      height: 44px;
+      height: 30px;
     }
     .input-group-prepend {
-      padding-right: 5px;
-    }
-    .input-group-append {
-      padding-left: 5px;
+      height: 1.875em;
     }
   }
   .input-group.dataTables_paginate {

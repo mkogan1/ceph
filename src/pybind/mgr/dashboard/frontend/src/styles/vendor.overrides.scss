@@ -46,6 +46,10 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
   @extend .pf-c-button;
 }
 
+.dropdown {
+  @extend .pf-c-dropdown;
+}
+
 .btn-primary,
 .btn-primary.dropdown-toggle,
 .btn-secondary,
@@ -62,6 +66,10 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
     background-color: $pf-global--disabled-color--200;
     color: $pf-global--disabled-color--100;
   }
+}
+
+.btn-light {
+  @extend .pf-c-button, .pf-m-control;
 }
 
 .badge {
@@ -88,4 +96,22 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
 .badge-tab {
   color: $color-solid-gray;
   background-color: $color-light-shade-gray;
+}
+
+.input-group {
+  @extend .pf-c-input-group;
+  background-color: transparent;
+}
+
+.form-control {
+  @extend .pf-c-form-control;
+}
+
+.input-group-text {
+  @extend .pf-c-input-group__text;
+}
+
+.widget-toolbar {
+  @extend .pf-c-toolbar;
+  background-color: transparent;
 }

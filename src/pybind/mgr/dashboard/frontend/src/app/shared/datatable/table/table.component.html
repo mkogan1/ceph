@@ -28,10 +28,14 @@
       <div dropdown
            class="btn-group tc_filter_name">
         <a dropdownToggle
-           class="btn btn-light dropdown-toggle"
+           class="btn btn-light"
            data-toggle="dropdown">
-          <i [ngClass]="[icons.large, icons.filter]"></i>
+          <i [ngClass]="icons.filter"></i>
           {{ selectedFilter.column.name }}
+          <span class="pf-c-dropdown__toggle-icon">
+            <i class="fas fa-caret-down"
+               aria-hidden="true"></i>
+          </span>
         </a>
         <ul *dropdownMenu
             class="dropdown-menu px-1"
@@ -47,10 +51,14 @@
       <div dropdown
            class="btn-group tc_filter_option">
         <a dropdownToggle
-           class="btn btn-light dropdown-toggle"
+           class="btn btn-light"
            [class.disabled]="selectedFilter.options.length === 0"
            data-toggle="dropdown">
            {{ selectedFilter.value ? selectedFilter.value.formatted: 'Any' }}
+          <span class="pf-c-dropdown__toggle-icon">
+            <i class="fas fa-caret-down"
+               aria-hidden="true"></i>
+          </span>
         </a>
         <ul *dropdownMenu
             class="dropdown-menu px-1"
@@ -110,9 +118,13 @@
            [autoClose]="false"
            class="dropdown tc_menuitem tc_menuitem_cluster">
         <a dropdownToggle
-           class="btn btn-light dropdown-toggle tc_columnBtn"
+           class="btn btn-light tc_columnBtn"
            data-toggle="dropdown">
-          <i [ngClass]="[icons.large, icons.table]"></i>
+          <i [ngClass]="icons.table"></i>
+          <span class="pf-c-dropdown__toggle-icon">
+            <i class="fas fa-caret-down"
+               aria-hidden="true"></i>
+          </span>
         </a>
         <ul *dropdownMenu
             class="dropdown-menu px-3">
@@ -142,7 +154,7 @@
       <button type="button"
               class="btn btn-light"
               (click)="refreshBtn()">
-        <i [ngClass]="[icons.large, icons.refresh]"
+        <i [ngClass]="icons.refresh"
            [class.fa-spin]="updating || loadingIndicator"></i>
       </button>
     </div>
