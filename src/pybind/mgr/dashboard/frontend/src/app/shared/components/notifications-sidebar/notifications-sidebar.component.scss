@@ -49,8 +49,12 @@ ngx-simplebar {
   }
 }
 
-.close {
-  margin-left: 39%;
+.pf-c-notification-drawer__header {
+  justify-content: space-between;
+}
+
+.pf-c-notification-drawer__list-item-description {
+  width: 17.5em;
 }
 
 table {
@@ -60,4 +64,9 @@ table {
 .row {
   margin-left: 0;
   margin-right: 0;
+}
+
+.pf-c-notification-drawer__body {
+  overflow: hidden;
+  word-break: break-word;
 }

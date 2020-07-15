@@ -2,7 +2,7 @@ import { PageHelper } from '../page-helper.po';
 
 export class NotificationSidebarPageHelper extends PageHelper {
   getNotificatinoIcon() {
-    return cy.get('cd-notifications a');
+    return cy.get('cd-notifications div');
   }
 
   getSidebar() {
@@ -10,15 +10,15 @@ export class NotificationSidebarPageHelper extends PageHelper {
   }
 
   getTasks() {
-    return this.getSidebar().find('.card.tc_task');
+    return this.getSidebar().find('.pf-c-notification-drawer__list.tc_task');
   }
 
   getNotifications() {
-    return this.getSidebar().find('.card.tc_notification');
+    return this.getSidebar().find('.pf-c-notification-drawer__list.tc_notification');
   }
 
   getClearNotficationsBtn() {
-    return this.getSidebar().find('button.btn-block');
+    return this.getSidebar().find('button.pf-c-button');
   }
 
   getCloseBtn() {

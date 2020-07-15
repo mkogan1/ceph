@@ -1,20 +1,16 @@
 <ng-template #tasksTpl>
   <!-- Executing -->
   <div *ngFor="let executingTask of executingTasks; trackBy:trackByFn">
-    <ul class="pf-c-notification-drawer__list tc_task border-0 mb-3">
+    <ul class="pf-c-notification-drawer__list tc_task border-0">
       <li class="pf-c-notification-drawer__list-item pf-m-hoverable no-gutters">
         <div class="pf-c-notification-drawer__list-item-header-title">
-          <span [ngClass]="[icons.stack]"
-                class="pf-c-notification-drawer__list-item-header-icon">
-            <i [ngClass]="[icons.spinner, icons.spin, icons.inverse]"></i>
-          </span>
           <h2 class="pf-c-notification-drawer__list-item-header-title">{{ executingTask.description }}</h2>
         </div>
         <div class="pf-c-notification-drawer__list-item-description">
           <div class="pf-c-progress pf-m-sm">
             <progressbar class="pf-c-progress__bar active"
                          max="100"
-                         value]="executingTask.progress"
+                         [value]="executingTask.progress"
                          [animate]="true"></progressbar>
           </div>
           <p class="card-text text-muted">
@@ -101,7 +97,7 @@
             tabindex="-1"
             type="button"
             (click)="closeSidebar()">
-      <span class="fas fa-times"></span>
+      <span class="fas fa-times-circle fa-sm"></span>
     </button>
   </div>
 
