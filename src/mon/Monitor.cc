@@ -3090,15 +3090,15 @@ void Monitor::get_cluster_status(stringstream &ss, Formatter *f)
       }
     }
 
-    {
-      auto& service_map = mgrstatmon()->get_service_map();
-      if (!service_map.services.empty()) {
-        ss << "\n \n  task status:\n";
-        {
-          for (auto &p : service_map.services) {
-            ss << p.second.get_task_summary(p.first);
-          }
-        }
+    auto& service_map = mgrstatmon()->get_service_map();
+    if (std::any_of(service_map.services.begin(),
+                    service_map.services.end(),
+                    [](const std::pair<std::string, ServiceMap::Service> &service) {
+                      return service.second.has_running_tasks();
+                    })) {
+      ss << "\n \n  task status:\n";
+      for (auto &p : service_map.services) {
+        ss << p.second.get_task_summary(p.first);
       }
     }
 

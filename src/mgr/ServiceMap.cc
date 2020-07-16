@@ -88,6 +88,14 @@ std::string ServiceMap::Service::get_summary() const
   return ss.str();
 }
 
+bool ServiceMap::Service::has_running_tasks() const
+{
+  return std::any_of(daemons.begin(), daemons.end(),
+                     [](const std::pair<std::string, Daemon> &daemon) {
+    return !daemon.second.task_status.empty();
+  });
+}
+
 std::string ServiceMap::Service::get_task_summary(const std::string_view task_prefix) const
 {
   // contruct a map similar to:
