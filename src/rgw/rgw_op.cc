@@ -4739,7 +4739,6 @@ void RGWDeleteObj::execute()
     populate_metadata_in_request(s, attrs);
 
     // make reservation for notification if needed
-    // TODO: delete marker is set only after object is deleted
     rgw::notify::reservation_t res(store, s, s->object);
     const auto versioned_object = s->bucket_info.versioning_enabled();
     const auto event_type = versioned_object && s->object.have_instance() ? 
