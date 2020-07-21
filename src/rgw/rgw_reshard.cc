@@ -315,20 +315,28 @@ int RGWBucketReshard::clear_index_shard_reshard_status(RGWRados* store,
 
 static int set_target_layout(RGWRados* store,
                              int new_num_shards,
-                             RGWBucketInfo& bucket_info,
-                             map<string, bufferlist>& attrs)
+                             RGWBucketInfo& bucket_info)
 {
   assert(!bucket_info.layout.target_index);
   bucket_info.layout.target_index.emplace();
 
   bucket_info.layout.target_index->layout.normal.num_shards = new_num_shards;
 
+  //increment generation number
+  bucket_info.layout.target_index->gen = bucket_info.layout.current_index.gen;
+  bucket_info.layout.target_index->gen++;
+
   bucket_info.layout.resharding = rgw::BucketReshardState::InProgress;
 
-  int ret = store->put_bucket_instance_info(bucket_info, true, real_time(), &attrs);
+  int ret = store->put_bucket_instance_info(bucket_info, true, real_time(), nullptr);
   if (ret < 0) {
     cerr << "ERROR: failed to store updated bucket instance info: " << cpp_strerror(-ret) << std::endl;
     return ret;
+  }
+
+  ret = store->init_bucket_index(bucket_info, *(bucket_info.layout.target_index));
+  if (ret < 0) {
+      return ret;
   }
 
   return 0;
@@ -336,7 +344,7 @@ static int set_target_layout(RGWRados* store,
 
 int RGWBucketReshard::set_target_layout(int new_num_shards)
 {
-  return ::set_target_layout(store, new_num_shards, bucket_info, bucket_attrs);
+  return ::set_target_layout(store, new_num_shards, bucket_info);
 }
 
 int RGWBucketReshard::cancel()
@@ -356,13 +364,12 @@ class BucketInfoReshardUpdate
 {
   RGWRados *store;
   RGWBucketInfo& bucket_info;
-  std::map<string, bufferlist> bucket_attrs;
 
   bool in_progress{false};
 
   int set_status(rgw::BucketReshardState s) {
     bucket_info.layout.resharding = s;
-    int ret = store->put_bucket_instance_info(bucket_info, false, real_time(), &bucket_attrs);
+    int ret = store->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
     if (ret < 0) {
       ldout(store->ctx(), 0) << "ERROR: failed to write bucket info, ret=" << ret << dendl;
       return ret;
@@ -372,11 +379,9 @@ class BucketInfoReshardUpdate
 
 public:
   BucketInfoReshardUpdate(RGWRados *_store,
-			  RGWBucketInfo& _bucket_info,
-                          map<string, bufferlist>& _bucket_attrs) :
+			  RGWBucketInfo& _bucket_info) :
     store(_store),
-    bucket_info(_bucket_info),
-    bucket_attrs(_bucket_attrs)
+    bucket_info(_bucket_info)
   {}
 
   ~BucketInfoReshardUpdate() {
@@ -521,7 +526,8 @@ int RGWBucketReshard::do_reshard(int num_shards,
 
   // NB: destructor cleans up sharding state if reshard does not
   // complete successfully
-  BucketInfoReshardUpdate bucket_info_updater(store, bucket_info, bucket_attrs);
+  BucketInfoReshardUpdate bucket_info_updater(store, bucket_info);
+
   int ret = bucket_info_updater.start();
   if (ret < 0) {
     ldout(store->ctx(), 0) << __func__ <<
@@ -529,10 +535,6 @@ int RGWBucketReshard::do_reshard(int num_shards,
       "start ret=" << ret << dendl;
     return ret;
   }
-
-  //increment generation number
-  bucket_info.layout.target_index->gen = bucket_info.layout.current_index.gen;
-  bucket_info.layout.target_index->gen++;
 
   int num_target_shards = bucket_info.layout.target_index->layout.normal.num_shards;
 
@@ -647,15 +649,10 @@ int RGWBucketReshard::do_reshard(int num_shards,
   bucket_info.layout.current_index = *bucket_info.layout.target_index;
   bucket_info.layout.target_index = std::nullopt; // target_layout doesn't need to exist after reshard
   bucket_info.layout.resharding = rgw::BucketReshardState::None;
-  ret = store->put_bucket_instance_info(bucket_info, false, real_time(), &bucket_attrs);
+  ret = store->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
   if (ret < 0) {
     ldout(store->ctx(), -1) << "ERROR: failed writing bucket instance info: " << dendl;
     return ret;
-  }
-
-  ret = store->init_bucket_index(bucket_info, bucket_info.layout.current_index);
-  if (ret < 0) {
-      return ret;
   }
 
   return 0;
@@ -694,8 +691,6 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
                               bool verbose, ostream *out, Formatter *formatter,
 			      RGWReshard* reshard_log)
 {
-  Clock::time_point now;
-
   int ret = reshard_lock.lock();
   if (ret < 0) {
     return ret;
@@ -764,7 +759,7 @@ error_out:
 
   // restore old index if reshard fails
   bucket_info.layout.current_index = prev_index;
-  ret = store->put_bucket_instance_info(bucket_info, false, real_time(), &bucket_attrs);
+  ret = store->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
   if (ret < 0) {
     lderr(store->ctx()) << "ERROR: failed writing bucket instance info: " << dendl;
       return ret;
