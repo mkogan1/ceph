@@ -35,6 +35,8 @@ class WebTokenEngine : public rgw::auth::Engine {
 
   std::string get_jwks_url(const string& iss, const DoutPrefixProvider *dpp) const;
 
+  std::string get_role_tenant(const string& role_arn) const;
+
   boost::optional<WebTokenEngine::token_t>
   get_from_jwt(const DoutPrefixProvider* dpp, const std::string& token, const req_state* const s) const;
 
@@ -92,9 +94,10 @@ class DefaultStrategy : public rgw::auth::Strategy,
   aplptr_t create_apl_web_identity( CephContext* cct,
                                     const req_state* s,
                                     const string& role_session,
+                                    const string& role_tenant,
                                     const rgw::web_idp::WebTokenClaims& token) const override {
     auto apl = rgw::auth::add_sysreq(cct, store, s,
-      rgw::auth::WebIdentityApplier(cct, store, role_session, token));
+      rgw::auth::WebIdentityApplier(cct, store, role_session, role_tenant, token));
     return aplptr_t(new decltype(apl)(std::move(apl)));
   }
 
