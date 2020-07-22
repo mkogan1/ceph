@@ -166,6 +166,7 @@
     mfa resync                 re-sync MFA TOTP token
   options:
      --tenant=<tenant>         tenant name
+     --user_ns=<namespace>     namespace of user (oidc in case of users authenticated with oidc provider)
      --uid=<id>                user id
      --new-uid=<id>            new user id
      --subuser=<name>          subuser name

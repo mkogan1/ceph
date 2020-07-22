@@ -78,6 +78,8 @@ public:
 
   /* Subuser of Account */
   virtual string get_subuser() const = 0;
+
+  virtual string get_role_tenant() const { return ""; }
 };
 
 inline std::ostream& operator<<(std::ostream& out,
@@ -359,24 +361,26 @@ protected:
   CephContext* const cct;
   RGWRados* const store;
   string role_session;
+  string role_tenant;
   rgw::web_idp::WebTokenClaims token_claims;
 
   string get_idp_url() const;
 
+  void create_account(const DoutPrefixProvider* dpp,
+                      const rgw_user& acct_user,
+                      const string& display_name,
+                      RGWUserInfo& user_info) const;     /* out */
 public:
   WebIdentityApplier( CephContext* const cct,
                       RGWRados* const store,
 		      const string& role_session,
+                      const string& role_tenant,
                       const rgw::web_idp::WebTokenClaims& token_claims)
     : cct(cct),
       store(store),
       role_session(role_session),
+      role_tenant(role_tenant),
       token_claims(token_claims) {
-  }
-
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override {
-    user_info.user_id = rgw_user(token_claims.sub);
-    user_info.display_name = token_claims.user_name;
   }
 
   void modify_request_state(const DoutPrefixProvider *dpp, req_state* s) const override;
@@ -390,6 +394,9 @@ public:
   }
 
   bool is_owner_of(const rgw_user& uid) const override {
+    if (uid.id == token_claims.sub && uid.tenant == role_tenant && uid.ns == "oidc") {
+      return true;
+    }
     return false;
   }
 
@@ -400,6 +407,8 @@ public:
   void to_str(std::ostream& out) const override;
 
   bool is_identity(const idset_t& ids) const override;
+
+  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override;
 
   uint32_t get_identity_type() const override {
     return TYPE_WEB;
@@ -419,6 +428,7 @@ public:
     virtual aplptr_t create_apl_web_identity( CephContext* cct,
                                               const req_state* s,
                                               const string& role_session,
+                                              const string& role_tenant,
                                               const rgw::web_idp::WebTokenClaims& token) const = 0;
   };
 };
@@ -651,7 +661,7 @@ public:
     return false;
   }
   bool is_owner_of(const rgw_user& uid) const override {
-    return false;
+    return (this->user_id.id == uid.id && this->user_id.tenant == uid.tenant && this->user_id.ns == this->user_id.ns);
   }
   bool is_identity(const idset_t& ids) const override;
   uint32_t get_perm_mask() const override {
@@ -663,6 +673,7 @@ public:
   string get_acct_name() const override { return {}; }
   string get_subuser() const override { return {}; }
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;
+  string get_role_tenant() const override { return role.tenant; }
 
   struct Factory {
     virtual ~Factory() {}

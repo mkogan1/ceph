@@ -2316,7 +2316,14 @@ int RGWListBuckets::verify_permission()
   rgw::Partition partition = rgw::Partition::aws;
   rgw::Service service = rgw::Service::s3;
 
-  if (!verify_user_permission(this, s, ARN(partition, service, "", s->user->user_id.tenant, "*"), rgw::IAM::s3ListAllMyBuckets)) {
+  string tenant;
+  if (s->auth.identity->get_identity_type() == TYPE_ROLE) {
+    tenant = s->auth.identity->get_role_tenant();
+  } else {
+    tenant = s->user->user_id.tenant;
+  }
+
+  if (!verify_user_permission(this, s, ARN(partition, service, "", tenant, "*"), rgw::IAM::s3ListAllMyBuckets)) {
     return -EACCES;
   }
 
@@ -2920,12 +2927,16 @@ int RGWCreateBucket::verify_permission()
   }
 
   if (s->user->user_id.tenant != s->bucket_tenant) {
-    ldpp_dout(this, 10) << "user cannot create a bucket in a different tenant"
-                      << " (user_id.tenant=" << s->user->user_id.tenant
-                      << " requested=" << s->bucket_tenant << ")"
-                      << dendl;
-    return -EACCES;
+    //AssumeRole is meant for cross account access
+    if (s->auth.identity->get_identity_type() != TYPE_ROLE) {
+      ldpp_dout(this, 10) << "user cannot create a bucket in a different tenant"
+                        << " (user_id.tenant=" << s->user->user_id.tenant
+                        << " requested=" << s->bucket_tenant << ")"
+                        << dendl;
+      return -EACCES;
+    }
   }
+
   if (s->user->max_buckets < 0) {
     return -EPERM;
   }
