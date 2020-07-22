@@ -1431,7 +1431,7 @@ struct RGWBucketInfo {
   RGWObjectLock obj_lock;
 
   void encode(bufferlist& bl) const {
-     ENCODE_START(20, 4, bl);
+     ENCODE_START(21, 4, bl);
      encode(bucket, bl);
      encode(owner.id, bl);
      encode(flags, bl);
@@ -1461,10 +1461,11 @@ struct RGWBucketInfo {
      if (obj_lock_enabled()) {
        encode(obj_lock, bl);
      }
+     encode(owner.ns, bl);
      ENCODE_FINISH(bl);
   }
   void decode(bufferlist::const_iterator& bl) {
-    DECODE_START_LEGACY_COMPAT_LEN_32(20, 4, 4, bl);
+    DECODE_START_LEGACY_COMPAT_LEN_32(21, 4, 4, bl);
      decode(bucket, bl);
      if (struct_v >= 2) {
        string s;
@@ -1530,6 +1531,9 @@ struct RGWBucketInfo {
      }
      if (struct_v >= 20 && obj_lock_enabled()) {
        decode(obj_lock, bl);
+     }
+     if (struct_v >= 21) {
+       decode(owner.ns, bl);
      }
      DECODE_FINISH(bl);
   }
