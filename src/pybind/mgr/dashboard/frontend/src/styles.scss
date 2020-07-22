@@ -454,3 +454,28 @@ tree-root {
     min-height: 1em;
   }
 }
+
+form .card .card-body {
+  padding-right: 2rem;
+
+  .row {
+    align-items: center;
+
+    .cd-col-form-label {
+      align-self: baseline;
+    }
+  }
+}
+
+cd-select-badges > cd-select {
+  display: inline-flex;
+  align-items: center;
+}
+
+.form-text {
+  margin-top: unset;
+}
+
+.custom-checkbox {
+  padding-top: unset;
+}
