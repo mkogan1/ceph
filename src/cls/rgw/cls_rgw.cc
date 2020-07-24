@@ -3627,7 +3627,7 @@ static int rgw_cls_lc_list_entries(cls_method_context_t hctx, bufferlist *in,
       pair<string, int> oe;
       try {
 	iter = it->second.begin();
-	::decode(oe, iter);
+	decode(oe, iter);
 	entry = {oe.first, 0 /* start */, uint32_t(oe.second)};
       } catch(buffer::error& err) {
 	CLS_LOG(
