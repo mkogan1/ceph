@@ -40,6 +40,7 @@ class SafeTimer;
 
 namespace librbd {
 
+  template <typename> class ConfigWatcher;
   template <typename> class ExclusiveLock;
   template <typename> class ImageState;
   template <typename> class ImageWatcher;
@@ -105,6 +106,8 @@ namespace librbd {
     cls::rbd::SnapshotNamespace snap_namespace;
     std::string snap_name;
     IoCtx data_ctx, md_ctx;
+
+    ConfigWatcher<ImageCtx> *config_watcher = nullptr;
     ImageWatcher<ImageCtx> *image_watcher;
     Journal<ImageCtx> *journal;
 
