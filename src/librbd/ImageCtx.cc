@@ -733,7 +733,7 @@ public:
                                 bool thread_safe) {
     ldout(cct, 20) << __func__ << dendl;
 
-    RWLock::WLocker md_locker(md_lock);
+    std::unique_lock image_locker(image_lock);
 
     // reset settings back to global defaults
     for (auto& key : config_overrides) {
@@ -773,7 +773,7 @@ public:
       }
     }
 
-    md_locker.unlock();
+    image_locker.unlock();
 
 #define ASSIGN_OPTION(param, type)              \
     param = config.get_val<type>("rbd_"#param)
