@@ -3390,6 +3390,9 @@ void RGWDeleteBucket::execute()
     return;
   }
 
+  // remove lifecycle config, if any
+  (void) store->get_lc()->remove_bucket_config(s->bucket_info, s->bucket_attrs);
+
   op_ret = store->delete_bucket(s->bucket_info, ot, false);
 
   if (op_ret == -ECANCELED) {
