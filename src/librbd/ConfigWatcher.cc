@@ -95,7 +95,7 @@ void ConfigWatcher<I>::handle_global_config_change(
 
   {
     // ignore any global changes that are being overridden
-    RWLock::RLocker md_locker(m_image_ctx.md_lock);
+    std::shared_lock image_locker{m_image_ctx.image_lock};
     for (auto& key : m_image_ctx.config_overrides) {
       changed_keys.erase(key);
     }
