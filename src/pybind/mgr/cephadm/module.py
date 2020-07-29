@@ -45,6 +45,7 @@ from .schedule import HostAssignment, HostPlacementSpec
 from .inventory import Inventory, SpecStore, HostCache, EventStore
 from .upgrade import CEPH_UPGRADE_ORDER, CephadmUpgrade
 from .template import TemplateMgr
+from .utils import forall_hosts
 
 try:
     import remoto
@@ -86,42 +87,11 @@ CEPH_DATEFMT = '%Y-%m-%dT%H:%M:%S.%fZ'
 CEPH_TYPES = set(CEPH_UPGRADE_ORDER)
 
 
-def forall_hosts(f: Callable[..., T]) -> Callable[..., List[T]]:
-    @wraps(f)
-    def forall_hosts_wrapper(*args) -> List[T]:
-
-        # Some weired logic to make calling functions with multiple arguments work.
-        if len(args) == 1:
-            vals = args[0]
-            self = None
-        elif len(args) == 2:
-            self, vals = args
-        else:
-            assert 'either f([...]) or self.f([...])'
-
-        def do_work(arg):
-            if not isinstance(arg, tuple):
-                arg = (arg, )
-            try:
-                if self:
-                    return f(self, *arg)
-                return f(*arg)
-            except Exception as e:
-                logger.exception(f'executing {f.__name__}({args}) failed.')
-                raise
-
-        assert CephadmOrchestrator.instance is not None
-        return CephadmOrchestrator.instance._worker_pool.map(do_work, vals)
-
-
-    return forall_hosts_wrapper
-
-
-class CephadmCompletion(orchestrator.Completion):
+class CephadmCompletion(orchestrator.Completion[T]):
     def evaluate(self):
         self.finalize(None)
 
-def trivial_completion(f: Callable) -> Callable[..., CephadmCompletion]:
+def trivial_completion(f: Callable[..., T]) -> Callable[..., CephadmCompletion[T]]:
     """
     Decorator to make CephadmCompletion methods return
     a completion object that executes themselves.
@@ -260,6 +230,24 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             'default': False,
             'desc': 'Manage and own /etc/ceph/ceph.conf on the hosts.',
         },
+        {
+            'name': 'registry_url',
+            'type': 'str',
+            'default': None,
+            'desc': 'Custom repository url'
+        },
+        {
+            'name': 'registry_username',
+            'type': 'str',
+            'default': None,
+            'desc': 'Custom repository username'
+        },
+        {
+            'name': 'registry_password',
+            'type': 'str',
+            'default': None,
+            'desc': 'Custom repository password'
+        },
     ]
 
     def __init__(self, *args, **kwargs):
@@ -295,6 +283,9 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             self.migration_current = None
             self.config_dashboard = True
             self.manage_etc_ceph_ceph_conf = True
+            self.registry_url: Optional[str] = None
+            self.registry_username: Optional[str] = None
+            self.registry_password: Optional[str] = None
 
         self._cons = {}  # type: Dict[str, Tuple[remoto.backends.BaseConnection,remoto.backends.LegacyModuleExecute]]
 
@@ -392,6 +383,20 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
     def _kick_serve_loop(self):
         self.log.debug('_kick_serve_loop')
         self.event.set()
+
+    # function responsible for logging single host into custom registry
+    def _registry_login(self, host, url, username, password):
+        self.log.debug(f"Attempting to log host {host} into custom registry @ {url}")
+        # want to pass info over stdin rather than through normal list of args
+        args_str = ("{\"url\": \"" + url + "\", \"username\": \"" + username + "\", "
+                    " \"password\": \"" + password + "\"}")
+        out, err, code = self._run_cephadm(
+            host, 'mon', 'registry-login',
+            ['--registry-json', '-'], stdin=args_str, error_ok=True)
+        if code:
+            return f"Host {host} failed to login to {url} as {username} with given password"
+        return
+
 
     def _check_host(self, host):
         if host not in self.inventory:
@@ -862,6 +867,50 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         return 0, msg, ''
 
     @orchestrator._cli_read_command(
+        'cephadm registry-login',
+        "name=url,type=CephString,req=false "
+        "name=username,type=CephString,req=false "
+        "name=password,type=CephString,req=false",
+        'Set custom registry login info by providing url, username and password or json file with login info (-i <file>)')
+    def registry_login(self, url=None, username=None, password=None, inbuf=None):
+        # if password not given in command line, get it through file input
+        if not (url and username and password) and (inbuf is None or len(inbuf) == 0):
+            return -errno.EINVAL, "", ("Invalid arguments. Please provide arguments <url> <username> <password> "
+                                        "or -i <login credentials json file>")
+        elif not (url and username and password):
+            login_info = json.loads(inbuf)
+            if "url" in login_info and "username" in login_info and "password" in login_info:
+                url = login_info["url"]
+                username = login_info["username"]
+                password = login_info["password"]
+            else:
+                return -errno.EINVAL, "", ("json provided for custom registry login did not include all necessary fields. "
+                                "Please setup json file as\n"
+                                "{\n"
+                                  " \"url\": \"REGISTRY_URL\",\n"
+                                  " \"username\": \"REGISTRY_USERNAME\",\n"
+                                  " \"password\": \"REGISTRY_PASSWORD\"\n"
+                                "}\n")
+        # verify login info works by attempting login on random host
+        host = None
+        for host_name in self.inventory.keys():
+            host = host_name
+            break
+        if not host:
+            raise OrchestratorError('no hosts defined')
+        r = self._registry_login(host, url, username, password)
+        if r is not None:
+            return 1, '', r
+        # if logins succeeded, store info
+        self.log.debug("Host logins successful. Storing login info.")
+        self.set_module_option('registry_url', url)
+        self.set_module_option('registry_username', username)
+        self.set_module_option('registry_password', password)
+        # distribute new login info to all hosts
+        self.cache.distribute_new_registry_login_info()
+        return 0, "registry login scheduled", ''
+
+    @orchestrator._cli_read_command(
         'cephadm check-host',
         'name=host,type=CephString '
         'name=addr,type=CephString,req=false',
@@ -1143,7 +1192,7 @@ you may want to run:
         return "Removed host '{}'".format(host)
 
     @trivial_completion
-    def update_host_addr(self, host, addr):
+    def update_host_addr(self, host, addr) -> str:
         self.inventory.set_addr(host, addr)
         self._reset_con(host)
         self.event.set()  # refresh stray health check
@@ -1162,16 +1211,39 @@ you may want to run:
         return list(self.inventory.all_specs())
 
     @trivial_completion
-    def add_host_label(self, host, label):
+    def add_host_label(self, host, label) -> str:
         self.inventory.add_label(host, label)
         self.log.info('Added label %s to host %s' % (label, host))
         return 'Added label %s to host %s' % (label, host)
 
     @trivial_completion
-    def remove_host_label(self, host, label):
+    def remove_host_label(self, host, label) -> str:
         self.inventory.rm_label(host, label)
         self.log.info('Removed label %s to host %s' % (label, host))
         return 'Removed label %s from host %s' % (label, host)
+
+    @trivial_completion
+    def host_ok_to_stop(self, hostname: str):
+        if hostname not in self.cache.get_hosts():
+            raise OrchestratorError(f'Cannot find host "{hostname}"')
+
+        daemons = self.cache.get_daemons()
+        daemon_map = defaultdict(lambda: [])
+        for dd in daemons:
+            if dd.hostname == hostname:
+                daemon_map[dd.daemon_type].append(dd.daemon_id)
+
+        for daemon_type,daemon_ids in daemon_map.items():
+            r = self.cephadm_services[daemon_type].ok_to_stop(daemon_ids)
+            if r.retval:
+                self.log.error(f'It is NOT safe to stop host {hostname}')
+                raise orchestrator.OrchestratorError(
+                        r.stderr,
+                        errno=r.retval)
+
+        msg = f'It is presumed safe to stop host {hostname}'
+        self.log.info(msg)
+        return msg
 
     def update_osdspec_previews(self, search_host: str = ''):
         # Set global 'pending' flag for host
@@ -1206,6 +1278,13 @@ you may want to run:
                 r = self._refresh_host_daemons(host)
                 if r:
                     failures.append(r)
+
+            if self.cache.host_needs_registry_login(host) and self.registry_url:
+                self.log.debug(f"Logging `{host}` into custom registry")
+                r = self._registry_login(host, self.registry_url, self.registry_username, self.registry_password)
+                if r:
+                    bad_hosts.append(r)
+
             if self.cache.host_needs_device_refresh(host):
                 self.log.debug('refreshing %s devices' % host)
                 r = self._refresh_host_devices(host)
@@ -1364,7 +1443,7 @@ you may want to run:
 
     @trivial_completion
     def describe_service(self, service_type=None, service_name=None,
-                         refresh=False):
+                         refresh=False) -> List[orchestrator.ServiceDescription]:
         if refresh:
             # ugly sync path, FIXME someday perhaps?
             for host in self.inventory.keys():
@@ -1452,7 +1531,7 @@ you may want to run:
 
     @trivial_completion
     def list_daemons(self, service_name=None, daemon_type=None, daemon_id=None,
-                     host=None, refresh=False):
+                     host=None, refresh=False) -> List[orchestrator.DaemonDescription]:
         if refresh:
             # ugly sync path, FIXME someday perhaps?
             if host:
@@ -1475,7 +1554,7 @@ you may want to run:
         return result
 
     @trivial_completion
-    def service_action(self, action, service_name):
+    def service_action(self, action, service_name) -> List[str]:
         args = []
         for host, dm in self.cache.daemons.items():
             for name, d in dm.items():
@@ -1486,7 +1565,7 @@ you may want to run:
         return self._daemon_actions(args)
 
     @forall_hosts
-    def _daemon_actions(self, daemon_type, daemon_id, host, action):
+    def _daemon_actions(self, daemon_type, daemon_id, host, action) -> str:
         with set_exception_subject('daemon', DaemonDescription(
             daemon_type=daemon_type,
             daemon_id=daemon_id
@@ -1523,7 +1602,7 @@ you may want to run:
         return "{} {} from host '{}'".format(action, name, daemon_spec.host)
 
     @trivial_completion
-    def daemon_action(self, action, daemon_type, daemon_id):
+    def daemon_action(self, action, daemon_type, daemon_id) -> List[str]:
         args = []
         for host, dm in self.cache.daemons.items():
             for name, d in dm.items():
@@ -1553,19 +1632,19 @@ you may want to run:
         return self._remove_daemons(args)
 
     @trivial_completion
-    def remove_service(self, service_name):
+    def remove_service(self, service_name) -> str:
         self.log.info('Remove service %s' % service_name)
         self._trigger_preview_refresh(service_name=service_name)
         found = self.spec_store.rm(service_name)
         if found:
             self._kick_serve_loop()
-            return ['Removed service %s' % service_name]
+            return 'Removed service %s' % service_name
         else:
             # must be idempotent: still a success.
-            return [f'Failed to remove service. <{service_name}> was not found.']
+            return f'Failed to remove service. <{service_name}> was not found.'
 
     @trivial_completion
-    def get_inventory(self, host_filter=None, refresh=False):
+    def get_inventory(self, host_filter=None, refresh=False) -> List[orchestrator.InventoryHost]:
         """
         Return the storage inventory of hosts matching the given filter.
 
@@ -1592,7 +1671,7 @@ you may want to run:
         return result
 
     @trivial_completion
-    def zap_device(self, host, path):
+    def zap_device(self, host, path) -> str:
         self.log.info('Zap device %s:%s' % (host, path))
         out, err, code = self._run_cephadm(
             host, 'osd', 'ceph-volume',
@@ -1604,7 +1683,7 @@ you may want to run:
         return '\n'.join(out + err)
 
     @trivial_completion
-    def blink_device_light(self, ident_fault, on, locs):
+    def blink_device_light(self, ident_fault, on, locs) -> List[str]:
         @forall_hosts
         def blink(host, dev, path):
             cmd = [
@@ -1668,7 +1747,16 @@ you may want to run:
             self.cache.osdspec_previews_refresh_queue.append(host)
 
     @trivial_completion
-    def create_osds(self, drive_group: DriveGroupSpec):
+    def apply_drivegroups(self, specs: List[DriveGroupSpec]) -> List[str]:
+        """
+        Deprecated. Please use `apply()` instead.
+
+        Keeping this around to be compapatible to mgr/dashboard
+        """
+        return [self._apply(spec) for spec in specs]
+
+    @trivial_completion
+    def create_osds(self, drive_group: DriveGroupSpec) -> str:
         return self.osd_service.create_from_spec(drive_group)
 
     def _preview_osdspecs(self,
@@ -1768,6 +1856,9 @@ you may want to run:
                 daemon_spec.extra_args.append('--reconfig')
             if self.allow_ptrace:
                 daemon_spec.extra_args.append('--allow-ptrace')
+
+            if self.cache.host_needs_registry_login(daemon_spec.host) and self.registry_url:
+                self._registry_login(daemon_spec.host, self.registry_url, self.registry_username, self.registry_password)
 
             self.log.info('%s daemon %s on %s' % (
                 'Reconfiguring' if reconfig else 'Deploying',
@@ -1933,8 +2024,12 @@ you may want to run:
             r = True
 
         # remove any?
-        while remove_daemon_hosts and not self.cephadm_services[daemon_type].ok_to_stop(
-                [d.daemon_id for d in remove_daemon_hosts]):
+        def _ok_to_stop(remove_daemon_hosts: Set[orchestrator.DaemonDescription]) -> bool:
+            daemon_ids = [d.daemon_id for d in remove_daemon_hosts]
+            r = self.cephadm_services[daemon_type].ok_to_stop(daemon_ids)
+            return not r.retval
+
+        while remove_daemon_hosts and not _ok_to_stop(remove_daemon_hosts):
             # let's find a subset that is ok-to-stop
             remove_daemon_hosts.pop()
         for d in remove_daemon_hosts:
@@ -2079,7 +2174,7 @@ you may want to run:
         return create_func_map(args)
 
     @trivial_completion
-    def apply_mon(self, spec):
+    def apply_mon(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
@@ -2130,7 +2225,7 @@ you may want to run:
         }
 
     @trivial_completion
-    def plan(self, specs: List[GenericSpec]):
+    def plan(self, specs: List[GenericSpec]) -> List:
         results = [{'warning': 'WARNING! Dry-Runs are snapshots of a certain point in time and are bound \n'
                                'to the current inventory setup. If any on these conditions changes, the \n'
                                'preview will be invalid. Please make sure to have a minimal \n'
@@ -2178,30 +2273,30 @@ you may want to run:
         return "Scheduled %s update..." % spec.service_name()
 
     @trivial_completion
-    def apply(self, specs: List[GenericSpec]):
+    def apply(self, specs: List[GenericSpec]) -> List[str]:
         results = []
         for spec in specs:
             results.append(self._apply(spec))
         return results
 
     @trivial_completion
-    def apply_mgr(self, spec):
+    def apply_mgr(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
-    def add_mds(self, spec: ServiceSpec):
+    def add_mds(self, spec: ServiceSpec) -> List[str]:
         return self._add_daemon('mds', spec, self.mds_service.create, self.mds_service.config)
 
     @trivial_completion
-    def apply_mds(self, spec: ServiceSpec):
+    def apply_mds(self, spec: ServiceSpec) -> str:
         return self._apply(spec)
 
     @trivial_completion
-    def add_rgw(self, spec):
+    def add_rgw(self, spec) -> List[str]:
         return self._add_daemon('rgw', spec, self.rgw_service.create, self.rgw_service.config)
 
     @trivial_completion
-    def apply_rgw(self, spec):
+    def apply_rgw(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
@@ -2210,23 +2305,23 @@ you may want to run:
         return self._add_daemon('iscsi', spec, self.iscsi_service.create, self.iscsi_service.config)
 
     @trivial_completion
-    def apply_iscsi(self, spec):
+    def apply_iscsi(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
-    def add_rbd_mirror(self, spec):
+    def add_rbd_mirror(self, spec) -> List[str]:
         return self._add_daemon('rbd-mirror', spec, self.rbd_mirror_service.create)
 
     @trivial_completion
-    def apply_rbd_mirror(self, spec):
+    def apply_rbd_mirror(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
-    def add_nfs(self, spec):
+    def add_nfs(self, spec) -> List[str]:
         return self._add_daemon('nfs', spec, self.nfs_service.create, self.nfs_service.config)
 
     @trivial_completion
-    def apply_nfs(self, spec):
+    def apply_nfs(self, spec) -> str:
         return self._apply(spec)
 
     def _get_dashboard_url(self):
@@ -2234,11 +2329,11 @@ you may want to run:
         return self.get('mgr_map').get('services', {}).get('dashboard', '')
 
     @trivial_completion
-    def add_prometheus(self, spec):
+    def add_prometheus(self, spec) -> List[str]:
         return self._add_daemon('prometheus', spec, self.prometheus_service.create)
 
     @trivial_completion
-    def apply_prometheus(self, spec):
+    def apply_prometheus(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
@@ -2248,7 +2343,7 @@ you may want to run:
                                 self.node_exporter_service.create)
 
     @trivial_completion
-    def apply_node_exporter(self, spec):
+    def apply_node_exporter(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
@@ -2258,7 +2353,7 @@ you may want to run:
                                 self.crash_service.create)
 
     @trivial_completion
-    def apply_crash(self, spec):
+    def apply_crash(self, spec) -> str:
         return self._apply(spec)
 
     @trivial_completion
@@ -2267,7 +2362,7 @@ you may want to run:
         return self._add_daemon('grafana', spec, self.grafana_service.create)
 
     @trivial_completion
-    def apply_grafana(self, spec: ServiceSpec):
+    def apply_grafana(self, spec: ServiceSpec) -> str:
         return self._apply(spec)
 
     @trivial_completion
@@ -2276,7 +2371,7 @@ you may want to run:
         return self._add_daemon('alertmanager', spec, self.alertmanager_service.create)
 
     @trivial_completion
-    def apply_alertmanager(self, spec: ServiceSpec):
+    def apply_alertmanager(self, spec: ServiceSpec) -> str:
         return self._apply(spec)
 
     def _get_container_image_id(self, image_name):
@@ -2287,6 +2382,8 @@ you may want to run:
             break
         if not host:
             raise OrchestratorError('no hosts defined')
+        if self.cache.host_needs_registry_login(host) and self.registry_url:
+            self._registry_login(host, self.registry_url, self.registry_username, self.registry_password)
         out, err, code = self._run_cephadm(
             host, '', 'pull', [],
             image=image_name,
@@ -2303,7 +2400,7 @@ you may want to run:
         return image_id, ceph_version
 
     @trivial_completion
-    def upgrade_check(self, image, version):
+    def upgrade_check(self, image, version) -> str:
         if version:
             target_name = self.container_image_base + ':v' + version
         elif image:
@@ -2334,29 +2431,29 @@ you may want to run:
         return json.dumps(r, indent=4, sort_keys=True)
 
     @trivial_completion
-    def upgrade_status(self):
+    def upgrade_status(self) -> orchestrator.UpgradeStatusSpec:
         return self.upgrade.upgrade_status()
 
     @trivial_completion
-    def upgrade_start(self, image, version):
+    def upgrade_start(self, image, version) -> str:
         return self.upgrade.upgrade_start(image, version)
 
     @trivial_completion
-    def upgrade_pause(self):
+    def upgrade_pause(self) -> str:
         return self.upgrade.upgrade_pause()
 
     @trivial_completion
-    def upgrade_resume(self):
+    def upgrade_resume(self) -> str:
         return self.upgrade.upgrade_resume()
 
     @trivial_completion
-    def upgrade_stop(self):
+    def upgrade_stop(self) -> str:
         return self.upgrade.upgrade_stop()
 
     @trivial_completion
     def remove_osds(self, osd_ids: List[str],
                     replace: bool = False,
-                    force: bool = False):
+                    force: bool = False) -> str:
         """
         Takes a list of OSDs and schedules them for removal.
         The function that takes care of the actual removal is
@@ -2383,7 +2480,7 @@ you may want to run:
         return "Scheduled OSD(s) for removal"
 
     @trivial_completion
-    def remove_osds_status(self):
+    def remove_osds_status(self) -> Set[OSDRemoval]:
         """
         The CLI call to retrieve an osd removal report
         """

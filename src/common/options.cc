@@ -4043,6 +4043,17 @@ std::vector<Option> get_global_options() {
       .set_default(true)
       .set_description("Enables checks for allocations consistency during log replay"),
 
+    Option("bluefs_replay_recovery", Option::TYPE_BOOL, Option::LEVEL_DEV)
+    .set_default(false)
+    .set_description("Attempt to read bluefs log so large that it became unreadable.")
+    .set_long_description("If BlueFS log grows to extreme sizes (200GB+) it is likely that it becames unreadable. "
+			  "This options enables heuristics that scans devices for missing data. "
+			  "DO NOT ENABLE BY DEFAULT"),
+
+    Option("bluefs_replay_recovery_disable_compact", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description(""),
+
     Option("bluestore_bluefs", Option::TYPE_BOOL, Option::LEVEL_DEV)
     .set_default(true)
     .set_flag(Option::FLAG_CREATE)
@@ -4712,7 +4723,7 @@ std::vector<Option> get_global_options() {
       .set_default(0)
       .set_description("Space reserved at DB device and not allowed for 'use some extra' policy usage. Overrides 'bluestore_volume_selection_reserved_factor' setting and introduces straightforward limit."),
 
-    Option("bluestore_ioring", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    Option("bdev_ioring", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
     .set_description("Enables Linux io_uring API instead of libaio"),
 
@@ -5418,7 +5429,13 @@ std::vector<Option> get_global_options() {
 
     Option("crimson_osd_scheduler_concurrency", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
     .set_default(0)
-    .set_description("The maximum number concurrent IO operations, 0 for unlimited")
+    .set_description("The maximum number concurrent IO operations, 0 for unlimited"),
+
+    // ----------------------------
+    // blk specific options
+    Option("bdev_type", Option::TYPE_STR, Option::LEVEL_ADVANCED)
+    .set_description("Explicitly set the device type to select the driver if it's needed")
+    .set_enum_allowed({"aio", "spdk", "pmem", "hm_smr"})
 
   });
 }

@@ -59,8 +59,6 @@ Status
 Show current orchestrator mode and high-level status (whether the module able
 to talk to it)
 
-Also show any in-progress actions.
-
 Host Management
 ===============
 
@@ -478,6 +476,7 @@ Many service specifications can then be applied at once using
       host_pattern: "mgr*"
     ---
     service_type: osd
+    service_id: default_drive_group
     placement:
       host_pattern: "osd*"
     data_devices:
