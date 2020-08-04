@@ -1,54 +1,27 @@
 @use 'sass:map';
-@use './src/styles/vendor/variables' as vv;
+@use './src/styles/defaults/bootstrap-defaults' as bd;
 
-$dark-secondary: darken(vv.$secondary, 4%);
+::ng-deep {
+  .login {
+    background-image: url('../../../../assets/redhat_new_background.svg');
+    background-position: center;
+    background-size: cover;
 
-::ng-deep cd-login {
-  .form-group {
-    background-color: $dark-secondary;
-    border-left: 4px solid vv.$white;
-    height: auto;
-    margin-bottom: 2rem;
+    @media (min-width: bd.$screen-xl-min) {
+      background-position-x: 30%;
+    }
 
-    &:focus-within {
-      border-left: 4px solid map.get(vv.$theme-colors, 'accent');
+    @media only screen and (min-width: bd.$screen-xl-min) {
+      .pf-c-login__footer {
+        padding-left: 26%;
+      }
+    }
+
+    .pf-c-login__container {
+      margin-right: 22%;
+      min-width: 0;
+      padding-left: 0;
+      padding-right: 0;
     }
   }
-
-  .btn-password,
-  .btn-password:focus,
-  .form-control,
-  .form-control:focus {
-    background-color: $dark-secondary;
-    border: 0;
-    box-shadow: none;
-    color: vv.$body-color-bright;
-    filter: none;
-    outline: none;
-  }
-
-  .placeholder {
-    color: vv.$gray-600;
-  }
-
-  .btn-password:focus {
-    outline-color: vv.$primary;
-  }
-}
-
-// This will override the colors applied by chrome
-@keyframes autofill {
-  to {
-    background-color: $dark-secondary;
-    color: vv.$body-color-bright;
-  }
-}
-
-input:-webkit-autofill {
-  animation-fill-mode: both;
-  animation-name: autofill;
-  border-radius: 0;
-  box-shadow: 0 0 0 1000px $dark-secondary inset;
-  -webkit-text-fill-color: vv.$body-color-bright;
-  transition-property: none;
 }
