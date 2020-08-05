@@ -46,6 +46,12 @@ export class AboutComponent implements OnInit, OnDestroy {
       this.versionHash = version[1];
       this.versionName = version.slice(2, version.length).join(' ');
     });
+    const element = document.getElementsByTagName('div');
+    for (let i = 0; i < element.length; ++i) {
+      if (element[i].className === 'modal-content') {
+        element[i].classList.add('about_modal_branding');
+      }
+    }
   }
 
   ngOnDestroy(): void {

@@ -1,12 +1,21 @@
 @use './src/styles/vendor/variables' as vv;
 
-.about-container {
-  background-color: vv.$secondary;
-  background-image: url('../../../../assets/ceph_background.gif');
-  background-position: right bottom;
+.pf-c-about-modal-box {
+  font-size: 1.2rem;
+  height: 80vh;
+  left: -10vw;
+  max-width: inherit;
+  overflow-y: hidden;
+  width: 65vw;
+}
+
+.pf-c-about-modal-box__hero {
+  background-attachment: inherit;
+  background-color: vv.$about-modal;
+  background-image: url('/assets/redhat_new_background.svg');
+  background-position: 70% -12px;
   background-repeat: no-repeat;
-  color: vv.$white;
-  text-shadow: 1px 1px vv.$secondary;
+  background-size: cover;
 }
 
 .product-versions {
@@ -21,11 +30,6 @@
   border-bottom: 0;
 }
 
-.modal-header .close {
-  color: vv.$white;
-  font-size: 2em;
-}
-
 .modal-body {
   padding-left: 80px;
   padding-right: 80px;
@@ -36,8 +40,6 @@
   width: 25%;
 }
 
-.modal-footer {
-  border-top: 0;
-  display: block;
-  padding: 15px 80px 35px;
+.modal-content {
+  border: unset !important;
 }
