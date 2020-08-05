@@ -6,8 +6,16 @@
 
 ::ng-deep cd-navigation .cd-navbar-top {
   .cd-navbar-brand {
-    background: vv.$secondary;
-    border-top: 4px solid vv.$primary;
+    background: vv.$navbar-bg;
+    height: 55px;
+    padding-left: 1.6rem;
+
+    .py-0 {
+      color: vv.$white;
+      font-size: 0.7em;
+      padding-left: 0;
+      padding-right: 0;
+    }
 
     &.isPwdDisplayed {
       top: vv.$top-notification-height;
@@ -21,7 +29,7 @@
     }
 
     .navbar-brand > img {
-      height: 25px;
+      height: 34px;
     }
 
     .navbar-toggler {
@@ -76,7 +84,7 @@
   .navbar-nav > li > .cd-navbar > a:hover,
   .navbar-nav > li > a:hover,
   .navbar-nav > li:hover {
-    background-color: vv.$primary;
+    background-color: vv.$navbar-hover;
   }
 
   .navbar-nav > .open > .cd-navbar > [ngbDropdown] > a,
@@ -138,14 +146,14 @@
     SIDEBAR STYLE
 --------------------------------------------------- */
 
-$sidebar-width: 200px;
+$sidebar-width: 225px;
 
 .cd-navbar-primary .active > a,
 .cd-navbar-primary > .active > a:focus,
 .cd-navbar-primary > .active > a:hover {
-  background-color: vv.$primary !important;
-  border: 0 !important;
-  color: vv.$gray-200 !important;
+  background-color: vv.$navbar-hover !important;
+  border-left: 4px solid #06c;
+  color: vv.$white-gray !important;
 }
 
 .wrapper {
@@ -153,11 +161,12 @@ $sidebar-width: 200px;
   width: 100%;
 
   #sidebar {
-    background: vv.$secondary;
+    background: vv.$sidebar-bg;
     bottom: 0;
     color: vv.$white;
     left: 0;
     overflow-y: auto;
+    padding-left: 10px;
     position: fixed;
     top: vv.$navbar-height;
     transition: all 0.3s;
@@ -184,12 +193,12 @@ $sidebar-width: 200px;
         display: block;
         font-size: 1.1em;
         padding: 10px;
-        padding-left: 27px;
+        padding-left: 20px;
 
         text-decoration: none;
 
         &:hover {
-          background: vv.$primary;
+          background: vv.$navbar-hover;
           color: vv.$white;
         }
 
@@ -212,7 +221,7 @@ $sidebar-width: 200px;
       border: 0;
       content: '\f054';
       font-family: 'ForkAwesome';
-      font-size: 1rem;
+      font-size: 0.8rem;
       position: absolute;
       right: 20px;
       transition: transform 0.3s ease-in-out;
@@ -224,7 +233,6 @@ $sidebar-width: 200px;
   }
 
   ul ul a {
-    background: lighten(vv.$secondary, 10);
     font-size: 0.9em !important;
     padding-left: 40px !important;
   }

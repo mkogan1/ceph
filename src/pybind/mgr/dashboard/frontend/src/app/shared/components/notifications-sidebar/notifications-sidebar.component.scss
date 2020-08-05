@@ -40,11 +40,32 @@ ngx-simplebar {
 }
 
 .btn-block {
-  width: 98%;
+  border: 1px solid;
+  color: vv.$primary;
 }
 
-.btn-link .fa-trash-o {
-  color: vv.$black;
+.btn-link {
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+  width: 35px;
+}
+
+.pf-c-notification-drawer__list-item {
+  margin: 1px;
+}
+
+.pf-c-notification-drawer__header {
+  justify-content: space-between;
+}
+
+.pf-c-notification-drawer__list-item-description {
+  width: 17.5em;
+}
+
+.pf-c-notification-drawer__body {
+  overflow: hidden;
+  word-break: break-word;
 }
 
 table {

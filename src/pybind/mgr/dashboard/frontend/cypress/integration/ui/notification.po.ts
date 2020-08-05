@@ -10,11 +10,11 @@ export class NotificationSidebarPageHelper extends PageHelper {
   }
 
   getTasks() {
-    return this.getSidebar().find('.card.tc_task');
+    return this.getSidebar().find('.pf-c-notification-drawer__list.tc_task');
   }
 
   getNotifications() {
-    return this.getSidebar().find('.card.tc_notification');
+    return this.getSidebar().find('.pf-c-notification-drawer__list.tc_notification');
   }
 
   getClearNotficationsBtn() {

@@ -10,7 +10,7 @@ export enum Icons {
   copy = 'fa fa-copy', // Copy
   clipboard = 'fa fa-clipboard', // Clipboard
   flatten = 'fa fa-chain-broken', // Flatten, Link broken, Mark Lost
-  trash = 'fa fa-trash-o', // Move to trash
+  trash = 'fa fa-trash', // Move to trash
   lock = 'fa fa-lock', // Protect
   unlock = 'fa fa-unlock', // Unprotect
   clone = 'fa fa-clone', // clone
@@ -19,7 +19,7 @@ export enum Icons {
   start = 'fa fa-play', // Enable
   stop = 'fa fa-stop', // Disable
   analyse = 'fa fa-stethoscope', // Scrub
-  deepCheck = 'fa fa-cog', // Deep Scrub, Setting, Configuration
+  deepCheck = 'pf-icon pf-icon-maintenance', // Deep Scrub, Setting, Configuration
   reweight = 'fa fa-balance-scale', // Reweight
   left = 'fa fa-arrow-left', // Mark out
   right = 'fa fa-arrow-right', // Mark in
@@ -32,7 +32,7 @@ export enum Icons {
   warning = 'fa fa-exclamation-triangle', // Notification warning
   info = 'fa fa-info', // Notification information
   infoCircle = 'fa fa-info-circle', // Info on landing page
-  questionCircle = 'fa fa-question-circle-o',
+  questionCircle = 'fa fa-question-circle',
   check = 'fa fa-check', // Notification check
   show = 'fa fa-eye', // Show
   paragraph = 'fa fa-paragraph', // Silence Matcher - Attribute name
@@ -48,10 +48,10 @@ export enum Icons {
   server = 'fa fa-server', // Server, Portal
   filter = 'fa fa-filter', // Filter
   lineChart = 'fa fa-line-chart', // Line chart
-  signOut = 'fa fa-sign-out', // Sign Out
+  signOut = 'fa fa-key', // Sign Out
   health = 'fa fa-heartbeat', // Health
   circle = 'fa fa-circle', // Circle
-  bell = 'fa fa-bell', // Notification
+  bell = 'pf-icon pf-icon-chat', // Notification
   tag = 'fa fa-tag', // Tag, Badge
   leftArrow = 'fa fa-angle-left', // Left facing angle
   rightArrow = 'fa fa-angle-right', // Right facing angle

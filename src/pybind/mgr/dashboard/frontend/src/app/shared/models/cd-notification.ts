@@ -33,6 +33,16 @@ export class CdNotification extends CdNotificationConfig {
   private textClasses = ['text-danger', 'text-info', 'text-success'];
   private iconClasses = [Icons.warning, Icons.info, Icons.check];
   private borderClasses = ['border-danger', 'border-info', 'border-success'];
+  overrideTextClass: string;
+  overrideIconClass: string;
+
+  
+  private overrtideTextClasses = ['pf-m-danger', 'pf-m-info', 'pf-m-success'];
+  private overrideIconClasses = [
+    'fas fa-exclamation-circle fa-md',
+    'fas fa-info-circle fa-md',
+    'fas fa-check-circle fa-md'
+  ];
 
   constructor(private config: CdNotificationConfig = new CdNotificationConfig()) {
     super(config.type, config.title, config.message, config.options, config.application);
@@ -44,5 +54,7 @@ export class CdNotification extends CdNotificationConfig {
     this.textClass = this.textClasses[this.type];
     this.borderClass = this.borderClasses[this.type];
     this.isFinishedTask = config.isFinishedTask;
+    this.overrideIconClass = this.overrideIconClasses[this.type];
+    this.overrideTextClass = this.overrtideTextClasses[this.type];
   }
 }

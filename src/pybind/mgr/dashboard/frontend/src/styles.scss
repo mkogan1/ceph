@@ -151,7 +151,15 @@ a {
   chartHealthColorYellow: #f6d173;
   chartHealthTootlipBgColor: #000;
 
-  healthColorError: #f00;
-  healthColorHealthy: #0b0;
-  healthColorWarning: #ffa500;
+  healthColorError: #c9190b;
+  healthColorHealthy: #3e8635;
+  healthColorWarning: #f0ab00;
 }
+/* stylelint-disable */
+$pf-global--font-path: '~@patternfly/patternfly/assets/fonts';
+$fa-font-path: '~@patternfly/patternfly/assets/fonts/webfonts';
+$pf-global--fonticon-path: '~@patternfly/patternfly/assets/pficon';
+$pf-global--image-path: '~@patternfly/patternfly/assets/images';
+/* stylelint-enable */
+
+@import '~@patternfly/patternfly/patternfly';

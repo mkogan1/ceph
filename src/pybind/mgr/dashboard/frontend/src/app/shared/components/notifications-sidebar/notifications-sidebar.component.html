@@ -1,42 +1,26 @@
 <ng-template #tasksTpl>
   <!-- Executing -->
   <div *ngFor="let executingTask of executingTasks; trackBy:trackByFn">
-    <div class="card tc_task border-0">
-      <div class="row no-gutters">
-        <div class="col-md-2 text-center">
-          <span [ngClass]="[icons.stack, icons.large2x]"
-                class="text-info">
-            <i [ngClass]="[icons.stack2x, icons.circle]"></i>
-            <i [ngClass]="[icons.stack1x, icons.spinner, icons.spin, icons.inverse]"></i>
-          </span>
+    <ul class="pf-c-notification-drawer__list tc_task border-0">
+      <li class="pf-c-notification-drawer__list-item pf-m-hoverable no-gutters">
+        <div class="pf-c-notification-drawer__list-item-header-title">
+          <h6 class="pf-c-notification-drawer__list-item-header-title">{{ executingTask.description }}</h6>
         </div>
-        <div class="col-md-9">
-          <div class="card-body p-1">
-            <h6 class="card-title bold">{{ executingTask.description }}</h6>
-
-            <div class="mb-1">
-              <ngb-progressbar type="info"
-                               [value]="executingTask?.progress"
-                               [striped]="true"
-                               [animated]="true"></ngb-progressbar>
-            </div>
-
-            <p class="card-text text-muted">
-              <small class="date float-left">
-                {{ executingTask.begin_time | cdDate }}
-              </small>
-
-              <span class="float-right">
-                {{ executingTask.progress || 0 }} %
-              </span>
-            </p>
-
-          </div>
+        <div class="pf-c-notification-drawer__list-item-description">
+          <ngb-progressbar type="info"
+                           [value]="executingTask?.progress"
+                           [animated]="true"></ngb-progressbar>
+          <p class="card-text text-muted">
+            <small class="date float-left">
+              {{ executingTask.begin_time | cdDate }}
+            </small>
+            <span class="float-right">
+              {{ executingTask.progress || 0 }} %
+            </span>
+          </p>
         </div>
-      </div>
-    </div>
-
-    <hr>
+      </li>
+    </ul>
   </div>
 </ng-template>
 
@@ -50,50 +34,38 @@
       &nbsp;
       <ng-container i18n>Clear notifications</ng-container>
     </button>
-
-    <hr>
-
-    <div *ngFor="let notification of notifications; let i = index"
-         [ngClass]="notification.borderClass">
-      <div class="card tc_notification border-0">
-        <div class="row no-gutters">
-          <div class="col-md-2 text-center">
-            <span [ngClass]="[icons.stack, icons.large2x,  notification.textClass]">
-              <i [ngClass]="[icons.circle, icons.stack2x]"></i>
-              <i [ngClass]="[icons.stack1x, icons.inverse, notification.iconClass]"></i>
+    <div *ngFor="let notification of notifications; let i = index">
+      <ul class="pf-c-notification-drawer__list tc_notification">
+        <li class="pf-c-notification-drawer__list-item pf-m-hoverable"
+            [ngClass]="notification.overrideTextClass"
+            tabindex="0">
+          <div class="pf-c-notification-drawer__list-item-header">
+            <span class="pf-c-notification-drawer__list-item-header-icon">
+              <i [ngClass]="notification.overrideIconClass"></i>
             </span>
+            <h6 class="pf-c-notification-drawer__list-item-header-title">{{ notification.title }}</h6>
           </div>
-          <div class="col-md-10">
-            <div class="card-body p-1">
-              <button class="btn btn-link float-right mt-0 pt-0"
-                      title="Remove notification"
-                      i18n-title
-                      (click)="remove(i); $event.stopPropagation()">
-                <i [ngClass]="[icons.trash]"></i>
-              </button>
-
-              <h6 class="card-title bold">{{ notification.title }}</h6>
-              <p class="card-text"
-                 [innerHtml]="notification.message"></p>
-              <p class="card-text text-muted">
-                <ng-container *ngIf="notification.duration">
-                  <small>
-                    <ng-container i18n>Duration:</ng-container> {{ notification.duration | duration }}
-                  </small>
-                  <br>
-                </ng-container>
-                <small class="date"
-                       [title]="notification.timestamp | cdDate">{{ notification.timestamp | relativeDate }}</small>
-                <i class="float-right custom-icon"
-                   [ngClass]="[notification.applicationClass]"
-                   [title]="notification.application"></i>
-              </p>
-            </div>
+          <div class="pf-c-notification-drawer__list-item-description"
+               [innerHtml]="notification.message">
           </div>
-        </div>
-      </div>
-
-      <hr>
+          <p class="card-text text-muted">
+            <button class="btn btn-link"
+                    title="Remove notification"
+                    (click)="remove(i); $event.stopPropagation()">
+              <i [ngClass]="[icons.trash]"></i>
+            </button>
+          </p>
+          <div class="pf-c-notification-drawer__list-item-timestamp"
+               [title]="notification.timestamp | cdDate">{{ notification.timestamp | relativeDate }}
+            <ng-container *ngIf="notification.duration">
+              <small>
+                <ng-container i18n>Duration:</ng-container> {{ notification.duration | duration }}
+              </small>
+              <br>
+            </ng-container>
+          </div>
+        </li>
+      </ul>
     </div>
   </ng-container>
 </ng-template>
@@ -105,12 +77,12 @@
   </div>
 </ng-template>
 
-<div class="card"
+<div class="pf-c-notification-drawer"
      (clickOutside)="closeSidebar()"
      [clickOutsideEnabled]="isSidebarOpened">
-  <div class="card-header">
-    <ng-container i18n>Tasks and Notifications</ng-container>
-
+  <div class="pf-c-notification-drawer__header">
+    <h1 class="pf-c-notification-drawer__header-title"
+        i18n>Tasks and Notifications</h1>
     <button class="close float-right"
             tabindex="-1"
             type="button"
@@ -122,7 +94,7 @@
   </div>
 
   <ngx-simplebar [options]="simplebar">
-    <div class="card-body">
+    <div class="pf-c-notification-drawer__body">
       <ng-container *ngTemplateOutlet="tasksTpl"></ng-container>
       <ng-container *ngTemplateOutlet="notificationsTpl"></ng-container>
       <ng-container *ngTemplateOutlet="emptyTpl"></ng-container>
