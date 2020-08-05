@@ -152,6 +152,24 @@ Options
 :Type: String
 :Default: ``EMPTY``
 
+``enable_unsafe_request_smuggling``
+
+:Description: If set beast will ignore bogus content_length fields
+              when transfer_encoding: chunked is set.  This was correct
+              behavior in RFC 2616 4.4, but is deprecated as of
+              RFC 7230 3.3.3.  You should never set this if you depend
+              on any form of authorization checking for requests done
+              in a proxy server in front of your gateway.  You may
+              want to set this if you have old incorrect s3 clients
+              that send both options, but really, you should just fix
+              those clients.
+
+              ``1`` Accept the insecurity of ignoring bad content_length fields.
+
+              ``0`` Keep the default: Don't allow bogus content_length fields.
+
+:Type: Integer (0 or 1)
+:Default: 0
 
 The following is an example of the ``/etc/ceph/ceph.conf`` file with some of these options set: ::
  
