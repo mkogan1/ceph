@@ -1,0 +1,6 @@
+#!/bin/sh
+eval $@
+for X in ${ps}/src/patches/[0-9]*-boost*.patch; do
+echo "    applying $X"
+patch -p2 < $X
+done

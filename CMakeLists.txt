@@ -649,6 +649,8 @@ set(HAVE_SEASTAR ${WITH_SEASTAR})
 
 # Boost
 option(WITH_SYSTEM_BOOST "require and build with system Boost" OFF)
+option(WITH_CUSTOM_BOOST_BEAST_IGNORE_BAD_CONTENT_LENGTH
+	"custom beast has .ignore_bad_content_length()" OFF)
 
 # Boost::thread depends on Boost::atomic, so list it explicitly.
 set(BOOST_COMPONENTS
@@ -686,6 +688,9 @@ else()
   include(BuildBoost)
   build_boost(1.67
     COMPONENTS ${BOOST_COMPONENTS} ${BOOST_HEADER_COMPONENTS})
+endif()
+if(Boost_WAS_PATCHED OR WITH_CUSTOM_BOOST_BEAST_IGNORE_BAD_CONTENT_LENGTH)
+  set(HAVE_BOOST_IGNORE_BAD_CONTENT_LENGTH ON)
 endif()
 include_directories(BEFORE SYSTEM ${Boost_INCLUDE_DIRS})
 set(Boost_USE_MULTITHREADED ON)
