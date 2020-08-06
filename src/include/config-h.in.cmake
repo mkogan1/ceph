@@ -340,6 +340,9 @@
 /* Defined if boost::context is available */
 #cmakedefine HAVE_BOOST_CONTEXT
 
+/* Defined if beast parser has ignore_bad_content_length() */
+#cmakedefine HAVE_BOOST_IGNORE_BAD_CONTENT_LENGTH
+
 /* Defined if libradosstriper is enabled: */
 #cmakedefine WITH_LIBRADOSSTRIPER
 
