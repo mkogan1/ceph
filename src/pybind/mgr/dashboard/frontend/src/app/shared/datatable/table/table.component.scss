@@ -127,7 +127,14 @@
 
     .sort-asc,
     .sort-desc {
-      color: vv.$primary;
+      .datatable-header-cell-label {
+        color: vv.$table-sort;
+
+        &:hover,
+        &:focus {
+          color: vv.$table-sort-hover;
+        }
+      }
     }
 
     .datatable-header-cell {

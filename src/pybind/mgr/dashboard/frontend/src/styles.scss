@@ -163,3 +163,39 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
 /* stylelint-enable */
 
 @import '~@patternfly/patternfly/patternfly';
+
+.toast-success {
+  background-color: $success;
+}
+
+.toast-error {
+  background-color: $danger;
+}
+
+.toast-info {
+  background-color: $success;
+}
+
+.toast-warning {
+  background-color: $warning;
+}
+
+.text-primary {
+  color: $primary;
+}
+
+.text-success {
+  color: $success;
+}
+
+.text-info {
+  color: $info;
+}
+
+.text-warning {
+  color: $warning;
+}
+
+.text-danger {
+  color: $danger;
+}

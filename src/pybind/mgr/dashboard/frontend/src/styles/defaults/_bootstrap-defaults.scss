@@ -24,18 +24,21 @@ $green: #0b0 !default;
 $teal: #20c997 !default;
 $cyan: #17a2b8 !default;
 
-$primary: #06c;
-$secondary: #004080;
-$success: $green;
+$primary: variables.$pf-color-blue-400;
+$secondary: variables.$pf-color-blue-500;
+$success: variables.$pf-color-green-500;
 $info: $primary;
-$warning: $yellow;
-$danger: $red;
+$warning: variables.$pf-color-gold-500;
+$danger: variables.$pf-color-red-100;
 $light: $gray-100;
 $dark: #777;
 
-$navbar-bg: #151515 !default;
-$sidebar-bg: #212427 !default;
-$navbar-hover: #3c3f42 !default;
+$navbar-bg: variables.$pf-color-black-900 !default;
+$sidebar-bg: variables.$pf-color-black-850 !default;
+$navbar-hover: variables.$pf-color-black-800 !default;
+
+$table-sort: #0088ce !default;
+$table-sort-hover: #004080 !default;
 
 // Extra theme colors.
 $accent: $red !default;
