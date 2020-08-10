@@ -22,8 +22,12 @@
            class="tc_filter_name">
         <button ngbDropdownToggle
                 class="btn btn-light">
-          <i [ngClass]="[icons.large, icons.filter]"></i>
+          <i [ngClass]="[icons.filter]"></i>
           {{ selectedFilter.column.name }}
+          <span class="pf-c-dropdown__toggle-icon">
+            <i class="fas fa-caret-down"
+               aria-hidden="true"></i>
+          </span>
         </button>
         <div ngbDropdownMenu>
           <ng-container *ngFor="let filter of columnFilters">
@@ -40,6 +44,10 @@
                 class="btn btn-light"
                 [class.disabled]="selectedFilter.options.length === 0">
           {{ selectedFilter.value ? selectedFilter.value.formatted: 'Any' }}
+          <span class="pf-c-dropdown__toggle-icon">
+            <i class="fas fa-caret-down"
+               aria-hidden="true"></i>
+          </span>
         </button>
         <div ngbDropdownMenu>
           <ng-container *ngFor="let option of selectedFilter.options">
@@ -98,7 +106,11 @@
            class="tc_menuitem">
         <button ngbDropdownToggle
                 class="btn btn-light tc_columnBtn">
-          <i [ngClass]="[icons.large, icons.table]"></i>
+          <i [ngClass]="[icons.table]"></i>
+          <span class="pf-c-dropdown__toggle-icon">
+            <i class="fas fa-caret-down"
+               aria-hidden="true"></i>
+          </span>
         </button>
         <div ngbDropdownMenu>
           <ng-container *ngFor="let column of columns">
@@ -129,7 +141,7 @@
               [class]="'btn btn-' + status.type"
               [ngbTooltip]="status.msg"
               (click)="refreshBtn()">
-        <i [ngClass]="[icons.large, icons.refresh]"
+        <i [ngClass]="[icons.refresh]"
            [class.fa-spin]="updating || loadingIndicator"></i>
       </button>
     </div>

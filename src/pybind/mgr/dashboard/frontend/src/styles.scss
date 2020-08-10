@@ -199,3 +199,76 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
 .text-danger {
   color: $danger;
 }
+
+.table {
+  @extend .pf-c-table, .pf-m-grid-md, .pf-m-compact;
+}
+
+.btn {
+  @extend .pf-c-button;
+}
+
+.btn-accent,
+.btn-accent.dropdown-toggle {
+  @extend .pf-c-button, .pf-m-primary;
+
+  &:hover,
+  &:focus,
+  &.focus,
+  &:not(:disabled):not(.disabled):active,
+  &:not(:disabled):not(.disabled).active {
+    background-color: $secondary;
+  }
+
+  &.disabled {
+    background-color: $pf-global--disabled-color--200;
+    color: $pf-global--disabled-color--100;
+  }
+}
+
+.btn-accent:not(:disabled):not(.disabled):active,
+.btn-accent:not(:disabled):not(.disabled).active,
+.show > .btn-accent.dropdown-toggle {
+  background-color: $secondary;
+}
+
+.badge {
+  @extend .pf-c-label, .pf-m-compact;
+}
+
+.badge-success {
+  background-color: $success;
+}
+
+.badge-danger {
+  background-color: $danger;
+}
+
+.badge-warning {
+  background-color: $warning;
+}
+
+.badge-info {
+  background-color: $info;
+}
+
+.ngbDropdown {
+  @extend .pf-c-dropdown;
+}
+
+.btn-light {
+  @extend .pf-c-button, .pf-m-control;
+}
+
+.input-group {
+  @extend .pf-c-input-group;
+  background-color: transparent;
+}
+
+.form-control {
+  @extend .pf-c-form-control;
+}
+
+.input-group-text {
+  @extend .pf-c-input-group__text;
+}

@@ -3,7 +3,7 @@ export enum Icons {
   add = 'fa fa-plus', // Create, Add
   addCircle = 'fa fa-plus-circle', // Plus with Circle
   minusCircle = 'fa fa-minus-circle', // Minus with Circle
-  edit = 'fa fa-pencil', // Edit, Edit Mode, Rename
+  edit = 'fa fa-pencil-alt', // Edit, Edit Mode, Rename
   destroy = 'fa fa-times', // Destroy, Remove, Delete
   destroyCircle = 'fa fa-times-circle', // Destroy, Remove, Delete
   exchange = 'fa fa-exchange', // Edit-Peer

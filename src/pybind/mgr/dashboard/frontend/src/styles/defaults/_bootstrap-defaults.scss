@@ -37,8 +37,10 @@ $navbar-bg: variables.$pf-color-black-900 !default;
 $sidebar-bg: variables.$pf-color-black-850 !default;
 $navbar-hover: variables.$pf-color-black-800 !default;
 
-$table-sort: #0088ce !default;
-$table-sort-hover: #004080 !default;
+$table-sort: variables.$pf-color-blue-400 !default;
+$table-sort-hover: variables.$pf-color-blue-500 !default;
+$table-active-row: variables.$pf-color-blue-100 !default;
+$table-active-row-hover: variables.$pf-color-light-blue-100 !default;
 
 // Extra theme colors.
 $accent: $red !default;

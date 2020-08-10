@@ -8,6 +8,13 @@
   line-height: 1;
 }
 
+.btn-light {
+  height: 1.875em;
+  line-height: 1;
+  padding: 0.5rem 1rem;
+  padding-top: 4px;
+}
+
 .dataTables_wrapper {
   margin-bottom: 25px;
 
@@ -124,6 +131,7 @@
     background-image: linear-gradient(to bottom, vv.$gray-100 0, vv.$gray-200 100%);
     background-repeat: repeat-x;
     filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#fffafafa', endColorstr='#ffededed', GradientType=0);
+    font-size: 0.9em;
 
     .sort-asc,
     .sort-desc {
@@ -159,6 +167,7 @@
       &.sortable {
         .datatable-header-cell-label::after {
           content: ' \f0dc';
+          padding-right: 5px;
         }
 
         &.sort-active {
@@ -259,6 +268,38 @@
       min-height: 2rem;
       padding-left: 0.3rem;
       padding-top: 0.3rem;
+    }
+
+    .datatable-pager .pager {
+      margin-right: 5px !important;
+
+      li:not(:first-child) {
+        /** Add space between buttons */
+        margin-left: 4px;
+      }
+
+      li > a,
+      li > span {
+        border-radius: 2px;
+        padding: 7px 0;
+      }
+
+      .pages {
+        a,
+        span {
+          display: inline-block;
+          margin-bottom: 5px;
+          padding: 7px;
+        }
+
+        a:hover {
+          background-color: bd.$table-active-row-hover;
+        }
+
+        &.active > a {
+          background-color: bd.$table-active-row;
+        }
+      }
     }
   }
 
