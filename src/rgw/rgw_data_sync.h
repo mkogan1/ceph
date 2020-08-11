@@ -676,6 +676,13 @@ public:
   void wakeup();
 };
 
+class BucketIndexShardsManager;
+
+int rgw_read_remote_bilog_info(RGWRESTConn* conn,
+                               const rgw_bucket& bucket,
+                               BucketIndexShardsManager& markers,
+                               optional_yield y);
+
 class RGWBucketPipeSyncStatusManager : public DoutPrefixProvider {
   RGWRados *store;
 
