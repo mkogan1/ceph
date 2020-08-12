@@ -272,3 +272,28 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
 .input-group-text {
   @extend .pf-c-input-group__text;
 }
+
+form .card .card-body {
+  padding-right: 2rem;
+
+  .row {
+    align-items: center;
+
+    .cd-col-form-label {
+      align-self: baseline;
+    }
+  }
+}
+
+cd-select-badges > cd-select {
+  align-items: center;
+  display: inline-flex;
+}
+
+.form-text {
+  margin-top: unset;
+}
+
+.custom-checkbox {
+  padding-top: unset;
+}
