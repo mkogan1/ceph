@@ -57,7 +57,11 @@ void PurgeItem::encode(bufferlist &bl) const
 void PurgeItem::decode(bufferlist::const_iterator &p)
 {
   DECODE_START(2, p);
-  decode((uint8_t&)action, p);
+  {
+    uint8_t raw_action;
+    decode(raw_action, p);
+    action = (Action)raw_action;
+  }
   decode(ino, p);
   decode(size, p);
   decode(layout, p);
