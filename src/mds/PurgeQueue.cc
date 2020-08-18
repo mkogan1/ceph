@@ -65,6 +65,9 @@ void PurgeItem::decode(bufferlist::const_iterator &p)
       decode(stamp, p);
       decode(pad_size, p);
       p.advance(pad_size);
+      uint8_t raw_action;
+      decode(raw_action, p);
+      action = (Action)raw_action;
       decode(ino, p);
       decode(size, p);
       decode(layout, p);
