@@ -458,7 +458,7 @@ public:
     return 0;
   }
   int trim(int index, std::string_view marker) override {
-    auto r = fifos[index]->trim(marker, null_yield);
+    auto r = fifos[index]->trim(marker, false, null_yield);
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
 		 << ": unable to trim FIFO: " << get_oid(index)
@@ -492,7 +492,7 @@ public:
       pc->cond.Signal();
       pc->put_unlock();
     } else {
-      r = fifos[index]->trim(marker, c);
+      r = fifos[index]->trim(marker, false, c);
       if (r < 0) {
 	lderr(cct) << __PRETTY_FUNCTION__
 		   << ": unable to trim FIFO: " << get_oid(index)
