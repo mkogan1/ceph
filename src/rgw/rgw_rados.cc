@@ -2556,6 +2556,11 @@ int RGWRados::Bucket::List::list_objects_ordered(
           string prefix_key =
 	    obj.name.substr(0, delim_pos + params.delim.length());
 
+	  // setting skip_after_delim allows the next call to
+	  // cls_bucket_list_ordered to skip over unlisted entries
+	  skip_after_delim = obj.name.substr(0, delim_pos); // excludes the delimiter
+	  skip_after_delim += after_delim_s;
+
           if (common_prefixes &&
               common_prefixes->find(prefix_key) == common_prefixes->end()) {
             if (count >= max) {
