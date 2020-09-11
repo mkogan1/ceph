@@ -2769,7 +2769,7 @@ int check_reshard_bucket_params(rgw::sal::RGWRadosStore *store,
     return -EBUSY;
   }
 
-  int num_source_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+  int num_source_shards = rgw::current_num_shards(bucket_info.layout);
 
   if (num_shards <= num_source_shards && !yes_i_really_mean_it) {
     cerr << "num shards is less or equal to current shards count" << std::endl
@@ -6656,7 +6656,7 @@ next:
     }
 
     const auto& index = bucket_info.layout.current_index;
-    int max_shards = index.layout.normal.num_shards;
+    const int max_shards = rgw::num_shards(index);
 
     formatter->open_array_section("entries");
 
@@ -6724,8 +6724,12 @@ next:
     }
 
     const auto& index = bucket_info.layout.current_index;
-    int max_shards = index.layout.normal.num_shards;
+    if (index.layout.type == rgw::BucketIndexType::Indexless) {
+      cerr << "ERROR: indexless bucket has no index to purge" << std::endl;
+      return EINVAL;
+    }
 
+    const int max_shards = rgw::num_shards(index);
     for (int i = 0; i < max_shards; i++) {
       RGWRados::BucketShard bs(store->getRados());
       int shard_id = (bucket_info.layout.current_index.layout.normal.num_shards > 0  ? i : -1);
@@ -7028,7 +7032,7 @@ next:
       return ret;
     }
 
-    int num_source_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+    int num_source_shards = rgw::current_num_shards(bucket_info.layout);
 
     RGWReshard reshard(store, dpp());
     cls_rgw_reshard_entry entry;
