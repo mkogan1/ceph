@@ -2062,7 +2062,7 @@ int RGWBucketAdminOp::set_quota(RGWRados *store, RGWBucketAdminOpState& op_state
 static int purge_bucket_instance(RGWRados *store, const RGWBucketInfo& bucket_info)
 {
   const auto& index = bucket_info.layout.current_index;
-  int max_shards = index.layout.normal.num_shards;
+  const int max_shards = num_shards(index);
   for (int i = 0; i < max_shards; i++) {
     RGWRados::BucketShard bs(store);
     int ret = bs.init(bucket_info.bucket, i, index, nullptr);
