@@ -2630,7 +2630,7 @@ int check_reshard_bucket_params(RGWRados *store,
     return -EBUSY;
   }
 
-  int num_source_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+  int num_source_shards = rgw::current_num_shards(bucket_info.layout);
 
   if (num_shards <= num_source_shards && !yes_i_really_mean_it) {
     cerr << "num shards is less or equal to current shards count" << std::endl
@@ -6060,7 +6060,7 @@ next:
       max_entries = 1000;
     }
 
-    int max_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+    int max_shards = rgw::current_num_shards(bucket_info.layout);
 
     formatter->open_array_section("entries");
 
@@ -6124,7 +6124,7 @@ next:
       return EINVAL;
     }
 
-    int max_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+    int max_shards = rgw::current_num_shards(bucket_info.layout);
 
     for (int i = 0; i < max_shards; i++) {
       RGWRados::BucketShard bs(store);
@@ -6420,7 +6420,7 @@ next:
       return ret;
     }
 
-    int num_source_shards = (bucket_info.layout.current_index.layout.normal.num_shards > 0 ? bucket_info.layout.current_index.layout.normal.num_shards : 1);
+    int num_source_shards = rgw::current_num_shards(bucket_info.layout);
 
     RGWReshard reshard(store);
     cls_rgw_reshard_entry entry;
