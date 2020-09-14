@@ -5754,7 +5754,17 @@ int RGWRados::Bucket::List::list_objects_ordered(
     }
     prev_marker = cur_marker;
 
+    if (skip_after_delim > cur_marker.name) {
+      cur_marker = skip_after_delim;
+
+      ldout(cct, 20) << "setting cur_marker="
+		     << cur_marker.name
+		     << "[" << cur_marker.instance << "]"
+		     << dendl;
+    }
+
     std::map<string, rgw_bucket_dir_entry> ent_map;
+
     int r = store->cls_bucket_list_ordered(target->get_bucket_info(),
 					   shard_id,
 					   cur_marker,
