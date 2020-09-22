@@ -2,7 +2,7 @@ import argparse
 import logging
 from textwrap import dedent
 from ceph_volume import terminal, decorators
-from ceph_volume.util import disk, prompt_bool
+from ceph_volume.util import prompt_bool
 from ceph_volume.util import arg_validators
 from . import strategies
 
@@ -123,9 +123,6 @@ class Batch(object):
     _help = dedent("""
     Automatically size devices ready for OSD provisioning based on default strategies.
 
-    Detected devices:
-    {detected_devices}
-
     Usage:
 
         ceph-volume lvm batch [DEVICE...]
@@ -137,18 +134,6 @@ class Batch(object):
 
     def __init__(self, argv):
         self.argv = argv
-
-    def get_devices(self):
-        # remove devices with partitions
-        devices = [(device, details) for device, details in
-                       disk.get_devices().items() if details.get('partitions') == {}]
-        size_sort = lambda x: (x[0], x[1]['size'])
-        return device_formatter(sorted(devices, key=size_sort))
-
-    def print_help(self):
-        return self._help.format(
-            detected_devices=self.get_devices(),
-        )
 
     def report(self, args):
         strategy = self._get_strategy(args)
@@ -191,7 +176,7 @@ class Batch(object):
         parser = argparse.ArgumentParser(
             prog='ceph-volume lvm batch',
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            description=self.print_help(),
+            description=self._help,
         )
 
         parser.add_argument(
