@@ -3114,6 +3114,80 @@ options:
   enum_values:
   - fifo
   - omap
+- name: rgw_d3n_l1_local_datacache_enabled
+  type: bool
+  level: advanced
+  desc: Enable datacenter-scale dataset delivery local cache
+  default: false
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d3n_l1_datacache_persistent_path
+  type: str
+  level: advanced
+  desc: path for the directory for storing the local cache objects data
+  default: /tmp/rgw_datacache/
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d3n_l1_datacache_size
+  type: size
+  level: advanced
+  desc: datacache maximum size on disk in bytes
+  default: 1048576
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d3n_l1_evict_cache_on_start
+  type: bool
+  level: advanced
+  desc: clear the content of the persistent data cache directory on start
+  default: true
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d3n_l1_fadvise
+  type: int
+  level: advanced
+  desc: posix_fadvise() flag for access pattern of cache files
+  long_desc: for example to bypass the page-cache -
+    POSIX_FADV_DONTNEED=4
+  default: 4
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d3n_l1_eviction_policy
+  type: str
+  level: advanced
+  desc: select the d3n cache eviction policy
+  default: lru
+  services:
+  - rgw
+  enum_values:
+  - lru
+  - random
+  with_legacy: true
+- name: rgw_d3n_libaio_aio_num
+  type: int
+  level: advanced
+  desc: specifies the maximum number of simultaneous I/O requests that libaio expects to enqueue
+  default: 512
+  services:
+  - rgw
+  see_also:
+  - rgw_thread_pool_size
+  with_legacy: true
+- name: rgw_d3n_req_libaio_aio_num
+  type: int
+  level: advanced
+  desc: specifies the maximum number of simultaneous I/O requests that libaio will enqueue per GET request, by default calculated from rgw_get_obj_window_size/rgw_get_obj_max_req_size
+  default: 0
+  services:
+  - rgw
+  see_also:
+  - rgw_get_obj_window_size
+  - rgw_get_obj_max_req_size
+  with_legacy: true
 - name: rgw_luarocks_location
   type: str
   level: advanced

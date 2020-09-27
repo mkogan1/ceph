@@ -18,6 +18,7 @@
 #include "librados/librados_asio.h"
 
 #include "rgw_aio.h"
+#include "rgw_d3n_cacherequest.h"
 
 namespace rgw {
 
@@ -33,6 +34,50 @@ struct state {
     : aio(aio),
       c(librados::Rados::aio_create_completion(&r, &cb)) {}
 };
+
+struct d3n_cache_state {
+  Aio* aio;
+  D3nL1CacheRequest* c;
+
+  d3n_cache_state(Aio* aio)
+    : aio(aio) {}
+
+  int d3n_submit_libaio_read_op(D3nL1CacheRequest* cr) {
+    cr->d_sem->Get();
+    cr->libaio_op_curr.store(++(*cr->d_libaio_op_curr));
+    lsubdout(g_ceph_context, rgw, 20) << "D3nDataCache: " << __func__ << "(): Read From Cache, key=" << c->key << dendl;
+    lsubdout(g_ceph_context, rgw_datacache, 30) << "D3nDataCache: " << __func__ << "(): d_libaio_op_seq= " << *cr->d_libaio_op_curr << ", libaio_op_curr= " << cr->libaio_op_curr << dendl;
+    int ret = 0;
+    if((ret = ::aio_read(&cr->d3n_aiocb)) != 0) {
+      lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << "(): Error: ::aio_read(), errno= " << -errno << dendl;
+      return -errno;
+    }
+    return ret;
+  }
+};
+
+void d3n_libaio_read_cbt(sigval_t sigval) {
+  D3nL1CacheRequest* c = static_cast<D3nL1CacheRequest*>(sigval.sival_ptr);
+
+  const std::lock_guard ld(*c->d_lock);
+  lsubdout(g_ceph_context, rgw_datacache, 30) << "D3nDataCache: " << __func__ << "(): Read From Cache, key=" << c->key << ", thread id=0x" << std::hex << std::this_thread::get_id() << dendl;
+  int status = c->d3n_libaio_status();
+  if (status == 0) {
+    c->d3n_libaio_finish();
+    c->r->result = 0;
+    c->aio->put(*(c->r));
+  } else {
+    c->r->result = -EINVAL;
+    c->aio->put(*(c->r));
+    if (status != ECANCELED) {
+      lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << "(): Error: status!=ECANCELED, status=" << status << dendl;
+    }
+  }
+  (*c->d_libaio_op_prev)++;
+  c->d_sem->Put();
+  delete c;
+  c = nullptr;
+}
 
 void cb(librados::completion_t, void* arg) {
   static_assert(sizeof(AioResult::user_data) >= sizeof(state));
@@ -93,6 +138,28 @@ Aio::OpFunc aio_abstract(Op&& op, boost::asio::io_context& context,
     };
 }
 
+
+template <typename Op>
+Aio::OpFunc d3n_cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location, D3nGetObjData* d_d3n_data) {
+  return [op = std::move(op), obj_ofs, read_ofs, read_len, location, d_d3n_data] (Aio* aio, AioResult& r) mutable {
+    auto& ref = r.obj.get_ref();
+    auto cs = new(&r.user_data) d3n_cache_state(aio);
+    cs->c = new D3nL1CacheRequest();
+
+    lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: d3n_cache_aio_abstract(): libaio Read From Cache, oid=" << ref.obj.oid << dendl;
+    cs->c->d3n_prepare_libaio_read_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, d3n_libaio_read_cbt, aio, &r, d_d3n_data);
+    int ret = cs->d3n_submit_libaio_read_op(cs->c);
+    if(ret < 0) {
+      lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: d3n_cache_aio_abstract(): ERROR: submit_libaio_op, ret=" << ret << dendl;
+      r.result = -EINVAL;
+      cs->aio->put(r);
+      delete cs->c;
+      cs->c = nullptr;
+    }
+  };
+}
+
+
 template <typename Op>
 Aio::OpFunc aio_abstract(Op&& op, optional_yield y) {
   static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
@@ -105,6 +172,15 @@ Aio::OpFunc aio_abstract(Op&& op, optional_yield y) {
   return aio_abstract(std::forward<Op>(op));
 }
 
+template <typename Op>
+Aio::OpFunc d3n_cache_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs,
+                                   off_t read_ofs, off_t read_len, std::string& location, D3nGetObjData* d_d3n_data) {
+  static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
+  static_assert(!std::is_lvalue_reference_v<Op>);
+  static_assert(!std::is_const_v<Op>);
+  return d3n_cache_aio_abstract(std::forward<Op>(op), obj_ofs, read_ofs, read_len, location, d_d3n_data);
+}
+
 } // anonymous namespace
 
 Aio::OpFunc Aio::librados_op(librados::ObjectReadOperation&& op,
@@ -114,6 +190,11 @@ Aio::OpFunc Aio::librados_op(librados::ObjectReadOperation&& op,
 Aio::OpFunc Aio::librados_op(librados::ObjectWriteOperation&& op,
                              optional_yield y) {
   return aio_abstract(std::move(op), y);
+}
+
+Aio::OpFunc Aio::d3n_cache_op(librados::ObjectReadOperation&& op, optional_yield y,
+                              off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location, D3nGetObjData* d_d3n_data) {
+  return d3n_cache_aio_abstract(std::move(op), y, obj_ofs, read_ofs, read_len, location, d_d3n_data);
 }
 
 } // namespace rgw
