@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <memory>
 #include <type_traits>
+#include "common/Semaphore.h"
 
 #include <boost/intrusive/list.hpp>
 #include "include/rados/librados_fwd.hpp"
@@ -28,6 +29,9 @@
 #include "rgw_common.h"
 
 #include "include/function2.hpp"
+
+/*D3nDataCache*/
+struct D3nGetObjData;
 
 namespace rgw {
 
@@ -95,6 +99,8 @@ class Aio {
                             optional_yield y);
   static OpFunc librados_op(librados::ObjectWriteOperation&& op,
                             optional_yield y);
+  static OpFunc d3n_cache_op(librados::ObjectReadOperation&& op, optional_yield y,
+                             off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location);
 };
 
 } // namespace rgw
