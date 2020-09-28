@@ -679,7 +679,7 @@ void cls_rgw_bucket_instance_entry::generate_test_instances(list<cls_rgw_bucket_
 {
   ls.push_back(new cls_rgw_bucket_instance_entry);
   ls.push_back(new cls_rgw_bucket_instance_entry);
-  ls.back()->reshard_status = RESHARD_STATUS::IN_PROGRESS;
+  ls.back()->reshard_status = CLS_RGW_RESHARD_IN_PROGRESS;
 }
   
 void cls_rgw_lc_obj_head::dump(Formatter *f) const 

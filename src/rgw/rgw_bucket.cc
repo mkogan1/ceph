@@ -1855,7 +1855,7 @@ void get_stale_instances(RGWRados *store, const std::string& bucket_name,
                           << cpp_strerror(-r) << dendl;
       continue;
     }
-    if (binfo.reshard_status == cls_rgw_reshard_status::DONE)
+    if (binfo.reshard_status == CLS_RGW_RESHARD_DONE)
       stale_instances.emplace_back(std::move(binfo));
     else {
       other_instances.emplace_back(std::move(binfo));
@@ -3086,7 +3086,7 @@ public:
 
     objv_tracker = bci.info.objv_tracker;
 
-    ret = store->init_bucket_index(bci.info, bci.info.layout.current_index.layout.normal.num_shards);
+    ret = store->init_bucket_index(bci.info, bci.info.layout.current_index);
     if (ret < 0)
       return ret;
 

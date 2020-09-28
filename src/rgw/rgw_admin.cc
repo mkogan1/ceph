@@ -2623,7 +2623,7 @@ int check_reshard_bucket_params(RGWRados *store,
     return ret;
   }
 
-  if (bucket_info.reshard_status != cls_rgw_reshard_status::NOT_RESHARDING) {
+  if (bucket_info.reshard_status != CLS_RGW_RESHARD_NOT_RESHARDING) {
     // if in_progress or done then we have an old BucketInfo
     cerr << "ERROR: the bucket is currently undergoing resharding and "
       "cannot be added to the reshard list at this time" << std::endl;
@@ -2653,7 +2653,7 @@ int create_new_bucket_instance(RGWRados *store,
   new_bucket_info.layout.current_index.layout.normal.num_shards = new_num_shards;
   new_bucket_info.objv_tracker.clear();
 
-  int ret = store->init_bucket_index(new_bucket_info, new_bucket_info.layout.current_index.layout.normal.num_shards);
+  int ret = store->init_bucket_index(new_bucket_info, new_bucket_info.layout.current_index);
   if (ret < 0) {
     cerr << "ERROR: failed to init new bucket indexes: " << cpp_strerror(-ret) << std::endl;
     return -ret;

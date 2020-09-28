@@ -638,22 +638,22 @@ struct rgw_bucket_category_stats {
 };
 WRITE_CLASS_ENCODER(rgw_bucket_category_stats)
 
-enum class cls_rgw_reshard_status : uint8_t {
-  NOT_RESHARDING  = 0,
-  IN_PROGRESS     = 1,
-  DONE            = 2
+enum cls_rgw_reshard_status {
+  CLS_RGW_RESHARD_NOT_RESHARDING  = 0,
+  CLS_RGW_RESHARD_IN_PROGRESS     = 1,
+  CLS_RGW_RESHARD_DONE            = 2,
 };
 
-inline std::string to_string(const cls_rgw_reshard_status status)
+static inline std::string to_string(const enum cls_rgw_reshard_status status)
 {
   switch (status) {
-  case cls_rgw_reshard_status::NOT_RESHARDING:
+  case CLS_RGW_RESHARD_NOT_RESHARDING:
     return "not-resharding";
     break;
-  case cls_rgw_reshard_status::IN_PROGRESS:
+  case CLS_RGW_RESHARD_IN_PROGRESS:
     return "in-progress";
     break;
-  case cls_rgw_reshard_status::DONE:
+  case CLS_RGW_RESHARD_DONE:
     return "done";
     break;
   default:
@@ -663,20 +663,18 @@ inline std::string to_string(const cls_rgw_reshard_status status)
 }
 
 struct cls_rgw_bucket_instance_entry {
-  using RESHARD_STATUS = cls_rgw_reshard_status;
-  
-  cls_rgw_reshard_status reshard_status{RESHARD_STATUS::NOT_RESHARDING};
+  cls_rgw_reshard_status reshard_status{CLS_RGW_RESHARD_NOT_RESHARDING};
   std::string new_bucket_instance_id;
   int32_t num_shards{-1};
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(1, 1, bl);
+    ENCODE_START(2, 1, bl);
     encode((uint8_t)reshard_status, bl);
     ENCODE_FINISH(bl);
   }
 
   void decode(bufferlist::const_iterator& bl) {
-    DECODE_START(1, bl);
+    DECODE_START(2, bl);
     uint8_t s;
     decode(s, bl);
     reshard_status = (cls_rgw_reshard_status)s;
@@ -691,7 +689,7 @@ struct cls_rgw_bucket_instance_entry {
   static void generate_test_instances(list<cls_rgw_bucket_instance_entry*>& o);
 
   void clear() {
-    reshard_status = RESHARD_STATUS::NOT_RESHARDING;
+    reshard_status = CLS_RGW_RESHARD_NOT_RESHARDING;
   }
 
   void set_status(cls_rgw_reshard_status s) {
@@ -1172,7 +1170,7 @@ struct cls_rgw_reshard_entry
   cls_rgw_reshard_entry() {}
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(1, 1, bl);
+    ENCODE_START(2, 1, bl);
     encode(time, bl);
     encode(tenant, bl);
     encode(bucket_name, bl);
@@ -1183,7 +1181,7 @@ struct cls_rgw_reshard_entry
   }
 
   void decode(bufferlist::const_iterator& bl) {
-    DECODE_START(1, bl);
+    DECODE_START(2, bl);
     decode(time, bl);
     decode(tenant, bl);
     decode(bucket_name, bl);

@@ -99,9 +99,9 @@ class BucketReshardShard {
   }
 
 public:
-  BucketReshardShard(rgw::sal::RGWRadosStore *_store, const RGWBucketInfo& _bucket_info,
+  BucketReshardShard(RGWRados *_store, const RGWBucketInfo& _bucket_info,
                      int _num_shard, deque<librados::AioCompletion *>& _completions) :
-    store(_store), bucket_info(_bucket_info), bs(store->getRados()),
+    store(_store), bucket_info(_bucket_info), bs(store),
     aio_completions(_completions)
   {
     num_shard = (bucket_info.layout.target_index->layout.normal.num_shards > 0 ? _num_shard : -1);
@@ -301,7 +301,7 @@ int RGWBucketReshard::clear_index_shard_reshard_status(RGWRados* store,
 
   if (num_shards < std::numeric_limits<uint32_t>::max()) {
     int ret = set_resharding_status(store, bucket_info,
-				    cls_rgw_reshard_status::NOT_RESHARDING);
+				    CLS_RGW_RESHARD_NOT_RESHARDING);
     if (ret < 0) {
       ldout(store->ctx(), 0) << "RGWBucketReshard::" << __func__ <<
 	" ERROR: error clearing reshard status from index shard " <<
@@ -313,7 +313,7 @@ int RGWBucketReshard::clear_index_shard_reshard_status(RGWRados* store,
   return 0;
 }
 
-static int set_target_layout(rgw::sal::RGWRadosStore *store,
+static int set_target_layout(RGWRados *store,
 				      int new_num_shards,
 				      RGWBucketInfo& bucket_info)
 {
@@ -327,7 +327,7 @@ static int set_target_layout(rgw::sal::RGWRadosStore *store,
   bucket_info.layout.target_index->gen = bucket_info.layout.current_index.gen;
   bucket_info.layout.target_index->gen++;
 
-  int ret = store->svc()->bi->init_index(bucket_info, *(bucket_info.layout.target_index));
+  int ret = store->init_bucket_index(bucket_info, *(bucket_info.layout.target_index));
   if (ret < 0) {
       return ret;
   }
@@ -367,7 +367,7 @@ class BucketInfoReshardUpdate
 
   int set_status(rgw::BucketReshardState s) {
     bucket_info.layout.resharding = s;
-    int ret = store->getRados()->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
+    int ret = store->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
     if (ret < 0) {
       ldout(store->ctx(), 0) << "ERROR: failed to write bucket info, ret=" << ret << dendl;
       return ret;
@@ -377,8 +377,7 @@ class BucketInfoReshardUpdate
 
 public:
   BucketInfoReshardUpdate(RGWRados *_store,
-			  RGWBucketInfo& _bucket_info,
-                          map<string, bufferlist>& _bucket_attrs) :
+			  RGWBucketInfo& _bucket_info) :
     store(_store),
     bucket_info(_bucket_info)
   {}
@@ -499,7 +498,6 @@ int RGWBucketReshard::do_reshard(int num_shards,
 				 ostream *out,
 				 Formatter *formatter)
 {
-  rgw_bucket& bucket = bucket_info.bucket;
 
   int ret = 0;
 
@@ -571,7 +569,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
     marker.clear();
     while (is_truncated) {
       entries.clear();
-      int ret = store->getRados()->bi_list(bucket_info, i, string(), marker, max_entries, &entries, &is_truncated);
+      int ret = store->bi_list(bucket_info, i, string(), marker, max_entries, &entries, &is_truncated);
       if (ret < 0 && ret != -ENOENT) {
         derr << "ERROR: bi_list(): " << cpp_strerror(-ret) << dendl;
         return ret;
@@ -602,7 +600,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
 	  // place the multipart .meta object on the same shard as its head object
 	  obj.index_hash_source = mp.get_key();
 	}
-	int ret = store->getRados()->get_target_shard_id(
+	int ret = store->get_target_shard_id(
     bucket_info.layout.target_index->layout.normal,
     obj.get_hash_object(),
     &target_shard_id);
@@ -658,6 +656,10 @@ int RGWBucketReshard::do_reshard(int num_shards,
     return -EIO;
   }
 
+  //overwrite current_index for the next reshard process
+  bucket_info.layout.current_index = *bucket_info.layout.target_index;
+  bucket_info.layout.target_index = std::nullopt; // target_layout doesn't need to exist after reshard
+
   for (int attempt = 0; attempt < max_attempts; ++attempt) {
     // exponential back-off
     if (attempt > 0) {
@@ -678,15 +680,7 @@ int RGWBucketReshard::do_reshard(int num_shards,
       ": failed to update bucket info on completion ret=" << ret <<
       "; ignoring" << dendl;
     /* don't error out, reshard process succeeded */
-
-  //overwrite current_index for the next reshard process
-  bucket_info.layout.current_index = *bucket_info.layout.target_index;
-  bucket_info.layout.target_index = std::nullopt; // target_layout doesn't need to exist after reshard
-
-  ret = RGWBucketReshard::update_bucket(rgw::BucketReshardState::NONE);
-  if (ret < 0) {
-    lderr(store->ctx()) << "ERROR: failed writing bucket instance info: " << dendl;
-      return ret;
+  }
 
   return 0;
   // NB: some error clean-up is done by ~BucketInfoReshardUpdate
@@ -719,7 +713,7 @@ int RGWBucketReshard::get_status(list<cls_rgw_bucket_instance_entry> *status)
 
 int RGWBucketReshard::update_bucket(rgw::BucketReshardState s) {
     bucket_info.layout.resharding = s;
-    int ret = store->getRados()->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
+    int ret = store->put_bucket_instance_info(bucket_info, false, real_time(), nullptr);
     if (ret < 0) {
       ldout(store->ctx(), 0) << "ERROR: failed to write bucket info, ret=" << ret << dendl;
       return ret;
@@ -771,7 +765,7 @@ int RGWBucketReshard::execute(int num_shards, int max_op_entries,
   // at this point since all we're using a best effort to remove old
   // shard objects
 
-  ret = store->svc()->bi->clean_index(bucket_info, prev_index);
+  ret = store->clean_bucket_index(bucket_info, prev_index);
   if (ret < 0) {
     lderr(store->ctx()) << "Error: " << __func__ <<
     " failed to clean up old shards; " <<
@@ -793,7 +787,7 @@ error_out:
   // temporarily error codes
 
   if (bucket_info.layout.target_index != std::nullopt) {
-    int ret2 = store->svc()->bi->clean_index(bucket_info, *(bucket_info.layout.target_index));
+    int ret2 = store->clean_bucket_index(bucket_info, *(bucket_info.layout.target_index));
     if (ret2 < 0) {
       lderr(store->ctx()) << "Error: " << __func__ <<
         " failed to clean up shards from failed incomplete resharding; " <<

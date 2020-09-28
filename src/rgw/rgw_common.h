@@ -1390,7 +1390,7 @@ struct RGWBucketInfo {
 
 
   /* resharding */
-  uint8_t reshard_status;
+  uint8_t reshard_status{0};
   string new_bucket_instance_id;
 
   RGWObjectLock obj_lock;
@@ -1450,7 +1450,7 @@ struct RGWBucketInfo {
        decode(has_instance_obj, bl);
      if (struct_v >= 9)
        decode(quota, bl);
-     static constexpr uint8_t new_layout_v = 22;
+     static constexpr uint8_t new_layout_v = 21;
      if (struct_v >= 10 && struct_v < new_layout_v)
        decode(layout.current_index.layout.normal.num_shards, bl);
      if (struct_v >= 11 && struct_v < new_layout_v)

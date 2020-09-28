@@ -1200,7 +1200,7 @@ class RGWRados : public AdminSocketHook
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
       const string& obj_key, string *bucket_obj, int *shard_id);
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-                              int shard_id, string *bucket_obj);
+                              int shard_id, uint32_t num_shards, uint64_t gen, string *bucket_obj);
   int open_bucket_index(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
       map<int, string>& bucket_objs, int shard_id = -1, map<int, string> *bucket_instance_ids = NULL);
   template<typename T>
@@ -1256,11 +1256,11 @@ class RGWRados : public AdminSocketHook
   int get_system_obj_ref(const rgw_raw_obj& obj, rgw_rados_ref *ref);
   uint64_t max_bucket_id;
 
-  int get_olh_target_state(RGWObjectCtx& rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
+  int get_olh_target_state(RGWObjectCtx& rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj,
                            RGWObjState *olh_state, RGWObjState **target_state);
-  int get_obj_state_impl(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
+  int get_obj_state_impl(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
                          bool follow_olh, bool assume_noent = false);
-  int append_atomic_test(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
+  int append_atomic_test(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj,
                          librados::ObjectOperation& op, RGWObjState **state);
   int append_atomic_test(const RGWObjState* astate, librados::ObjectOperation& op);
 
@@ -1450,8 +1450,8 @@ public:
 
   int create_pool(const rgw_pool& pool);
 
-  int init_bucket_index(RGWBucketInfo& bucket_info, int num_shards);
-  int clean_bucket_index(RGWBucketInfo& bucket_info, int num_shards);
+  int init_bucket_index(RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout);
+  int clean_bucket_index(RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout);
   void create_bucket_id(string *bucket_id);
 
   bool get_obj_data_pool(const rgw_placement_rule& placement_rule, const rgw_obj& obj, rgw_pool *pool);
@@ -1485,7 +1485,7 @@ public:
     int init(const rgw_bucket& _bucket, int sid, std::optional<rgw::bucket_index_layout_generation> current_layout,
             RGWBucketInfo* out);
     int init(const RGWBucketInfo& bucket_info, const rgw_obj& obj);
-    int init(const RGWBucketInfo& bucket_info, int sid);
+    int init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& idx_layout, int sid);
   };
 
   class Object {
@@ -2041,9 +2041,9 @@ public:
                         map<string, bufferlist>& attrs,
                         map<string, bufferlist>* rmattrs);
 
-  int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
+  int get_obj_state(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
                     bool follow_olh, bool assume_noent = false);
-  int get_obj_state(RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state) {
+  int get_obj_state(RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state) {
     return get_obj_state(rctx, bucket_info, obj, state, true);
   }
 
@@ -2249,7 +2249,7 @@ public:
   void bi_put(librados::ObjectWriteOperation& op, BucketShard& bs, rgw_cls_bi_entry& entry);
   int bi_put(BucketShard& bs, rgw_cls_bi_entry& entry);
   int bi_put(rgw_bucket& bucket, rgw_obj& obj, rgw_cls_bi_entry& entry);
-  int bi_list(rgw_bucket& bucket, int shard_id, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated);
+  int bi_list(const RGWBucketInfo& bucket_info, int shard_id, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated);
   int bi_list(BucketShard& bs, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated);
   int bi_list(rgw_bucket& bucket, const string& obj_name, const string& marker, uint32_t max,
               list<rgw_cls_bi_entry> *entries, bool *is_truncated);
@@ -2321,7 +2321,7 @@ public:
   int list_gc_objs(int *index, string& marker, uint32_t max, bool expired_only, std::list<cls_rgw_gc_obj_info>& result, bool *truncated, bool& processing_queue);
   int process_gc(bool expired_only);
   bool process_expire_objects();
-  int defer_gc(void *ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, optional_yield y);
+  int defer_gc(void *ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj);
 
   int process_lc();
   int list_lc_progress(string& marker, uint32_t max_entries,
@@ -2338,7 +2338,7 @@ public:
 	             librados::IoCtx& dst_ioctx,
 		     const string& dst_oid, const string& dst_locator);
   int fix_head_obj_locator(const RGWBucketInfo& bucket_info, bool copy_obj, bool remove_bad, rgw_obj_key& key);
-  int fix_tail_obj_locator(const RGWBucketInfo& bucket_info, rgw_obj_key& key, bool fix, bool *need_fix);
+  int fix_tail_obj_locator(RGWBucketInfo& bucket_info, rgw_obj_key& key, bool fix, bool *need_fix);
 
   int cls_user_get_header(const string& user_id, cls_user_header *header);
   int cls_user_reset_stats(const string& user_id);
@@ -2406,7 +2406,7 @@ public:
    * num_shards [in] - number of bucket index object shards.
    * bucket_objs [out] - filled by this method, a list of bucket index objects.
    */
-  void get_bucket_index_objects(const string& bucket_oid_base, uint32_t num_shards,
+  void get_bucket_index_objects(const string& bucket_oid_base, uint32_t num_shards, uint64_t gen_id,
       map<int, string>& bucket_objs, int shard_id = -1);
 
   /**
@@ -2422,10 +2422,10 @@ public:
    * Return 0 on success, a failure code otherwise.
    */
   int get_bucket_index_object(const string& bucket_oid_base, const string& obj_key,
-      uint32_t num_shards, rgw::BucketHashType hash_type, string *bucket_obj, int *shard);
+      uint32_t num_shards, rgw::BucketHashType hash_type, uint64_t gen_id, string *bucket_obj, int *shard);
 
   void get_bucket_index_object(const string& bucket_oid_base, uint32_t num_shards,
-                               int shard_id, string *bucket_obj);
+                               int shard_id, uint64_t gen_id, string *bucket_obj);
 
   /**
    * Check the actual on-disk state of the object specified
