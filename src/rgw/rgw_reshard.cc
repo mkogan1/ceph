@@ -679,7 +679,8 @@ int RGWBucketReshard::do_reshard(int num_shards,
     ldout(store->ctx(), 0) << __func__ <<
       ": failed to update bucket info on completion ret=" << ret <<
       "; ignoring" << dendl;
-    /* don't error out, reshard process succeeded */
+    return ret;
+    /* error out, current layout of bucket info is not updated */
   }
 
   return 0;
