@@ -147,10 +147,11 @@ public:
     retry_attempt = req->get_retry_attempt();
     do_redirect = false;
 
-    // zero out ops payload_len and possibly out data
-    for (unsigned i = 0; i < ops.size(); i++) {
-      if (ignore_out_data)
+    // zero out data?
+    if (ignore_out_data) {
+      for (unsigned i = 0; i < ops.size(); i++) {
 	ops[i].outdata.clear();
+      }
     }
   }
 private:
