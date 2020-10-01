@@ -3565,11 +3565,13 @@ bool PG::check_in_progress_op(
   const osd_reqid_t &r,
   eversion_t *version,
   version_t *user_version,
-  int *return_code) const
+  int *return_code,
+  vector<pg_log_op_return_item_t> *op_returns
+  ) const
 {
   return (
-    projected_log.get_request(r, version, user_version, return_code) ||
-    pg_log.get_log().get_request(r, version, user_version, return_code));
+    projected_log.get_request(r, version, user_version, return_code, op_returns) ||
+    pg_log.get_log().get_request(r, version, user_version, return_code, op_returns));
 }
 
 static bool find_shard(const set<pg_shard_t> & pgs, shard_id_t shard)

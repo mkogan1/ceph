@@ -1168,9 +1168,7 @@ int PrimaryLogPG::do_command(
 
 void PrimaryLogPG::do_pg_op(OpRequestRef op)
 {
-  // NOTE: this is non-const because we modify the OSDOp.outdata in
-  // place
-  MOSDOp *m = static_cast<MOSDOp *>(op->get_nonconst_req());
+  const MOSDOp *m = static_cast<const MOSDOp *>(op->get_req());
   ceph_assert(m->get_type() == CEPH_MSG_OSD_OP);
   dout(10) << "do_pg_op " << *m << dendl;
 
@@ -1574,7 +1572,7 @@ void PrimaryLogPG::do_pg_op(OpRequestRef op)
   delete filter;
 }
 
-int PrimaryLogPG::do_scrub_ls(MOSDOp *m, OSDOp *osd_op)
+int PrimaryLogPG::do_scrub_ls(const MOSDOp *m, OSDOp *osd_op)
 {
   if (m->get_pg() != info.pgid.pgid) {
     dout(10) << " scrubls pg=" << m->get_pg() << " != " << info.pgid << dendl;
@@ -2201,17 +2199,19 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     eversion_t version;
     version_t user_version;
     int return_code = 0;
+    vector<pg_log_op_return_item_t> op_returns;
     bool got = check_in_progress_op(
-      m->get_reqid(), &version, &user_version, &return_code);
+      m->get_reqid(), &version, &user_version, &return_code, &op_returns);
     if (got) {
       dout(3) << __func__ << " dup " << m->get_reqid()
 	      << " version " << version << dendl;
       if (already_complete(version)) {
-	osd->reply_op_error(op, return_code, version, user_version);
+	osd->reply_op_error(op, return_code, version, user_version, op_returns);
       } else {
 	dout(10) << " waiting for " << version << " to commit" << dendl;
         // always queue ondisk waiters, so that we can requeue if needed
-	waiting_for_ondisk[version].emplace_back(op, user_version, return_code);
+	waiting_for_ondisk[version].emplace_back(op, user_version, return_code,
+						 op_returns);
 	op->mark_delayed("waiting for ondisk");
       }
       return;
@@ -2396,13 +2396,14 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 
   if (r) {
     dout(20) << __func__ << " returned an error: " << r << dendl;
-    close_op_ctx(ctx);
     if (op->may_write() &&
 	get_osdmap()->require_osd_release >= CEPH_RELEASE_KRAKEN) {
-      record_write_error(op, oid, nullptr, r);
+      record_write_error(op, oid, nullptr, r,
+			 ctx->op->allows_returnvec() ? ctx : nullptr);
     } else {
       osd->reply_op_error(op, r);
     }
+    close_op_ctx(ctx);
     return;
   }
 
@@ -2753,7 +2754,8 @@ void PrimaryLogPG::finish_manifest_flush(hobject_t oid, ceph_tid_t tid, int r,
 }
 
 void PrimaryLogPG::record_write_error(OpRequestRef op, const hobject_t &soid,
-				      MOSDOpReply *orig_reply, int r)
+				      MOSDOpReply *orig_reply, int r,
+				      OpContext *ctx_for_op_returns)
 {
   dout(20) << __func__ << " r=" << r << dendl;
   ceph_assert(op->may_write());
@@ -2762,6 +2764,10 @@ void PrimaryLogPG::record_write_error(OpRequestRef op, const hobject_t &soid,
   entries.push_back(pg_log_entry_t(pg_log_entry_t::ERROR, soid,
 				   get_next_version(), eversion_t(), 0,
 				   reqid, utime_t(), r));
+  if (ctx_for_op_returns) {
+    entries.back().set_op_returns(*ctx_for_op_returns->ops);
+    dout(20) << __func__ << " op_returns=" << entries.back().op_returns << dendl;
+  }
 
   struct OnComplete {
     PrimaryLogPG *pg;
@@ -3404,6 +3410,10 @@ void PrimaryLogPG::do_proxy_write(OpRequestRef op, ObjectContextRef obc)
   if (!(op->may_write() || op->may_cache())) {
     flags |= CEPH_OSD_FLAG_RWORDERED;
   }
+  if (op->allows_returnvec()) {
+    flags |= CEPH_OSD_FLAG_RETURNVEC;
+  }
+
   dout(10) << __func__ << " Start proxy write for " << *m << dendl;
 
   ProxyWriteOpRef pwop(std::make_shared<ProxyWriteOp>(op, soid, m->ops, m->get_reqid()));
@@ -3727,14 +3737,12 @@ void PrimaryLogPG::finish_proxy_write(hobject_t oid, ceph_tid_t tid, int r)
 
   if (!pwop->sent_reply) {
     // send commit.
-    MOSDOpReply *reply = pwop->ctx->reply;
-    if (reply)
-      pwop->ctx->reply = NULL;
-    else {
-      reply = new MOSDOpReply(m, r, get_osdmap_epoch(), 0, true);
-      reply->set_reply_versions(eversion_t(), pwop->user_version);
-    }
+    assert(pwop->ctx->reply == nullptr);
+    MOSDOpReply *reply = new MOSDOpReply(m, r, get_osdmap_epoch(), 0,
+					 true /* we claim it below */);
+    reply->set_reply_versions(eversion_t(), pwop->user_version);
     reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
+    reply->claim_op_out_data(pwop->ops);
     dout(10) << " sending commit on " << pwop << " " << reply << dendl;
     osd->send_message_osd_client(reply, m->get_connection());
     pwop->sent_reply = true;
@@ -3994,24 +4002,33 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
     return;
   }
 
-  bool successful_write = !ctx->op_t->empty() && op->may_write() && result >= 0;
-  // prepare the reply
-  ctx->reply = new MOSDOpReply(m, 0, get_osdmap_epoch(), 0,
-			       successful_write);
-
-  // Write operations aren't allowed to return a data payload because
-  // we can't do so reliably. If the client has to resend the request
-  // and it has already been applied, we will return 0 with no
-  // payload.  Non-deterministic behavior is no good.  However, it is
-  // possible to construct an operation that does a read, does a guard
-  // check (e.g., CMPXATTR), and then a write.  Then we either succeed
-  // with the write, or return a CMPXATTR and the read value.
-  if (successful_write) {
-    // write.  normalize the result code.
-    dout(20) << " zeroing write result code " << result << dendl;
-    result = 0;
+  bool ignore_out_data = false;
+  if (!ctx->op_t->empty() &&
+      op->may_write() &&
+      result >= 0) {
+    // successful update
+    if (ctx->op->allows_returnvec()) {
+      // enforce reasonable bound on the return buffer sizes
+      for (auto& i : *ctx->ops) {
+	if (i.outdata.length() > cct->_conf->osd_max_write_op_reply_len) {
+	  dout(10) << __func__ << " op " << i << " outdata overflow" << dendl;
+	  result = -EOVERFLOW;  // overall result is overflow
+	  i.rval = -EOVERFLOW;
+	  i.outdata.clear();
+	}
+      }
+    } else {
+      // legacy behavior -- zero result and return data etc.
+      ignore_out_data = true;
+      result = 0;
+    }
   }
-  ctx->reply->set_result(result);
+
+  // prepare the reply
+  ctx->reply = new MOSDOpReply(m, result, get_osdmap_epoch(), 0,
+			       ignore_out_data);
+  dout(20) << __func__ << " alloc reply " << ctx->reply
+	   << " result " << result << dendl;
 
   // read or error?
   if ((ctx->op_t->empty() || result < 0) && !ctx->update_log_only) {
@@ -4061,9 +4078,7 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
     // save just what we need from ctx
     MOSDOpReply *reply = ctx->reply;
     ctx->reply = nullptr;
-    reply->claim_op_out_data(*ctx->ops);
     reply->get_header().data_off = (ctx->data_off ? *ctx->data_off : 0);
-    close_op_ctx(ctx);
 
     if (result == -ENOENT) {
       reply->set_enoent_reply_versions(info.last_update,
@@ -4071,7 +4086,9 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
     }
     reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
     // append to pg log for dup detection - don't save buffers for now
-    record_write_error(op, soid, reply, result);
+    record_write_error(op, soid, reply, result,
+		       ctx->op->allows_returnvec() ? ctx : nullptr);
+    close_op_ctx(ctx);
     return;
   }
 
@@ -4084,13 +4101,7 @@ void PrimaryLogPG::execute_ctx(OpContext *ctx)
 
       if (m && !ctx->sent_reply) {
 	MOSDOpReply *reply = ctx->reply;
-	if (reply)
-	  ctx->reply = nullptr;
-	else {
-	  reply = new MOSDOpReply(m, 0, get_osdmap_epoch(), 0, true);
-	  reply->set_reply_versions(ctx->at_version,
-				    ctx->user_at_version);
-	}
+	ctx->reply = nullptr;
 	reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
 	dout(10) << " sending reply on " << *m << " " << reply << dendl;
 	osd->send_message_osd_client(reply, m->get_connection());
@@ -4136,13 +4147,6 @@ void PrimaryLogPG::reply_ctx(OpContext *ctx, int r)
 {
   if (ctx->op)
     osd->reply_op_error(ctx->op, r);
-  close_op_ctx(ctx);
-}
-
-void PrimaryLogPG::reply_ctx(OpContext *ctx, int r, eversion_t v, version_t uv)
-{
-  if (ctx->op)
-    osd->reply_op_error(ctx->op, r, v, uv);
   close_op_ctx(ctx);
 }
 
@@ -8518,12 +8522,13 @@ int PrimaryLogPG::prepare_transaction(OpContext *ctx)
 
   finish_ctx(ctx,
 	     ctx->new_obs.exists ? pg_log_entry_t::MODIFY :
-	     pg_log_entry_t::DELETE);
+	     pg_log_entry_t::DELETE,
+	     result);
 
   return result;
 }
 
-void PrimaryLogPG::finish_ctx(OpContext *ctx, int log_op_type)
+void PrimaryLogPG::finish_ctx(OpContext *ctx, int log_op_type, int result)
 {
   const hobject_t& soid = ctx->obs->oi.soid;
   dout(20) << __func__ << " " << soid << " " << ctx
@@ -8581,10 +8586,19 @@ void PrimaryLogPG::finish_ctx(OpContext *ctx, int log_op_type)
   }
 
   // append to log
-  ctx->log.push_back(pg_log_entry_t(log_op_type, soid, ctx->at_version,
-				    ctx->obs->oi.version,
-				    ctx->user_at_version, ctx->reqid,
-				    ctx->mtime, 0));
+  ctx->log.push_back(
+    pg_log_entry_t(log_op_type, soid, ctx->at_version,
+		   ctx->obs->oi.version,
+		   ctx->user_at_version, ctx->reqid,
+		   ctx->mtime,
+		   (ctx->op && ctx->op->allows_returnvec()) ? result : 0));
+  if (ctx->op && ctx->op->allows_returnvec()) {
+    // also the per-op values
+    ctx->log.back().set_op_returns(*ctx->ops);
+    dout(20) << __func__ << " op_returns " << ctx->log.back().op_returns
+	     << dendl;
+  }
+
   if (soid.snap < CEPH_NOSNAP) {
     switch (log_op_type) {
     case pg_log_entry_t::MODIFY:
@@ -8661,7 +8675,6 @@ void PrimaryLogPG::complete_read_ctx(int result, OpContext *ctx)
     }
     ctx->bytes_read += p->outdata.length();
   }
-  ctx->reply->claim_op_out_data(*ctx->ops);
   ctx->reply->get_header().data_off = (ctx->data_off ? *ctx->data_off : 0);
 
   MOSDOpReply *reply = ctx->reply;
@@ -8935,10 +8948,7 @@ int PrimaryLogPG::do_copy_get(OpContext *ctx, bufferlist::const_iterator& bp,
 void PrimaryLogPG::fill_in_copy_get_noent(OpRequestRef& op, hobject_t oid,
                                           OSDOp& osd_op)
 {
-  // NOTE: we take non-const ref here for claim_op_out_data below; we must
-  // be careful not to modify anything else that will upset a racing
-  // operator<<
-  MOSDOp *m = static_cast<MOSDOp*>(op->get_nonconst_req());
+  const MOSDOp *m = static_cast<const MOSDOp*>(op->get_req());
   uint64_t features = m->get_features();
   object_copy_data_t reply_obj;
 
@@ -8948,7 +8958,6 @@ void PrimaryLogPG::fill_in_copy_get_noent(OpRequestRef& op, hobject_t oid,
   encode(reply_obj, osd_op.outdata, features);
   osd_op.rval = -ENOENT;
   MOSDOpReply *reply = new MOSDOpReply(m, 0, get_osdmap_epoch(), 0, false);
-  reply->claim_op_out_data(m->ops);
   reply->set_result(-ENOENT);
   reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
   osd->send_message_osd_client(reply, m->get_connection());
@@ -10496,7 +10505,7 @@ void PrimaryLogPG::eval_repop(RepGather *repop)
           return_code = std::get<2>(i);
         }
         osd->reply_op_error(std::get<0>(i), return_code, repop->v,
-                            std::get<1>(i));
+                            std::get<1>(i), std::get<3>(i));
       }
       waiting_for_ondisk.erase(it);
     }

@@ -270,10 +270,12 @@ inline namespace v14_2_0 {
     // marked full; ops will either succeed (e.g., delete) or return
     // EDQUOT or ENOSPC
     OPERATION_FULL_TRY           = LIBRADOS_OPERATION_FULL_TRY,
-    //mainly for delete
+    // mainly for delete
     OPERATION_FULL_FORCE	 = LIBRADOS_OPERATION_FULL_FORCE,
     OPERATION_IGNORE_REDIRECT	 = LIBRADOS_OPERATION_IGNORE_REDIRECT,
     OPERATION_ORDERSNAP          = LIBRADOS_OPERATION_ORDERSNAP,
+    // enable/allow return value and per-op return code/buffers
+    OPERATION_RETURNVEC          = LIBRADOS_OPERATION_RETURNVEC,
   };
 
   /*
@@ -1089,7 +1091,9 @@ inline namespace v14_2_0 {
 
     // compound object operations
     int operate(const std::string& oid, ObjectWriteOperation *op);
+    int operate(const std::string& oid, ObjectWriteOperation *op, int flags);
     int operate(const std::string& oid, ObjectReadOperation *op, bufferlist *pbl);
+    int operate(const std::string& oid, ObjectReadOperation *op, bufferlist *pbl, int flags);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op, int flags);
     /**
