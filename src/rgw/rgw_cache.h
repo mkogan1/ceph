@@ -37,8 +37,6 @@ enum {
 #define CACHE_FLAG_MODIFY_XATTRS  0x08
 #define CACHE_FLAG_OBJV           0x10
 
-#define mydout(v) lsubdout(T::cct, rgw, v)
-
 /*DataCache*/
 struct DataCache;
 class L2CacheThreadPool;
@@ -406,11 +404,16 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
   for (iter = l.begin(); iter != l.end(); ++iter) {
     bufferlist& bl = *iter;
     oid = d->get_pending_oid();
+    if(oid.empty()) {
+      lsubdout(g_ceph_context, rgw, 0) << "ERROR: flush_read_list(): get_pending_oid() returned empty oid" << dendl;
+      r = -ENOENT;
+      break;
+    }
     if (bl.length() == 0x400000)
       data_cache.put(bl, bl.length(), oid);
     r = d->client_cb->handle_data(bl, 0, bl.length());
     if (r < 0) {
-      mydout(0) << "ERROR: flush_read_list(): d->client_cb->handle_data() returned " << r << dendl;
+      lsubdout(g_ceph_context, rgw, 0) << "ERROR: flush_read_list(): d->client_cb->handle_data() returned " << r << dendl;
       break;
     }
   }
@@ -472,7 +475,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
   // cleaning up
   d->add_io(obj_ofs, len, &pbl, &c);
 
-  mydout(20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+  lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
   op.read(read_ofs, len, pbl, NULL);
 
   librados::IoCtx io_ctx(d->io_ctx);
@@ -485,15 +488,15 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
     r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<CacheRequest*>(cc));
     r = d->submit_l1_aio_read(cc);
     if (r != 0 ){
-      mydout(0) << "Error cache_aio_read failed err=" << r << dendl;
+      lsubdout(g_ceph_context, rgw, 0) << "Error cache_aio_read failed err=" << r << dendl;
     }
   } else if (d->deterministic_hash_is_local(read_obj.oid)){
-    mydout(20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+    lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
     op.read(read_ofs, len, pbl, NULL);
     r = io_ctx.aio_operate(read_obj.oid, c, &op, NULL);
-    mydout(20) << "rados->aio_operate r=" << r << " bl.length=" << pbl->length() << dendl;
+    lsubdout(g_ceph_context, rgw, 20) << "rados->aio_operate r=" << r << " bl.length=" << pbl->length() << dendl;
     if (r < 0) {
-      mydout(0) << "rados->aio_operate r=" << r << dendl;
+      lsubdout(g_ceph_context, rgw, 0) << "rados->aio_operate r=" << r << dendl;
       goto done_err;
     }
   }  else {
@@ -511,7 +514,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
   return 0;
 
 done_err:
-  mydout(20) << "cancelling io r=" << r << " obj_ofs=" << obj_ofs << dendl;
+  lsubdout(g_ceph_context, rgw, 20) << "cancelling io r=" << r << " obj_ofs=" << obj_ofs << dendl;
   d->set_cancelled(r);
   d->cancel_io(obj_ofs);
 
@@ -521,7 +524,6 @@ done_err:
 class L2CacheThreadPool {
 public:
   L2CacheThreadPool(int n) {
-    curl_global_init(CURL_GLOBAL_ALL);
     for (int i=0; i<n; ++i) {
       threads.push_back(new PoolWorkerThread(workQueue));
       threads.back()->start();

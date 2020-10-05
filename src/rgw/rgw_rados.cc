@@ -6492,7 +6492,11 @@ std::vector<string> split(const string &s, const char * delim)
 }
 
 bool get_obj_data::deterministic_hash_is_local(string oid) {
-	return (deterministic_hash(oid).compare(cct->_conf->rgw_host)==0);
+  if( g_conf()->rgw_datacache_distributed_enabled == false ) {
+    return true;
+  } else {
+	  return (deterministic_hash(oid).compare(cct->_conf->rgw_host)==0);
+  }
 }
 
 string get_obj_data::deterministic_hash(string oid)

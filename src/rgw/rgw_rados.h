@@ -174,8 +174,6 @@ struct RGWObjState {
   bool fake_tag{false};
   std::optional<RGWObjManifest> manifest;
 
-  
-  bool has_manifest;
   string shadow_obj;
   bool has_data{false};
   bufferlist data;
