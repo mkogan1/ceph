@@ -155,13 +155,13 @@ int RGWShardCollectCR::operate() {
     while (spawn_next()) {
       current_running++;
 
-      while (current_running >= max_concurrent) {
+      if (current_running >= max_concurrent) {
         int child_ret;
         yield wait_for_child();
         if (collect_next(&child_ret)) {
           current_running--;
-          if (child_ret < 0 && child_ret != -ENOENT) {
-            ldout(cct, 10) << __func__ << ": failed to fetch log status, ret=" << child_ret << dendl;
+          child_ret = handle_result(child_ret);
+          if (child_ret < 0) {
             status = child_ret;
           }
         }
@@ -172,8 +172,8 @@ int RGWShardCollectCR::operate() {
       yield wait_for_child();
       if (collect_next(&child_ret)) {
         current_running--;
-        if (child_ret < 0 && child_ret != -ENOENT) {
-          ldout(cct, 10) << __func__ << ": failed to fetch log status, ret=" << child_ret << dendl;
+        child_ret = handle_result(child_ret);
+        if (child_ret < 0) {
           status = child_ret;
         }
       }
@@ -196,6 +196,15 @@ class RGWReadRemoteMDLogInfoCR : public RGWShardCollectCR {
   int shard_id;
 #define READ_MDLOG_MAX_CONCURRENT 10
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to fetch mdlog status: " << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
 public:
   RGWReadRemoteMDLogInfoCR(RGWMetaSyncEnv *_sync_env,
                      const std::string& period, int _num_shards,
@@ -217,6 +226,15 @@ class RGWListRemoteMDLogCR : public RGWShardCollectCR {
   map<int, string>::iterator iter;
 #define READ_MDLOG_MAX_CONCURRENT 10
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to list remote mdlog shard: " << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
 public:
   RGWListRemoteMDLogCR(RGWMetaSyncEnv *_sync_env,
                      const std::string& period, map<int, string>& _shards,
@@ -715,6 +733,16 @@ class RGWReadSyncStatusMarkersCR : public RGWShardCollectCR {
   int shard_id{0};
   map<uint32_t, rgw_meta_sync_marker>& markers;
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to read metadata sync markers: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
  public:
   RGWReadSyncStatusMarkersCR(RGWMetaSyncEnv *env, int num_shards,
                              map<uint32_t, rgw_meta_sync_marker>& markers)
@@ -2467,6 +2495,15 @@ class PurgeLogShardsCR : public RGWShardCollectCR {
   int i{0};
 
   static constexpr int max_concurrent = 16;
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to remove mdlog shard: " << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
 
  public:
   PurgeLogShardsCR(RGWRados *store, const RGWMetadataLog* mdlog,
@@ -2695,6 +2732,16 @@ class MetaMasterTrimShardCollectCR : public RGWShardCollectCR {
   std::string oid;
   const rgw_meta_sync_status& sync_status;
 
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to trim mdlog shard: " << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
+
  public:
   MetaMasterTrimShardCollectCR(MasterTrimEnv& env, RGWMetadataLog *mdlog,
                                const rgw_meta_sync_status& sync_status)
@@ -2746,6 +2793,17 @@ class MetaMasterStatusCollectCR : public RGWShardCollectCR {
   MasterTrimEnv& env;
   connection_map::iterator c;
   std::vector<rgw_meta_sync_status>::iterator s;
+
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to fetch metadata sync status: "
+          << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
  public:
   explicit MetaMasterStatusCollectCR(MasterTrimEnv& env)
     : RGWShardCollectCR(env.store->ctx(), MAX_CONCURRENT_SHARDS),
@@ -2952,6 +3010,16 @@ class MetaPeerTrimShardCollectCR : public RGWShardCollectCR {
   const std::string& period_id;
   RGWMetaSyncEnv meta_env; //< for RGWListRemoteMDLogShardCR
   int shard_id{0};
+
+  int handle_result(int r) override {
+    if (r == -ENOENT) { // ENOENT is not a fatal error
+      return 0;
+    }
+    if (r < 0) {
+      ldout(cct, 4) << "failed to trim mdlog shard: " << cpp_strerror(r) << dendl;
+    }
+    return r;
+  }
 
  public:
   MetaPeerTrimShardCollectCR(PeerTrimEnv& env, RGWMetadataLog *mdlog)
