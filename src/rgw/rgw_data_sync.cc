@@ -1006,10 +1006,10 @@ class RGWSyncBucketShardCR : public RGWCoroutine {
 
 public:
   RGWSyncBucketShardCR(RGWDataSyncCtx *_sc,
-                            boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
-                            const rgw_bucket_sync_pair_info& _sync_pair,
-                            const RGWSyncTraceNodeRef& _tn_parent,
-			    ceph::real_time* progress)
+		       boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
+		       const rgw_bucket_sync_pair_info& _sync_pair,
+		       const RGWSyncTraceNodeRef& _tn_parent,
+		       ceph::real_time* progress)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
       lease_cr(std::move(lease_cr)), sync_pair(_sync_pair),
       progress(progress),
@@ -4249,6 +4249,12 @@ std::ostream& operator<<(std::ostream& out, std::optional<rgw_bucket_shard>& bs)
   return out;
 }
 
+static RGWCoroutine* sync_bucket_shard_cr(RGWDataSyncCtx* sc,
+					  boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
+					  const rgw_bucket_sync_pair_info& sync_pair,
+                                          const RGWSyncTraceNodeRef& tn,
+					  ceph::real_time* progress);
+
 RGWRunBucketSourcesSyncCR::RGWRunBucketSourcesSyncCR(RGWDataSyncCtx *_sc,
                                                      boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
                                                      std::optional<rgw_bucket_shard> _target_bs,
@@ -4327,8 +4333,8 @@ int RGWRunBucketSourcesSyncCR::operate()
 
         ldpp_dout(sync_env->dpp, 20) << __func__ << "(): sync_pair=" << sync_pair << dendl;
 
-        yield spawn(new RGWSyncBucketShardCR(sc, lease_cr, sync_pair, tn,
-					     &*cur_shard_progress), false);
+	yield spawn(sync_bucket_shard_cr(sc, lease_cr, sync_pair, tn,
+					 &*cur_shard_progress), false);
 	while (num_spawned() > BUCKET_SYNC_SPAWN_WINDOW) {
           set_status() << "num_spawned() > spawn_window";
           yield wait_for_child();
@@ -4630,6 +4636,15 @@ int RGWGetBucketPeersCR::operate()
   return 0;
 }
 
+static RGWCoroutine* sync_bucket_shard_cr(RGWDataSyncCtx* sc,
+					  boost::intrusive_ptr<const RGWContinuousLeaseCR> lease_cr,
+					  const rgw_bucket_sync_pair_info& sync_pair,
+                                          const RGWSyncTraceNodeRef& tn,
+					  ceph::real_time* progress)
+{
+  return new RGWSyncBucketShardCR(sc, std::move(lease_cr), sync_pair, tn, progress);
+}
+
 int RGWSyncBucketShardCR::operate()
 {
   reenter(this) {
@@ -4716,7 +4731,7 @@ RGWCoroutine *RGWRemoteBucketManager::run_sync_cr(int num)
     return nullptr;
   }
 
-  return new RGWSyncBucketShardCR(&sc, nullptr, sync_pairs[num], sync_env->sync_tracer->root_node, nullptr);
+  return sync_bucket_shard_cr(&sc, nullptr, sync_pairs[num], sync_env->sync_tracer->root_node, nullptr);
 }
 
 int RGWBucketPipeSyncStatusManager::init()
