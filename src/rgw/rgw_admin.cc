@@ -2474,7 +2474,7 @@ static int bucket_source_sync_status(RGWRados *store, const RGWZone& zone,
   }
 
   std::vector<rgw_bucket_shard_sync_info> status;
-  r = rgw_bucket_sync_status(dpp(), store, pipe, bucket_info, &source_bucket_info, &status);
+  r = rgw_read_bucket_inc_sync_status(dpp(), store, pipe, bucket_info, &source_bucket_info, &status);
   if (r < 0) {
     lderr(store->ctx()) << "failed to read bucket sync status: " << cpp_strerror(r) << dendl;
     return r;
