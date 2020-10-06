@@ -726,10 +726,13 @@ public:
   map<int, rgw_bucket_shard_sync_info>& get_sync_status() { return sync_status; }
   int init_sync_status(const DoutPrefixProvider *dpp);
 
-  static string status_oid(const rgw_zone_id& source_zone, const rgw_bucket_sync_pair_info& bs);
-  static string obj_status_oid(const rgw_bucket_sync_pipe& sync_pipe,
-                               const rgw_zone_id& source_zone, const rgw::sal::RGWObject* obj); /* specific source obj sync status,
-                                                                                       can be used by sync modules */
+  static std::string inc_status_oid(const rgw_zone_id& source_zone,
+				    const rgw_bucket_sync_pair_info& bs);
+  // specific source obj sync status, can be used by sync modules
+  static std::string obj_status_oid(const rgw_bucket_sync_pipe& sync_pipe,
+				    const rgw_zone_id& source_zone,
+				    const rgw::sal::RGWObject* obj); /* specific source obj sync status,
+									can be used by sync modules */
 
   // implements DoutPrefixProvider
   CephContext *get_cct() const override;
