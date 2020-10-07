@@ -130,7 +130,7 @@ public:
   void l2_http_request(off_t ofs , off_t len, std::string oid);
   void init(CephContext *_cct) {
     cct = _cct;
-    free_data_cache_size = cct->_conf->rgw_datacache_size;
+    free_data_cache_size = cct->_conf->rgw_d3n_l1_datacache_size;
     head = nullptr;
     tail = nullptr;
   }

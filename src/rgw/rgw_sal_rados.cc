@@ -944,7 +944,7 @@ int RGWRadosStore::create_bucket(RGWUser& u, const rgw_bucket& b,
 rgw::sal::RGWRadosStore *RGWStoreManager::init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metacache, bool use_datacache)
 {
   RGWRados *rados{nullptr};
-  use_datacache = cct->_conf->rgw_datacache_local_enabled;
+  use_datacache = cct->_conf->rgw_d3n_l1_local_datacache_enabled;
   if (use_datacache) {
     rados = new RGWDataCache<RGWRados>;
   } else {

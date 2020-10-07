@@ -6492,7 +6492,7 @@ std::vector<string> split(const string &s, const char * delim)
 }
 
 bool get_obj_data::deterministic_hash_is_local(string oid) {
-  if( g_conf()->rgw_datacache_distributed_enabled == false ) {
+  if(g_conf()->rgw_d3n_l2_distributed_datacache_enabled == false) {
     return true;
   } else {
 	  return (deterministic_hash(oid).compare(cct->_conf->rgw_host)==0);
@@ -6501,7 +6501,7 @@ bool get_obj_data::deterministic_hash_is_local(string oid) {
 
 string get_obj_data::deterministic_hash(string oid)
 {
-  std::string location = cct->_conf->rgw_l2_hosts;
+  std::string location = cct->_conf->rgw_d3n_l2_datacache_hosts;
   string delimiters(",");
   std::vector<std::string> tokens = split(location, ",");
   int mod = tokens.size();
@@ -6569,7 +6569,7 @@ int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, st
   c->stat = EINPROGRESS;
   c->op_data = this;
 
-  std::string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   struct aiocb *cb = new struct aiocb;
   memset(cb, 0, sizeof(struct aiocb));
   cb->aio_fildes = ::open(location.c_str(), O_RDONLY);
@@ -6596,7 +6596,7 @@ int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, st
 
 int get_obj_data::submit_l1_io_read(bufferlist* pbl, int len, string oid)
 {
-  std::string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   int cache_file = -1;
   int r = 0;
 

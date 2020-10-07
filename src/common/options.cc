@@ -6992,29 +6992,30 @@ std::vector<Option> get_rgw_options() {
     .set_default(512*1024)
     .set_description(""),
 
-    Option("rgw_datacache_persistent_path", Option::TYPE_STR, Option::LEVEL_ADVANCED)
-    .set_default("/tmp/")
-    .set_description("NOTE: path must include trailing slash"),
+    Option("rgw_d3n_l1_local_datacache_enabled", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("Enable datacenter-scale dataset delivery local cache"),
 
-    Option("rgw_datacache_size", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
+    Option("rgw_d3n_l1_datacache_persistent_path", Option::TYPE_STR, Option::LEVEL_ADVANCED)
+    .set_default("/tmp/")
+    .set_description("path for the directory for storing the local cache objects data "
+                     "NOTE: path must include trailing slash"),
+
+    Option("rgw_d3n_l1_datacache_size", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
     .set_default(1048576)
     .set_description("Datacache size in bytes"),
 
-    Option("rgw_datacache_local_enabled", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    Option("rgw_d3n_l2_distributed_datacache_enabled", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(false)
-    .set_description(""),
+    .set_description("Enable datacenter-scale dataset delivery distributed cache"),
 
-    Option("rgw_datacache_distributed_enabled", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(false)
-    .set_description(""),
-
-    Option("rgw_l2_request_thread_num", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+    Option("rgw_d3n_l2_datacache_request_thread_num", Option::TYPE_INT, Option::LEVEL_ADVANCED)
     .set_default(10)
-    .set_description(""),
+    .set_description("Number of threads to utilize for distributed cache requests"),
 
-    Option("rgw_l2_hosts", Option::TYPE_STR, Option::LEVEL_ADVANCED)
+    Option("rgw_d3n_l2_datacache_hosts", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("localhost")
-    .set_description(""),
+    .set_description("Comma separated list of hosts in the format host:port"),
 
     Option("rgw_dynamic_resharding", Option::TYPE_BOOL, Option::LEVEL_BASIC)
     .set_default(true)

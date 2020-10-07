@@ -365,7 +365,7 @@ ObjectCache::~ObjectCache()
 
 int CacheAioWriteRequest::create_io(bufferlist& bl, unsigned int len, string oid)
 {
-  std::string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   int r = 0;
 
   cb = new struct aiocb;
@@ -407,7 +407,7 @@ int DataCache::io_write(bufferlist& bl, unsigned int len, std::string oid)
 {
   ChunkDataInfo* chunk_info = new ChunkDataInfo;
 
-  std::string location = cct->_conf->rgw_datacache_persistent_path + oid; /* replace tmp with the correct path from config file*/
+  std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid; /* replace tmp with the correct path from config file*/
   FILE *cache_file = 0;
   int r = 0;
 
@@ -547,7 +547,7 @@ void DataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
 bool DataCache::get(const string& oid)
 {
   bool exist = false;
-  string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   cache_lock.lock();
   map<string, ChunkDataInfo*>::iterator iter = cache_map.find(oid);
   if (!(iter == cache_map.end())) {
@@ -600,7 +600,7 @@ size_t DataCache::random_eviction()
   cache_map.erase(del_oid); // oid
   cache_lock.unlock();
 
-  location = cct->_conf->rgw_datacache_persistent_path + del_oid; /*replace tmp with the correct path from config file*/
+  location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + del_oid;
   remove(location.c_str());
   return freed_size;
 }
@@ -632,7 +632,7 @@ size_t DataCache::lru_eviction()
   cache_lock.unlock();
   freed_size = del_entry->size;
   free(del_entry);
-  location = cct->_conf->rgw_datacache_persistent_path + del_oid; /*replace tmp with the correct path from config file*/
+  location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + del_oid;
   remove(location.c_str());
   return freed_size;
 }
@@ -671,7 +671,7 @@ static size_t _l2_response_cb(void *ptr, size_t size, size_t nmemb, void* param)
 void HttpL2Request::run()
 {
   get_obj_data* d = static_cast<get_obj_data*>(req->op_data);
-  int n_retries = cct->_conf->rgw_l2_request_thread_num;
+  int n_retries = cct->_conf->rgw_d3n_l2_datacache_request_thread_num;
   int r = 0;
 
   for (int i=0; i<n_retries; i++ ) {
