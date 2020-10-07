@@ -27,6 +27,7 @@
 #include "rgw_bucket.h"
 #include "rgw_multi.h"
 #include "rgw_acl_s3.h"
+#include "rgw_d3n_datacache.h"
 
 /* Stuff for RGWRadosStore.  Move to separate file when store split out */
 #include "rgw_zone.h"
