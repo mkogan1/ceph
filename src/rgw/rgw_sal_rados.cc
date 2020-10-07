@@ -947,7 +947,7 @@ rgw::sal::RGWRadosStore *RGWStoreManager::init_storage_provider(CephContext *cct
   RGWRados *rados{nullptr};
   use_datacache = cct->_conf->rgw_d3n_l1_local_datacache_enabled;
   if (use_datacache) {
-    rados = new RGWDataCache<RGWRados>;
+    rados = new D3nRGWDataCache<RGWRados>;
   } else {
     rados = new RGWRados;
   }

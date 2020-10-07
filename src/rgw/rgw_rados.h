@@ -55,7 +55,7 @@ class RGWReshard;
 class RGWReshardWait;
 
 class RGWSysObjectCtx;
-struct get_obj_data;
+struct d3n_get_obj_data;
 
 /* flags for put_obj_meta() */
 #define PUT_OBJ_CREATE      0x01
@@ -1275,7 +1275,7 @@ public:
 
   int append_atomic_test(const RGWObjState* astate, librados::ObjectOperation& op);
 
-  virtual int flush_read_list(struct get_obj_data* d);
+  virtual int flush_read_list(struct d3n_get_obj_data* d);
   //virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   virtual int get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                  off_t read_ofs, off_t len, bool is_head_obj,
@@ -1562,7 +1562,7 @@ public:
 
 
 struct get_obj_aio_data {
-  struct get_obj_data* op_data;
+  struct d3n_get_obj_data* op_data;
   off_t ofs;
   off_t len;
 };
@@ -1572,7 +1572,7 @@ struct get_obj_io {
   bufferlist bl;
 };
 
-struct get_obj_data : public RefCountedObject{
+struct d3n_get_obj_data : public RefCountedObject{
   CephContext* cct;
   RGWRados* store;
   RGWGetDataCB* client_cb;
@@ -1603,15 +1603,15 @@ struct get_obj_data : public RefCountedObject{
   char *tmp_data;
 
 
-  get_obj_data(CephContext *_cct);
+  d3n_get_obj_data(CephContext *_cct);
 
-  get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
+  d3n_get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
                uint64_t offset, optional_yield yield, Throttle throttle)
                : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield),
-               throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false) {}
+               throttle(cct, "d3n_get_obj_data", cct->_conf->rgw_get_obj_window_size, false) {}
 
 
-  ~get_obj_data();
+  ~d3n_get_obj_data();
 
   void add_pending_oid(std::string oid);
   void set_cancelled(int r);

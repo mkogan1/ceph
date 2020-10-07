@@ -6308,7 +6308,7 @@ int RGWRados::Object::Read::read(int64_t ofs, int64_t end, bufferlist& bl, optio
 
 static void _get_obj_aio_completion_cb(completion_t cb, void *arg);
 
-get_obj_data::get_obj_data(CephContext *_cct)
+d3n_get_obj_data::d3n_get_obj_data(CephContext *_cct)
   : cct(_cct),
   store(NULL),
   client_cb(NULL),
@@ -6319,32 +6319,32 @@ get_obj_data::get_obj_data(CephContext *_cct)
   data_lock(),
   cache_lock(),
   l2_lock(),
-  throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false)
+  throttle(cct, "d3n_get_obj_data", cct->_conf->rgw_get_obj_window_size, false)
 {
 }
 
-get_obj_data::~get_obj_data()
+d3n_get_obj_data::~d3n_get_obj_data()
 {
 }
 
 
-void get_obj_data::set_cancelled(int r)
+void d3n_get_obj_data::set_cancelled(int r)
 {
   cancelled = true;
   err_code = r;
 }
 
-bool get_obj_data::is_cancelled()
+bool d3n_get_obj_data::is_cancelled()
 {
   return cancelled;
 }
 
-int get_obj_data::get_err_code()
+int d3n_get_obj_data::get_err_code()
 {
   return err_code;
 }
 
-int get_obj_data::wait_next_io(bool *done)
+int d3n_get_obj_data::wait_next_io(bool *done)
 {
   lock.lock();
   map<off_t, librados::AioCompletion *>::iterator iter = completion_map.begin();
@@ -6372,7 +6372,7 @@ int get_obj_data::wait_next_io(bool *done)
   return r;
 }
 
-void get_obj_data::add_io(off_t ofs, off_t len, bufferlist** pbl, AioCompletion** pc)
+void d3n_get_obj_data::add_io(off_t ofs, off_t len, bufferlist** pbl, AioCompletion** pc)
 {
   std::lock_guard<std::mutex> l(lock);
 
@@ -6404,9 +6404,9 @@ void get_obj_data::add_io(off_t ofs, off_t len, bufferlist** pbl, AioCompletion*
   get();
 }
 
-void get_obj_data::cancel_io(off_t ofs)
+void d3n_get_obj_data::cancel_io(off_t ofs)
 {
-  ldout(cct, 20) << "get_obj_data::cancel_io() ofs=" << ofs << dendl;
+  ldout(cct, 20) << "d3n_get_obj_data::cancel_io() ofs=" << ofs << dendl;
   lock.lock();
   map<off_t, AioCompletion *>::iterator iter = completion_map.find(ofs);
   if (iter != completion_map.end()) {
@@ -6422,8 +6422,8 @@ void get_obj_data::cancel_io(off_t ofs)
   //
 }
 
-void get_obj_data::cancel_all_io() {
-  ldout(cct, 20) << "get_obj_data::cancel_all_io()" << dendl;
+void d3n_get_obj_data::cancel_all_io() {
+  ldout(cct, 20) << "d3n_get_obj_data::cancel_all_io()" << dendl;
   std::lock_guard<std::mutex> l(lock);
   for (map<off_t, librados::AioCompletion *>::iterator iter = completion_map.begin();
       iter != completion_map.end(); ++iter) {
@@ -6432,7 +6432,7 @@ void get_obj_data::cancel_all_io() {
   }
 }
 
-int get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list)
+int d3n_get_obj_data::get_complete_ios(off_t ofs, list<bufferlist>& bl_list)
 {
   std::lock_guard<std::mutex> l(lock);
 
@@ -6491,7 +6491,7 @@ std::vector<string> split(const string &s, const char * delim)
   return tokens;
 }
 
-bool get_obj_data::deterministic_hash_is_local(string oid) {
+bool d3n_get_obj_data::deterministic_hash_is_local(string oid) {
   if(g_conf()->rgw_d3n_l2_distributed_datacache_enabled == false) {
     return true;
   } else {
@@ -6499,7 +6499,7 @@ bool get_obj_data::deterministic_hash_is_local(string oid) {
   }
 }
 
-string get_obj_data::deterministic_hash(string oid)
+string d3n_get_obj_data::deterministic_hash(string oid)
 {
   std::string location = cct->_conf->rgw_d3n_l2_datacache_hosts;
   string delimiters(",");
@@ -6515,12 +6515,12 @@ string get_obj_data::deterministic_hash(string oid)
   return tokens[hash%mod];
 }
 
-void get_obj_data::add_pending_oid(std::string oid)
+void d3n_get_obj_data::add_pending_oid(std::string oid)
 {
   pending_oid_list.push_back(oid);
 }
 
-string get_obj_data::get_pending_oid()
+string d3n_get_obj_data::get_pending_oid()
 {
   string str;
   str.clear();
@@ -6531,7 +6531,7 @@ string get_obj_data::get_pending_oid()
   return str;
 }
 
-int get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, string oid,
+int d3n_get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, string oid,
                 off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion* lc)
 {
   L2CacheRequest* l2request = new L2CacheRequest(cct);
@@ -6554,7 +6554,7 @@ int get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, st
   return 0;
 }
 
-int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, string oid,
+int d3n_get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, string oid,
 		size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc)
 {
   L1CacheRequest* c = new L1CacheRequest(cct);
@@ -6594,7 +6594,7 @@ int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, st
   return 0;
 }
 
-int get_obj_data::submit_l1_io_read(bufferlist* pbl, int len, string oid)
+int d3n_get_obj_data::submit_l1_io_read(bufferlist* pbl, int len, string oid)
 {
   std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   int cache_file = -1;
@@ -6602,13 +6602,13 @@ int get_obj_data::submit_l1_io_read(bufferlist* pbl, int len, string oid)
 
   cache_file = ::open(location.c_str(), O_RDONLY);
   if (cache_file < 0) {
-    dout(0) << "ERROR: get_obj_data::cache_io_read, open failed. errno " << errno << dendl;
+    dout(0) << "ERROR: d3n_get_obj_data::cache_io_read, open failed. errno " << errno << dendl;
     return -1;
   }
 
   r = ::read(cache_file, tmp_data, len);
   if (r < 0){
-    dout(0) << "ERROR: get_obj_data::cache_io_read, read failed. errno " << r << dendl;
+    dout(0) << "ERROR: d3n_get_obj_data::cache_io_read, read failed. errno " << r << dendl;
     goto END;
   }
   pbl->append(tmp_data, len);
@@ -6618,7 +6618,7 @@ END:
   return r;
 }
 
-int get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
+int d3n_get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
 {
   int r = 0;
   if((r= ::aio_read(cc->paiocb)) != 0) {
@@ -6633,23 +6633,23 @@ void _cache_aio_completion_cb(sigval_t sigval)
   c->op_data->cache_aio_completion_cb(c);
 }
 
-void get_obj_data::cache_aio_completion_cb(CacheRequest* c)
+void d3n_get_obj_data::cache_aio_completion_cb(CacheRequest* c)
 {
   int status = c->status();
   if (status == ECANCELED) {
     cache_unmap_io(c->ofs);
-    ldout(cct, 0) << "DataCache: cache_aio_request: status = ECANCLE" << dendl;
+    ldout(cct, 0) << "D3nDataCache: cache_aio_request: status = ECANCLE" << dendl;
     return;
   } else if (status == 0) {
     cache_unmap_io(c->ofs);
     l2_lock.lock();
-    ldout(cct, 0) << "DataCache: cache_aio_completion_cb,inside the finish lock- oid : " << c->oid << ", len:" << std::hex << c->len << "plb->len" << std::hex << c->pbl->length()  << dendl;
+    ldout(cct, 0) << "D3nDataCache: cache_aio_completion_cb,inside the finish lock- oid : " << c->oid << ", len:" << std::hex << c->len << "plb->len" << std::hex << c->pbl->length()  << dendl;
     c->finish();
     l2_lock.unlock();
   }
 }
 
-void get_obj_data::cache_unmap_io(off_t ofs)
+void d3n_get_obj_data::cache_unmap_io(off_t ofs)
 {
 
   cache_lock.lock();
@@ -6665,7 +6665,7 @@ void get_obj_data::cache_unmap_io(off_t ofs)
 static void _get_obj_aio_completion_cb(completion_t cb, void *arg)
 {
   struct get_obj_aio_data* aio_data = (struct get_obj_aio_data*)arg;
-  struct get_obj_data* d = aio_data->op_data;
+  struct d3n_get_obj_data* d = aio_data->op_data;
 
   d->store->get_obj_aio_completion_cb(cb, arg);
 }
@@ -6674,7 +6674,7 @@ static int _get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                off_t read_ofs, off_t len, bool is_head_obj,
                                RGWObjState *astate, void *arg)
 {
-  struct get_obj_data* d = static_cast<struct get_obj_data*>(arg);
+  struct d3n_get_obj_data* d = static_cast<struct d3n_get_obj_data*>(arg);
   return d->store->get_obj_iterate_cb(read_obj, obj_ofs, read_ofs, len,
                                       is_head_obj, astate, arg);
 }
@@ -6682,7 +6682,7 @@ static int _get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
 void RGWRados::get_obj_aio_completion_cb(completion_t c, void *arg)
 {
   struct get_obj_aio_data* aio_data = (struct get_obj_aio_data*)arg;
-  struct get_obj_data* d = aio_data->op_data;
+  struct d3n_get_obj_data* d = aio_data->op_data;
   off_t ofs = aio_data->ofs;
   off_t len = aio_data->len;
 
@@ -6720,7 +6720,7 @@ done:
   return;
 }
 
-int RGWRados::flush_read_list(struct get_obj_data* d)
+int RGWRados::flush_read_list(struct d3n_get_obj_data* d)
 {
 
   d->data_lock.lock();
@@ -6759,7 +6759,7 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                  RGWObjState *astate, void *arg)
 {
   ObjectReadOperation op;
-  struct get_obj_data* d = static_cast<struct get_obj_data*>(arg);
+  struct d3n_get_obj_data* d = static_cast<struct d3n_get_obj_data*>(arg);
   string oid, key;
   buffer::list *pbl;
   AioCompletion *c;
@@ -6839,7 +6839,7 @@ int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
   const uint64_t window_size = cct->_conf->rgw_get_obj_window_size;
   auto aio = rgw::make_throttle(window_size, y);
   bool done = false;
-  struct get_obj_data* data = new get_obj_data(cct);
+  struct d3n_get_obj_data* data = new d3n_get_obj_data(cct);
   data->store = store;
   data->client_cb = cb;
   data->aio = &*aio;

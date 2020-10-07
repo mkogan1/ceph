@@ -15,7 +15,7 @@ class CacheRequest {
     std::mutex lock;
     int sequence;
     buffer::list* pbl;
-    struct get_obj_data* op_data;
+    struct d3n_get_obj_data* op_data;
     std::string oid;
     off_t ofs;
     off_t len;

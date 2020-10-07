@@ -16,7 +16,7 @@
 
 class RGWGetObj_CB;
 
-int CacheAioWriteRequest::create_io(bufferlist& bl, unsigned int len, string oid)
+int D3nCacheAioWriteRequest::create_io(bufferlist& bl, unsigned int len, string oid)
 {
   std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   int r = 0;
@@ -50,15 +50,15 @@ done:
   return r;
 }
 
-DataCache::DataCache()
+D3nDataCache::D3nDataCache()
   : index(0), cct(NULL), io_type(ASYNC_IO), free_data_cache_size(0), outstanding_write_size(0)
 {
-  tp = new L2CacheThreadPool(32);
+  tp = new D3nL2CacheThreadPool(32);
 }
 
-int DataCache::io_write(bufferlist& bl, unsigned int len, std::string oid)
+int D3nDataCache::io_write(bufferlist& bl, unsigned int len, std::string oid)
 {
-  ChunkDataInfo* chunk_info = new ChunkDataInfo;
+  D3nChunkDataInfo* chunk_info = new D3nChunkDataInfo;
 
   std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid; /* replace tmp with the correct path from config file*/
   FILE *cache_file = 0;
@@ -66,13 +66,13 @@ int DataCache::io_write(bufferlist& bl, unsigned int len, std::string oid)
 
   cache_file = fopen(location.c_str(),"w+");
   if (cache_file != nullptr) {
-    ldout(cct, 0) << "ERROR: DataCache::open file has return error " << r << dendl;
+    ldout(cct, 0) << "ERROR: D3nDataCache::open file has return error " << r << dendl;
     return -1;
   }
 
   r = fwrite(bl.c_str(), 1, len, cache_file);
   if (r < 0) {
-    ldout(cct, 0) << "ERROR: DataCache::write: write in file has return error " << r << dendl;
+    ldout(cct, 0) << "ERROR: D3nDataCache::write: write in file has return error " << r << dendl;
   }
 
   fclose(cache_file);
@@ -82,33 +82,33 @@ int DataCache::io_write(bufferlist& bl, unsigned int len, std::string oid)
   chunk_info->oid = oid;
   chunk_info->set_ctx(cct);
   chunk_info->size = len;
-  cache_map.insert(pair<string, ChunkDataInfo*>(oid, chunk_info));
+  cache_map.insert(pair<string, D3nChunkDataInfo*>(oid, chunk_info));
   cache_lock.unlock();
 
   return r;
 }
 
-void _cache_aio_write_completion_cb(sigval_t sigval)
+void _d3n_cache_aio_write_completion_cb(sigval_t sigval)
 {
-  CacheAioWriteRequest* c = static_cast<CacheAioWriteRequest*>(sigval.sival_ptr);
+  D3nCacheAioWriteRequest* c = static_cast<D3nCacheAioWriteRequest*>(sigval.sival_ptr);
   c->priv_data->cache_aio_write_completion_cb(c);
 }
 
 
-void DataCache::cache_aio_write_completion_cb(CacheAioWriteRequest* c)
+void D3nDataCache::cache_aio_write_completion_cb(D3nCacheAioWriteRequest* c)
 {
-  ChunkDataInfo* chunk_info{nullptr};
+  D3nChunkDataInfo* chunk_info{nullptr};
 
-  ldout(cct, 0) << "DataCache: cache_aio_write_completion_cb oid:" << c->oid <<dendl;
+  ldout(cct, 0) << "D3nDataCache: cache_aio_write_completion_cb oid:" << c->oid <<dendl;
 
   /*update cache_map entries for new chunk in cache*/
   cache_lock.lock();
   outstanding_write_list.remove(c->oid);
-  chunk_info = new ChunkDataInfo;
+  chunk_info = new D3nChunkDataInfo;
   chunk_info->oid = c->oid;
   chunk_info->set_ctx(cct);
   chunk_info->size = c->cb->aio_nbytes;
-  cache_map.insert(pair<string, ChunkDataInfo*>(c->oid, chunk_info));
+  cache_map.insert(pair<string, D3nChunkDataInfo*>(c->oid, chunk_info));
   cache_lock.unlock();
 
   /*update free size*/
@@ -120,16 +120,16 @@ void DataCache::cache_aio_write_completion_cb(CacheAioWriteRequest* c)
   c->release();
 }
 
-int DataCache::create_aio_write_request(bufferlist& bl, unsigned int len, std::string oid)
+int D3nDataCache::create_aio_write_request(bufferlist& bl, unsigned int len, std::string oid)
 {
-  struct CacheAioWriteRequest* wr = new struct CacheAioWriteRequest(cct);
+  struct D3nCacheAioWriteRequest* wr = new struct D3nCacheAioWriteRequest(cct);
   int r=0;
   if (wr->create_io(bl, len, oid) < 0) {
-    ldout(cct, 0) << "DataCache: Error create_aio_write_request" << dendl;
+    ldout(cct, 0) << "D3nDataCache: Error create_aio_write_request" << dendl;
     goto done;
   }
   wr->cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
-  wr->cb->aio_sigevent.sigev_notify_function = _cache_aio_write_completion_cb;
+  wr->cb->aio_sigevent.sigev_notify_function = _d3n_cache_aio_write_completion_cb;
   wr->cb->aio_sigevent.sigev_notify_attributes = nullptr;
   wr->cb->aio_sigevent.sigev_value.sival_ptr = wr;
   wr->oid = oid;
@@ -147,23 +147,23 @@ done:
   return r;
 }
 
-void DataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
+void D3nDataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
 {
   int r = 0;
   uint64_t freed_size = 0, _free_data_cache_size = 0, _outstanding_write_size = 0;
 
-  ldout(cct, 20) << "DataCache: We are in DataCache::put() and oid is: " << oid <<dendl;
+  ldout(cct, 20) << "D3nDataCache: We are in D3nDataCache::put() and oid is: " << oid <<dendl;
   cache_lock.lock();
-  map<string, ChunkDataInfo*>::iterator iter = cache_map.find(oid);
+  map<string, D3nChunkDataInfo*>::iterator iter = cache_map.find(oid);
   if (iter != cache_map.end()) {
     cache_lock.unlock();
-    ldout(cct, 10) << "DataCache: Warning: data already cached, no rewrite" << dendl;
+    ldout(cct, 10) << "D3nDataCache: Warning: data already cached, no rewrite" << dendl;
     return;
   }
   std::list<std::string>::iterator it = std::find(outstanding_write_list.begin(), outstanding_write_list.end(),oid);
   if (it != outstanding_write_list.end()) {
     cache_lock.unlock();
-    ldout(cct, 10) << "DataCache: Warning: data put in cache already issued, no rewrite" << dendl;
+    ldout(cct, 10) << "D3nDataCache: Warning: data put in cache already issued, no rewrite" << dendl;
     return;
   }
   outstanding_write_list.push_back(oid);
@@ -174,9 +174,9 @@ void DataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
   _outstanding_write_size = outstanding_write_size;
   eviction_lock.unlock();
 
-  ldout(cct, 20) << "DataCache: Before eviction _free_data_cache_size:" << _free_data_cache_size << ", _outstanding_write_size:" << _outstanding_write_size << "freed_size:" << freed_size << dendl;
+  ldout(cct, 20) << "D3nDataCache: Before eviction _free_data_cache_size:" << _free_data_cache_size << ", _outstanding_write_size:" << _outstanding_write_size << "freed_size:" << freed_size << dendl;
   while (len >= (_free_data_cache_size - _outstanding_write_size + freed_size)) {
-    ldout(cct, 20) << "DataCache: enter eviction, r=" << r << dendl;
+    ldout(cct, 20) << "D3nDataCache: enter eviction, r=" << r << dendl;
     r = lru_eviction();
     if (r < 0)
       return;
@@ -187,7 +187,7 @@ void DataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
     cache_lock.lock();
     outstanding_write_list.remove(oid);
     cache_lock.unlock();
-    ldout(cct, 1) << "DataCache: create_aio_wirte_request fail, r=" << r << dendl;
+    ldout(cct, 1) << "D3nDataCache: create_aio_wirte_request fail, r=" << r << dendl;
     return;
   }
 
@@ -197,20 +197,20 @@ void DataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
   eviction_lock.unlock();
 }
 
-bool DataCache::get(const string& oid)
+bool D3nDataCache::get(const string& oid)
 {
   bool exist = false;
   string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
   cache_lock.lock();
-  map<string, ChunkDataInfo*>::iterator iter = cache_map.find(oid);
+  map<string, D3nChunkDataInfo*>::iterator iter = cache_map.find(oid);
   if (!(iter == cache_map.end())) {
     // check inside cache whether file exists or not!!!! then make exist true;
-    struct ChunkDataInfo* chdo = iter->second;
+    struct D3nChunkDataInfo* chdo = iter->second;
     if (access(location.c_str(), F_OK ) != -1 ) { // file exists
       exist = true;
       {
         /*LRU*/
-        /*get ChunkDataInfo*/
+        /*get D3nChunkDataInfo*/
         eviction_lock.lock();
         lru_remove(chdo);
         lru_insert_head(chdo);
@@ -226,12 +226,12 @@ bool DataCache::get(const string& oid)
   return exist;
 }
 
-size_t DataCache::random_eviction()
+size_t D3nDataCache::random_eviction()
 {
   int n_entries = 0;
   int random_index = 0;
   size_t freed_size = 0;
-  ChunkDataInfo* del_entry;
+  D3nChunkDataInfo* del_entry;
   string del_oid, location;
 
   cache_lock.lock();
@@ -242,7 +242,7 @@ size_t DataCache::random_eviction()
   }
   srand (time(NULL));
   random_index = rand()%n_entries;
-  map<string, ChunkDataInfo*>::iterator iter = cache_map.begin();
+  map<string, D3nChunkDataInfo*>::iterator iter = cache_map.begin();
   std::advance(iter, random_index);
   del_oid = iter->first;
   del_entry =  iter->second;
@@ -258,11 +258,11 @@ size_t DataCache::random_eviction()
   return freed_size;
 }
 
-size_t DataCache::lru_eviction()
+size_t D3nDataCache::lru_eviction()
 {
   int n_entries = 0;
   size_t freed_size = 0;
-  ChunkDataInfo* del_entry;
+  D3nChunkDataInfo* del_entry;
   string del_oid, location;
 
   eviction_lock.lock();
@@ -277,8 +277,8 @@ size_t DataCache::lru_eviction()
     return -1;
   }
   del_oid = del_entry->oid;
-  ldout(cct, 20) << "DataCache: lru_eviction: oid to remove" << del_oid << dendl;
-  map<string, ChunkDataInfo*>::iterator iter = cache_map.find(del_entry->oid);
+  ldout(cct, 20) << "D3nDataCache: lru_eviction: oid to remove" << del_oid << dendl;
+  map<string, D3nChunkDataInfo*>::iterator iter = cache_map.find(del_entry->oid);
   if (iter != cache_map.end()) {
     cache_map.erase(del_oid); // oid
   }
@@ -291,14 +291,14 @@ size_t DataCache::lru_eviction()
 }
 
 
-void DataCache::remote_io(L2CacheRequest* l2request )
+void D3nDataCache::remote_io(L2CacheRequest* l2request )
 {
-  ldout(cct, 20) << "DataCache: Add task to remote IO" << dendl;
-  tp->addTask(new HttpL2Request(l2request, cct));
+  ldout(cct, 20) << "D3nDataCache: Add task to remote IO" << dendl;
+  tp->addTask(new D3nHttpL2Request(l2request, cct));
 }
 
 
-std::vector<string> split(const std::string &s, char * delim)
+std::vector<string> d3n_split(const std::string &s, char * delim)
 {
   stringstream ss(s);
   std::string item;
@@ -309,21 +309,21 @@ std::vector<string> split(const std::string &s, char * delim)
   return tokens;
 }
 
-void DataCache::push_l2_request(L2CacheRequest* l2request )
+void D3nDataCache::push_l2_request(L2CacheRequest* l2request )
 {
-  tp->addTask(new HttpL2Request(l2request, cct));
+  tp->addTask(new D3nHttpL2Request(l2request, cct));
 }
 
-static size_t _l2_response_cb(void *ptr, size_t size, size_t nmemb, void* param)
+static size_t _d3n_l2_response_cb(void *ptr, size_t size, size_t nmemb, void* param)
 {
   L2CacheRequest* req = static_cast<L2CacheRequest*>(param);
   req->pbl->append((char *)ptr, size*nmemb);
   return size*nmemb;
 }
 
-void HttpL2Request::run()
+void D3nHttpL2Request::run()
 {
-  get_obj_data* d = static_cast<get_obj_data*>(req->op_data);
+  d3n_get_obj_data* d = static_cast<d3n_get_obj_data*>(req->op_data);
   int n_retries = cct->_conf->rgw_d3n_l2_datacache_request_thread_num;
   int r = 0;
 
@@ -338,13 +338,13 @@ void HttpL2Request::run()
   }
 }
 
-int HttpL2Request::submit_http_request()
+int D3nHttpL2Request::submit_http_request()
 {
   CURLcode res;
   string auth_token;
   string range = std::to_string(req->ofs + req->read_ofs)+ "-"+ std::to_string(req->ofs + req->read_ofs + req->len - 1);
   struct curl_slist* header{nullptr};
-  get_obj_data* d = static_cast<get_obj_data*>(req->op_data);
+  d3n_get_obj_data* d = static_cast<d3n_get_obj_data*>(req->op_data);
 
   string req_uri;
   string uri,dest;
@@ -382,7 +382,7 @@ int HttpL2Request::submit_http_request()
   else if (s->dialect == "swift") {
     header = curl_slist_append(header, auth_token.c_str());
   } else {
-    ldout(cct, 10) << "DataCache: curl_easy_perform() failed " << dendl;
+    ldout(cct, 10) << "D3nDataCache: curl_easy_perform() failed " << dendl;
     return -1;
   }
 
@@ -393,20 +393,20 @@ int HttpL2Request::submit_http_request()
     curl_easy_setopt(curl_handle, CURLOPT_URL, uri.c_str());
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
-    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _l2_response_cb);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _d3n_l2_response_cb);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void*)req);
     res = curl_easy_perform(curl_handle);
     curl_easy_reset(curl_handle);
     curl_slist_free_all(header);
   }
   if (res != CURLE_OK) {
-    ldout(cct, 10) << "DataCache: curl_easy_perform() failed " << curl_easy_strerror(res) << " oid " << req->oid << " offset " << req->ofs + req->read_ofs  <<dendl;
+    ldout(cct, 10) << "D3nDataCache: curl_easy_perform() failed " << curl_easy_strerror(res) << " oid " << req->oid << " offset " << req->ofs + req->read_ofs  <<dendl;
     return -1;
   }
   return 0;
 }
 
-int HttpL2Request::sign_request(RGWAccessKey& key, RGWEnv& env, req_info& info)
+int D3nHttpL2Request::sign_request(RGWAccessKey& key, RGWEnv& env, req_info& info)
 {
   // don't sign if no key is provided
   if (key.key.empty()) {
