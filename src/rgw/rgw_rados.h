@@ -30,7 +30,7 @@
 #include "rgw_service.h"
 #include "rgw_sal.h"
 #include "rgw_aio.h"
-#include "rgw_cacherequest.h"
+#include "rgw_d3n_cacherequest.h"
 
 #include "services/svc_rados.h"
 #include "services/svc_bi_rados.h"
@@ -1597,7 +1597,7 @@ struct d3n_get_obj_data : public RefCountedObject{
   std::list<bufferlist> read_list;
   std::list<string> pending_oid_list;
   std::map<off_t, get_obj_io> io_map;
-  std::map<off_t, CacheRequest*> cache_aio_map;
+  std::map<off_t, D3nCacheRequest*> cache_aio_map;
   std::map<off_t, librados::AioCompletion *> completion_map;
 
   char *tmp_data;
@@ -1627,14 +1627,14 @@ struct d3n_get_obj_data : public RefCountedObject{
   string get_pending_oid();
   bool deterministic_hash_is_local(string oid);
   string deterministic_hash(string oid);
-  int add_l1_request(struct L1CacheRequest** cc, bufferlist* pbl, string oid,
+  int add_l1_request(struct D3nL1CacheRequest** cc, bufferlist* pbl, string oid,
       size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc);
-  int add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, string oid,
+  int add_l2_request(struct D3nL2CacheRequest** cc, bufferlist* pbl, string oid,
       off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion *lc);
-  void cache_aio_completion_cb(CacheRequest* c);
+  void cache_aio_completion_cb(D3nCacheRequest* c);
   void cache_unmap_io(off_t ofs);
 
-  int submit_l1_aio_read(L1CacheRequest* cc);
+  int submit_l1_aio_read(D3nL1CacheRequest* cc);
   int submit_l1_io_read(bufferlist* pbl, int len, string oid);
 
 

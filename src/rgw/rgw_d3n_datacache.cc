@@ -291,7 +291,7 @@ size_t D3nDataCache::lru_eviction()
 }
 
 
-void D3nDataCache::remote_io(L2CacheRequest* l2request )
+void D3nDataCache::remote_io(D3nL2CacheRequest* l2request )
 {
   ldout(cct, 20) << "D3nDataCache: Add task to remote IO" << dendl;
   tp->addTask(new D3nHttpL2Request(l2request, cct));
@@ -309,14 +309,14 @@ std::vector<string> d3n_split(const std::string &s, char * delim)
   return tokens;
 }
 
-void D3nDataCache::push_l2_request(L2CacheRequest* l2request )
+void D3nDataCache::push_l2_request(D3nL2CacheRequest* l2request )
 {
   tp->addTask(new D3nHttpL2Request(l2request, cct));
 }
 
 static size_t _d3n_l2_response_cb(void *ptr, size_t size, size_t nmemb, void* param)
 {
-  L2CacheRequest* req = static_cast<L2CacheRequest*>(param);
+  D3nL2CacheRequest* req = static_cast<D3nL2CacheRequest*>(param);
   req->pbl->append((char *)ptr, size*nmemb);
   return size*nmemb;
 }

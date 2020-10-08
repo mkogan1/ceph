@@ -1,8 +1,8 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
-#ifndef RGW_CACHEREQUEST_H
-#define RGW_CACHEREQUEST_H
+#ifndef RGW_D3NCACHEREQUEST_H
+#define RGW_D3NCACHEREQUEST_H
 
 #include <stdlib.h>
 #include <aio.h>
@@ -10,7 +10,7 @@
 #include "include/rados/librados.hpp"
 #include "include/Context.h"
 
-class CacheRequest {
+class D3nCacheRequest {
   public:
     std::mutex lock;
     int sequence;
@@ -24,19 +24,19 @@ class CacheRequest {
     off_t read_ofs;
     Context *onack;
     CephContext* cct;
-    CacheRequest(CephContext* _cct) : sequence(0), pbl(nullptr), op_data(nullptr), ofs(0), lc(nullptr), read_ofs(0), cct(_cct) {};
-    virtual ~CacheRequest(){};
+    D3nCacheRequest(CephContext* _cct) : sequence(0), pbl(nullptr), op_data(nullptr), ofs(0), lc(nullptr), read_ofs(0), cct(_cct) {};
+    virtual ~D3nCacheRequest(){};
     virtual void release()=0;
     virtual void cancel_io()=0;
     virtual int status()=0;
     virtual void finish()=0;
 };
 
-struct L1CacheRequest : public CacheRequest {
+struct D3nL1CacheRequest : public D3nCacheRequest {
   int stat;
   struct aiocb* paiocb;
-  L1CacheRequest(CephContext* _cct) :  CacheRequest(_cct), stat(-1), paiocb(NULL) {}
-  ~L1CacheRequest(){}
+  D3nL1CacheRequest(CephContext* _cct) :  D3nCacheRequest(_cct), stat(-1), paiocb(NULL) {}
+  ~D3nL1CacheRequest(){}
   void release (){
     lock.lock();
     free((void*)paiocb->aio_buf);
@@ -74,13 +74,13 @@ struct L1CacheRequest : public CacheRequest {
   }
 };
 
-struct L2CacheRequest : public CacheRequest {
+struct D3nL2CacheRequest : public D3nCacheRequest {
   size_t read;
   int stat;
   void *tp;
   string dest;
-  L2CacheRequest(CephContext* _cct) : CacheRequest(_cct), read(0), stat(-1) {}
-  ~L2CacheRequest(){}
+  D3nL2CacheRequest(CephContext* _cct) : D3nCacheRequest(_cct), read(0), stat(-1) {}
+  ~D3nL2CacheRequest(){}
   void release (){
     lock.lock();
     lock.unlock();

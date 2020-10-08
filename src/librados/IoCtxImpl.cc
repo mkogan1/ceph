@@ -738,8 +738,8 @@ int librados::IoCtxImpl::aio_operate_read(const object_t &oid,
   return 0;
 }
 
-int librados::IoCtxImpl::cache_aio_operate_read(const object_t &oid, 
-    AioCompletionImpl *c, CacheRequest *cc) {
+int librados::IoCtxImpl::d3n_cache_aio_operate_read(const object_t &oid, 
+    AioCompletionImpl *c, D3nCacheRequest *cc) {
 
    FUNCTRACE(client->cct);
    Context *oncomplete = new C_aio_Complete(c);

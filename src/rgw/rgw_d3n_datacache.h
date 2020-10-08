@@ -14,7 +14,7 @@
 #include "include/Context.h"
 #include "include/lru.h"
 #include "rgw_threadpool.h"
-#include "rgw_cacherequest.h"
+#include "rgw_d3n_cacherequest.h"
 
 
 /*D3nDataCache*/
@@ -104,9 +104,9 @@ public:
   size_t lru_eviction();
   std::string hash_uri(std::string dest);
   std::string deterministic_hash(std::string oid);
-  void remote_io(struct L2CacheRequest* l2request);
+  void remote_io(struct D3nL2CacheRequest* l2request);
   void init_l2_request_cb(librados::completion_t c, void *arg);
-  void push_l2_request(L2CacheRequest* l2request);
+  void push_l2_request(D3nL2CacheRequest* l2request);
   void l2_http_request(off_t ofs , off_t len, std::string oid);
   void init(CephContext *_cct) {
     cct = _cct;
@@ -273,9 +273,9 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t ob
   d->add_pending_oid(read_obj.oid);
 
   if (data_cache.get(read_obj.oid)) {
-    L1CacheRequest* cc;
+    D3nL1CacheRequest* cc;
     d->add_l1_request(&cc, pbl, read_obj.oid, len, obj_ofs, read_ofs, key, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<CacheRequest*>(cc));
+    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<D3nCacheRequest*>(cc));
     r = d->submit_l1_aio_read(cc);
     if (r != 0 ){
       lsubdout(g_ceph_context, rgw, 0) << "Error cache_aio_read failed err=" << r << dendl;
@@ -290,9 +290,9 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t ob
       goto done_err;
     }
   }  else {
-    L2CacheRequest* cc;
+    D3nL2CacheRequest* cc;
     d->add_l2_request(&cc, pbl, read_obj.oid, obj_ofs, read_ofs, len, key, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<CacheRequest*>(cc));
+    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<D3nCacheRequest*>(cc));
     data_cache.push_l2_request(cc);
   }
 
@@ -345,7 +345,7 @@ private:
 
 class D3nHttpL2Request : public Task {
 public:
-  D3nHttpL2Request(L2CacheRequest* _req, CephContext* _cct) : Task(), req(_req), cct(_cct) {
+  D3nHttpL2Request(D3nL2CacheRequest* _req, CephContext* _cct) : Task(), req(_req), cct(_cct) {
     pthread_mutex_init(&qmtx, 0);
     pthread_cond_init(&wcond, 0);
   }
@@ -363,7 +363,7 @@ private:
 private:
   pthread_mutex_t qmtx;
   pthread_cond_t wcond;
-  L2CacheRequest* req;
+  D3nL2CacheRequest* req;
   CURL *curl_handle;
   CephContext *cct;
 };

@@ -6531,10 +6531,10 @@ string d3n_get_obj_data::get_pending_oid()
   return str;
 }
 
-int d3n_get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, string oid,
+int d3n_get_obj_data::add_l2_request(struct D3nL2CacheRequest** cc, bufferlist* pbl, string oid,
                 off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion* lc)
 {
-  L2CacheRequest* l2request = new L2CacheRequest(cct);
+  D3nL2CacheRequest* l2request = new D3nL2CacheRequest(cct);
   l2request->sequence = sequence; sequence+=1;
   l2request->ofs = obj_ofs;
   l2request->len = len;
@@ -6554,10 +6554,10 @@ int d3n_get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl
   return 0;
 }
 
-int d3n_get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, string oid,
+int d3n_get_obj_data::add_l1_request(struct D3nL1CacheRequest** cc, bufferlist *pbl, string oid,
 		size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc)
 {
-  L1CacheRequest* c = new L1CacheRequest(cct);
+  D3nL1CacheRequest* c = new D3nL1CacheRequest(cct);
   c->sequence = sequence++;
   c->pbl = pbl;
   c->oid = oid;
@@ -6618,7 +6618,7 @@ END:
   return r;
 }
 
-int d3n_get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
+int d3n_get_obj_data::submit_l1_aio_read(D3nL1CacheRequest* cc)
 {
   int r = 0;
   if((r= ::aio_read(cc->paiocb)) != 0) {
@@ -6629,11 +6629,11 @@ int d3n_get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
 
 void _cache_aio_completion_cb(sigval_t sigval)
 {
-  CacheRequest* c = static_cast<CacheRequest*>(sigval.sival_ptr);
+  D3nCacheRequest* c = static_cast<D3nCacheRequest*>(sigval.sival_ptr);
   c->op_data->cache_aio_completion_cb(c);
 }
 
-void d3n_get_obj_data::cache_aio_completion_cb(CacheRequest* c)
+void d3n_get_obj_data::cache_aio_completion_cb(D3nCacheRequest* c)
 {
   int status = c->status();
   if (status == ECANCELED) {
@@ -6653,7 +6653,7 @@ void d3n_get_obj_data::cache_unmap_io(off_t ofs)
 {
 
   cache_lock.lock();
-  map<off_t, struct CacheRequest*>::iterator iter = cache_aio_map.find(ofs);
+  map<off_t, struct D3nCacheRequest*>::iterator iter = cache_aio_map.find(ofs);
   if (iter == cache_aio_map.end()) {
     cache_lock.unlock();
     return;
