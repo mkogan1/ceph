@@ -380,6 +380,30 @@ void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp
     return;
   }
 
+  federated_user.ns.clear();
+  //Check for old users which wouldn't have been created in oidc namespace
+  if (rgw_get_user_info_by_uid(store, federated_user, user_info) >= 0) {
+    /* Succeeded. */
+    return;
+  }
+
+  //Check if user_id.buckets already exists, may have been from the time, when shadow users didnt exist
+  RGWStorageStats stats;
+  int ret = store->get_user_stats(federated_user, stats);
+  if (ret < 0 && ret != -ENOENT) {
+    ldpp_dout(dpp, 0) << "ERROR: reading stats for the user returned error " << ret << dendl;
+    return;
+  }
+  if (ret == -ENOENT) { /* in case of ENOENT, which means user doesnt have buckets */
+    //In this case user will be created in oidc namespace
+    ldpp_dout(dpp, 5) << "NOTICE: incoming user has no buckets " << federated_user << dendl;
+    federated_user.ns = "oidc";
+  } else {
+    //User already has buckets associated, hence wont be created in oidc namespace.
+    ldpp_dout(dpp, 5) << "NOTICE: incoming user already has buckets associated " << federated_user << ", won't be created in oidc namespace"<< dendl;
+    federated_user.ns = "";
+  }
+
   ldpp_dout(dpp, 0) << "NOTICE: couldn't map oidc federated user " << federated_user << dendl;
   create_account(dpp, federated_user, token_claims.user_name, user_info);
 }
