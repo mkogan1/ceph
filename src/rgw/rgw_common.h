@@ -780,6 +780,8 @@ struct RGWUserInfo
   set<string> mfa_ids;
   string assumed_role_arn;
 
+  static bool empty(RGWUserInfo* i) { return (!i || i->user_id.id.empty()); }
+
   RGWUserInfo()
     : suspended(0),
       max_buckets(RGW_DEFAULT_MAX_BUCKETS),
