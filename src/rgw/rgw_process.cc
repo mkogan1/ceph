@@ -175,6 +175,7 @@ int process_request(RGWRados* const store,
                     OpsLogSocket* const olog,
                     optional_yield yield,
 		    rgw::dmclock::Scheduler *scheduler,
+                    string* user,
                     int* http_ret)
 {
   int ret = client_io->init(g_ceph_context);
@@ -301,6 +302,11 @@ done:
     *http_ret = s->err.http_ret;
   }
   int op_ret = 0;
+
+  if (user && !RGWUserInfo::empty(s->user)) {
+    *user = s->user->user_id.to_str();
+  }
+
   if (op) {
     op_ret = op->get_ret();
     ldpp_dout(op, 2) << "op status=" << op_ret << dendl;
