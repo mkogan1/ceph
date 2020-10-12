@@ -2435,16 +2435,15 @@ int RGWDataChangesLog::renew_entries()
    * it later, so we keep two lists under the map */
   map<int, pair<list<rgw_bucket_shard>, list<cls_log_entry> > > m;
 
-  lock.Lock();
+  std::unique_lock l(lock);
   map<rgw_bucket_shard, bool> entries;
   entries.swap(cur_cycle);
-  lock.Unlock();
+  l.unlock();
 
-  map<rgw_bucket_shard, bool>::iterator iter;
   string section;
-  real_time ut = real_clock::now();
-  for (iter = entries.begin(); iter != entries.end(); ++iter) {
-    const rgw_bucket_shard& bs = iter->first;
+  auto ut = real_clock::now();
+  for (auto iter = entries.begin(); iter != entries.end(); ++iter) {
+    const auto& bs = iter->first;
 
     int index = choose_oid(bs);
 
@@ -2463,11 +2462,10 @@ int RGWDataChangesLog::renew_entries()
     m[index].second.emplace_back(std::move(entry));
   }
 
-  map<int, pair<list<rgw_bucket_shard>, list<cls_log_entry> > >::iterator miter;
-  for (miter = m.begin(); miter != m.end(); ++miter) {
-    list<cls_log_entry>& entries = miter->second.second;
+  for (auto miter = m.begin(); miter != m.end(); ++miter) {
+    auto& entries = miter->second.second;
 
-    real_time now = real_clock::now();
+    auto now = real_clock::now();
 
     int ret = store->time_log_add(oids[miter->first], entries, NULL);
     if (ret < 0) {
@@ -2480,9 +2478,8 @@ int RGWDataChangesLog::renew_entries()
     real_time expiration = now;
     expiration += make_timespan(cct->_conf->rgw_data_log_window);
 
-    list<rgw_bucket_shard>& buckets = miter->second.first;
-    list<rgw_bucket_shard>::iterator liter;
-    for (liter = buckets.begin(); liter != buckets.end(); ++liter) {
+    auto& buckets = miter->second.first;
+    for (auto liter = buckets.begin(); liter != buckets.end(); ++liter) {
       update_renewed(*liter, expiration);
     }
   }
@@ -2501,17 +2498,20 @@ void RGWDataChangesLog::_get_change(const rgw_bucket_shard& bs, ChangeStatusPtr&
 
 void RGWDataChangesLog::register_renew(rgw_bucket_shard& bs)
 {
-  Mutex::Locker l(lock);
+  std::lock_guard l(lock);
   cur_cycle[bs] = true;
 }
 
-void RGWDataChangesLog::update_renewed(rgw_bucket_shard& bs, real_time& expiration)
+void RGWDataChangesLog::update_renewed(rgw_bucket_shard& bs,
+				       real_time expiration)
 {
-  Mutex::Locker l(lock);
+  std::lock_guard l(lock);
   ChangeStatusPtr status;
   _get_change(bs, status);
 
-  ldout(cct, 20) << "RGWDataChangesLog::update_renewd() bucket_name=" << bs.bucket.name << " shard_id=" << bs.shard_id << " expiration=" << expiration << dendl;
+  ldout(cct, 20) << "RGWDataChangesLog::update_renewd() bucket_name="
+		 << bs.bucket.name << " shard_id=" << bs.shard_id
+		 << " expiration=" << expiration << dendl;
   status->cur_expiration = expiration;
 }
 
@@ -2534,22 +2534,24 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   int index = choose_oid(bs);
   mark_modified(index, bs);
 
-  lock.Lock();
+  std::unique_lock l(lock);
 
   ChangeStatusPtr status;
   _get_change(bs, status);
 
-  lock.Unlock();
+  l.unlock();
 
   real_time now = real_clock::now();
 
-  status->lock->Lock();
+  std::unique_lock sl(status->lock);
 
-  ldout(cct, 20) << "RGWDataChangesLog::add_entry() bucket.name=" << bucket.name << " shard_id=" << shard_id << " now=" << now << " cur_expiration=" << status->cur_expiration << dendl;
+  ldout(cct, 20) << "RGWDataChangesLog::add_entry() bucket.name=" << bucket.name
+		 << " shard_id=" << shard_id << " now=" << now
+		 << " cur_expiration=" << status->cur_expiration << dendl;
 
   if (now < status->cur_expiration) {
     /* no need to send, recently completed */
-    status->lock->Unlock();
+    sl.unlock();
 
     register_renew(bs);
     return 0;
@@ -2563,7 +2565,7 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
     ceph_assert(cond);
 
     status->cond->get();
-    status->lock->Unlock();
+    sl.unlock();
 
     int ret = cond->wait();
     cond->put();
@@ -2587,8 +2589,8 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
     expiration = now;
     expiration += ceph::make_timespan(cct->_conf->rgw_data_log_window);
 
-    status->lock->Unlock();
-  
+    sl.unlock();
+
     bufferlist bl;
     rgw_data_change change;
     change.entity_type = ENTITY_TYPE_BUCKET;
@@ -2603,7 +2605,7 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
 
     now = real_clock::now();
 
-    status->lock->Lock();
+    sl.lock();
 
   } while (!ret && real_clock::now() > expiration);
 
@@ -2613,7 +2615,7 @@ int RGWDataChangesLog::add_entry(rgw_bucket& bucket, int shard_id) {
   status->cur_expiration = status->cur_sent; /* time of when operation started, not completed */
   status->cur_expiration += make_timespan(cct->_conf->rgw_data_log_window);
   status->cond = NULL;
-  status->lock->Unlock();
+  sl.unlock();
 
   cond->done(ret);
   cond->put();
@@ -2732,7 +2734,7 @@ RGWDataChangesLog::~RGWDataChangesLog() {
   delete[] oids;
 }
 
-void *RGWDataChangesLog::ChangesRenewThread::entry() {
+void* RGWDataChangesLog::ChangesRenewThread::entry() {
   do {
     dout(2) << "RGWDataChangesLog::ChangesRenewThread: start" << dendl;
     int r = log->renew_entries();
@@ -2744,41 +2746,42 @@ void *RGWDataChangesLog::ChangesRenewThread::entry() {
       break;
 
     int interval = cct->_conf->rgw_data_log_window * 3 / 4;
-    lock.Lock();
-    cond.WaitInterval(lock, utime_t(interval, 0));
-    lock.Unlock();
+    std::unique_lock l(lock);
+    cond.wait_for(l, interval * 1s);
+    l.unlock();
   } while (!log->going_down());
 
-  return NULL;
+  return nullptr;
 }
 
 void RGWDataChangesLog::ChangesRenewThread::stop()
 {
-  Mutex::Locker l(lock);
-  cond.Signal();
+  std::lock_guard l(lock);
+  cond.notify_all();
 }
 
 void RGWDataChangesLog::mark_modified(int shard_id, const rgw_bucket_shard& bs)
 {
   auto key = bs.get_key();
-  modified_lock.get_read();
-  map<int, set<string> >::iterator iter = modified_shards.find(shard_id);
+
+  std::shared_lock rl(modified_lock);
+  auto iter = modified_shards.find(shard_id);
   if (iter != modified_shards.end()) {
-    set<string>& keys = iter->second;
+    auto& keys = iter->second;
     if (keys.find(key) != keys.end()) {
-      modified_lock.unlock();
+      rl.unlock();
       return;
     }
   }
-  modified_lock.unlock();
+  rl.unlock();
 
-  RWLock::WLocker wl(modified_lock);
+  std::unique_lock wl(modified_lock);
   modified_shards[shard_id].insert(key);
 }
 
 void RGWDataChangesLog::read_clear_modified(map<int, set<string> > &modified)
 {
-  RWLock::WLocker wl(modified_lock);
+  std::unique_lock wl(modified_lock);
   modified.swap(modified_shards);
   modified_shards.clear();
 }
