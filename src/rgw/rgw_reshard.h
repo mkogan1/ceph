@@ -14,12 +14,12 @@
 
 #include "include/rados/librados.hpp"
 #include "common/ceph_time.h"
+#include "common/fault_injector.h"
 #include "cls/rgw/cls_rgw_types.h"
 #include "cls/lock/cls_lock_client.h"
 #include "rgw_bucket.h"
+#include "rgw_common.h"
 
-
-class CephContext;
 class RGWRados;
 
 class RGWBucketReshardLock {
@@ -83,7 +83,7 @@ private:
   int update_bucket(rgw::BucketReshardState s);
 
   int do_reshard(int num_shards,
-		 int max_entries,
+                 int max_entries, FaultInjector<std::string_view>& f,
                  bool verbose,
                  ostream *os,
 		 Formatter *formatter);
@@ -95,9 +95,10 @@ public:
 		   const RGWBucketInfo& _bucket_info,
                    const std::map<string, bufferlist>& _bucket_attrs,
 		   RGWBucketReshardLock* _outer_reshard_lock);
-  int execute(int num_shards, int max_op_entries,
-              bool verbose = false, ostream *out = nullptr,
-              Formatter *formatter = nullptr,
+  int execute(int num_shards, FaultInjector<std::string_view>& f,
+              int max_op_entries,
+              bool verbose = false, std::ostream *out = nullptr,
+              ceph::Formatter *formatter = nullptr,
 	      RGWReshard *reshard_log = nullptr);
   int get_status(std::list<cls_rgw_bucket_instance_entry> *status);
   int cancel();
