@@ -412,12 +412,12 @@ enum DataLogEntityType {
 
 struct rgw_data_change {
   DataLogEntityType entity_type;
-  string key;
-  real_time timestamp;
+  std::string key;
+  ceph::real_time timestamp;
 
-  void encode(bufferlist& bl) const {
+  void encode(ceph::buffer::list& bl) const {
     ENCODE_START(1, 1, bl);
-    uint8_t t = (uint8_t)entity_type;
+    auto t = std::uint8_t(entity_type);
     encode(t, bl);
     encode(key, bl);
     encode(timestamp, bl);
@@ -426,25 +426,25 @@ struct rgw_data_change {
 
   void decode(bufferlist::const_iterator& bl) {
      DECODE_START(1, bl);
-     uint8_t t;
+     std::uint8_t t;
      decode(t, bl);
-     entity_type = (DataLogEntityType)t;
+     entity_type = DataLogEntityType(t);
      decode(key, bl);
      decode(timestamp, bl);
      DECODE_FINISH(bl);
   }
 
-  void dump(Formatter *f) const;
-  void decode_json(JSONObj *obj);
+  void dump(ceph::Formatter* f) const;
+  void decode_json(JSONObj* obj);
 };
 WRITE_CLASS_ENCODER(rgw_data_change)
 
 struct rgw_data_change_log_entry {
-  string log_id;
-  real_time log_timestamp;
+  std::string log_id;
+  ceph::real_time log_timestamp;
   rgw_data_change entry;
 
-  void encode(bufferlist& bl) const {
+  void encode(ceph::buffer::list& bl) const {
     ENCODE_START(1, 1, bl);
     encode(log_id, bl);
     encode(log_timestamp, bl);
@@ -452,7 +452,7 @@ struct rgw_data_change_log_entry {
     ENCODE_FINISH(bl);
   }
 
-  void decode(bufferlist::const_iterator& bl) {
+  void decode(ceph::buffer::list::const_iterator& bl) {
      DECODE_START(1, bl);
      decode(log_id, bl);
      decode(log_timestamp, bl);
@@ -460,17 +460,17 @@ struct rgw_data_change_log_entry {
      DECODE_FINISH(bl);
   }
 
-  void dump(Formatter *f) const;
-  void decode_json(JSONObj *obj);
+  void dump(ceph::Formatter* f) const;
+  void decode_json(JSONObj* obj);
 };
 WRITE_CLASS_ENCODER(rgw_data_change_log_entry)
 
 struct RGWDataChangesLogInfo {
-  string marker;
-  real_time last_update;
+  std::string marker;
+  ceph::real_time last_update;
 
-  void dump(Formatter *f) const;
-  void decode_json(JSONObj *obj);
+  void dump(ceph::Formatter* f) const;
+  void decode_json(JSONObj* obj);
 };
 
 namespace rgw {
@@ -483,49 +483,46 @@ class RGWDataChangesLog {
   rgw::BucketChangeObserver *observer = nullptr;
 
   int num_shards;
-  string *oids;
+  std::string* oids;
 
-  Mutex lock;
-  RWLock modified_lock;
-  map<int, set<string> > modified_shards;
+  ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::lock");
+  ceph::shared_mutex modified_lock =
+    ceph::make_shared_mutex("RGWDataChangesLog::modified_lock");
+  std::map<int, std::set<std::string>> modified_shards;
 
   std::atomic<bool> down_flag = { false };
 
   struct ChangeStatus {
-    real_time cur_expiration;
-    real_time cur_sent;
-    bool pending;
-    RefCountedCond *cond;
-    Mutex *lock;
+    ceph::real_time cur_expiration;
+    ceph::real_time cur_sent;
+    bool pending = false;
+    RefCountedCond *cond = nullptr;
+    ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::ChangeStatus");
 
-    ChangeStatus() : pending(false), cond(NULL) {
-      lock = new Mutex("RGWDataChangesLog::ChangeStatus");
-    }
+    ChangeStatus() = default;
 
-    ~ChangeStatus() {
-      delete lock;
-    }
+    ~ChangeStatus() = default;
   };
 
-  typedef std::shared_ptr<ChangeStatus> ChangeStatusPtr;
+  using ChangeStatusPtr = std::shared_ptr<ChangeStatus>;
 
   lru_map<rgw_bucket_shard, ChangeStatusPtr> changes;
 
-  map<rgw_bucket_shard, bool> cur_cycle;
+  std::map<rgw_bucket_shard, bool> cur_cycle;
 
   void _get_change(const rgw_bucket_shard& bs, ChangeStatusPtr& status);
   void register_renew(rgw_bucket_shard& bs);
-  void update_renewed(rgw_bucket_shard& bs, real_time& expiration);
+  void update_renewed(rgw_bucket_shard& bs, ceph::real_time expiration);
 
   class ChangesRenewThread : public Thread {
-    CephContext *cct;
+    CephContext* cct;
     RGWDataChangesLog *log;
-    Mutex lock;
-    Cond cond;
+    ceph::mutex lock = ceph::mutex("ChangesRenewThread::lock");
+    ceph::condition_variable cond;
 
   public:
-    ChangesRenewThread(CephContext *_cct, RGWDataChangesLog *_log) : cct(_cct), log(_log), lock("ChangesRenewThread::lock") {}
-    void *entry() override;
+    ChangesRenewThread(CephContext *_cct, RGWDataChangesLog *_log) : cct(_cct), log(_log) {}
+    void* entry() override;
     void stop();
   };
 
@@ -534,13 +531,12 @@ class RGWDataChangesLog {
 public:
 
   RGWDataChangesLog(CephContext *_cct, RGWRados *_store) : cct(_cct), store(_store),
-                                                           lock("RGWDataChangesLog::lock"), modified_lock("RGWDataChangesLog::modified_lock"),
                                                            changes(cct->_conf->rgw_data_log_changes_size) {
     num_shards = cct->_conf->rgw_data_log_num_shards;
 
-    oids = new string[num_shards];
+    oids = new std::string[num_shards];
 
-    string prefix = cct->_conf->rgw_data_log_obj_prefix;
+    std::string prefix = cct->_conf->rgw_data_log_obj_prefix;
 
     if (prefix.empty()) {
       prefix = "data_log";
@@ -574,10 +570,10 @@ public:
   int lock_exclusive(int shard_id, timespan duration, string& zone_id, string& owner_id);
   int unlock(int shard_id, string& zone_id, string& owner_id);
   struct LogMarker {
-    int shard;
-    string marker;
+    int shard = 0;
+    std::string marker;
 
-    LogMarker() : shard(0) {}
+    LogMarker() = default;
   };
   int list_entries(const real_time& start_time, const real_time& end_time, int max_entries,
                list<rgw_data_change_log_entry>& entries, LogMarker& marker, bool *ptruncated);
