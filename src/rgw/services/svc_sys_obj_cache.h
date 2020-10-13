@@ -50,9 +50,10 @@ protected:
   int get_attr(const rgw_raw_obj& obj, const char *name, bufferlist *dest) override;
 
   int set_attrs(const rgw_raw_obj& obj, 
-                map<string, bufferlist>& attrs,
-                map<string, bufferlist> *rmattrs,
-                RGWObjVersionTracker *objv_tracker);
+                std::map<std::string, bufferlist>& attrs,
+                std::map<std::string, bufferlist> *rmattrs,
+                RGWObjVersionTracker *objv_tracker,
+                bool exclusive) override;
 
   int remove(RGWSysObjectCtxBase& obj_ctx,
              RGWObjVersionTracker *objv_tracker,

@@ -160,7 +160,7 @@ protected:
   virtual int set_attrs(const rgw_raw_obj& obj, 
                         map<string, bufferlist>& attrs,
                         map<string, bufferlist> *rmattrs,
-                        RGWObjVersionTracker *objv_tracker);
+                        RGWObjVersionTracker *objv_tracker, bool exclusive);
 
   virtual int omap_get_all(const rgw_raw_obj& obj, std::map<string, bufferlist> *m);
   virtual int omap_get_vals(const rgw_raw_obj& obj,
