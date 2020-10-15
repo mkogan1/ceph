@@ -592,11 +592,11 @@ RGWDataChangesLog::RGWDataChangesLog(CephContext* cct, RGWRados* store)
   }
 
   try {
-    if (backing == "omap" || (backing == "auto" && omapexists)) {
-      be = std::make_unique<RGWDataChangesOmap>(cct, store);
-    } else if (backing != "omap") {
+    if (backing == "fifo" || (backing == "auto" && fifoexists)) {
       be = std::make_unique<RGWDataChangesFIFO>(cct, store->get_rados_handle(),
 						log_pool);
+    } else if (backing != "fifo") {
+      be = std::make_unique<RGWDataChangesOmap>(cct, store);
     }
   } catch (const std::system_error& e) {
     lderr(cct) << __PRETTY_FUNCTION__
@@ -609,7 +609,6 @@ RGWDataChangesLog::RGWDataChangesLog(CephContext* cct, RGWRados* store)
   renew_thread = make_named_thread("rgw_dt_lg_renew",
 				   &RGWDataChangesLog::renew_run, this);
 }
-
 
 int RGWDataChangesLog::choose_oid(const rgw_bucket_shard& bs) {
   const auto& name = bs.bucket.name;
