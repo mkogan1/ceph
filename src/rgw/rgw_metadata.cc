@@ -282,7 +282,7 @@ public:
 
   int get(RGWRados *store, string& entry, RGWMetadataObject **obj) override { return -ENOTSUP; }
   int put(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker,
-                  real_time mtime, JSONObj *obj, sync_type_t sync_type) override { return -ENOTSUP; }
+	  real_time mtime, JSONObj *obj, sync_type_t sync_type, bool from_remote_zone) override { return -ENOTSUP; }
 
   virtual void get_pool_and_oid(RGWRados *store, const string& key, rgw_pool& pool, string& oid) override {}
 
@@ -761,7 +761,7 @@ int RGWMetadataManager::get(string& metadata_key, Formatter *f)
 
 int RGWMetadataManager::put(string& metadata_key, bufferlist& bl,
                             RGWMetadataHandler::sync_type_t sync_type,
-                            obj_version *existing_version)
+                            bool from_remote_zone, obj_version *existing_version)
 {
   RGWMetadataHandler *handler;
   string entry;
@@ -795,7 +795,7 @@ int RGWMetadataManager::put(string& metadata_key, bufferlist& bl,
     return -EINVAL;
   }
 
-  ret = handler->put(store, entry, objv_tracker, mtime.to_real_time(), jo, sync_type);
+  ret = handler->put(store, entry, objv_tracker, mtime.to_real_time(), jo, sync_type, from_remote_zone);
   if (existing_version) {
     *existing_version = objv_tracker.read_version;
   }

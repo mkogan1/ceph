@@ -54,6 +54,16 @@ static constexpr size_t listing_max_entries = 1000;
 static RGWMetadataHandler *bucket_meta_handler = NULL;
 static RGWMetadataHandler *bucket_instance_meta_handler = NULL;
 
+void init_default_bucket_layout(CephContext *cct, RGWBucketInfo& info, const RGWZone& zone) {
+  info.layout.current_index.gen = 0;
+  info.layout.current_index.layout.normal.hash_type = rgw::BucketHashType::Mod;
+  info.layout.current_index.layout.type = rgw::BucketIndexType::Normal;
+
+  info.layout.current_index.layout.normal.num_shards = (
+      cct->_conf->rgw_override_bucket_index_max_shards > 0 ?
+      cct->_conf->rgw_override_bucket_index_max_shards : zone.bucket_index_max_shards);
+}
+
 // define as static when RGWBucket implementation completes
 void rgw_get_buckets_obj(const rgw_user& user_id, string& buckets_obj_id)
 {
@@ -2445,7 +2455,7 @@ public:
   }
 
   int put(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker,
-          real_time mtime, JSONObj *obj, sync_type_t sync_type) override {
+          real_time mtime, JSONObj *obj, sync_type_t sync_type, bool from_remote_zone) override {
     RGWBucketEntryPoint be, old_be;
     try {
       decode_json_obj(be, obj);
@@ -2760,7 +2770,7 @@ public:
   }
 
   int put(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker,
-          real_time mtime, JSONObj *obj, sync_type_t sync_type) override {
+          real_time mtime, JSONObj *obj, sync_type_t sync_type, bool from_remote_zone) override {
     if (entry.find("-deleted-") != string::npos) {
       RGWObjVersionTracker ot;
       RGWMetadataObject *robj;
@@ -2780,7 +2790,7 @@ public:
     }
 
     return RGWBucketMetadataHandler::put(store, entry, objv_tracker,
-                                         mtime, obj, sync_type);
+                                         mtime, obj, sync_type, from_remote_zone);
   }
 
 };
@@ -2808,7 +2818,8 @@ public:
   }
 
   int put(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker,
-          real_time mtime, JSONObj *obj, sync_type_t sync_type) override {
+          real_time mtime, JSONObj *obj, sync_type_t sync_type,
+	  bool from_remote_zone) override {
     RGWBucketCompleteInfo bci, old_bci;
     try {
       decode_json_obj(bci, obj);
@@ -2824,6 +2835,16 @@ public:
     bool exists = (ret != -ENOENT);
     if (ret < 0 && exists)
       return ret;
+
+    if (from_remote_zone) {
+      // don't sync bucket layout changes
+      if (!exists) {
+	init_default_bucket_layout(store->ctx(), bci.info, store->svc.zone->get_zone());
+      } else {
+	bci.info.layout = old_bci.info.layout;
+      }
+    }
+
 
     if (!exists || old_bci.info.bucket.bucket_id != bci.info.bucket.bucket_id) {
       /* a new bucket, we need to select a new bucket placement for it */

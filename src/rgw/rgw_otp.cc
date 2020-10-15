@@ -61,7 +61,7 @@ public:
   }
 
   int put(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker,
-          real_time mtime, JSONObj *obj, sync_type_t sync_mode) override {
+          real_time mtime, JSONObj *obj, sync_type_t sync_mode, bool from_remote_zone) override {
 
     list<rados::cls::otp::otp_info_t> devices;
     try {

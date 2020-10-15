@@ -78,7 +78,7 @@ public:
 
   virtual int get(RGWRados *store, string& entry, RGWMetadataObject **obj) = 0;
   virtual int put(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker,
-                  real_time mtime, JSONObj *obj, sync_type_t type) = 0;
+                  real_time mtime, JSONObj *obj, sync_type_t type, bool from_remote_zone) = 0;
   virtual int remove(RGWRados *store, string& entry, RGWObjVersionTracker& objv_tracker) = 0;
 
   virtual int list_keys_init(RGWRados *store, const string& marker, void **phandle) = 0;
@@ -366,7 +366,7 @@ public:
   int get(string& metadata_key, Formatter *f);
   int put(string& metadata_key, bufferlist& bl,
           RGWMetadataHandler::sync_type_t sync_mode,
-          obj_version *existing_version = NULL);
+          bool from_remote_zone, obj_version *existing_version = NULL);
   int remove(string& metadata_key);
 
   int list_keys_init(const string& section, void **phandle);
