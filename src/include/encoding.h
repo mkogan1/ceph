@@ -602,6 +602,32 @@ inline void decode(boost::optional<T> &p, bufferlist::const_iterator &bp)
 #pragma GCC diagnostic pop
 #pragma GCC diagnostic warning "-Wpragmas"
 
+// std optional
+template<typename T>
+inline void encode(const std::optional<T> &p, bufferlist &bl)
+{
+  __u8 present = static_cast<bool>(p);
+  encode(present, bl);
+  if (p)
+    encode(*p, bl);
+}
+
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+template<typename T>
+inline void decode(std::optional<T> &p, bufferlist::const_iterator &bp)
+{
+  __u8 present;
+  decode(present, bp);
+  if (present) {
+    p = T{};
+    decode(*p, bp);
+  } else {
+    p = std::nullopt;
+  }
+}
+
 // std::tuple
 template<typename... Ts>
 inline void encode(const std::tuple<Ts...> &t, bufferlist& bl)
