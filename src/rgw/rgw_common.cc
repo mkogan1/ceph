@@ -1967,7 +1967,7 @@ RGWBucketInfo::~RGWBucketInfo()
 }
 
 void RGWBucketInfo::encode(bufferlist& bl) const {
-  ENCODE_START(21, 4, bl);
+  ENCODE_START(22, 4, bl);
   encode(bucket, bl);
   encode(owner.id, bl);
   encode(flags, bl);
@@ -1977,15 +1977,12 @@ void RGWBucketInfo::encode(bufferlist& bl) const {
   encode(placement_rule, bl);
   encode(has_instance_obj, bl);
   encode(quota, bl);
-  encode(num_shards, bl);
-  encode(bucket_index_shard_hash_type, bl);
   encode(requester_pays, bl);
   encode(owner.tenant, bl);
   encode(has_website, bl);
   if (has_website) {
     encode(website_conf, bl);
   }
-  encode((uint32_t)index_type, bl);
   encode(swift_versioning, bl);
   if (swift_versioning) {
     encode(swift_ver_location, bl);
@@ -2002,11 +1999,12 @@ void RGWBucketInfo::encode(bufferlist& bl) const {
   if (has_sync_policy) {
     encode(*sync_policy, bl);
   }
+  encode(layout, bl);
   ENCODE_FINISH(bl);
 }
 
 void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
-  DECODE_START_LEGACY_COMPAT_LEN_32(21, 4, 4, bl);
+  DECODE_START_LEGACY_COMPAT_LEN_32(22, 4, 4, bl);
   decode(bucket, bl);
   if (struct_v >= 2) {
     string s;
@@ -2029,10 +2027,11 @@ void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
     decode(has_instance_obj, bl);
   if (struct_v >= 9)
     decode(quota, bl);
-  if (struct_v >= 10)
-    decode(num_shards, bl);
-  if (struct_v >= 11)
-    decode(bucket_index_shard_hash_type, bl);
+  static constexpr uint8_t new_layout_v = 21;
+  if (struct_v >= 10 && struct_v < new_layout_v)
+    decode(layout.current_index.layout.normal.num_shards, bl);
+  if (struct_v >= 11 && struct_v < new_layout_v)
+    decode(layout.current_index.layout.normal.hash_type, bl);
   if (struct_v >= 12)
     decode(requester_pays, bl);
   if (struct_v >= 13)
@@ -2045,12 +2044,12 @@ void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
       website_conf = RGWBucketWebsiteConf();
     }
   }
-  if (struct_v >= 15) {
+  if (struct_v >= 15 && struct_v < new_layout_v) {
     uint32_t it;
     decode(it, bl);
-    index_type = (RGWBucketIndexType)it;
+    layout.current_index.layout.type = (rgw::BucketIndexType)it;
   } else {
-    index_type = RGWBIType_Normal;
+    layout.current_index.layout.type = rgw::BucketIndexType::Normal;
   }
   swift_versioning = false;
   swift_ver_location.clear();
@@ -2083,6 +2082,9 @@ void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
     } else {
       sync_policy.reset();
     }
+  }
+  if (struct_v >= 22) {
+    decode(layout, bl);
   }
   
   DECODE_FINISH(bl);
