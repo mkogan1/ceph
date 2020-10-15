@@ -27,7 +27,8 @@ struct req_state;
 #define CREATION_DATE      "creation date"
 #define ENCODING           "encoding"
 #define LENGTH             "length"
-#define NAME               "name"
+// Changed so macro doesn't screw up later includes
+static constexpr auto NAME = "name";
 #define PIECE_LENGTH       "piece length"
 #define PIECES             "pieces"
 #define INFO_PIECES        "info"
