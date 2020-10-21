@@ -116,6 +116,7 @@ class Module(MgrModule):
     ]
     MODULE_OPTIONS = [
         {'name': MirrorSnapshotScheduleHandler.MODULE_OPTION_NAME},
+        {'name': MirrorSnapshotScheduleHandler.MODULE_OPTION_NAME_MAX_CONCURRENT_SNAP_CREATE, 'type': 'int', 'default': 10},
     ]
 
     mirror_snapshot_schedule = None
