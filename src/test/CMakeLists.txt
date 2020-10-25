@@ -383,6 +383,7 @@ target_link_libraries(ceph_test_librgw_admin_user
   ceph-common
   ${UNITTEST_LIBS}
   ${EXTRALIBS}
+  cls_2pc_queue_client
    )
 
 endif(${WITH_RADOSGW})
