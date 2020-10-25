@@ -3745,6 +3745,14 @@ void RGWPutObj::execute()
     }
   }
 
+  // make reservation for notification if needed
+  rgw::notify::reservation_t res(store, s, s->object);
+  const auto event_type = rgw::notify::ObjectCreatedPut;
+  op_ret = rgw::notify::publish_reserve(event_type, res);
+  if (op_ret < 0) {
+    return;
+  }
+
   // create the object processor
   rgw::AioThrottle aio(store->ctx()->_conf->rgw_put_obj_min_window_size);
   using namespace rgw::putobj;
@@ -4019,12 +4027,10 @@ void RGWPutObj::execute()
   }
 
   // send request to notification manager
-  const auto ret = rgw::notify::publish(s, obj.key, s->obj_size, mtime, etag, rgw::notify::ObjectCreatedPut, store);
+  const auto ret = rgw::notify::publish_commit(obj.key, s->obj_size, mtime, etag, event_type, res);
   if (ret < 0) {
-    ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	// TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	// this should be global conf (probably returnign a different handler)
-    // so we don't need to read the configured values before we perform it
+		ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+    // too late to rollback operation, hence op_ret is not set here
   }
 }
 
@@ -4080,6 +4086,14 @@ void RGWPostObj::execute()
     }
   } else if (!verify_bucket_permission_no_policy(this, s, RGW_PERM_WRITE)) {
     op_ret = -EACCES;
+    return;
+  }
+
+	// make reservation for notification if needed
+  rgw::notify::reservation_t res(store, s, s->object);
+  const auto event_type = rgw::notify::ObjectCreatedPost;
+  op_ret = rgw::notify::publish_reserve(event_type, res);
+  if (op_ret < 0) {
     return;
   }
 
@@ -4245,12 +4259,10 @@ void RGWPostObj::execute()
     }
   } while (is_next_file_to_upload());
 
-  const auto ret = rgw::notify::publish(s, s->object, ofs, ceph::real_clock::now(), etag, rgw::notify::ObjectCreatedPost, store);
+  const auto ret = rgw::notify::publish_commit(s->object, ofs, ceph::real_clock::now(), etag, event_type, res);
   if (ret < 0) {
-    ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	// TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	// this should be global conf (probably returnign a different handler)
-    // so we don't need to read the configured values before we perform it
+		ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+		// too late to rollback operation, hence op_ret is not set here
   }
 }
 
@@ -4741,6 +4753,26 @@ void RGWDeleteObj::execute()
       return;
     }
 
+		// cache the objects tags and metadata into the requests
+    // so it could be used in the notification mechanism
+    try {
+      populate_tags_in_request(s, attrs);
+    } catch (buffer::error& err) {
+      ldpp_dout(this, 5) << "WARNING: failed to populate delete request with object tags: " << err.what() << dendl;
+    }
+    populate_metadata_in_request(s, attrs);
+
+    // make reservation for notification if needed
+    // TODO: delete marker is set only after object is deleted
+    rgw::notify::reservation_t res(store, s, s->object);
+    const auto versioned_object = s->bucket_info.versioning_enabled();
+    const auto event_type = versioned_object && s->object.have_instance() ? 
+        rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
+    op_ret = rgw::notify::publish_reserve(event_type, res);
+    if (op_ret < 0) {
+      return;
+    }
+
     RGWObjectCtx *obj_ctx = static_cast<RGWObjectCtx *>(s->obj_ctx);
     obj_ctx->set_atomic(obj);
 
@@ -4801,14 +4833,12 @@ void RGWDeleteObj::execute()
     populate_metadata_in_request(s, attrs);
     const auto obj_state = obj_ctx->get_state(obj);
 
-    const auto ret = rgw::notify::publish(s, s->object, obj_state->size , obj_state->mtime, attrs[RGW_ATTR_ETAG].to_str(),
-        delete_marker && s->object.instance.empty() ? rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete,
-        store);
+    const auto ret = rgw::notify::publish_commit(s->object, obj_state->size , obj_state->mtime, attrs[RGW_ATTR_ETAG].to_str(),
+        event_type, res);
+
     if (ret < 0) {
-      ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	    // TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	    // this should be global conf (probably returnign a different handler)
-      // so we don't need to read the configured values before we perform it
+			ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+			// too late to rollback operation, hence op_ret is not set here
     }
   } else {
     op_ret = -EINVAL;
@@ -5060,6 +5090,14 @@ void RGWCopyObj::execute()
   if (init_common() < 0)
     return;
 
+	// make reservation for notification if needed
+  rgw::notify::reservation_t res(store, s, s->object);
+  const auto event_type = rgw::notify::ObjectCreatedCopy; 
+  op_ret = rgw::notify::publish_reserve(event_type, res);
+  if (op_ret < 0) {
+    return;
+  }
+
   rgw_obj src_obj(src_bucket, src_object);
   rgw_obj dst_obj(dest_bucket, dest_object);
 
@@ -5132,12 +5170,10 @@ void RGWCopyObj::execute()
 			   copy_obj_progress_cb, (void *)this
     );
 
-  const auto ret = rgw::notify::publish(s, s->object, s->obj_size, mtime, etag, rgw::notify::ObjectCreatedCopy, store);
+  const auto ret = rgw::notify::publish_commit(s->object, s->obj_size, mtime, etag, event_type, res);;
   if (ret < 0) {
-    ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	// TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	// this should be global conf (probably returnign a different handler)
-    // so we don't need to read the configured values before we perform it
+		ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+		// too late to rollback operation, hence op_ret is not set here
   }
 }
 
@@ -5762,6 +5798,14 @@ void RGWInitMultipart::execute()
     return;
   }
 
+	// make reservation for notification if needed
+  rgw::notify::reservation_t res(store, s, s->object);
+  const auto event_type = rgw::notify::ObjectCreatedPost;
+  op_ret = rgw::notify::publish_reserve(event_type, res);
+  if (op_ret < 0) {
+    return;
+  }
+
   do {
     char buf[33];
     gen_rand_alphanumeric(s->cct, buf, sizeof(buf) - 1);
@@ -5796,12 +5840,10 @@ void RGWInitMultipart::execute()
     op_ret = obj_op.write_meta(bl.length(), 0, attrs);
   } while (op_ret == -EEXIST);
   
-  const auto ret = rgw::notify::publish(s, s->object, s->obj_size, ceph::real_clock::now(), attrs[RGW_ATTR_ETAG].to_str(), rgw::notify::ObjectCreatedPost, store);
+  const auto ret = rgw::notify::publish_commit(s->object, s->obj_size, ceph::real_clock::now(), attrs[RGW_ATTR_ETAG].to_str(), event_type, res);
   if (ret < 0) {
-    ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	// TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	// this should be global conf (probably returnign a different handler)
-    // so we don't need to read the configured values before we perform it
+		ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+		// too late to rollback operation, hence op_ret is not set here
   }
 }
 
@@ -5900,6 +5942,14 @@ void RGWCompleteMultipart::execute()
 
   mp.init(s->object.name, upload_id);
   meta_oid = mp.get_meta();
+
+	// make reservation for notification if needed
+  rgw::notify::reservation_t res(store, s, s->object);
+  const auto event_type = rgw::notify::ObjectCreatedCompleteMultipartUpload;
+  op_ret = rgw::notify::publish_reserve(event_type, res);
+  if (op_ret < 0) {
+    return;
+  }
 
   int total_parts = 0;
   int handled_parts = 0;
@@ -6110,13 +6160,11 @@ void RGWCompleteMultipart::execute()
     ldpp_dout(this, 0) << "WARNING: failed to remove object " << meta_obj << dendl;
   }
   
-  const auto ret = rgw::notify::publish(s, s->object, ofs, ceph::real_clock::now(), final_etag_str, rgw::notify::ObjectCreatedCompleteMultipartUpload, store);
+  const auto ret = rgw::notify::publish_commit(s->object, ofs, ceph::real_clock::now(), final_etag_str, event_type, res);
 
   if (ret < 0) {
-    ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	// TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	// this should be global conf (probably returnign a different handler)
-    // so we don't need to read the configured values before we perform it
+		ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+		// too late to rollback operation, hence op_ret is not set here
   }
 }
 
@@ -6451,6 +6499,17 @@ void RGWDeleteMultiObj::execute()
       }
     }
 
+		// make reservation for notification if needed
+    const auto versioned_object = s->bucket_info.versioning_enabled();
+    rgw::notify::reservation_t res(store, s, obj.key); 
+    const auto event_type = versioned_object && obj.key.have_instance() ? 
+        rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
+    op_ret = rgw::notify::publish_reserve(event_type, res);
+    if (op_ret < 0) {
+      send_partial_response(*iter, false, "", op_ret);
+      continue;
+    }
+
     obj_ctx->set_atomic(obj);
 
     RGWRados::Object del_target(store, s->bucket_info, *obj_ctx, obj);
@@ -6472,14 +6531,10 @@ void RGWDeleteMultiObj::execute()
     bufferlist etag_bl;
     const auto etag = obj_state->get_attr(RGW_ATTR_ETAG, etag_bl) ? etag_bl.to_str() : "";
 
-    const auto ret = rgw::notify::publish(s, obj.key, obj_state->size, obj_state->mtime, etag, 
-            del_op.result.delete_marker && s->object.instance.empty() ? rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete,
-            store);
+    const auto ret = rgw::notify::publish_commit(obj.key, obj_state->size, obj_state->mtime, etag, event_type, res);
     if (ret < 0) {
-        ldpp_dout(this, 5) << "WARNING: publishing notification failed, with error: " << ret << dendl;
-	    // TODO: we should have conf to make send a blocking coroutine and reply with error in case sending failed
-	    // this should be global conf (probably returnign a different handler)
-        // so we don't need to read the configured values before we perform it
+			ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+			// too late to rollback operation, hence op_ret is not set here
     }
   }
 
