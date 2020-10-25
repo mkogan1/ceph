@@ -6,6 +6,9 @@
 #include <string>
 #include "common/ceph_time.h"
 #include "rgw_notify_event_type.h"
+#include "common/async/yield_context.h"
+#include "cls/2pc_queue/cls_2pc_queue_types.h"
+#include "rgw_pubsub.h"
 
 // forward declarations
 class RGWRados;
@@ -14,14 +17,63 @@ struct rgw_obj_key;
 
 namespace rgw::notify {
 
-// publish notification
-int publish(const req_state* s, 
-        const rgw_obj_key& key,
-        uint64_t size,
-        const ceph::real_time& mtime, 
-        const std::string& etag, 
-        EventType event_type,
-        RGWRados* store);
+// initialize the notification manager
+// notification manager is dequeing the 2-phase-commit queues
+// and send the notifications to the endpoints
+bool init(CephContext* cct, RGWRados* store);
+
+// shutdown the notification manager
+void shutdown();
+
+// create persistent delivery queue for a topic (endpoint)
+// this operation also add a topic name to the common (to all RGWs) list of all topics
+int add_persistent_topic(const std::string& topic_name, optional_yield y);
+
+// remove persistent delivery queue for a topic (endpoint)
+// this operation also remove the topic name from the common (to all RGWs) list of all topics
+int remove_persistent_topic(const std::string& topic_name, optional_yield y);
+
+// struct holding reservation information
+// populated in the publish_reserve call
+// then used to commit or abort the reservation
+struct reservation_t {
+  struct topic_t {
+    topic_t(const std::string& _configurationId, const rgw_pubsub_topic& _cfg, cls_2pc_reservation::id_t _res_id) :
+        configurationId(_configurationId), cfg(_cfg), res_id(_res_id) {}
+
+    const std::string configurationId;
+    const rgw_pubsub_topic cfg;
+    // res_id is reset after topic is committed/aborted
+    cls_2pc_reservation::id_t res_id;
+};
+
+std::vector<topic_t> topics;
+  RGWRados* const store;
+  const req_state* const s;
+  size_t size;
+  const rgw_obj_key& object;
+
+  reservation_t(RGWRados* _store, const req_state* _s, const rgw_obj_key& _object) :
+      store(_store), s(_s), object(_object) {}
+
+  // dtor doing resource leak guarding
+  // aborting the reservation if not already committed or aborted
+  ~reservation_t();
+};
+
+// create a reservation on the 2-phase-commit queue
+int publish_reserve(EventType event_type, reservation_t& reservation);
+
+// commit the reservation to the queue
+int publish_commit(const rgw_obj_key& obj,
+    uint64_t size,
+    const ceph::real_time& mtime,
+    const std::string& etag,
+    EventType event_type,
+    reservation_t& reservation);
+
+// cancel the reservation
+int publish_abort(reservation_t& reservation);
 
 }
 
