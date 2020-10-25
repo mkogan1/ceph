@@ -363,6 +363,8 @@ void rgw_pubsub_sub_dest::dump(Formatter *f) const
   encode_json("push_endpoint", push_endpoint, f);
   encode_json("push_endpoint_args", push_endpoint_args, f);
   encode_json("push_endpoint_topic", arn_topic, f);
+  encode_json("stored_secret", stored_secret, f);
+  encode_json("persistent", persistent, f);
 }
 
 void rgw_pubsub_sub_dest::dump_xml(Formatter *f) const
@@ -370,6 +372,8 @@ void rgw_pubsub_sub_dest::dump_xml(Formatter *f) const
   encode_xml("EndpointAddress", push_endpoint, f);
   encode_xml("EndpointArgs", push_endpoint_args, f);
   encode_xml("EndpointTopic", arn_topic, f);
+  encode_xml("HasStoredSecret", stored_secret, f);
+  encode_xml("Persistent", persistent, f);
 }
 
 void rgw_pubsub_sub_config::dump(Formatter *f) const
