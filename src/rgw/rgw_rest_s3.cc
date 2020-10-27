@@ -4012,7 +4012,13 @@ int RGWHandler_REST_S3::postauth_init()
   }
 
   if (!t->src_bucket.empty()) {
-    rgw_parse_url_bucket(t->src_bucket, s->user->user_id.tenant,
+    string auth_tenant;
+    if (s->auth.identity->get_identity_type() == TYPE_ROLE) {
+      auth_tenant = s->auth.identity->get_role_tenant();
+    } else {
+      auth_tenant = s->user->user_id.tenant;
+    }
+    rgw_parse_url_bucket(t->src_bucket, auth_tenant,
 			s->src_tenant_name, s->src_bucket_name);
     ret = rgw_validate_tenant_name(s->src_tenant_name);
     if (ret)
