@@ -30,3 +30,7 @@
   to be warned again if additional repairs are performed you can provide a value
   to the command and specify the value of ``mon_osd_warn_num_repaired``.
   This command will be replaced in future releases by the health mute/unmute feature.
+
+* This release fixes a regression introduced in 14.2.12 which broke deployments
+  that referred to MON hosts using DNS names instead of IP addresses in the
+  ``mon_host`` parameter in ``/etc/ceph/ceph.conf``.
