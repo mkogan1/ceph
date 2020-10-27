@@ -297,3 +297,24 @@ cd-select-badges > cd-select {
 .custom-checkbox {
   padding-top: unset;
 }
+
+cd-download-button {
+  .btn-light.dropdown-toggle {
+    border: 1px solid #f0f0f0 !important;
+    border-bottom: 1px solid #8a8d90 !important;
+
+    &::after {
+      border: 0;
+      content: '\f0d7';
+      font-family: 'ForkAwesome';
+      font-size: 0.8rem;
+      position: inherit;
+      right: 0;
+    }
+
+    &:hover {
+      border: 1px solid #ced4da !important;
+      border-bottom: 2px solid $primary !important;
+    }
+  }
+}

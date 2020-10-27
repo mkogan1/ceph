@@ -24,23 +24,14 @@ $green: #0b0 !default;
 $teal: #20c997 !default;
 $cyan: #17a2b8 !default;
 
-$primary: variables.$pf-color-blue-400;
-$secondary: variables.$pf-color-blue-500;
-$success: variables.$pf-color-green-500;
-$info: $primary;
-$warning: variables.$pf-color-gold-500;
-$danger: variables.$pf-color-red-100;
-$light: $gray-100;
-$dark: #777;
-
-$navbar-bg: variables.$pf-color-black-900 !default;
-$sidebar-bg: variables.$pf-color-black-850 !default;
-$navbar-hover: variables.$pf-color-black-800 !default;
-
-$table-sort: variables.$pf-color-blue-400 !default;
-$table-sort-hover: variables.$pf-color-blue-500 !default;
-$table-active-row: variables.$pf-color-blue-100 !default;
-$table-active-row-hover: variables.$pf-color-light-blue-100 !default;
+$primary: #2b99a8 !default;
+$secondary: #374249 !default;
+$success: $green !default;
+$info: $primary !default;
+$warning: $yellow !default;
+$danger: $red !default;
+$light: $gray-100 !default;
+$dark: #777 !default;
 
 // Extra theme colors.
 $accent: $red !default;

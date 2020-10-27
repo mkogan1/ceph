@@ -293,11 +293,11 @@
         }
 
         a:hover {
-          background-color: bd.$table-active-row-hover;
+          background-color: vv.$table-active-row-hover;
         }
 
         &.active > a {
-          background-color: bd.$table-active-row;
+          background-color: vv.$table-active-row;
         }
       }
     }
