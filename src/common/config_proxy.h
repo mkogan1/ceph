@@ -123,6 +123,10 @@ public:
   ConfigValues* operator->() noexcept {
     return &values;
   }
+  void set_config_values(const ConfigValues& val) {
+    std::lock_guard l{lock};
+    values = val;
+  }
   int get_val(const std::string& key, char** buf, int len) const {
     std::lock_guard l{lock};
     return config.get_val(values, key, buf, len);
