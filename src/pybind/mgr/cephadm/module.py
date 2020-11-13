@@ -157,28 +157,28 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         },
         {
             'name': 'container_image_base',
-            'default': 'docker.io/ceph/ceph',
+            'default': 'registry.redhat.io/rhceph-alpha/rhceph-5-rhel8',
             'desc': 'Container image name, without the tag',
             'runtime': True,
         },
         {
             'name': 'container_image_prometheus',
-            'default': 'docker.io/prom/prometheus:v2.18.1',
+            'default': 'registry.redhat.io/openshift4/ose-prometheus:v4.6',
             'desc': 'Prometheus container image',
         },
         {
             'name': 'container_image_grafana',
-            'default': 'docker.io/ceph/ceph-grafana:6.6.2',
+            'default': 'registry.redhat.io/rhceph-alpha/rhceph-5-dashboard-rhel8:latest',
             'desc': 'Prometheus container image',
         },
         {
             'name': 'container_image_alertmanager',
-            'default': 'docker.io/prom/alertmanager:v0.20.0',
+            'default': 'registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.5',
             'desc': 'Prometheus container image',
         },
         {
             'name': 'container_image_node_exporter',
-            'default': 'docker.io/prom/node-exporter:v0.18.1',
+            'default': 'registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.5',
             'desc': 'Prometheus container image',
         },
         {

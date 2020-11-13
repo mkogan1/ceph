@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
-DEFAULT_IMAGE = 'docker.io/ceph/daemon-base:latest-master-devel'
-DEFAULT_IMAGE_IS_MASTER = True
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph-alpha/rhceph-5-rhel8:latest'
+DEFAULT_IMAGE_IS_MASTER = False
 LATEST_STABLE_RELEASE = 'octopus'
 DATA_DIR = '/var/lib/ceph'
 LOG_DIR = '/var/log/ceph'
@@ -161,7 +161,7 @@ class Monitoring(object):
 
     components = {
         "prometheus": {
-            "image": "docker.io/prom/prometheus:v2.18.1",
+            "image": "registry.redhat.io/openshift4/ose-prometheus:v4.6",
             "cpus": '2',
             "memory": '4GB',
             "args": [
@@ -174,7 +174,7 @@ class Monitoring(object):
             ],
         },
         "node-exporter": {
-            "image": "docker.io/prom/node-exporter:v0.18.1",
+            "image": "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.5",
             "cpus": "1",
             "memory": "1GB",
             "args": [
@@ -182,7 +182,7 @@ class Monitoring(object):
             ],
         },
         "grafana": {
-            "image": "docker.io/ceph/ceph-grafana:6.6.2",
+            "image": "registry.redhat.io/rhceph-alpha/rhceph-5-dashboard-rhel8:latest",
             "cpus": "2",
             "memory": "4GB",
             "args": [],
@@ -194,7 +194,7 @@ class Monitoring(object):
             ],
         },
         "alertmanager": {
-            "image": "docker.io/prom/alertmanager:v0.20.0",
+            "image": "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.5",
             "cpus": "2",
             "memory": "2GB",
             "args": [
