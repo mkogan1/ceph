@@ -91,13 +91,15 @@ Host *
 """
 
 # Default container images -----------------------------------------------------
-DEFAULT_IMAGE = 'quay.io/ceph/ceph'
-DEFAULT_PROMETHEUS_IMAGE = 'quay.io/prometheus/prometheus:v2.18.1'
-DEFAULT_NODE_EXPORTER_IMAGE = 'quay.io/prometheus/node-exporter:v0.18.1'
-DEFAULT_ALERT_MANAGER_IMAGE = 'quay.io/prometheus/alertmanager:v0.20.0'
-DEFAULT_GRAFANA_IMAGE = 'quay.io/ceph/ceph-grafana:6.7.4'
-DEFAULT_HAPROXY_IMAGE = 'docker.io/library/haproxy:2.3'
-DEFAULT_KEEPALIVED_IMAGE = 'docker.io/arcts/keepalived'
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph-beta/rhceph-5-rhel8:latest'
+DEFAULT_PROMETHEUS_IMAGE = "registry.redhat.io/openshift4/ose-prometheus:v4.6"
+DEFAULT_NODE_EXPORTER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.5"
+DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8:latest"
+DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.5"
+DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8:latest"
+#XXX: not accounted for in backported downstream change
+#DEFAULT_HAPROXY_IMAGE = 'docker.io/library/haproxy:2.3'
+#DEFAULT_KEEPALIVED_IMAGE = 'docker.io/arcts/keepalived'
 # ------------------------------------------------------------------------------
 
 
