@@ -1034,8 +1034,8 @@ int RGWLC::list_lc_progress(string& marker, uint32_t max_entries,
 }
 
 static inline vector<int> random_sequence(uint32_t n)
- {
-  vector<int> v(n-1, 0);
+{
+  vector<int> v(n, 0);
   int ix{0};
   std::generate(v.begin(), v.end(),
     [&ix]() mutable {
