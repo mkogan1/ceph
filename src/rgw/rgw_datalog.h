@@ -35,9 +35,9 @@
 
 #include "cls/log/cls_log_types.h"
 
-#include "rgw_basic_types.h"
+#include "rgw/rgw_basic_types.h"
 #include "rgw/rgw_rados.h"
-#include "rgw_zone.h"
+#include "rgw/rgw_zone.h"
 
 namespace bc = boost::container;
 
@@ -111,6 +111,7 @@ struct RGWDataChangesLogInfo {
 
 class RGWDataChangesBE {
 protected:
+  librados::IoCtx& ioctx;
   CephContext* const cct;
 private:
   std::string prefix;
@@ -125,8 +126,9 @@ public:
   using entries = std::variant<std::list<cls_log_entry>,
 			       std::vector<ceph::buffer::list>>;
 
-  RGWDataChangesBE(CephContext* const cct)
-    : cct(cct), prefix(get_prefix(cct)) {}
+  RGWDataChangesBE(librados::IoCtx& ioctx)
+    : ioctx(ioctx), cct(static_cast<CephContext*>(ioctx.cct())),
+      prefix(get_prefix(cct)) {}
   virtual ~RGWDataChangesBE() = default;
 
   static std::string get_oid(CephContext* cct, int i) {
@@ -205,8 +207,8 @@ public:
   ~RGWDataChangesLog();
 
   int init();
-  std::string get_oid(int shard_id) const;
-  int add_entry(const rgw_bucket& bucket, int shard_id);
+  std::string get_oid(int i) const;
+  int add_entry(const rgw_bucket& bucket_info, int shard_id);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int list_entries(int shard, int max_entries,
 		   std::vector<rgw_data_change_log_entry>& entries,
