@@ -14,9 +14,13 @@
 #include "rgw/rgw_tools.h"
 #include "rgw/rgw_zone.h"
 #include "rgw/cls_fifo_legacy.h"
+#include "cls/fifo/cls_fifo_types.h"
+#include "cls/log/cls_log_client.h"
 
 #define dout_context g_ceph_context
 static constexpr auto dout_subsys = ceph_subsys_rgw;
+
+namespace lr = librados;
 
 void rgw_data_change::dump(ceph::Formatter* f) const
 {
@@ -66,12 +70,10 @@ void rgw_data_change_log_entry::decode_json(JSONObj* obj) {
 
 class RGWDataChangesOmap final : public RGWDataChangesBE {
   using centries = std::list<cls_log_entry>;
-  RGWRados* store;
   std::vector<std::string> oids;
 public:
-  RGWDataChangesOmap(CephContext* cct, RGWRados* store)
-    : RGWDataChangesBE(cct), store(store) {
-    auto num_shards = cct->_conf->rgw_data_log_num_shards;
+  RGWDataChangesOmap(lr::IoCtx& ioctx, int num_shards)
+    : RGWDataChangesBE(ioctx) {
     oids.reserve(num_shards);
     for (auto i = 0; i < num_shards; ++i) {
       oids.push_back(get_oid(i));
@@ -86,12 +88,13 @@ public:
     }
 
     cls_log_entry e;
-    store->time_log_prepare_entry(e, ut, {}, key, entry);
+    cls_log_add_prepare_entry(e, utime_t(ut), {}, key, entry);
     std::get<centries>(out).push_back(std::move(e));
   }
   int push(int index, entries&& items) override {
-    auto r = store->time_log_add(oids[index], std::get<centries>(items),
-				 nullptr, true);
+    lr::ObjectWriteOperation op;
+    cls_log_add(op, std::get<centries>(items), true);
+    auto r = rgw_rados_operate(ioctx, oids[index], &op, null_yield);
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
 		 << ": failed to push to " << oids[index] << cpp_strerror(-r)
@@ -102,7 +105,9 @@ public:
   int push(int index, ceph::real_time now,
 	   const std::string& key,
 	   ceph::buffer::list&& bl) override {
-    auto r = store->time_log_add(oids[index], now, {}, key, bl);
+    lr::ObjectWriteOperation op;
+    cls_log_add(op, utime_t(now), {}, key, bl);
+    auto r = rgw_rados_operate(ioctx, oids[index], &op, null_yield);
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
 		 << ": failed to push to " << oids[index]
@@ -115,10 +120,10 @@ public:
 	   std::optional<std::string_view> marker,
 	   std::string* out_marker, bool* truncated) override {
     std::list<cls_log_entry> log_entries;
-    auto r = store->time_log_list(oids[index], {}, {},
-				  max_entries, log_entries,
-				  std::string(marker.value_or("")),
-				  out_marker, truncated);
+    lr::ObjectReadOperation op;
+    cls_log_list(op, {}, {}, std::string(marker.value_or("")),
+		 max_entries, log_entries, out_marker, truncated);
+    auto r = rgw_rados_operate(ioctx, oids[index], &op, nullptr, null_yield);
     if (r == -ENOENT) {
       *truncated = false;
       return 0;
@@ -149,7 +154,9 @@ public:
   }
   int get_info(int index, RGWDataChangesLogInfo *info) override {
     cls_log_header header;
-    auto r = store->time_log_info(oids[index], &header);
+    lr::ObjectReadOperation op;
+    cls_log_info(op, &header);
+    auto r = rgw_rados_operate(ioctx, oids[index], &op, nullptr, null_yield);
     if (r == -ENOENT) r = 0;
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
@@ -162,9 +169,9 @@ public:
     return r;
   }
   int trim(int index, std::string_view marker) override {
-    auto r = store->time_log_trim(oids[index], {}, {},
-				  {}, std::string(marker), nullptr);
-
+    lr::ObjectWriteOperation op;
+    cls_log_trim(op, {}, {}, {}, std::string(marker));
+    auto r = rgw_rados_operate(ioctx, oids[index], &op, null_yield);
     if (r == -ENOENT) r = 0;
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
@@ -174,10 +181,10 @@ public:
     return r;
   }
   int trim(int index, std::string_view marker,
-	   librados::AioCompletion* c) override {
-    auto r = store->time_log_trim(oids[index], {}, {},
-				  {}, std::string(marker), c);
-
+	   lr::AioCompletion* c) override {
+    lr::ObjectWriteOperation op;
+    cls_log_trim(op, {}, {}, {}, std::string(marker));
+    auto r = ioctx.aio_operate(oids[index], c, &op, 0);
     if (r == -ENOENT) r = 0;
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
@@ -195,20 +202,12 @@ class RGWDataChangesFIFO final : public RGWDataChangesBE {
   using centries = std::vector<ceph::buffer::list>;
   std::vector<std::unique_ptr<rgw::cls::fifo::FIFO>> fifos;
 public:
-  RGWDataChangesFIFO(CephContext* cct, librados::Rados* rados,
-		     const rgw_pool& log_pool)
-    : RGWDataChangesBE(cct) {
-    librados::IoCtx ioctx;
-    auto shards = cct->_conf->rgw_data_log_num_shards;
-    auto r = rgw_init_ioctx(rados, log_pool.name, ioctx,
-			    true, false);
-    if (r < 0) {
-      throw std::system_error(-r, std::system_category());
-    }
+  RGWDataChangesFIFO(lr::IoCtx& ioctx, int shards)
+    : RGWDataChangesBE(ioctx) {
     fifos.resize(shards);
     for (auto i = 0; i < shards; ++i) {
-      r = rgw::cls::fifo::FIFO::create(ioctx, get_oid(i),
-				       &fifos[i], null_yield);
+      auto  r = rgw::cls::fifo::FIFO::create(ioctx, get_oid(i),
+					     &fifos[i], null_yield);
       if (r < 0) {
 	throw std::system_error(-r, std::system_category());
       }
@@ -393,11 +392,10 @@ int RGWDataChangesLog::init()
   try {
     switch (*found) {
     case log_type::omap:
-      be = std::make_unique<RGWDataChangesOmap>(cct, store);
+      be = std::make_unique<RGWDataChangesOmap>(ioctx, num_shards);
       break;
     case log_type::fifo:
-      be = std::make_unique<RGWDataChangesFIFO>(cct, store->get_rados_handle(),
-						log_pool);
+      be = std::make_unique<RGWDataChangesFIFO>(ioctx, num_shards);
       break;
     }
   } catch (const std::system_error& e) {
