@@ -1927,6 +1927,13 @@ int RGWGetObj::handle_slo_manifest(bufferlist& bl)
 
 int RGWGetObj::get_data_cb(bufferlist& bl, off_t bl_ofs, off_t bl_len)
 {
+#if 0
+  // Due to BZ1892644 we are not executing this code since defer_gc,
+  // in its present form, can invoke garbage collection on objects
+  // that were not deleted thereby causing data loss. Thus GC deferral
+  // will not happen for the time being until a full fix is
+  // implemented. See related comment in src/cls/rgw_gc/cls_rgw_gc.cc.
+
   /* garbage collection related handling */
   utime_t start_time = ceph_clock_now();
   if (start_time > gc_invalidate_time) {
@@ -1937,6 +1944,8 @@ int RGWGetObj::get_data_cb(bufferlist& bl, off_t bl_ofs, off_t bl_len)
     gc_invalidate_time = start_time;
     gc_invalidate_time += (s->cct->_conf->rgw_gc_obj_min_wait / 2);
   }
+#endif
+
   return send_response_data(bl, bl_ofs, bl_len);
 }
 

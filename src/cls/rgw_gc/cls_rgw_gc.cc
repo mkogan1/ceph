@@ -494,6 +494,14 @@ static int cls_rgw_gc_queue_update_entry(cls_method_context_t hctx, bufferlist *
     return -ENOSPC;
   }
 
+#if 0
+  // The code immediately below is the ultimate source of error in
+  // BZ1892644. Due to temporary code changes in src/rgw/rgw_op.cc
+  // (see related comment in that file), we'll never enter this
+  // function. But this code will not be compiled nonetheless. When
+  // the full fix for the bug is merged in, this comment and the
+  // following code should be removed.
+
   cls_queue_enqueue_op enqueue_op;
   bufferlist bl_data;
   encode(op.info, bl_data);
@@ -504,6 +512,7 @@ static int cls_rgw_gc_queue_update_entry(cls_method_context_t hctx, bufferlist *
   if (ret < 0) {
     return ret;
   }
+#endif
 
   if (has_urgent_data) {
     head.bl_urgent_data.clear();
