@@ -1411,11 +1411,7 @@ int RGWRados::init_rados()
   }
 
   meta_mgr = new RGWMetadataManager(cct, this);
-  try {
-    data_log = new RGWDataChangesLog(cct, this);
-  } catch (const std::system_error& e) {
-    ret = e.code().value();
-  }
+  data_log = new RGWDataChangesLog(cct, this);
   cr_registry = crs.release();
   return ret;
 }
@@ -1540,6 +1536,13 @@ int RGWRados::init_complete()
   if (ret < 0) {
     lderr(cct) << "ERROR: failed to initialize metadata log: "
         << cpp_strerror(-ret) << dendl;
+    return ret;
+  }
+
+  ret = data_log->init();
+  if (ret < 0) {
+    lderr(cct) << "ERROR: failed to initialize data log: "
+	       << cpp_strerror(-ret) << dendl;
     return ret;
   }
 
