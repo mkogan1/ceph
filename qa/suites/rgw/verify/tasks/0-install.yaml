@@ -3,6 +3,10 @@ os_type: centos
 
 tasks:
 - install:
+      # extra packages added for the rgw-datacache task
+      extra_packages:
+        deb: ['s3cmd']
+        rpm: ['s3cmd']
 #    flavor: notcmalloc
 - ceph:
 - openssl_keys:
