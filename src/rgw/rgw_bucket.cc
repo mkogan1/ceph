@@ -381,7 +381,8 @@ int rgw_remove_bucket_bypass_gc(rgw::sal::RGWRadosStore *store, rgw_bucket& buck
   if (ret < 0)
     return ret;
 
-  ret = store->getRados()->get_bucket_stats(dpp, info, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
+  ret = store->getRados()->get_bucket_stats(dpp, info, info.layout.current_index,
+					    RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
   if (ret < 0)
     return ret;
 
@@ -966,7 +967,7 @@ int RGWBucket::check_object_index(const DoutPrefixProvider *dpp,
     result.reserve(listing_max_entries);
 
     int r = store->getRados()->cls_bucket_list_ordered(
-      dpp, bucket_info, RGW_NO_SHARD, marker, prefix, empty_delimiter,
+      dpp, bucket_info, bucket_info.layout.current_index, RGW_NO_SHARD, marker, prefix, empty_delimiter,
       listing_max_entries, true, expansion_factor,
       result, &is_truncated, &cls_filtered, &marker,
       y, rgw_bucket_object_check_filter);
@@ -1039,17 +1040,18 @@ int RGWBucket::sync(RGWBucketAdminOpState& op_state, map<string, bufferlist> *at
     return r;
   }
 
-  int shards_num = bucket_info.layout.current_index.layout.normal.num_shards? bucket_info.layout.current_index.layout.normal.num_shards : 1;
+  int shards_num = bucket_info.layout.current_index.layout.normal.num_shards ? bucket_info.layout.current_index.layout.normal.num_shards : 1;
   int shard_id = bucket_info.layout.current_index.layout.normal.num_shards? 0 : -1;
+  const auto& log_layout = bucket_info.layout.logs.back();
 
   if (!sync) {
-    r = store->svc()->bilog_rados->log_stop(dpp, bucket_info, -1);
+    r = store->svc()->bilog_rados->log_stop(dpp, bucket_info, log_layout, -1);
     if (r < 0) {
       set_err_msg(err_msg, "ERROR: failed writing stop bilog:" + cpp_strerror(-r));
       return r;
     }
   } else {
-    r = store->svc()->bilog_rados->log_start(dpp, bucket_info, -1);
+    r = store->svc()->bilog_rados->log_start(dpp, bucket_info, log_layout, -1);
     if (r < 0) {
       set_err_msg(err_msg, "ERROR: failed writing resync bilog:" + cpp_strerror(-r));
       return r;
@@ -1330,9 +1332,9 @@ static int bucket_stats(rgw::sal::RGWRadosStore *store,
 
   string bucket_ver, master_ver;
   string max_marker;
-  int ret = store->getRados()->get_bucket_stats(dpp, bucket_info, RGW_NO_SHARD,
-						&bucket_ver, &master_ver, stats,
-						&max_marker);
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = log_to_index_layout(latest_log);
+  auto ret = store->getRados()->get_bucket_stats(dpp, bucket_info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
   if (ret < 0) {
     cerr << "error getting bucket stats bucket=" << bucket.name << " ret=" << ret << std::endl;
     return ret;
@@ -1444,8 +1446,9 @@ int RGWBucketAdminOp::limit_check(rgw::sal::RGWRadosStore *store,
 	/* need stats for num_entries */
 	string bucket_ver, master_ver;
 	std::map<RGWObjCategory, RGWStorageStats> stats;
-	ret = store->getRados()->get_bucket_stats(dpp, info, RGW_NO_SHARD, &bucket_ver,
-				      &master_ver, stats, nullptr);
+	const auto& latest_log = info.layout.logs.back();
+	const auto& index = log_to_index_layout(latest_log);
+	ret = store->getRados()->get_bucket_stats(dpp, info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, nullptr);
 
 	if (ret < 0)
 	  continue;
