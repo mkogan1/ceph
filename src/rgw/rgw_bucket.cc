@@ -717,7 +717,9 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
   if (ret < 0)
     return ret;
 
-  ret = store->get_bucket_stats(info, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
+  const auto& latest_log = info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
+  ret = store->get_bucket_stats(info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
   if (ret < 0)
     return ret;
 
@@ -824,7 +826,9 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
   if (ret < 0)
     return ret;
 
-  ret = store->get_bucket_stats(info, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
+  const auto& latest_log = info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
+  ret = store->get_bucket_stats(info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
   if (ret < 0)
     return ret;
 
@@ -1465,7 +1469,9 @@ int RGWBucket::check_object_index(RGWBucketAdminOpState& op_state,
     RGWRados::ent_map_t result;
     result.reserve(1000);
 
-    int r = store->cls_bucket_list_ordered(bucket_info, RGW_NO_SHARD,
+    const auto& latest_log = bucket_info.layout.logs.back();
+    const auto& index = rgw::log_to_index_layout(latest_log);
+    int r = store->cls_bucket_list_ordered(bucket_info, index, RGW_NO_SHARD,
 					   marker, prefix,
 					   listing_max_entries, true,
 					   expansion_factor,
@@ -1760,7 +1766,9 @@ static int bucket_stats(RGWRados *store, const std::string& tenant_name, const s
 
   string bucket_ver, master_ver;
   string max_marker;
-  int ret = store->get_bucket_stats(bucket_info, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = log_to_index_layout(latest_log);
+  int ret = store->get_bucket_stats(bucket_info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
   if (ret < 0) {
     cerr << "error getting bucket stats bucket=" << bucket.name << " ret=" << ret << std::endl;
     return ret;
@@ -1869,7 +1877,9 @@ int RGWBucketAdminOp::limit_check(RGWRados *store,
 	/* need stats for num_entries */
 	string bucket_ver, master_ver;
 	std::map<RGWObjCategory, RGWStorageStats> stats;
-	ret = store->get_bucket_stats(info, RGW_NO_SHARD, &bucket_ver,
+	const auto& latest_log = info.layout.logs.back();
+	const auto& index = rgw::log_to_index_layout(latest_log);
+	ret = store->get_bucket_stats(info, index, RGW_NO_SHARD, &bucket_ver,
 				      &master_ver, stats, nullptr);
 
 	if (ret < 0)

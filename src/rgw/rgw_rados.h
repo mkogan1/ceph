@@ -65,7 +65,7 @@ using RGWBucketSyncPolicyHandlerRef = std::shared_ptr<RGWBucketSyncPolicyHandler
 
 #define RGW_BUCKET_INSTANCE_MD_PREFIX ".bucket.meta."
 
-#define RGW_NO_SHARD -1
+inline constexpr auto RGW_NO_SHARD = -1;
 
 #define RGW_SHARDS_PRIME_0 7877
 #define RGW_SHARDS_PRIME_1 65521
@@ -1231,17 +1231,22 @@ class RGWRados : public AdminSocketHook
   int open_pool_ctx(const rgw_pool& pool, librados::IoCtx&  io_ctx,
 		    bool mostly_omap);
   int open_bucket_index_ctx(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx);
-  int open_bucket_index(const RGWBucketInfo& bucket_info, librados::IoCtx&  index_ctx, string& bucket_oid);
+  int open_bucket_index(const RGWBucketInfo& bucket_info,
+			librados::IoCtx&  index_ctx, string& bucket_oid);
   int open_bucket_index_base(const RGWBucketInfo& bucket_info, librados::IoCtx&  index_ctx,
       string& bucket_oid_base);
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
       const string& obj_key, string *bucket_obj, int *shard_id);
   int open_bucket_index_shard(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
                               int shard_id, const rgw::bucket_index_layout_generation& idx_layout, string *bucket_obj);
-  int open_bucket_index(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
-      map<int, string>& bucket_objs, int shard_id = -1, map<int, string> *bucket_instance_ids = NULL);
+  int open_bucket_index(const RGWBucketInfo& bucket_info,
+			librados::IoCtx& index_ctx,
+			const rgw::bucket_index_layout_generation& idx_layout,
+			map<int, string>& bucket_objs, int shard_id = -1, map<int, string> *bucket_instance_ids = NULL);
   template<typename T>
-  int open_bucket_index(const RGWBucketInfo& bucket_info, librados::IoCtx& index_ctx,
+  int open_bucket_index(const RGWBucketInfo& bucket_info,
+			librados::IoCtx& index_ctx,
+			const rgw::bucket_index_layout_generation& idx_layout,
                         map<int, string>& oids, map<int, T>& bucket_objs,
                         int shard_id = -1, map<int, string> *bucket_instance_ids = NULL);
   void build_bucket_index_marker(const string& shard_id_str, const string& shard_marker,
@@ -2185,9 +2190,14 @@ public:
     rctx->set_prefetch_data(obj);
   }
   int decode_policy(bufferlist& bl, ACLOwner *owner);
-  int get_bucket_stats(RGWBucketInfo& bucket_info, int shard_id, string *bucket_ver, string *master_ver,
-      map<RGWObjCategory, RGWStorageStats>& stats, string *max_marker, bool* syncstopped = NULL);
-  int get_bucket_stats_async(RGWBucketInfo& bucket_info, int shard_id, RGWGetBucketStats_CB *cb);
+  int get_bucket_stats(RGWBucketInfo& bucket_info,
+		       const rgw::bucket_index_layout_generation& idx_layout,
+		       int shard_id, string *bucket_ver, string *master_ver,
+		       map<RGWObjCategory, RGWStorageStats>& stats,
+		       string *max_marker, bool* syncstopped = NULL);
+  int get_bucket_stats_async(RGWBucketInfo& bucket_info,
+			     const rgw::bucket_index_layout_generation& idx_layout,
+			     int shard_id, RGWGetBucketStats_CB *cb);
   int get_user_stats(const rgw_user& user, RGWStorageStats& stats);
   int get_user_stats_async(const rgw_user& user, RGWGetUserStats_CB *cb);
   void get_bucket_instance_obj(const rgw_bucket& bucket, rgw_raw_obj& obj);
@@ -2275,6 +2285,7 @@ public:
     boost::container::flat_map<std::string, rgw_bucket_dir_entry>;
 
   int cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
+			      const rgw::bucket_index_layout_generation& current_index,
 			      const int shard_id,
 			      const rgw_obj_index_key& start_after,
 			      const string& prefix,
@@ -2285,20 +2296,26 @@ public:
 			      bool *is_truncated,
 			      rgw_obj_index_key *last_entry,
 			      bool (*force_check_filter)(const string& name) = nullptr);
-  int cls_bucket_list_unordered(RGWBucketInfo& bucket_info, int shard_id,
+  int cls_bucket_list_unordered(RGWBucketInfo& bucket_info,
+				const rgw::bucket_index_layout_generation& current_index,
+				int shard_id,
 				const rgw_obj_index_key& start,
 				const string& prefix,
 				uint32_t num_entries, bool list_versions,
 				vector<rgw_bucket_dir_entry>& ent_list,
 				bool *is_truncated, rgw_obj_index_key *last_entry,
 				bool (*force_check_filter)(const string& name) = nullptr);
-  int cls_bucket_head(const RGWBucketInfo& bucket_info, int shard_id, vector<rgw_bucket_dir_header>& headers, map<int, string> *bucket_instance_ids = NULL);
-  int cls_bucket_head_async(const RGWBucketInfo& bucket_info, int shard_id, RGWGetDirHeader_CB *ctx, int *num_aio);
-  int list_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id, string& marker, uint32_t max, std::list<rgw_bi_log_entry>& result, bool *truncated);
-  int trim_bi_log_entries(RGWBucketInfo& bucket_info, int shard_id, string& marker, string& end_marker);
-  int resync_bi_log_entries(const RGWBucketInfo& bucket_info, int shard_id);
-  int stop_bi_log_entries(const RGWBucketInfo& bucket_info, int shard_id);
-  int get_bi_log_status(RGWBucketInfo& bucket_info, int shard_id, map<int, string>& max_marker);
+  int cls_bucket_head(const RGWBucketInfo& bucket_info,
+		      const rgw::bucket_index_layout_generation& idx_layout,
+		      int shard_id, vector<rgw_bucket_dir_header>& headers, map<int, string> *bucket_instance_ids = NULL);
+  int cls_bucket_head_async(const RGWBucketInfo& bucket_info,
+			    const rgw::bucket_index_layout_generation& idx_layout,
+			    int shard_id, RGWGetDirHeader_CB *ctx, int *num_aio);
+  int list_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, int shard_id, string& marker, uint32_t max, std::list<rgw_bi_log_entry>& result, bool *truncated);
+  int trim_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id, string& marker, string& end_marker);
+  int resync_bi_log_entries(const RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id);
+  int stop_bi_log_entries(const RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id);
+  int get_bi_log_status(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id, map<int, string>& max_marker);
 
   int bi_get_instance(const RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_bucket_dir_entry *dirent);
   int bi_get_olh(const RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_bucket_olh_entry *olh);

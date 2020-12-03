@@ -284,6 +284,10 @@ void usage()
   cout << "                               data sync status\n";
   cout << "                             required for: \n";
   cout << "                               mdlog trim\n";
+  cout << "   --gen=<gen-id>            optional for: \n";
+  cout << "                               bilog list\n";
+  cout << "                               bilog trim\n";
+  cout << "                               bilog status\n";
   cout << "   --max-entries=<entries>   max entries for listing operations\n";
   cout << "   --metadata-key=<key>      key to retrieve metadata from with metadata get\n";
   cout << "   --remote=<remote>         zone or zonegroup id of remote gateway\n";
@@ -1718,15 +1722,16 @@ int set_bucket_sync_enabled(RGWRados *store, int opt_cmd, const string& tenant_n
 
   int shards_num = bucket_info.layout.current_index.layout.normal.num_shards ? bucket_info.layout.current_index.layout.normal.num_shards : 1;
   int shard_id = bucket_info.layout.current_index.layout.normal.num_shards ? 0 : -1;
+  const auto& latest_log = bucket_info.layout.logs.back();
 
   if (opt_cmd == OPT_BUCKET_SYNC_DISABLE) {
-    r = store->stop_bi_log_entries(bucket_info, -1);
+    r = store->stop_bi_log_entries(bucket_info, latest_log, -1);
     if (r < 0) {
       lderr(store->ctx()) << "ERROR: failed writing stop bilog" << dendl;
       return r;
     }
   } else {
-    r = store->resync_bi_log_entries(bucket_info, -1);
+    r = store->resync_bi_log_entries(bucket_info, latest_log, -1);
     if (r < 0) {
       lderr(store->ctx()) << "ERROR: failed writing resync bilog" << dendl;
       return r;
@@ -3105,6 +3110,7 @@ int main(int argc, const char **argv)
   std::optional<string> opt_dest_tenant;
   std::optional<string> opt_dest_bucket_name;
   std::optional<string> opt_dest_bucket_id;
+  std::optional<uint64_t> gen = 0;
 
   for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ) {
     if (ceph_argparse_double_dash(args, i)) {
@@ -3249,6 +3255,12 @@ int main(int argc, const char **argv)
         return EINVAL;
       }
       specified_shard_id = true;
+    } else if (ceph_argparse_witharg(args, i, &val, "--gen", (char*)NULL)) {
+      gen = strict_strtoll(val.c_str(), 10, &err);
+      if (!err.empty()) {
+        cerr << "ERROR: failed to parse gen id: " << err << std::endl;
+        return EINVAL;
+      }
     } else if (ceph_argparse_witharg(args, i, &val, "--access", (char*)NULL)) {
       access = val;
       perm_mask = rgw_str_to_perm(access.c_str());
@@ -6599,8 +6611,11 @@ next:
     uint16_t expansion_factor = 1;
     while (is_truncated) {
       RGWRados::ent_map_t result;
+      result.reserve(NUM_ENTRIES);
+
+      const auto& current_index = bucket_info.layout.current_index;
       int r =
-	store->cls_bucket_list_ordered(bucket_info, RGW_NO_SHARD, marker,
+	store->cls_bucket_list_ordered(bucket_info, current_index, RGW_NO_SHARD, marker,
 				       prefix, NUM_ENTRIES, true, expansion_factor,
 				       result, &is_truncated, &marker,
 				       bucket_object_check_filter);
@@ -7900,9 +7915,20 @@ next:
     if (max_entries < 0)
       max_entries = 1000;
 
+    const auto& logs = bucket_info.layout.logs;
+    auto log_layout = std::reference_wrapper{logs.back()};
+    if (gen) {
+      auto i = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(*gen));
+      if (i == logs.end()) {
+        cerr << "ERROR: no log layout with gen=" << *gen << std::endl;
+        return ENOENT;
+      }
+      log_layout = *i;
+    }
+
     do {
       list<rgw_bi_log_entry> entries;
-      ret = store->list_bi_log_entries(bucket_info, shard_id, marker, max_entries - count, entries, &truncated);
+      ret = store->list_bi_log_entries(bucket_info, log_layout, shard_id, marker, max_entries - count, entries, &truncated);
       if (ret < 0) {
         cerr << "ERROR: list_bi_log_entries(): " << cpp_strerror(-ret) << std::endl;
         return -ret;
@@ -8056,7 +8082,19 @@ next:
       cerr << "ERROR: could not init bucket: " << cpp_strerror(-ret) << std::endl;
       return -ret;
     }
-    ret = store->trim_bi_log_entries(bucket_info, shard_id, start_marker, end_marker);
+
+    const auto& logs = bucket_info.layout.logs;
+    auto log_layout = std::reference_wrapper{logs.back()};
+    if (gen) {
+      auto i = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(*gen));
+      if (i == logs.end()) {
+        cerr << "ERROR: no log layout with gen=" << *gen << std::endl;
+        return ENOENT;
+      }
+      log_layout = *i;
+    }
+
+    ret = store->trim_bi_log_entries(bucket_info, log_layout, shard_id, start_marker, end_marker);
     if (ret < 0) {
       cerr << "ERROR: trim_bi_log_entries(): " << cpp_strerror(-ret) << std::endl;
       return -ret;
@@ -8075,7 +8113,18 @@ next:
       return -ret;
     }
     map<int, string> markers;
-    ret = store->get_bi_log_status(bucket_info, shard_id, markers);
+    const auto& logs = bucket_info.layout.logs;
+    auto log_layout = std::reference_wrapper{logs.back()};
+    if (gen) {
+      auto i = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(*gen));
+      if (i == logs.end()) {
+        cerr << "ERROR: no log layout with gen=" << *gen << std::endl;
+        return ENOENT;
+      }
+      log_layout = *i;
+    }
+
+    ret = store->get_bi_log_status(bucket_info, log_layout, shard_id, markers);
     if (ret < 0) {
       cerr << "ERROR: get_bi_log_status(): " << cpp_strerror(-ret) << std::endl;
       return -ret;
