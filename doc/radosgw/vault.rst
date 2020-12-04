@@ -260,6 +260,19 @@ Or, in the case of exportable transit keys::
 In the example above, the Gateway would only fetch transit encryption keys under
 ``http://vault-server:8200/v1/transit/export/encryption-key``.
 
+You can use custom ssl certs to authenticate with vault with help of
+following options::
+
+  rgw crypt vault verify ssl = true
+  rgw crypt vault ssl cacert = /etc/ceph/vault.ca
+  rgw crypt vault ssl clientcert = /etc/ceph/vault.crt
+  rgw crypt vault ssl clientkey = /etc/ceph/vault.key
+
+where vault.ca is CA certificate and vault.key/vault.crt are private key and ssl
+ceritificate generated for RGW to access the vault server. It highly recommended to
+set this option true, setting false is very dangerous and need to avoid since this
+runs in very secured enviroments.
+
 Upload object
 =============
 
