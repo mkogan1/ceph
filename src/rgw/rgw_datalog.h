@@ -210,10 +210,11 @@ private:
 
   lru_map<rgw_bucket_shard, ChangeStatusPtr> changes;
 
-  bc::flat_set<rgw_bucket_shard> cur_cycle;
+  bc::flat_set<std::pair<rgw_bucket_shard, uint64_t>> cur_cycle;
 
   void _get_change(const rgw_bucket_shard& bs, ChangeStatusPtr& status);
-  void register_renew(const rgw_bucket_shard& bs);
+  void register_renew(const rgw_bucket_shard& bs,
+		      const rgw::bucket_log_layout_generation& gen);
   void update_renewed(const rgw_bucket_shard& bs, ceph::real_time expiration);
   bool going_down() const;
   int choose_oid(const rgw_bucket_shard& bs);
@@ -235,7 +236,8 @@ public:
   ~RGWDataChangesLog();
 
   int init();
-  int add_entry(const RGWBucketInfo& bucket_info, int shard_id);
+  int add_entry(const RGWBucketInfo& bucket_info,
+		const rgw::bucket_log_layout_generation& gen, int shard_id);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int list_entries(int shard, int max_entries,
 		   std::vector<rgw_data_change_log_entry>& entries,

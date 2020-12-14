@@ -19,6 +19,7 @@
 #include "rgw/cls_fifo_legacy.h"
 #include "cls/fifo/cls_fifo_types.h"
 #include "cls/log/cls_log_client.h"
+#include "rgw_bucket_layout.h"
 
 #define dout_context g_ceph_context
 static constexpr auto dout_subsys = ceph_subsys_rgw;
@@ -499,7 +500,7 @@ int RGWDataChangesLog::renew_entries()
   std::string section;
   auto ut = real_clock::now();
   auto be = bes->head();
-  for (const auto& bs : entries) {
+  for (const auto& [bs, gen_id] : entries) {
     auto index = choose_oid(bs);
 
     rgw_data_change change;
@@ -507,6 +508,7 @@ int RGWDataChangesLog::renew_entries()
     change.entity_type = ENTITY_TYPE_BUCKET;
     change.key = bs.get_key();
     change.timestamp = ut;
+    change.gen_id = gen_id;
     encode(change, bl);
 
     m[index].first.push_back(bs);
@@ -546,10 +548,11 @@ void RGWDataChangesLog::_get_change(const rgw_bucket_shard& bs,
   }
 }
 
-void RGWDataChangesLog::register_renew(const rgw_bucket_shard& bs)
+void RGWDataChangesLog::register_renew(const rgw_bucket_shard& bs,
+				       const rgw::bucket_log_layout_generation& gen)
 {
   std::scoped_lock l{lock};
-  cur_cycle.insert(bs);
+  cur_cycle.insert({bs, gen.gen});
 }
 
 void RGWDataChangesLog::update_renewed(const rgw_bucket_shard& bs,
@@ -586,7 +589,10 @@ bool RGWDataChangesLog::filter_bucket(const rgw_bucket& bucket,
   return bucket_filter(bucket, y);
 }
 
-int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id) {
+int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info,
+				 const rgw::bucket_log_layout_generation& gen,
+				 int shard_id)
+{
   auto& bucket = bucket_info.bucket;
   if (!filter_bucket(bucket, null_yield)) {
     return 0;
@@ -617,7 +623,7 @@ int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id)
   if (now < status->cur_expiration) {
     /* no need to send, recently completed */
     sl.unlock();
-    register_renew(bs);
+    register_renew(bs, gen);
     return 0;
   }
 
@@ -634,7 +640,7 @@ int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id)
     int ret = cond->wait();
     cond->put();
     if (!ret) {
-      register_renew(bs);
+      register_renew(bs, gen);
     }
     return ret;
   }
@@ -658,6 +664,7 @@ int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info, int shard_id)
     change.entity_type = ENTITY_TYPE_BUCKET;
     change.key = bs.get_key();
     change.timestamp = now;
+    change.gen_id = gen.gen;
     encode(change, bl);
     ldout(cct, 20) << "RGWDataChangesLog::add_entry() sending update with now=" << now << " cur_expiration=" << expiration << dendl;
 

@@ -1737,7 +1737,9 @@ int set_bucket_sync_enabled(RGWRados *store, int opt_cmd, const string& tenant_n
   }
 
   for (int i = 0; i < shards_num; ++i, ++shard_id) {
-    r = store->data_log->add_entry(bucket_info, shard_id);
+    r = store->data_log->add_entry(bucket_info,
+				   bucket_info.layout.logs.back(),
+				   shard_id);
     if (r < 0) {
       lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
       return r;
