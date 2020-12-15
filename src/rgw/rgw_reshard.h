@@ -22,6 +22,8 @@
 
 class RGWRados;
 
+using ReshardFaultInjector = FaultInjector<std::string_view>;
+
 class RGWBucketReshardLock {
   using Clock = ceph::coarse_mono_clock;
 
@@ -82,7 +84,7 @@ private:
   int update_bucket(rgw::BucketReshardState s);
 
   int do_reshard(int num_shards,
-                 int max_entries, FaultInjector<std::string_view>& f,
+                 int max_entries, const ReshardFaultInjector& f,
                  bool verbose,
                  ostream *os,
 		 Formatter *formatter);
@@ -93,7 +95,7 @@ public:
   RGWBucketReshard(RGWRados *_store,
 		   const RGWBucketInfo& _bucket_info,
 		   RGWBucketReshardLock* _outer_reshard_lock);
-  int execute(int num_shards, FaultInjector<std::string_view>& f,
+  int execute(int num_shards, const ReshardFaultInjector& f,
               int max_op_entries,
               bool verbose = false, std::ostream *out = nullptr,
               ceph::Formatter *formatter = nullptr,
