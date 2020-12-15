@@ -307,12 +307,12 @@ case $1 in
     -X )
 	    cephx=0
 	    ;;
-    
+
     -g | --gssapi)
-	    gssapi_authx=1 
+	    gssapi_authx=1
 	    ;;
     -G)
-	    gssapi_authx=0 
+	    gssapi_authx=0
 	    ;;
 
     -k )
@@ -539,7 +539,7 @@ EOF
 	auth client required = gss
 	gss ktab client file = $CEPH_DEV_DIR/gss_\$name.keytab
 EOF
-	else 
+	else
 		wconf <<EOF
 	auth cluster required = none
 	auth service required = none
@@ -839,7 +839,10 @@ EOF
     if [ "$new" -eq 1 ]; then
         # setting login credentials for dashboard
         if $with_mgr_dashboard; then
-            ceph_adm tell mgr dashboard ac-user-create admin admin administrator
+            DASHBOARD_ADMIN_SECRET_FILE="${CEPH_CONF_PATH}/dashboard-admin-secret.txt"
+            printf 'admin' > "${DASHBOARD_ADMIN_SECRET_FILE}"
+            ceph_adm dashboard ac-user-create admin -i "${DASHBOARD_ADMIN_SECRET_FILE}" \
+                administrator
             if [ "$ssl" != "0" ]; then
                 if ! ceph_adm tell mgr dashboard create-self-signed-cert;  then
                     echo dashboard module not working correctly!
