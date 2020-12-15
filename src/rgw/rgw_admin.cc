@@ -5535,7 +5535,6 @@ int main(int argc, const char **argv)
       return EINVAL;
   }
 
-  FaultInjector<std::string_view> fault;
   if (!user_id.empty()) {
     user_op.set_user_id(user_id);
     bucket_op.set_user_id(user_id);
@@ -7020,6 +7019,7 @@ next:
       max_entries = DEFAULT_RESHARD_MAX_ENTRIES;
     }
 
+    ReshardFaultInjector fault;
     if (inject_error_at) {
       fault.inject(*inject_error_at, InjectError{-EIO, dpp()});
     } else if (inject_abort_at) {
