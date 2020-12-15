@@ -6712,7 +6712,7 @@ next:
       return ret;
     }
 
-    RGWBucketReshard br(store, bucket_info, attrs, nullptr /* no callback */);
+    RGWBucketReshard br(store, bucket_info, nullptr /* no callback */);
 
 #define DEFAULT_RESHARD_MAX_ENTRIES 1000
     if (max_entries < 1) {
@@ -6819,7 +6819,7 @@ next:
       return -ret;
     }
 
-    RGWBucketReshard br(store, bucket_info, attrs, nullptr /* no callback */);
+    RGWBucketReshard br(store, bucket_info, nullptr /* no callback */);
     list<cls_rgw_bucket_instance_entry> status;
     int r = br.get_status(&status);
     if (r < 0) {
@@ -6866,8 +6866,7 @@ next:
 
     if (bucket_initable) {
       // we did not encounter an error, so let's work with the bucket
-      RGWBucketReshard br(store, bucket_info, attrs,
-                          nullptr /* no callback */);
+      RGWBucketReshard br(store, bucket_info, nullptr /* no callback */);
       int ret = br.cancel();
       if (ret < 0) {
         if (ret == -EBUSY) {
