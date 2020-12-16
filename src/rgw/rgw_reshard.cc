@@ -269,6 +269,24 @@ static int set_resharding_status(RGWRados* store,
   return 0;
 }
 
+static int remove_old_reshard_instance(RGWRados* store,
+                                       const rgw_bucket& bucket)
+{
+  RGWBucketInfo info;
+  auto obj_ctx = store->svc.sysobj->init_obj_ctx();
+  int r = store->get_bucket_instance_info(obj_ctx, bucket, info,
+					  nullptr, nullptr);
+  if (r < 0) {
+    return r;
+  }
+
+  // delete its shard objects (ignore errors)
+  store->clean_bucket_index(info, info.layout.current_index);
+  // delete the bucket instance metadata
+  return rgw_bucket_instance_remove_entry(store, bucket.get_key(),
+					  info, &info.objv_tracker);
+}
+
 // initialize a target index layout, create its bucket index shard objects, and
 // write the target layout to the bucket instance metadata
 static int init_target_layout(RGWRados* store,
@@ -277,6 +295,20 @@ static int init_target_layout(RGWRados* store,
                               uint32_t new_num_shards)
 {
   uint64_t gen = bucket_info.layout.current_index.gen + 1;
+
+  if (bucket_info.reshard_status == cls_rgw_reshard_status::IN_PROGRESS) {
+    // backward-compatible cleanup of old reshards, where the target was in a
+    // different bucket instance
+    if (!bucket_info.new_bucket_instance_id.empty()) {
+      rgw_bucket new_bucket = bucket_info.bucket;
+      new_bucket.bucket_id = bucket_info.new_bucket_instance_id;
+      ldout(store->ctx(), 10) << __func__ << " removing target bucket instance "
+          "from a previous reshard attempt" << dendl;
+      // ignore errors
+      remove_old_reshard_instance(store, new_bucket);
+    }
+    bucket_info.reshard_status = cls_rgw_reshard_status::NOT_RESHARDING;
+  }
 
   auto& target = bucket_info.layout.target_index;
   if (target) {
