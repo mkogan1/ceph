@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# version 6
+# version 7
 
 # NOTE: This script based based on rgw-orphan-list but doing the
 # reverse calculation.
@@ -11,7 +11,7 @@
 # the task.
 
 # IMPORTANT: Affects order produced by 'sort'.
-export LANG=C
+export LC_ALL=C
 
 trap "exit 1" TERM
 TOP_PID=$$
@@ -218,10 +218,22 @@ function test_lines() {
   }
 }
 
+function findnul(myfield) {
+  for(i=1;i<=split(myfield,a,"");i++) {
+    if(ord[a[i]]==0) {
+      return 1
+    }
+  }
+  return 0
+}
+
 function line_out() {
+  if(findnul($1)) {
+    # If the RADOS object name has a NUL character, skip output
+    return
+  }
   # Note: Intentionally using $2 and $NF below
   # Use of $NF eliminates risk of exhausting input field count
-
   if ($2" "$NF!=lastline) {
     # Only output a given bucket/Obj combination once
     printf("Bucket: \"%s\"  Object: \"%s\"\n", $2, $NF)>>map_out
@@ -231,7 +243,7 @@ function line_out() {
 }
 
 BEGIN {
-  if (filetwo=="" || map_out=="") {
+  if(filetwo==""||map_out=="") {
      print "">>"/dev/stderr"
      print "">>"/dev/stderr"
      print "Missing parameter."
@@ -244,27 +256,27 @@ BEGIN {
   f2_count=0
   advance_f2()
   printf("%s File 1 Line Count\tFile 2 Line Count\tPotentially Impacted Objects\n",get_date_time())>>"/dev/stderr"
+  for(n=0;n<256;n++) {
+    ord[sprintf("%c",n)]=n
+  }
 }
 
 {
   f1_count++
-  if (f2_eof==0) {
-    if (test_lines()==2) {
+  if(f2_eof==0) {
+    if(test_lines()==2) {
       while ($1>b[1]) {
         advance_f2()
       }
       test_lines()
     }
-    if ((f1_count % status_delta)==0) {
-      status_out()
-    }
   } else {
     # If EOF hit, dump all remaining lines since they're missing
     # from filetwo
     line_out()
-    if ((f1_count % status_delta)==0) {
-      status_out()
-    }
+  }
+  if((f1_count % status_delta)==0) {
+    status_out()
   }
 }
 
@@ -273,6 +285,7 @@ END {
     status_out()
   }
 }
+
 EOF
 
 parallel=0
@@ -346,7 +359,6 @@ sort "$temp_file" > "$gap_out"
 rm -f "$temp_file"
 
 found=$(wc -l < "$gap_out")
-nullcount=$(grep -cPa '\x00' "$gap_out")
 mydate=$(date +%F\ %T)
 
 log_out "Done."
@@ -355,24 +367,6 @@ cat << EOF
 
 Found $found *possible* gaps.
 The results can be found in "${gap_out}".
-EOF
-
-if [ $nullcount -gt 0 ]; then
-    cat << EOF
-
-NOTE: There are ${nullcount} lines with a NUL ( 0x00 ) character in 
-      the object name.  These are almost certainly false-positive
-      results but are included for completeness.
-
-      The NUL character is injected when part of a multi-part upload
-      are re-uploaded.
-
-      To exclude these lines from the results, you can run:
-      $ grep -vPa '\x00' "$gap_out" > ${gap_out}.no-null
-EOF
-fi
-
-cat << EOF
 
 Intermediate files: "${rados_out}" and "${rgwadmin_out}".
 
