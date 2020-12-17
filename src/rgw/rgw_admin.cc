@@ -387,8 +387,10 @@ void usage()
   cout << "   --totp-window             the number of TOTP tokens that are checked before and after the current token when validating token\n";
   cout << "   --totp-pin                the valid value of a TOTP token at a certain time\n";
   cout << "\nradoslist options:\n";
-  cout << "   --rgw-obj-fs              the field separator that will separate the radox object name from the rgw object name;\n";
-  cout << "                             additionally rados objects for incomplete multipart uploads will not be output\n";
+  cout << "   --rgw-obj-fs              the field separator that will separate the rados\n";
+  cout << "                             object name from the rgw object name;\n";
+  cout << "                             additionally rados objects for incomplete\n";
+  cout << "                             multipart uploads will not be output\n";
   cout << "\n";
   generic_client_usage();
 }
@@ -2932,7 +2934,7 @@ int main(int argc, const char **argv)
   string event_id;
   rgw::notify::EventTypeList event_types;
 
-  boost::optional<std::string> rgw_obj_fs; // radoslist field separator
+  std::optional<std::string> rgw_obj_fs; // radoslist field separator
 
   for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ) {
     if (ceph_argparse_double_dash(args, i)) {
