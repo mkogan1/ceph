@@ -1423,7 +1423,7 @@ int RGWRadosList::run(const std::string& start_bucket_name)
   if (include_rgw_obj_name) {
     goto done;
   }
-  
+
   // now handle incomplete multipart uploads by going back to the
   // initial bucket
 
