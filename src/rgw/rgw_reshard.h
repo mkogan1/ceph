@@ -61,14 +61,10 @@ public:
 }; // class RGWBucketReshardLock
 
 class RGWBucketReshard {
-public:
-
-  friend class RGWReshard;
-
+ public:
   using Clock = ceph::coarse_mono_clock;
 
-private:
-
+ private:
   RGWRados *store;
   RGWBucketInfo bucket_info;
 
