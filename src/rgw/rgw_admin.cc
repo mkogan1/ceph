@@ -6672,12 +6672,12 @@ next:
 
     int i = (specified_shard_id ? shard_id : 0);
     for (; i < max_shards; i++) {
-      RGWRados::BucketShard bs(store->getRados());
-      int ret = bs.init(bucket_info.bucket, i, index, nullptr /* no RGWBucketInfo */, dpp());
+      RGWRados::BucketShard bs(static_cast<rgw::sal::RGWRadosStore*>(store)->getRados());
+      int ret = bs.init(dpp(), bucket_info, index, i);
       marker.clear();
 
       if (ret < 0) {
-        cerr << "ERROR: bs.init(bucket=" << bucket << ", shard=" << shard_id << "): " << cpp_strerror(-ret) << std::endl;
+        cerr << "ERROR: bs.init(bucket=" << bucket << ", shard=" << i << "): " << cpp_strerror(-ret) << std::endl;
         return -ret;
       }
 
@@ -6743,7 +6743,7 @@ next:
     for (int i = 0; i < max_shards; i++) {
       RGWRados::BucketShard bs(store->getRados());
       int shard_id = (bucket_info.layout.current_index.layout.normal.num_shards > 0  ? i : -1);
-      int ret = bs.init(bucket_info.bucket, shard_id, index, nullptr /* no RGWBucketInfo */, dpp());
+      int ret = bs.init(dpp(), bucket_info, index, shard_id);
       if (ret < 0) {
         cerr << "ERROR: bs.init(bucket=" << bucket << ", shard=" << i << "): " << cpp_strerror(-ret) << std::endl;
         return -ret;
