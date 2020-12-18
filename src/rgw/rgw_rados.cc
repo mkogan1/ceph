@@ -3395,45 +3395,13 @@ int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
   RGWBucketInfo bucket_info;
   RGWBucketInfo* bucket_info_p =
     bucket_info_out ? bucket_info_out : &bucket_info;
-  
+
   int ret = store->get_bucket_instance_info(obj_ctx, bucket, *bucket_info_p, NULL, NULL);
   if (ret < 0) {
     return ret;
   }
 
   ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, obj.get_hash_object(), &bucket_obj, &shard_id);
-  if (ret < 0) {
-    ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
-    return ret;
-  }
-  ldout(store->ctx(), 20) << " bucket index object: " << bucket_obj << dendl;
-
-  return 0;
-}
-
-int RGWRados::BucketShard::init(const rgw_bucket& _bucket,
-				int sid, std::optional<rgw::bucket_index_layout_generation> idx_layout,
-				RGWBucketInfo* bucket_info_out)
-{
-  bucket = _bucket;
-  shard_id = sid;
-
-  auto obj_ctx = store->svc.sysobj->init_obj_ctx();
-
-
-  RGWBucketInfo bucket_info;
-  RGWBucketInfo* bucket_info_p =
-    bucket_info_out ? bucket_info_out : &bucket_info;
-  int ret = store->get_bucket_instance_info(obj_ctx, bucket, *bucket_info_p, NULL, NULL);
-  if (ret < 0) {
-    return ret;
-  }
-
-  string oid;
-
-  ret = store->open_bucket_index_shard(*bucket_info_p, index_ctx, shard_id, idx_layout->layout.normal.num_shards,
-				       idx_layout->gen, &bucket_obj);
-
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -3460,12 +3428,16 @@ int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info,
   return 0;
 }
 
-int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info, const rgw::bucket_index_layout_generation& current_layout, int sid)
+int RGWRados::BucketShard::init(const RGWBucketInfo& bucket_info,
+                                const rgw::bucket_index_layout_generation& index,
+                                int sid)
 {
   bucket = bucket_info.bucket;
   shard_id = sid;
 
-  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id, current_layout.layout.normal.num_shards, current_layout.gen, &bucket_obj);
+  int ret = store->open_bucket_index_shard(bucket_info, index_ctx, shard_id,
+					   num_shards(index), index.gen,
+					   &bucket_obj);
   if (ret < 0) {
     ldout(store->ctx(), 0) << "ERROR: open_bucket_index_shard() returned ret=" << ret << dendl;
     return ret;
@@ -9362,9 +9334,9 @@ int RGWRados::bi_remove(BucketShard& bs)
 int RGWRados::bi_list(const RGWBucketInfo& bucket_info, int shard_id, const string& filter_obj, const string& marker, uint32_t max, list<rgw_cls_bi_entry> *entries, bool *is_truncated)
 {
   BucketShard bs(this);
-  int ret = bs.init(bucket_info.bucket, shard_id,
+  int ret = bs.init(bucket_info,
 		    bucket_info.layout.current_index,
-		    nullptr /* no RGWBucketInfo */);
+		    shard_id);
   if (ret < 0) {
     ldout(cct, 5) << "bs.init() returned ret=" << ret << dendl;
     return ret;
