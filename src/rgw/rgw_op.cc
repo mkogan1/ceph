@@ -209,7 +209,7 @@ static int get_user_policy_from_attr(CephContext * const cct,
  * object: name of the object to get the ACL for.
  * Returns: 0 on success, -ERR# otherwise.
  */
-int rgw_op_get_bucket_policy_from_attr(const DoutPrefixProvider *dpp, 
+int rgw_op_get_bucket_policy_from_attr(const DoutPrefixProvider *dpp,
                                        CephContext *cct,
 				       rgw::sal::RGWStore *store,
 				       RGWBucketInfo& bucket_info,
@@ -236,7 +236,7 @@ int rgw_op_get_bucket_policy_from_attr(const DoutPrefixProvider *dpp,
   return 0;
 }
 
-static int get_obj_policy_from_attr(const DoutPrefixProvider *dpp, 
+static int get_obj_policy_from_attr(const DoutPrefixProvider *dpp,
                                     CephContext *cct,
 				    rgw::sal::RGWStore *store,
 				    RGWObjectCtx& obj_ctx,
@@ -411,7 +411,7 @@ static int get_multipart_info(const DoutPrefixProvider *dpp, struct req_state *s
   return get_multipart_info(dpp, s, meta_obj.get(), upload_info);
 }
 
-static int read_bucket_policy(const DoutPrefixProvider *dpp, 
+static int read_bucket_policy(const DoutPrefixProvider *dpp,
                               rgw::sal::RGWStore *store,
                               struct req_state *s,
                               RGWBucketInfo& bucket_info,
@@ -438,7 +438,7 @@ static int read_bucket_policy(const DoutPrefixProvider *dpp,
   return ret;
 }
 
-static int read_obj_policy(const DoutPrefixProvider *dpp, 
+static int read_obj_policy(const DoutPrefixProvider *dpp,
                            rgw::sal::RGWStore *store,
                            struct req_state *s,
                            RGWBucketInfo& bucket_info,
@@ -722,7 +722,7 @@ int rgw_build_object_policies(const DoutPrefixProvider *dpp, rgw::sal::RGWStore 
     s->object_acl = std::make_unique<RGWAccessControlPolicy>(s->cct);
 
     s->object->set_bucket(s->bucket.get());
-      
+
     s->object->set_atomic(s->obj_ctx);
     if (prefetch_data) {
       s->object->set_prefetch_data(s->obj_ctx);
@@ -1572,7 +1572,7 @@ int RGWGetObj::read_user_manifest_part(rgw::sal::RGWBucket* bucket,
   return op_ret;
 }
 
-static int iterate_user_manifest_parts(const DoutPrefixProvider *dpp, 
+static int iterate_user_manifest_parts(const DoutPrefixProvider *dpp,
                                        CephContext * const cct,
                                        rgw::sal::RGWStore* const store,
                                        const off_t ofs,
@@ -2371,7 +2371,7 @@ void RGWGetUsage::execute(optional_yield y)
   op_ret = get_params(y);
   if (op_ret < 0)
     return;
-    
+
   if (!start_date.empty()) {
     op_ret = utime_t::parse_date(start_date, &start_epoch, NULL);
     if (op_ret < 0) {
@@ -2379,7 +2379,7 @@ void RGWGetUsage::execute(optional_yield y)
       return;
     }
   }
-    
+
   if (!end_date.empty()) {
     op_ret = utime_t::parse_date(end_date, &end_epoch, NULL);
     if (op_ret < 0) {
@@ -2387,13 +2387,13 @@ void RGWGetUsage::execute(optional_yield y)
       return;
     }
   }
-     
+
   uint32_t max_entries = 1000;
 
   bool is_truncated = true;
 
   RGWUsageIter usage_iter;
-  
+
   while (s->bucket && is_truncated) {
     op_ret = s->bucket->read_usage(start_epoch, end_epoch, max_entries, &is_truncated,
 				   usage_iter, usage);
@@ -2424,7 +2424,7 @@ void RGWGetUsage::execute(optional_yield y)
     ldpp_dout(this, 0) << "ERROR: can't read user header"  << dendl;
     return;
   }
-  
+
   return;
 }
 
@@ -3696,7 +3696,7 @@ void RGWPutObj::execute(optional_yield y)
   MD5 hash;
   bufferlist bl, aclbl, bs;
   int len;
-  
+
   off_t fst;
   off_t lst;
 
@@ -4253,7 +4253,7 @@ void RGWPostObj::execute(optional_yield y)
     buf_to_hex(m, CEPH_CRYPTO_MD5_DIGESTSIZE, calc_md5);
 
     etag = calc_md5;
-    
+
     if (supplied_md5_b64 && strcmp(calc_md5, supplied_md5)) {
       op_ret = -ERR_BAD_DIGEST;
       return;
@@ -4755,7 +4755,7 @@ void RGWDeleteObj::execute(optional_yield y)
 
     // make reservation for notification if needed
     const auto versioned_object = s->bucket->versioning_enabled();
-    const auto event_type = versioned_object && s->object->get_instance().empty() ? 
+    const auto event_type = versioned_object && s->object->get_instance().empty() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     std::unique_ptr<rgw::sal::Notification> res = store->get_notification(s->object.get(),
 									s, event_type);
@@ -4932,7 +4932,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
 	  return -EACCES;
 	} else if (e == Effect::Pass &&
 		   !src_acl.verify_permission(this, *s->auth.identity, s->perm_mask,
-					      RGW_PERM_READ)) { 
+					      RGW_PERM_READ)) {
 	  return -EACCES;
 	}
       } else if (!src_acl.verify_permission(this, *s->auth.identity,
@@ -5407,7 +5407,7 @@ void RGWPutACLs::execute(optional_yield y)
 void RGWPutLC::execute(optional_yield y)
 {
   bufferlist bl;
-  
+
   RGWLifecycleConfiguration_S3 config(s->cct);
   RGWXMLParser parser;
   RGWLifecycleConfiguration_S3 new_config(s->cct);
@@ -5804,7 +5804,7 @@ void RGWInitMultipart::execute(optional_yield y)
 
     op_ret = obj_op->write_meta(this, bl.length(), 0, s->yield);
   } while (op_ret == -EEXIST);
-  
+
   // send request to notification manager
   int ret = res->publish_commit(this, s->obj_size, ceph::real_clock::now(), attrs[RGW_ATTR_ETAG].to_str());
   if (ret < 0) {
@@ -6030,9 +6030,9 @@ void RGWCompleteMultipart::execute(optional_yield y)
           ldpp_dout(this, 0) << "ERROR: compression type was changed during multipart upload ("
                            << cs_info.compression_type << ">>" << obj_part.cs_info.compression_type << ")" << dendl;
           op_ret = -ERR_INVALID_PART;
-          return; 
+          return;
       }
-      
+
       if (part_compressed) {
         int64_t new_ofs; // offset in compression data for new part
         if (cs_info.blocks.size() > 0)
@@ -6046,7 +6046,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
           cb.len = block.len;
           cs_info.blocks.push_back(cb);
           new_ofs = cb.new_ofs + cb.len;
-        } 
+        }
         if (!compressed)
           cs_info.compression_type = obj_part.cs_info.compression_type;
         cs_info.orig_size += obj_part.cs_info.orig_size;
@@ -6458,7 +6458,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
 				   rgw::IAM::s3DeleteObjectVersion,
 				   ARN(obj->get_obj()));
       }
-      if ((e == Effect::Deny) || 
+      if ((e == Effect::Deny) ||
           (usr_policy_res == Effect::Pass && e == Effect::Pass && !acl_allowed)) {
 	      send_partial_response(*iter, false, "", -EACCES);
 	      continue;
@@ -6490,7 +6490,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
     }
     // make reservation for notification if needed
     const auto versioned_object = s->bucket->versioning_enabled();
-    const auto event_type = versioned_object && obj->get_instance().empty() ? 
+    const auto event_type = versioned_object && obj->get_instance().empty() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     std::unique_ptr<rgw::sal::Notification> res = store->get_notification(obj.get(),
 									s, event_type);
@@ -6934,7 +6934,7 @@ bool RGWBulkUploadOp::handle_file_verify_permission(RGWBucketInfo& binfo,
       return true;
     }
   }
-    
+
   return verify_bucket_permission_no_policy(this, s, s->user_acl.get(),
 					    &bacl, RGW_PERM_WRITE);
 }
@@ -8106,4 +8106,63 @@ void RGWDeleteBucketPublicAccessBlock::execute(optional_yield y)
       op_ret = s->bucket->set_instance_attrs(this, attrs, s->yield);
       return op_ret;
     });
+}
+
+/*datacache*/
+//FIXME:: UGUR
+//
+bool compare_acls(){return true;}
+
+bool RGWGetObj::cache_authorize(){
+  bool allow =  false;
+  c_obj.bucket_name = s->bucket_name;
+  c_obj.obj_name = s->object.name;
+  c_obj.backendProtocol =  S3;
+  c_obj.owner = s->user->get_info().user_id.id;
+//  c_obj.size_in_bytes = 134217728;
+//  return true;
+  int op_ret = store->getRados()->objDirectory->getValue(&c_obj);
+  // Object not found in diretory cache, and it's size and acls retrieved from backend
+  if (op_ret < 0){
+	op_ret = store->getRados()->retrieve_obj_acls(c_obj);
+	if (op_ret < 0)
+      return false;
+	int op_ret = store->getRados()->objDirectory->setValue(&c_obj);
+    return compare_acls();
+	// objectDirectory.updateACL(c_obj,c_obj.acl);
+	// c_obj.aclTimeStamp = now;
+  } else { // Object is in write-back cache 
+	return compare_acls(); 
+  }
+}
+
+
+void RGWGetObj::cache_execute(){
+  ldpp_dout(this, 10) << __func__  << "object size:" <<  c_obj.size_in_bytes <<dendl;
+  RGWGetObj_CB cb(this);
+  RGWGetObj_Filter* filter = (RGWGetObj_Filter *)&cb;
+ 
+  RGWBucketInfo dest_bucket_info;
+  RGWRados::Object op_target(store->getRados(), dest_bucket_info, *static_cast<RGWObjectCtx *>(s->obj_ctx), obj);
+  RGWRados::Object::Read read_op(&op_target);
+  s->obj_size = c_obj.size_in_bytes;
+
+  range_str = s->info.env->get("HTTP_RANGE");
+  op_ret = init_common();
+  if (op_ret < 0)
+    return ;
+  if(range_str){
+     op_ret = read_op.range_to_ofs(s->obj_size, ofs, end);
+     this->total_len = end - ofs + 1;
+  } else{ 
+  	this->total_len = c_obj.size_in_bytes;
+  	ofs = 0;
+  	end = c_obj.size_in_bytes - 1;
+  }
+  
+  
+  op_ret = read_op.read(ofs, end, filter, c_obj, s->yield); 
+  if (op_ret >= 0)
+    op_ret = filter->flush();
+  return;
 }

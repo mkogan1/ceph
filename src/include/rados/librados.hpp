@@ -14,6 +14,8 @@
 #include "librados_fwd.hpp"
 #include "rados_types.hpp"
 
+
+class CacheRequest;
 namespace libradosstriper
 {
   class RadosStriper;
@@ -24,7 +26,6 @@ namespace neorados { class RADOS; }
 namespace librados {
 
 using ceph::bufferlist;
-
 struct AioCompletionImpl;
 struct IoCtxImpl;
 struct ListObjectImpl;
@@ -33,7 +34,6 @@ struct ObjListCtx;
 class ObjectOperationImpl;
 struct PlacementGroupImpl;
 struct PoolAsyncCompletionImpl;
-
 typedef struct rados_cluster_stat_t cluster_stat_t;
 typedef struct rados_pool_stat_t pool_stat_t;
 
@@ -735,10 +735,10 @@ inline namespace v14_2_0 {
     /**
      * Extensible tier
      *
-     * set_chunk: make a chunk pointing a part of the source object at the target 
+     * set_chunk: make a chunk pointing a part of the source object at the target
      * 		  object
      *
-     * @param src_offset [in] source offset to indicate the start position of 
+     * @param src_offset [in] source offset to indicate the start position of
      * 				a chunk in the source object
      * @param src_length [in] source length to set the length of the chunk
      * @param tgt_oid    [in] target object's id to set a chunk
@@ -1161,6 +1161,8 @@ inline namespace v14_2_0 {
     int operate(const std::string& oid, ObjectReadOperation *op, bufferlist *pbl, int flags);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op, int flags);
+    int aio_operate(const std::string& oid, AioCompletion *c, CacheRequest *cc, bufferlist *pbl); //datacache
+
     /**
      * Schedule an async write operation with explicit snapshot parameters
      *

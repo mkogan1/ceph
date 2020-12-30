@@ -19,10 +19,59 @@
 
 #include "rgw_aio.h"
 #include "rgw_d3n_cacherequest.h"
-
+//#include "rgw_cache.h"
+//Class DataCenter
 namespace rgw {
 
 namespace {
+
+
+struct remote_state {
+  Aio* aio;
+  RemoteRequest *c;
+  remote_state(Aio* aio, AioResult& r)
+    : aio(aio) {}
+};
+
+void remote_aio_cb(RemoteRequest *c){
+
+/*	 lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << "(): Read From Cache " << c->r->id <<" key " << c->key  << dendl;
+        auto& r = *(c->r);
+        auto s = reinterpret_cast<remote_state*>(&r.user_data);
+  //      c->r->result = 0;
+//s->aio->put(*(c->r));
+	 lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << "(): Read From Cache s " << r.id <<" key " << c->key  << dendl;*/
+	c->finish();
+
+}
+
+void cache_aio_cb(sigval_t sigval){
+  LocalRequest* c = static_cast<LocalRequest*>(sigval.sival_ptr);
+  int status = c->status();
+  if (status == ECANCELED) {
+	c->r->result = -1;
+	c->aio->put(*(c->r));
+	return;
+  } else if (status == 0) {
+	c->finish();
+//	delete c;
+  }
+}
+
+struct cache_state {
+  Aio* aio;
+  LocalRequest *c;
+  cache_state(Aio* aio, AioResult& r)
+    : aio(aio) {}
+
+  int submit_op(LocalRequest *cc){
+    int ret = 0;
+    if((ret = ::aio_read(cc->paiocb)) != 0) {
+	  return ret;
+	 }
+    return ret;
+  }
+};
 
 void cb(librados::completion_t, void* arg);
 
@@ -132,19 +181,25 @@ Aio::OpFunc aio_abstract(Op&& op, boost::asio::io_context& context,
 
 
 template <typename Op>
-Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location) {
-  return [op = std::move(op), obj_ofs, read_ofs, read_len, location] (Aio* aio, AioResult& r) mutable{
+Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location, boost::asio::io_context& context, spawn::yield_context yield) {
+  return [op = std::move(op), obj_ofs, read_ofs, read_len, location, &context, yield] (Aio* aio, AioResult& r) mutable{
+
+  using namespace boost::asio;
+  async_completion<spawn::yield_context, void()> init(yield);
+  auto ex = get_associated_executor(init.completion_handler);
     auto& ref = r.obj.get_ref();
-    auto cs = new(&r.user_data) cache_state(aio);
-    cs->c = new D3nL1CacheRequest();
+    //auto cs = new(&r.user_data) cache_state(aio);
+    LocalRequest* c = new D3nL1CacheRequest();
 
     lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << ": libaio Read From Cache, oid=" << ref.obj.oid << dendl;
-    cs->c->prepare_libaio_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
-    int ret = cs->submit_libaio_op(cs->c);
+    c->prepare_libaio_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
+    librados::async_operate(context, ref.pool.ioctx(), ref.obj.oid, &op, c,
+                              bind_executor(ex, Handler{aio, r}));
+  int ret = c->submit_libaio_op();
     if(ret < 0) {
       lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << ": ERROR: submit_libaio_op, ret=" << ret << dendl;
       r.result = -EINVAL;
-      cs->aio->put(r);
+      aio->put(r);
       delete cs->c;
       cs->c = nullptr;
     }
@@ -152,6 +207,57 @@ Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t rea
 }
 
 
+template <typename Op>
+Aio::OpFunc remote_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, string dest,  RemoteRequest *c, boost::asio::io_context& context, spawn::yield_context yield, cache_block *c_block, string path, DataCache *dc) {
+  return [op = std::move(op), obj_ofs, read_ofs, read_len, dest, c, &context, yield, c_block, path, dc] (Aio* aio, AioResult& r) mutable{
+
+      /*	  auto& ref = r.obj.get_ref();
+    auto cs = new(&r.user_data) remote_state(aio, r);
+    cs->c = new RemoteRequest();
+    cs->c->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, dest, aio, &r, c_block, path, remote_aio_cb);
+    dc->submit_remote_req(cs->c);
+
+*/
+
+  using namespace boost::asio;
+  async_completion<spawn::yield_context, void()> init(yield);
+  auto ex = get_associated_executor(init.completion_handler);
+  auto& ref = r.obj.get_ref();
+  RemoteRequest* cc = new RemoteRequest();
+  cc->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, dest, aio, &r, c_block, path, remote_aio_cb);
+  librados::async_operate(context, ref.pool.ioctx(), ref.obj.oid, &op, cc,
+                             bind_executor(ex, Handler{aio, r}));
+   //DataCache *ab = static_cast<DataCache *>(dc);
+   dc->submit_remote_req(cc);
+
+  };
+}
+
+
+/* datacache */
+
+#endif // HAVE_BOOST_CONTEXT
+template <typename Op>
+Aio::OpFunc cache_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, off_t read_len, string location) {
+  static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
+  static_assert(!std::is_lvalue_reference_v<Op>);
+  static_assert(!std::is_const_v<Op>);
+
+  #ifdef HAVE_BOOST_CONTEXT
+  return cache_aio_abstract(std::forward<Op>(op),obj_ofs, read_ofs, read_len, location, y.get_io_context(), y.get_yield_context());
+  #endif
+}
+
+template <typename Op>
+Aio::OpFunc remote_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, off_t read_len, string dest,  RemoteRequest *c, cache_block *c_block, string path, DataCache *dc) {
+  static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
+  static_assert(!std::is_lvalue_reference_v<Op>);
+  static_assert(!std::is_const_v<Op>);
+  #ifdef HAVE_BOOST_CONTEXT
+  return remote_aio_abstract(std::forward<Op>(op),obj_ofs, read_ofs, read_len, dest, c,  y.get_io_context(), y.get_yield_context(),c_block , path, dc);
+  #endif
+}
+/* datacache */
 template <typename Op>
 Aio::OpFunc aio_abstract(Op&& op, optional_yield y) {
   static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
@@ -189,6 +295,10 @@ Aio::OpFunc Aio::cache_op(librados::ObjectReadOperation&& op, optional_yield y,
                           off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location) {
   lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << "()" << dendl;
   return cache_aio_abstract(std::move(op), y, obj_ofs, read_ofs, read_len, location);
+}
+
+Aio::OpFunc Aio::remote_op(librados::ObjectReadOperation&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, off_t read_len, string dest,  RemoteRequest *c, cache_block *c_block, string path, DataCache *dc) {
+    return remote_aio_abstract(std::move(op), y, obj_ofs, read_ofs, read_len, dest, c, c_block, path, dc);
 }
 
 } // namespace rgw

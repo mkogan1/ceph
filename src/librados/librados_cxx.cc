@@ -645,7 +645,7 @@ void librados::ObjectReadOperation::tier_evict()
   o->tier_evict();
 }
 
-void librados::ObjectWriteOperation::set_redirect(const std::string& tgt_obj, 
+void librados::ObjectWriteOperation::set_redirect(const std::string& tgt_obj,
 						  const IoCtx& tgt_ioctx,
 						  uint64_t tgt_version,
 						  int flag)
@@ -1547,6 +1547,15 @@ int librados::IoCtx::operate(const std::string& oid, librados::ObjectReadOperati
     return -EINVAL;
   return io_ctx_impl->operate_read(obj, &o->impl->o, pbl, translate_flags(flags));
 }
+
+/* datacache */
+int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c, CacheRequest *cc, bufferlist *pbl) {
+  if (!cc) return -EINVAL;
+  object_t obj(oid);
+  return io_ctx_impl->cache_aio_operate_read(obj, c->pc, cc, pbl);
+}
+/* datacache */
+
 
 int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c,
 				 librados::ObjectWriteOperation *o)
