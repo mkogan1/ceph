@@ -110,42 +110,7 @@ struct RGWDataChangesLogInfo {
   void decode_json(JSONObj* obj);
 };
 
-class RGWDataChangesLog;
-
-class RGWDataChangesBE {
-protected:
-  librados::IoCtx& ioctx;
-  CephContext* const cct;
-  RGWDataChangesLog& datalog;
-private:
-public:
-  using entries = std::variant<std::list<cls_log_entry>,
-			       std::vector<ceph::buffer::list>>;
-
-  RGWDataChangesBE(librados::IoCtx& ioctx,
-		   RGWDataChangesLog& datalog)
-    : ioctx(ioctx), cct(static_cast<CephContext*>(ioctx.cct())),
-      datalog(datalog) {}
-  virtual ~RGWDataChangesBE() = default;
-
-  virtual void prepare(ceph::real_time now,
-		       const std::string& key,
-		       ceph::buffer::list&& entry,
-		       entries& out) = 0;
-  virtual int push(int index, entries&& items) = 0;
-  virtual int push(int index, ceph::real_time now,
-		   const std::string& key,
-		   ceph::buffer::list&& bl) = 0;
-  virtual int list(int shard, int max_entries,
-		   std::vector<rgw_data_change_log_entry>& entries,
-		   std::optional<std::string_view> marker,
-		   std::string* out_marker, bool* truncated) = 0;
-  virtual int get_info(int index, RGWDataChangesLogInfo *info) = 0;
-  virtual int trim(int index, std::string_view marker) = 0;
-  virtual int trim(int index, std::string_view marker,
-		   librados::AioCompletion* c) = 0;
-  virtual std::string_view max_marker() const = 0;
-};
+class RGWDataChangesBE;
 
 class RGWDataChangesLog {
   CephContext* cct;
@@ -202,7 +167,6 @@ public:
   ~RGWDataChangesLog();
 
   int init();
-  std::string get_oid(int i) const;
   int add_entry(const rgw_bucket& bucket_info, int shard_id);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int list_entries(int shard, int max_entries,
@@ -239,6 +203,48 @@ public:
   }
   // a marker that compares greater than any other
   std::string_view max_marker() const;
+  std::string get_oid(uint64_t gen_id, int shard_id) const;
 };
+
+class RGWDataChangesBE {
+protected:
+  librados::IoCtx& ioctx;
+  CephContext* const cct;
+  RGWDataChangesLog& datalog;
+  uint64_t gen_id;
+
+  std::string get_oid(int shard_id) {
+    return datalog.get_oid(gen_id, shard_id);
+  }
+public:
+  using entries = std::variant<std::list<cls_log_entry>,
+			       std::vector<ceph::buffer::list>>;
+
+  RGWDataChangesBE(librados::IoCtx& ioctx,
+		   RGWDataChangesLog& datalog,
+		   uint64_t gen_id)
+    : ioctx(ioctx), cct(static_cast<CephContext*>(ioctx.cct())),
+      datalog(datalog), gen_id(gen_id) {}
+  virtual ~RGWDataChangesBE() = default;
+
+  virtual void prepare(ceph::real_time now,
+		       const std::string& key,
+		       ceph::buffer::list&& entry,
+		       entries& out) = 0;
+  virtual int push(int index, entries&& items) = 0;
+  virtual int push(int index, ceph::real_time now,
+		   const std::string& key,
+		   ceph::buffer::list&& bl) = 0;
+  virtual int list(int shard, int max_entries,
+		   std::vector<rgw_data_change_log_entry>& entries,
+		   std::optional<std::string_view> marker,
+		   std::string* out_marker, bool* truncated) = 0;
+  virtual int get_info(int index, RGWDataChangesLogInfo *info) = 0;
+  virtual int trim(int index, std::string_view marker) = 0;
+  virtual int trim(int index, std::string_view marker,
+		   librados::AioCompletion* c) = 0;
+  virtual std::string_view max_marker() const = 0;
+};
+
 
 #endif
