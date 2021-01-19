@@ -12,13 +12,13 @@
  *
  */
 
-#include "common/fault_injector.h"
-#include <gtest/gtest.h>
+#include <boost/intrusive_ptr.hpp>
 
-static const DoutPrefixProvider* dpp() {
-  static NoDoutPrefix d{g_ceph_context, ceph_subsys_context};
-  return &d;
-}
+#include "common/fault_injector.h"
+#include "common/common_init.h"
+#include "common/ceph_argparse.h"
+#include "global/global_init.h"
+#include <gtest/gtest.h>
 
 TEST(FaultInjectorDeathTest, InjectAbort)
 {
@@ -35,8 +35,29 @@ TEST(FaultInjectorDeathTest, AssignAbort)
   EXPECT_DEATH([[maybe_unused]] int r = f.check(false), "FaultInjector");
 }
 
+// death tests have to run in single-threaded mode, so we can't initialize a
+// CephContext until after those have run (gtest automatically runs them first)
+class Fixture : public testing::Test {
+  boost::intrusive_ptr<CephContext> cct;
+  std::optional<NoDoutPrefix> prefix;
+ protected:
+  void SetUp() override {
+    CephInitParameters params(CEPH_ENTITY_TYPE_CLIENT);
+    cct = common_preinit(params, CODE_ENVIRONMENT_UTILITY,
+                         CINIT_FLAG_NO_DEFAULT_CONFIG_FILE);
+    prefix.emplace(cct.get(), ceph_subsys_context);
+  }
+  void TearDown() override {
+    prefix.reset();
+    cct.reset();
+  }
+  const DoutPrefixProvider* dpp() { return &*prefix; }
+};
+
 // test int as a Key type
-TEST(FaultInjectorInt, Default)
+using FaultInjectorInt = Fixture;
+
+TEST_F(FaultInjectorInt, Default)
 {
   constexpr FaultInjector<int> f;
   EXPECT_EQ(f.check(0), 0);
@@ -45,7 +66,7 @@ TEST(FaultInjectorInt, Default)
   EXPECT_EQ(f.check(3), 0);
 }
 
-TEST(FaultInjectorInt, InjectError)
+TEST_F(FaultInjectorInt, InjectError)
 {
   constexpr FaultInjector f{2, InjectError{-EINVAL}};
   EXPECT_EQ(f.check(0), 0);
@@ -54,7 +75,7 @@ TEST(FaultInjectorInt, InjectError)
   EXPECT_EQ(f.check(3), 0);
 }
 
-TEST(FaultInjectorInt, InjectErrorMessage)
+TEST_F(FaultInjectorInt, InjectErrorMessage)
 {
   FaultInjector f{2, InjectError{-EINVAL, dpp()}};
   EXPECT_EQ(f.check(0), 0);
@@ -63,7 +84,7 @@ TEST(FaultInjectorInt, InjectErrorMessage)
   EXPECT_EQ(f.check(3), 0);
 }
 
-TEST(FaultInjectorInt, AssignError)
+TEST_F(FaultInjectorInt, AssignError)
 {
   FaultInjector<int> f;
   ASSERT_EQ(f.check(0), 0);
@@ -71,7 +92,7 @@ TEST(FaultInjectorInt, AssignError)
   EXPECT_EQ(f.check(0), -EINVAL);
 }
 
-TEST(FaultInjectorInt, AssignErrorMessage)
+TEST_F(FaultInjectorInt, AssignErrorMessage)
 {
   FaultInjector<int> f;
   ASSERT_EQ(f.check(0), 0);
@@ -80,7 +101,9 @@ TEST(FaultInjectorInt, AssignErrorMessage)
 }
 
 // test std::string_view as a Key type
-TEST(FaultInjectorString, Default)
+using FaultInjectorString = Fixture;
+
+TEST_F(FaultInjectorString, Default)
 {
   constexpr FaultInjector<std::string_view> f;
   EXPECT_EQ(f.check("Red"), 0);
@@ -88,7 +111,7 @@ TEST(FaultInjectorString, Default)
   EXPECT_EQ(f.check("Blue"), 0);
 }
 
-TEST(FaultInjectorString, InjectError)
+TEST_F(FaultInjectorString, InjectError)
 {
   FaultInjector<std::string_view> f{"Red", InjectError{-EIO}};
   EXPECT_EQ(f.check("Red"), -EIO);
@@ -96,7 +119,7 @@ TEST(FaultInjectorString, InjectError)
   EXPECT_EQ(f.check("Blue"), 0);
 }
 
-TEST(FaultInjectorString, InjectErrorMessage)
+TEST_F(FaultInjectorString, InjectErrorMessage)
 {
   FaultInjector<std::string_view> f{"Red", InjectError{-EIO, dpp()}};
   EXPECT_EQ(f.check("Red"), -EIO);
@@ -104,7 +127,7 @@ TEST(FaultInjectorString, InjectErrorMessage)
   EXPECT_EQ(f.check("Blue"), 0);
 }
 
-TEST(FaultInjectorString, AssignError)
+TEST_F(FaultInjectorString, AssignError)
 {
   FaultInjector<std::string_view> f;
   ASSERT_EQ(f.check("Red"), 0);
@@ -112,7 +135,7 @@ TEST(FaultInjectorString, AssignError)
   EXPECT_EQ(f.check("Red"), -EINVAL);
 }
 
-TEST(FaultInjectorString, AssignErrorMessage)
+TEST_F(FaultInjectorString, AssignErrorMessage)
 {
   FaultInjector<std::string_view> f;
   ASSERT_EQ(f.check("Red"), 0);
@@ -121,6 +144,8 @@ TEST(FaultInjectorString, AssignErrorMessage)
 }
 
 // test enum class as a Key type
+using FaultInjectorEnum = Fixture;
+
 enum class Color { Red, Green, Blue };
 
 static std::ostream& operator<<(std::ostream& out, const Color& c) {
@@ -132,7 +157,7 @@ static std::ostream& operator<<(std::ostream& out, const Color& c) {
   return out;
 }
 
-TEST(FaultInjectorEnum, Default)
+TEST_F(FaultInjectorEnum, Default)
 {
   constexpr FaultInjector<Color> f;
   EXPECT_EQ(f.check(Color::Red), 0);
@@ -140,7 +165,7 @@ TEST(FaultInjectorEnum, Default)
   EXPECT_EQ(f.check(Color::Blue), 0);
 }
 
-TEST(FaultInjectorEnum, InjectError)
+TEST_F(FaultInjectorEnum, InjectError)
 {
   FaultInjector f{Color::Red, InjectError{-EIO}};
   EXPECT_EQ(f.check(Color::Red), -EIO);
@@ -148,7 +173,7 @@ TEST(FaultInjectorEnum, InjectError)
   EXPECT_EQ(f.check(Color::Blue), 0);
 }
 
-TEST(FaultInjectorEnum, InjectErrorMessage)
+TEST_F(FaultInjectorEnum, InjectErrorMessage)
 {
   FaultInjector f{Color::Red, InjectError{-EIO, dpp()}};
   EXPECT_EQ(f.check(Color::Red), -EIO);
@@ -156,7 +181,7 @@ TEST(FaultInjectorEnum, InjectErrorMessage)
   EXPECT_EQ(f.check(Color::Blue), 0);
 }
 
-TEST(FaultInjectorEnum, AssignError)
+TEST_F(FaultInjectorEnum, AssignError)
 {
   FaultInjector<Color> f;
   ASSERT_EQ(f.check(Color::Red), 0);
@@ -164,7 +189,7 @@ TEST(FaultInjectorEnum, AssignError)
   EXPECT_EQ(f.check(Color::Red), -EINVAL);
 }
 
-TEST(FaultInjectorEnum, AssignErrorMessage)
+TEST_F(FaultInjectorEnum, AssignErrorMessage)
 {
   FaultInjector<Color> f;
   ASSERT_EQ(f.check(Color::Red), 0);
@@ -173,6 +198,8 @@ TEST(FaultInjectorEnum, AssignErrorMessage)
 }
 
 // test custom move-only Key type
+using FaultInjectorMoveOnly = Fixture;
+
 struct MoveOnlyKey {
   MoveOnlyKey() = default;
   MoveOnlyKey(const MoveOnlyKey&) = delete;
@@ -189,25 +216,25 @@ static std::ostream& operator<<(std::ostream& out, const MoveOnlyKey&) {
   return out;
 }
 
-TEST(FaultInjectorMoveOnly, Default)
+TEST_F(FaultInjectorMoveOnly, Default)
 {
   constexpr FaultInjector<MoveOnlyKey> f;
   EXPECT_EQ(f.check(MoveOnlyKey{}), 0);
 }
 
-TEST(FaultInjectorMoveOnly, InjectError)
+TEST_F(FaultInjectorMoveOnly, InjectError)
 {
   FaultInjector f{MoveOnlyKey{}, InjectError{-EIO}};
   EXPECT_EQ(f.check(MoveOnlyKey{}), -EIO);
 }
 
-TEST(FaultInjectorMoveOnly, InjectErrorMessage)
+TEST_F(FaultInjectorMoveOnly, InjectErrorMessage)
 {
   FaultInjector f{MoveOnlyKey{}, InjectError{-EIO, dpp()}};
   EXPECT_EQ(f.check(MoveOnlyKey{}), -EIO);
 }
 
-TEST(FaultInjectorMoveOnly, AssignError)
+TEST_F(FaultInjectorMoveOnly, AssignError)
 {
   FaultInjector<MoveOnlyKey> f;
   ASSERT_EQ(f.check({}), 0);
@@ -215,7 +242,7 @@ TEST(FaultInjectorMoveOnly, AssignError)
   EXPECT_EQ(f.check({}), -EINVAL);
 }
 
-TEST(FaultInjectorMoveOnly, AssignErrorMessage)
+TEST_F(FaultInjectorMoveOnly, AssignErrorMessage)
 {
   FaultInjector<MoveOnlyKey> f;
   ASSERT_EQ(f.check({}), 0);
