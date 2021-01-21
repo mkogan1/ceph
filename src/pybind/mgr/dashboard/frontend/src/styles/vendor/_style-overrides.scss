@@ -882,3 +882,14 @@ cd-prometheus-form {
 .custom-control-input {
   @extend .pf-c-check__input;
 }
+
+h3 {
+  font-size: 1.4rem !important;
+}
+
+.dashboard,
+.row {
+  h4 {
+    font-size: 1rem !important;
+  }
+}
