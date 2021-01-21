@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 
 import { BehaviorSubject, Subscription } from 'rxjs';
 import { filter, first, map } from 'rxjs/operators';
+
 import { CephReleaseNamePipe } from '../pipes/ceph-release-name.pipe';
 import { SummaryService } from './summary.service';
 
@@ -9,7 +10,7 @@ import { SummaryService } from './summary.service';
   providedIn: 'root'
 })
 export class DocService {
-  private releaseDataSource = new BehaviorSubject<string>('5');
+  private releaseDataSource = new BehaviorSubject<string>(null);
   releaseData$ = this.releaseDataSource.asObservable();
 
   constructor(
@@ -22,10 +23,10 @@ export class DocService {
     });
   }
 
-  urlGenerator(section: string, release = 'master'): string {
-    const docVersion = release === 'master' ? 'latest' : release;
+  urlGenerator(section: string, release = '5'): string {
+    const docVersion = release === 'master' ? '5' : release;
     const domain = `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/${docVersion}/html/`;
-    const domainCeph = `https://ceph.io/`;
+    const domainRedHat = `https://www.redhat.com/en/about/`;
 
     const sections = {
       iscsi: `${domain}dashboard_guide/block_devices#iscsi-functions`,
@@ -37,12 +38,12 @@ export class DocService {
       grafana: `${domain}dashboard_guide/managing-the-cluster#managing-the-prometheus-environment_dash`,
       orch: `${domain}operations_guide/orchestrator/`,
       pgs: `https://access.redhat.com/labs/cephpgc/`,
-      help: `${domainCeph}help/`,
-      security: `${domainCeph}security/`,
-      trademarks: `${domainCeph}legal-page/trademarks/`,
-      'dashboard-landing-page-status': `${domain}mgr/dashboard/#dashboard-landing-page-status`,
-      'dashboard-landing-page-performance': `${domain}mgr/dashboard/#dashboard-landing-page-performance`,
-      'dashboard-landing-page-capacity': `${domain}mgr/dashboard/#dashboard-landing-page-capacity`
+      help: `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/`,
+      terms: `${domainRedHat}all-policies-guidelines/`,
+      privacy: `${domainRedHat}privacy-policy/`,
+      'dashboard-landing-page-status': `${domain}dashboard_guide/index#understanding-the-landing-page_dash`,
+      'dashboard-landing-page-performance': `${domain}dashboard_guide/index#understanding-the-landing-page_dash`,
+      'dashboard-landing-page-capacity': `${domain}dashboard_guide/index#understanding-the-landing-page_dash`
     };
 
     return sections[section];
