@@ -153,6 +153,8 @@ public:
   int handle_init(entries_t e) noexcept override;
   int handle_new_gens(entries_t e) noexcept override;
   int handle_empty_to(uint64_t new_tail) noexcept override;
+
+  int trim_generations(std::optional<uint64_t>& through);
 };
 
 class RGWDataChangesLog {
@@ -251,6 +253,10 @@ public:
   // a marker that compares greater than any other
   std::string max_marker() const;
   std::string get_oid(uint64_t gen_id, int shard_id) const;
+
+
+  int change_format(log_type type, optional_yield y);
+  int trim_generations(std::optional<uint64_t>& through);
 };
 
 class RGWDataChangesBE : public boost::intrusive_ref_counter<RGWDataChangesBE> {
@@ -292,6 +298,8 @@ public:
   virtual int trim(int index, std::string_view marker,
 		   librados::AioCompletion* c) = 0;
   virtual std::string_view max_marker() const = 0;
+  // 1 on empty, 0 on non-empty, negative on error.
+  virtual int is_empty() = 0;
 };
 
 
