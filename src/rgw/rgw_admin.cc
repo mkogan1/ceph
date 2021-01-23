@@ -216,6 +216,7 @@ void usage()
   cout << "  datalog list               list data log\n";
   cout << "  datalog trim               trim data log\n";
   cout << "  datalog status             read data log status\n";
+  cout << "  datalog type               change datalog type to --log_type={fifo,omap}\n";
   cout << "  orphans find               deprecated -- init and run search for leaked rados objects (use job-id, pool)\n";
   cout << "  orphans finish             deprecated -- clean up search for leaked rados objects\n";
   cout << "  orphans list-jobs          deprecated -- list the current job-ids for orphans search\n";
@@ -520,6 +521,8 @@ enum {
   OPT_DATALOG_STATUS,
   OPT_DATALOG_AUTOTRIM,
   OPT_DATALOG_TRIM,
+  OPT_DATALOG_TYPE,
+  OPT_DATALOG_PRUNE,
   OPT_REALM_CREATE,
   OPT_REALM_DELETE,
   OPT_REALM_GET,
@@ -1005,6 +1008,10 @@ static int get_cmd(const char *cmd, const char *prev_cmd, const char *prev_prev_
       return OPT_DATALOG_TRIM;
     if (strcmp(cmd, "status") == 0)
       return OPT_DATALOG_STATUS;
+    if (strcmp(cmd, "type") == 0)
+      return OPT_DATALOG_TYPE;
+    if (strcmp(cmd, "prune") == 0)
+      return OPT_DATALOG_PRUNE;
   } else if ((prev_prev_cmd && strcmp(prev_prev_cmd, "data") == 0) &&
 	     (strcmp(prev_cmd, "sync") == 0)) {
     if (strcmp(cmd, "status") == 0)
@@ -1110,6 +1117,15 @@ BIIndexType get_bi_index_type(const string& type_str) {
     return BIIndexType::OLH;
 
   return BIIndexType::Invalid;
+}
+
+log_type get_log_type(const string& type_str) {
+  if (strcasecmp(type_str.c_str(), "fifo") == 0)
+    return log_type::fifo;
+  if (strcasecmp(type_str.c_str(), "omap") == 0)
+    return log_type::omap;
+
+  return static_cast<log_type>(0xff);
 }
 
 void dump_bi_entry(bufferlist& bl, BIIndexType index_type, Formatter *formatter)
@@ -2872,6 +2888,7 @@ int main(int argc, const char **argv)
   uint64_t min_rewrite_stripe_size = 0;
 
   BIIndexType bi_index_type = BIIndexType::Plain;
+  std::optional<log_type> opt_log_type;
 
   string job_id;
   int num_shards = 0;
@@ -3141,6 +3158,14 @@ int main(int argc, const char **argv)
         cerr << "ERROR: invalid bucket index entry type" << std::endl;
         return EINVAL;
       }
+    } else if (ceph_argparse_witharg(args, i, &val, "--log-type", (char*)NULL)) {
+      string log_type_str = val;
+      auto l = get_log_type(log_type_str);
+      if (l == static_cast<log_type>(0xff)) {
+        cerr << "ERROR: invalid log type" << std::endl;
+        return EINVAL;
+      }
+      opt_log_type = l;
     } else if (ceph_argparse_binary_flag(args, i, &is_master_int, NULL, "--master", (char*)NULL)) {
       is_master = (bool)is_master_int;
       is_master_set = true;
@@ -7962,6 +7987,36 @@ next:
     if (ret < 0 && ret != -ENODATA) {
       cerr << "ERROR: trim_entries(): " << cpp_strerror(-ret) << std::endl;
       return -ret;
+    }
+  }
+
+  if (opt_cmd == OPT_DATALOG_TYPE) {
+    if (!opt_log_type) {
+      std::cerr << "log-type not specified." << std::endl;
+      return -EINVAL;
+    }
+    auto datalog = store->data_log;
+    ret = datalog->change_format(*opt_log_type, null_yield);
+    if (ret < 0) {
+      cerr << "ERROR: change_format(): " << cpp_strerror(-ret) << std::endl;
+      return -ret;
+    }
+  }
+
+  if (opt_cmd == OPT_DATALOG_PRUNE) {
+    auto datalog = store->data_log;
+    std::optional<uint64_t> through;
+    ret = datalog->trim_generations(through);
+
+    if (ret < 0) {
+      cerr << "ERROR: trim_generations(): " << cpp_strerror(-ret) << std::endl;
+      return -ret;
+    }
+
+    if (through) {
+      std::cout << "Pruned " << *through << " empty generations." << std::endl;
+    } else {
+      std::cout << "No empty generations." << std::endl;
     }
   }
 
