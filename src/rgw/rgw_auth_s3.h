@@ -295,8 +295,9 @@ class AWSv4ComplMulti : public rgw::auth::Completer,
   public:
     static constexpr size_t SIG_SIZE = 64;
 
-    /* Let's try to be slightly generous about future chunk header fields */
-    static constexpr size_t META_MAX_SIZE = 256;
+    /* Let's suppose the data length fields can't exceed uint64_t. */
+    static constexpr size_t META_MAX_SIZE = \
+      sarrlen("\r\nffffffffffffffff;chunk-signature=") + SIG_SIZE + sarrlen("\r\n");  // = 101
 
     /* Detect whether a given stream_pos fits in boundaries of a chunk. */
     bool is_new_chunk_in_stream(size_t stream_pos) const;
