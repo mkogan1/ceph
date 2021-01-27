@@ -1320,3 +1320,69 @@ def test_bucket_creation_time():
         for a, b in zip(z1, z2):
             eq(a.name, b.name)
             eq(a.creation_date, b.creation_date)
+
+
+def datalog_type(zone, log_type):
+    zone.cluster.admin(['datalog', 'type', '--log-type', log_type])
+
+
+def datalog_prune(zone):
+    zone.cluster.admin(['datalog', 'prune'])
+
+
+def do_autotrim(zone_bucket):
+    # trim each datalog
+    for zone, _ in zone_bucket:
+        datalog_autotrim(zone.zone)
+        datalog = datalog_list(zone.zone)
+        assert len(datalog) == 0
+
+def test_datalog_backing():
+    default_logtype = 'omap'
+    other_logtype = 'fifo'
+    zonegroup = realm.master_zonegroup()
+    zonegroup_conns = ZonegroupConns(zonegroup)
+    buckets, zone_bucket = create_bucket_per_zone(zonegroup_conns)
+
+    uniq = 0
+
+    # upload an object to each zone to generate a datalog entry
+    for zone, bucket in zone_bucket:
+        k = new_key(zone, bucket.name, f"key{uniq}")
+        k.set_contents_from_string(f"body{uniq}")
+        ++uniq
+    # wait for metadata and data sync to catch up
+    zonegroup_meta_checkpoint(zonegroup)
+    zonegroup_data_checkpoint(zonegroup_conns)
+    for zone, bucket in zone_bucket:
+        datalog_type(zone.zone, other_logtype)
+        k = new_key(zone, bucket.name, f"key{uniq}")
+        k.set_contents_from_string(f"body{uniq}")
+        ++uniq
+    zonegroup_meta_checkpoint(zonegroup)
+    zonegroup_data_checkpoint(zonegroup_conns)
+
+    do_autotrim(zone_bucket)
+
+    for zone, _ in zone_bucket:
+        datalog_prune(zone.zone)
+
+    for zone, bucket in zone_bucket:
+        datalog_type(zone.zone, default_logtype)
+        k = new_key(zone, bucket.name, f"key{uniq}")
+        k.set_contents_from_string(f"body{uniq}")
+        ++uniq
+
+    for zone, bucket in zone_bucket:
+        datalog_type(zone.zone, other_logtype)
+        k = new_key(zone, bucket.name, f"key{uniq}")
+        k.set_contents_from_string(f"body{uniq}")
+        ++uniq
+
+    zonegroup_meta_checkpoint(zonegroup)
+    zonegroup_data_checkpoint(zonegroup_conns)
+
+    do_autotrim(zone_bucket)
+
+    for zone, _ in zone_bucket:
+        datalog_prune(zone.zone)
