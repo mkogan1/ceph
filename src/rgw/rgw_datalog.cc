@@ -176,8 +176,8 @@ public:
     lr::ObjectWriteOperation op;
     cls_log_trim(op, {}, {}, {}, std::string(marker));
     auto r = rgw_rados_operate(ioctx, oids[index], &op, null_yield);
-    if (r == -ENOENT) r = 0;
-    if (r < 0) {
+    if (r == -ENOENT) r = -ENODATA;
+    if (r < 0 && r != -ENODATA) {
       lderr(cct) << __PRETTY_FUNCTION__
 		 << ": failed to get info from " << oids[index]
 		 << cpp_strerror(-r) << dendl;
@@ -189,7 +189,7 @@ public:
     lr::ObjectWriteOperation op;
     cls_log_trim(op, {}, {}, {}, std::string(marker));
     auto r = ioctx.aio_operate(oids[index], c, &op, 0);
-    if (r == -ENOENT) r = 0;
+    if (r == -ENOENT) r = -ENODATA;
     if (r < 0) {
       lderr(cct) << __PRETTY_FUNCTION__
 		 << ": failed to get info from " << oids[index]
@@ -331,7 +331,7 @@ public:
 	   librados::AioCompletion* c) override {
     int r = 0;
     if (marker == rgw::cls::fifo::marker(0, 0).to_string()) {
-      rgw_complete_aio_completion(c, 0);
+      rgw_complete_aio_completion(c, -ENODATA);
     } else {
       fifos[index]->trim(marker, false, c);
     }
@@ -343,6 +343,66 @@ public:
     return std::string_view(mm);
   }
 };
+
+int DataLogBackends::handle_init(entries_t e) noexcept {
+  std::unique_lock l(m);
+
+  for (const auto& [gen_id, gen] : e) {
+    if (gen.empty) {
+      lderr(datalog.cct)
+	<< __PRETTY_FUNCTION__ << ":" << __LINE__
+	<< ": ERROR: given empty generation: gen_id=" << gen_id << dendl;
+    }
+    if (count(gen_id) != 0) {
+      lderr(datalog.cct)
+	<< __PRETTY_FUNCTION__ << ":" << __LINE__
+	<< ": ERROR: generation already exists: gen_id=" << gen_id << dendl;
+    }
+    try {
+      switch (gen.type) {
+      case log_type::omap:
+	emplace(gen_id, new RGWDataChangesOmap(ioctx, datalog, gen_id, shards));
+	break;
+      case log_type::fifo:
+	emplace(gen_id, new RGWDataChangesFIFO(ioctx, datalog, gen_id, shards));
+	break;
+      default:
+	lderr(datalog.cct)
+	  << __PRETTY_FUNCTION__ << ":" << __LINE__
+	  << ": IMPOSSIBLE: invalid log type: gen_id=" << gen_id
+	  << ", type" << gen.type << dendl;
+	return -EFAULT;
+      }
+    } catch (const bs::system_error& err) {
+      lderr(datalog.cct)
+	  << __PRETTY_FUNCTION__ << ":" << __LINE__
+	  << ": error setting up backend: gen_id=" << gen_id
+	  << ", err=" << err.what() << dendl;
+      return -err.code().value();
+    }
+  }
+  return 0;
+}
+
+int DataLogBackends::handle_new_gens(entries_t e) noexcept {
+  return handle_init(std::move(e));
+}
+
+int DataLogBackends::handle_empty_to(uint64_t new_tail) noexcept {
+  std::unique_lock l(m);
+  auto i = cbegin();
+  if (i->first < new_tail) {
+    return {};
+  }
+  if (new_tail >= (cend() - 1)->first) {
+    lderr(datalog.cct)
+      << __PRETTY_FUNCTION__ << ":" << __LINE__
+      << ": ERROR: attempt to trim head: new_tail=" << new_tail << dendl;
+    return -EFAULT;
+  }
+  erase(i, upper_bound(new_tail));
+  return 0;
+}
 
 RGWDataChangesLog::RGWDataChangesLog(CephContext* cct, RGWRados* store)
   : cct(cct), store(store),
@@ -365,31 +425,20 @@ int RGWDataChangesLog::init()
     return -r;
   }
 
-  auto found = log_backing_type(ioctx, *defbacking, num_shards,
-				[this](int i) { return get_oid(0, i); },
-				null_yield);
+  auto besr = logback_generations::init<DataLogBackends>(
+    ioctx, metadata_log_oid(), [this](uint64_t gen_id, int shard) {
+      return get_oid(gen_id, shard);
+    },
+    num_shards, *defbacking, null_yield, *this);
 
-  if (!found) {
+  if (!besr) {
     lderr(cct) << __PRETTY_FUNCTION__
-	       << ": Error when checking log type: r="
-	       << found.error() << dendl;
-  }
-  try {
-    switch (*found) {
-    case log_type::omap:
-      bes.set_zero(new RGWDataChangesOmap(ioctx, *this, 0, num_shards));
-      break;
-    case log_type::fifo:
-      bes.set_zero(new RGWDataChangesFIFO(ioctx, *this, 0, num_shards));
-      break;
-    }
-  } catch (const std::system_error& e) {
-    lderr(cct) << __PRETTY_FUNCTION__
-	       << ": Error when starting backend: "
-	       << e.what() << dendl;
-    return e.code().value();
+	       << ": Error initializing backends: r="
+	       << besr.error() << dendl;
+    return besr.error();
   }
 
+  bes = std::move(*besr);
   renew_thread = make_named_thread("rgw_dt_lg_renew",
 				   &RGWDataChangesLog::renew_run, this);
   return 0;
@@ -420,7 +469,7 @@ int RGWDataChangesLog::renew_entries()
 
   std::string section;
   auto ut = real_clock::now();
-  auto be = bes.head();
+  auto be = bes->head();
   for (const auto& bs : entries) {
     auto index = choose_oid(bs);
 
@@ -572,7 +621,7 @@ int RGWDataChangesLog::add_entry(const rgw_bucket& bucket, int shard_id) {
     encode(change, bl);
     ldout(cct, 20) << "RGWDataChangesLog::add_entry() sending update with now=" << now << " cur_expiration=" << expiration << dendl;
 
-    auto be = bes.head();
+    auto be = bes->head();
     ret = be->push(index, now, change.key, std::move(bl));
 
     now = real_clock::now();
@@ -614,8 +663,9 @@ int DataLogBackends::list(int shard, int max_entries,
     if (r < 0)
       return r;
 
-    if (out_marker)
+    if (out_marker && !out_cursor.empty()) {
       *out_marker = gencursor(gen_id, out_cursor);
+    }
     for (auto& g : gentries) {
       g.log_id = gencursor(gen_id, g.log_id);
     }
@@ -634,7 +684,7 @@ int RGWDataChangesLog::list_entries(int shard, int max_entries,
 				    std::string* out_marker, bool* truncated)
 {
   assert(shard < num_shards);
-  return bes.list(shard, max_entries, entries, marker, out_marker, truncated);
+  return bes->list(shard, max_entries, entries, marker, out_marker, truncated);
 }
 
 int RGWDataChangesLog::list_entries(int max_entries,
@@ -665,8 +715,12 @@ int RGWDataChangesLog::list_entries(int max_entries,
 int RGWDataChangesLog::get_info(int shard_id, RGWDataChangesLogInfo *info)
 {
   assert(shard_id < num_shards);
-  auto be = bes.head();
-  return be->get_info(shard_id, info);
+  auto be = bes->head();
+  auto r = be->get_info(shard_id, info);
+  if (!info->marker.empty()) {
+    info->marker = gencursor(be->gen_id, info->marker);
+  }
+  return r;
 }
 
 int DataLogBackends::trim_entries(int shard_id, std::string_view marker)
@@ -677,13 +731,13 @@ int DataLogBackends::trim_entries(int shard_id, std::string_view marker)
   const auto tail_gen = begin()->first;
   if (target_gen < tail_gen) return 0;
   auto r = 0;
-  for (auto i = lower_bound(0);
-       i != end() && i->first <= target_gen && i->first <= head_gen && r >= 0;
-       i = upper_bound(i->first)) {
-    auto be = i->second;
+  for (auto be = lower_bound(0)->second;
+       be->gen_id <= target_gen && be->gen_id <= head_gen && r >= 0;
+       be = upper_bound(be->gen_id)->second) {
     l.unlock();
     auto c = be->gen_id == target_gen ? cursor : be->max_marker();
     r = be->trim(shard_id, c);
+    if (r == -ENODATA && be->gen_id < target_gen) r = 0;
     l.lock();
   };
   return r;
@@ -692,7 +746,7 @@ int DataLogBackends::trim_entries(int shard_id, std::string_view marker)
 int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker)
 {
   assert(shard_id < num_shards);
-  return bes.trim_entries(shard_id, marker);
+  return bes->trim_entries(shard_id, marker);
 }
 
 class GenTrim : public rgw::cls::fifo::Completion<GenTrim> {
@@ -716,6 +770,8 @@ public:
   void handle(Ptr&& p, int r) {
     auto gen_id = be->gen_id;
     be.reset();
+    if (r == -ENOENT) r = -ENODATA;
+    if (r == -ENODATA && gen_id < target_gen) r = 0;
     if (r < 0) {
       complete(std::move(p), r);
       return;
@@ -762,7 +818,7 @@ int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker,
 				    librados::AioCompletion* c)
 {
   assert(shard_id < num_shards);
-  bes.trim_entries(shard_id, marker, c);
+  bes->trim_entries(shard_id, marker, c);
   return 0;
 }
 
