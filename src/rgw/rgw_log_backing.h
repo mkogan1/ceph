@@ -183,7 +183,7 @@ public:
       if (ec)
 	return tl::unexpected(ec);
       // Obnoxiousness for C++ Compiler in Bionic Beaver
-      return tl::expected<std::unique_ptr<T>, bs::error_code>(std::move(lg));
+      return tl::expected<std::unique_ptr<T>, int>(std::move(lg));
     } catch (const std::bad_alloc&) {
       return tl::unexpected(-ENOMEM);
     }
