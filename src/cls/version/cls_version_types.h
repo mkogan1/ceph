@@ -40,7 +40,7 @@ struct obj_version {
     return tag.empty();
   }
 
-  bool compare(struct obj_version *v) {
+  bool compare(const struct obj_version *v) const {
     return (ver == v->ver &&
             tag.compare(v->tag) == 0);
   }
@@ -49,6 +49,10 @@ struct obj_version {
   void decode_json(JSONObj *obj);
   static void generate_test_instances(list<obj_version*>& o);
 };
+inline bool operator ==(const obj_version& l,
+			const obj_version& r) {
+  return l.compare(&r);
+}
 WRITE_CLASS_ENCODER(obj_version)
 
 enum VersionCond {
