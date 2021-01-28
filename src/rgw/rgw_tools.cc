@@ -11,6 +11,8 @@
 #include "include/types.h"
 #include "include/stringify.h"
 
+#include "librados/AioCompletionImpl.h"
+
 #include "rgw_common.h"
 #include "rgw_rados.h"
 #include "rgw_tools.h"
@@ -560,4 +562,11 @@ void rgw_tools_cleanup()
 {
   delete ext_mime_map;
   ext_mime_map = nullptr;
+}
+
+void rgw_complete_aio_completion(librados::AioCompletion* c, int r) {
+  auto pc = c->pc;
+  librados::C_AioCompleteAndSafe cb(pc);
+  // NOT complete, since complete would free it.
+  cb.finish(r);
 }
