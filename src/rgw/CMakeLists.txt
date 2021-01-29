@@ -440,6 +440,7 @@ endif(WITH_TESTS)
 
 install(PROGRAMS
   rgw-gap-list
+  rgw-gap-list-comparator
   rgw-orphan-list
   DESTINATION bin)
 
