@@ -293,7 +293,7 @@ void RGWBucketInfo::generate_test_instances(list<RGWBucketInfo*>& o)
     l.current_index.layout.normal.num_shards = 11;
     l.logs.push_back(log_layout_from_index(
 		       l.current_index.gen,
-		       l.current_index.layout.normal));
+		       l.current_index));
   };
 
 
