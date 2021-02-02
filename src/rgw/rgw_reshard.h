@@ -198,15 +198,16 @@ protected:
   void get_bucket_logshard_oid(const string& tenant, const string& bucket_name, string *oid);
 
 public:
-  RGWReshard(RGWRados* _store, bool _verbose = false, ostream *_out = nullptr, Formatter *_formatter = nullptr);
+  RGWReshard(RGWRados* _store, bool _verbose = false, std::ostream *_out = nullptr, Formatter *_formatter = nullptr);
   int add(cls_rgw_reshard_entry& entry);
   int update(const RGWBucketInfo& bucket_info);
   int get(cls_rgw_reshard_entry& entry);
-  int remove(cls_rgw_reshard_entry& entry);
-  int list(int logshard_num, string& marker, uint32_t max, std::list<cls_rgw_reshard_entry>& entries, bool *is_truncated);
-  int clear_bucket_resharding(const string& bucket_instance_oid, cls_rgw_reshard_entry& entry);
+  int remove(const cls_rgw_reshard_entry& entry);
+  int list(int logshard_num, std::string& marker, uint32_t max, std::list<cls_rgw_reshard_entry>& entries, bool *is_truncated);
+  int clear_bucket_resharding(const std::string& bucket_instance_oid, cls_rgw_reshard_entry& entry);
 
   /* reshard thread */
+  int process_entry(const cls_rgw_reshard_entry& entry, int max_entries);
   int process_single_logshard(int logshard_num);
   int process_all_logshards();
   bool going_down();
