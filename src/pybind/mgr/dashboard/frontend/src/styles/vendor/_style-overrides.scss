@@ -111,6 +111,15 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
 
       .form-group {
         all: unset !important;
+
+        label {
+          font-weight: bold;
+
+          &::after {
+            color: vv.$danger;
+            content: '*';
+          }
+        }
       }
 
       .form-control {
