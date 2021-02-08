@@ -658,6 +658,10 @@ cd-table .cd-datatable {
   }
 }
 
+.datatable-row-detail {
+  border-left: 3px solid vv.$primary;
+}
+
 .widget-toolbar {
   .btn-light.dropdown-toggle {
     border: 1px solid vv.$btn-light-border !important;
