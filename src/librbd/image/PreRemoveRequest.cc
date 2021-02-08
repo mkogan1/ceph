@@ -119,6 +119,7 @@ template <typename I>
 void PreRemoveRequest<I>::shut_down_exclusive_lock() {
   std::shared_lock owner_locker{m_image_ctx->owner_lock};
   if (m_image_ctx->exclusive_lock == nullptr) {
+    owner_locker.unlock();
     validate_image_removal();
     return;
   }
