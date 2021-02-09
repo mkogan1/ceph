@@ -82,9 +82,9 @@ log_backing_type(librados::IoCtx& ioctx,
 /// Remove all log shards and associated parts of fifos.
 int log_remove(librados::IoCtx& ioctx,
 	       int shards, //< Total number of shards
-			   /// A function taking a shard number and
-	                   /// returning an oid.
+	       /// A function taking a shard number and returning an oid.
 	       const fu2::unique_function<std::string(int) const>& get_oid,
+	       bool leave_zero,
 	       optional_yield y);
 
 struct logback_generation {
