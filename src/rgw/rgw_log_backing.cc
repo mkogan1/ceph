@@ -168,6 +168,7 @@ log_backing_type(librados::IoCtx& ioctx,
 int log_remove(librados::IoCtx& ioctx,
 	       int shards,
 	       const fu2::unique_function<std::string(int) const>& get_oid,
+	       bool leave_zero,
 	       optional_yield y)
 {
   int r1 = 0;
@@ -204,7 +205,16 @@ int log_remove(librados::IoCtx& ioctx,
 		 << ", r=" << r << dendl;
     }
     librados::ObjectWriteOperation op;
-    op.remove();
+    if (i == 0 && leave_zero) {
+      // Leave shard 0 in existence, but remove contents and
+      // omap. cls_lock stores things in the xattrs. And sync needs to
+      // rendezvous with locks on generation 0 shard 0.
+      op.omap_set_header({});
+      op.omap_clear();
+      op.truncate(0);
+    } else {
+      op.remove();
+    }
     r = rgw_rados_operate(ioctx, oid, &op, null_yield);
     if (r < 0 && r != -ENOENT) {
       if (r1 >= 0)
@@ -290,7 +300,7 @@ int logback_generations::setup(log_type def, optional_yield y) noexcept
 	  r = log_remove(ioctx, shards,
 			 [this](int shard) {
 			   return this->get_oid(0, shard);
-			 }, y);
+			 }, true, y);
 	  if (r < 0)
 	    return r;
 	}
@@ -635,7 +645,7 @@ int logback_generations::remove_empty(optional_yield y) noexcept {
 	r = log_remove(ioctx, shards,
 		       [this, gen_id](int shard) {
 			 return this->get_oid(gen_id, shard);
-		       }, y);
+		       }, (gen_id == 0), y);
 	if (r < 0) {
 	  return r;
 	}
