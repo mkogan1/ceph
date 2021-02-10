@@ -586,7 +586,7 @@ int logback_generations::empty_to(uint64_t gen_id, optional_yield y) noexcept {
       }
       for (auto i = es.begin(); i < ei; ++i) {
 	newtail = i->first;
-	i->second.empty = true;
+	i->second.pruned = ceph::real_clock::now();
       }
       r = write(std::move(es), std::move(l), y);
       ++tries;
@@ -630,31 +630,44 @@ int logback_generations::remove_empty(optional_yield y) noexcept {
     entries_t new_entries;
     std::unique_lock l(m);
     ceph_assert(!entries_.empty());
-    auto i = lowest_nomempty(entries_);
-    if (i == entries_.begin()) {
-      return 0;
+    {
+      auto i = lowest_nomempty(entries_);
+      if (i == entries_.begin()) {
+	return 0;
+      }
     }
-    auto ln = i->first;
     entries_t es;
-    std::copy(entries_.cbegin(), i,
-	      std::inserter(es, es.end()));
+    auto now = ceph::real_clock::now();
     l.unlock();
     do {
+      std::copy_if(entries_.cbegin(), entries_.cend(),
+		   std::inserter(es, es.end()),
+		   [now](const auto& e) {
+		     if (!e.second.pruned)
+		       return false;
+
+		     auto pruned = *e.second.pruned;
+		     return (now - pruned) >= 1h;
+		   });
+      auto es2 = entries_;
       for (const auto& [gen_id, e] : es) {
-	ceph_assert(e.empty);
+	ceph_assert(e.pruned);
 	r = log_remove(ioctx, shards,
 		       [this, gen_id](int shard) {
 			 return this->get_oid(gen_id, shard);
 		       }, (gen_id == 0), y);
-	if (r < 0) {
-	  return r;
+	if (r) {
+	  lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		     << ": Error pruning: gen_id=" << gen_id
+		     << " r=" << r << dendl;
+	}
+	if (auto i = es2.find(gen_id); i != es2.end()) {
+	  es2.erase(i);
 	}
       }
       l.lock();
-      i = entries_.find(ln);
       es.clear();
-      std::copy(i, entries_.cend(), std::inserter(es, es.end()));
-      r = write(std::move(es), std::move(l), y);
+      r = write(std::move(es2), std::move(l), y);
       ++tries;
     } while (r == -ECANCELED && tries < max_tries);
     if (tries >= max_tries) {
