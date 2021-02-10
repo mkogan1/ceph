@@ -90,13 +90,13 @@ int log_remove(librados::IoCtx& ioctx,
 struct logback_generation {
   uint64_t gen_id = 0;
   log_type type;
-  bool empty = false;
+  std::optional<ceph::real_time> pruned;
 
   void encode(ceph::buffer::list& bl) const {
     ENCODE_START(1, 1, bl);
     encode(gen_id, bl);
     encode(type, bl);
-    encode(empty, bl);
+    encode(pruned, bl);
     ENCODE_FINISH(bl);
   }
 
@@ -104,7 +104,7 @@ struct logback_generation {
     DECODE_START(1, bl);
     decode(gen_id, bl);
     decode(type, bl);
-    decode(empty, bl);
+    decode(pruned, bl);
     DECODE_FINISH(bl);
   }
 };
@@ -152,7 +152,7 @@ private:
   auto lowest_nomempty(const entries_t& es) {
     return std::find_if(es.begin(), es.end(),
 			[](const auto& e) {
-			  return !e.second.empty;
+			  return !e.second.pruned;
 			});
   }
 
