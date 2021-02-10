@@ -2366,7 +2366,7 @@ cdef class Ioctx(object):
         Duplicate IoCtx
         """
 
-        ioctx = self.rados.open_ioctx2(self.get_pool_id())
+        ioctx = self.rados.open_ioctx2(int(self.get_pool_id()))
         ioctx.set_namespace(self.get_namespace())
         return ioctx
 
