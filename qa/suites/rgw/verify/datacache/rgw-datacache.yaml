@@ -9,7 +9,10 @@ overrides:
   rgw:
     datacache: true
     datacache_path: /tmp/rgw_datacache
-
 tasks:
-- rgw-datacache:
-    client.0: null
+- workunit:
+    clients:
+      client.0:
+      - rgw/run-datacache.sh
+    env:
+      RGW_DATACACHE_PATH: /tmp/rgw_datacache
