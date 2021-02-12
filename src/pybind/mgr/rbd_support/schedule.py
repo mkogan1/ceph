@@ -299,7 +299,9 @@ class Schedule:
             if item[1]:
                 start_time += timedelta(minutes=item[1].minutes)
             time = start_time + \
-                (int((now - start_time) / period) + 1) * period
+                timedelta(seconds=int(((now - start_time).total_seconds() /
+                                       period.total_seconds()) + 1) *
+                          period.total_seconds())
             if schedule_time is None or time < schedule_time:
                 schedule_time = time
         return datetime.strftime(schedule_time, "%Y-%m-%d %H:%M:00")
