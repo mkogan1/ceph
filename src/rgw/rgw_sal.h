@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "rgw_datalog.h"
 #include "rgw_user.h"
 #include "rgw_notify_event_type.h"
 #include "common/tracer.h"
@@ -333,7 +334,7 @@ class Store {
     /** Wake up sync threads for bucket metadata sync */
     virtual void wakeup_meta_sync_shards(std::set<int>& shard_ids) = 0;
     /** Wake up sync threads for bucket data sync */
-    virtual void wakeup_data_sync_shards(const DoutPrefixProvider *dpp, const rgw_zone_id& source_zone, std::map<int, std::set<std::string> >& shard_ids) = 0;
+    virtual void wakeup_data_sync_shards(const DoutPrefixProvider *dpp, const rgw_zone_id& source_zone, boost::container::flat_map<int, boost::container::flat_set<rgw_data_notify_entry> >& shard_ids) = 0;
     /** Clear all usage statistics globally */
     virtual int clear_usage(const DoutPrefixProvider *dpp) = 0;
     /** Get usage statistics for all users and buckets */
