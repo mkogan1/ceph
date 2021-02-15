@@ -16,6 +16,7 @@
 #pragma once
 
 #include "rgw_user.h"
+#include "rgw_datalog_notify.h"
 
 class RGWGetDataCB;
 struct RGWObjState;
@@ -23,6 +24,7 @@ class RGWAccessListFilter;
 class RGWLC;
 class RGWObjManifest;
 struct RGWZoneGroup;
+class RGWRealm;
 
 struct RGWUsageIter {
   string read_iter;
@@ -112,7 +114,7 @@ class RGWStore {
     virtual void finalize(void)=0;
 
     virtual CephContext *ctx(void)=0;
-    
+
     // get the location of where lua packages are installed
     virtual const std::string& get_luarocks_path() const = 0;
     // set the location of where lua packages are installed

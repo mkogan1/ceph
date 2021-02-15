@@ -17,7 +17,8 @@
 #include "services/svc_sys_obj.h"
 #include "services/svc_bucket.h"
 
-#define dout_subsys ceph_subsys_rgw
+struct rgw_http_param_pair;
+class RGWRESTConn;
 
 class RGWAsyncRadosRequest : public RefCountedObject {
   RGWCoroutine *caller;
@@ -1466,6 +1467,22 @@ public:
 
   int send_request(const DoutPrefixProvider *dpp) override;
   int request_complete() override;
+};
+
+class RGWDataPostNotifyCR : public RGWCoroutine {
+  RGWRados *store;
+  RGWHTTPManager& http_manager;
+  bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >& shards;
+  const char *source_zone;
+  RGWRESTConn *conn;
+
+public:
+  RGWDataPostNotifyCR(RGWRados *_store, RGWHTTPManager& _http_manager, bc::flat_map<int,
+		      bc::flat_set<rgw_data_notify_entry> >& _shards, const char *_zone, RGWRESTConn *_conn)
+		    : RGWCoroutine(_store->ctx()), store(_store), http_manager(_http_manager),
+                      shards(_shards), source_zone(_zone), conn(_conn) {}
+
+  int operate(const DoutPrefixProvider *dpp) override;
 };
 
 #endif
