@@ -7,6 +7,7 @@
 #include <functional>
 #include <iomanip>
 #include <boost/container/flat_map.hpp>
+#include <boost/container/flat_set.hpp>
 
 #include "include/rados/librados.hpp"
 #include "include/Context.h"
@@ -50,6 +51,7 @@ struct RGWZoneParams;
 class RGWReshard;
 class RGWReshardWait;
 class rgw_sync_bucket_entity;
+struct rgw_data_notify_entry;
 
 class RGWSysObjectCtx;
 class RGWBucketSyncPolicyHandler;
@@ -69,6 +71,8 @@ inline constexpr auto RGW_NO_SHARD = -1;
 
 #define RGW_SHARDS_PRIME_0 7877
 #define RGW_SHARDS_PRIME_1 65521
+
+namespace bc = boost::container;
 
 extern const std::string MP_META_SUFFIX;
 
@@ -2068,8 +2072,9 @@ public:
    */
   int delete_bucket(RGWBucketInfo& bucket_info, RGWObjVersionTracker& objv_tracker, bool check_empty = true);
 
-  void wakeup_meta_sync_shards(set<int>& shard_ids);
-  void wakeup_data_sync_shards(const rgw_zone_id& source_zone, map<int, set<string> >& shard_ids);
+  void wakeup_meta_sync_shards(std::set<int>& shard_ids);
+
+  void wakeup_data_sync_shards(const rgw_zone_id& source_zone, bc::flat_map<int, bc::flat_set<rgw_data_notify_entry> >& entries);
 
   RGWMetaSyncStatusManager* get_meta_sync_manager();
   RGWDataSyncStatusManager* get_data_sync_manager(const rgw_zone_id& source_zone);

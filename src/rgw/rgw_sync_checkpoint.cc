@@ -205,7 +205,6 @@ int rgw_bucket_sync_checkpoint(const DoutPrefixProvider* dpp,
     });
     // fetch source bucket info
     spawn::spawn(ioctx, [&] (spawn::yield_context yield) {
-      auto y = optional_yield{ioctx, yield};
       auto obj_ctx = store->svc.sysobj->init_obj_ctx();
       int r = store->get_bucket_instance_info(
           obj_ctx, *entry.pipe.source.bucket, entry.source_bucket_info,
