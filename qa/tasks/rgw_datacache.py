@@ -153,6 +153,25 @@ class RGWDataCache(Task):
                                            check_status=True)
             object_name = object_stat_json['manifest']['prefix']
 
+            # check if there are files in the cache directory to verify that the cache is enabled
+            log.info("Check that datacache is enabled")
+            datacache_fi = StringIO()
+            self.ctx.cluster.only(client).run(
+                args=[
+                    'find',
+                    '{path}'.format(path=self.ctx.rgw.datacache_path),
+                    '-type', 'f',
+                    run.Raw('|'),
+                    'wc', '-l'
+                ],
+                stdout=datacache_fi,
+            )
+            cached_object_count = int(datacache_fi.getvalue())
+            log.info("Number of files in datacache directory is %d", cached_object_count)
+            if cached_object_count == 0:
+                log.info("No files in the datacache directory, cache is disabled.")
+                continue
+
             # get name of cached object and check if it exists in the cache
             datacache_fp = StringIO()
             self.ctx.cluster.only(client).run(
@@ -208,12 +227,22 @@ class RGWDataCache(Task):
         Wrapper for running s3cmd
         """
         endpoint = self.ctx.rgw.role_endpoints.get(client)
-        host = '{ip}:{port}'.format(ip=endpoint.hostname, port=endpoint.port)
+        host = ""
+        ssl = ""
+        if endpoint.port == 443:
+            host += "https://"
+            ssl += "--ssl"
+        else:
+            host += "http://"
+            ssl += "--no-ssl"
+        host += '{ip}:{port}'.format(ip=endpoint.hostname, port=endpoint.port)
         s3cmd_args = [
             's3cmd',
             '--access_key={key}'.format(key=access_key),
             '--secret_key={key}'.format(key=secret_key),
             '--config={path}'.format(path=self.ctx.rgw_datacache.s3cmd_cfg),
+            '{https}'.format(https=ssl),
+            '--no-check-certificate',
             '--host={host}'.format(host=host),
         ] + cmd_args
 
