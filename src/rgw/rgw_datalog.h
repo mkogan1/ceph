@@ -122,6 +122,28 @@ struct RGWDataChangesLogInfo {
   void decode_json(JSONObj* obj);
 };
 
+class RGWDataChangesLog;
+
+struct rgw_data_notify_entry {
+  std::string key;
+  uint64_t gen = 0;
+
+  void dump(ceph::Formatter* f) const;
+  void decode_json(JSONObj* obj);
+
+  rgw_data_notify_entry& operator=(const rgw_data_notify_entry&) = default;
+
+  bool operator<(const rgw_data_notify_entry& d) const {
+    if (key < d.key) {
+      return true;
+    }
+    if (d.key < key) {
+      return false;
+    }
+    return gen < d.gen;
+  }
+};
+
 class RGWDataChangesBE;
 
 class DataLogBackends final

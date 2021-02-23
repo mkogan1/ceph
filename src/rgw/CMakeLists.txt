@@ -139,7 +139,8 @@ set(librgw_common_srcs
   rgw_rest_iam.cc
   rgw_kms.cc
   rgw_url.cc
-  rgw_oidc_provider
+  rgw_oidc_provider.cc
+  rgw_datalog_notify.cc
   cls_fifo_legacy.cc
   rgw_datalog.cc)
 
