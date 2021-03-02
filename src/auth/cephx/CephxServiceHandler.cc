@@ -253,7 +253,10 @@ int CephxServiceHandler::handle_request(bufferlist::iterator& indata,
       int service_err = 0;
       for (uint32_t service_id = 1; service_id <= ticket_req.keys;
 	   service_id <<= 1) {
-        if (ticket_req.keys & service_id) {
+        // skip CEPH_ENTITY_TYPE_AUTH: auth ticket must be obtained with
+        // CEPHX_GET_AUTH_SESSION_KEY
+        if ((ticket_req.keys & service_id) &&
+            service_id != CEPH_ENTITY_TYPE_AUTH) {
 	  ldout(cct, 10) << " adding key for service "
 			 << ceph_entity_type_name(service_id) << dendl;
           CephXSessionAuthInfo info;
