@@ -369,6 +369,8 @@ void usage()
   cout << "   --min-rewrite-stripe-size min stripe size for object rewrite (default 0)\n";
   cout << "   --trim-delay-ms           time interval in msec to limit the frequency of sync error log entries trimming operations,\n";
   cout << "                             the trimming process will sleep the specified msec for every 1000 entries trimmed\n";
+  cout << "   --enable-feature          enable a zone/zonegroup feature\n";
+  cout << "   --disable-feature         disable a zone/zonegroup feature\n";
   cout << "\n";
   cout << "<date> := \"YYYY-MM-DD[ hh:mm:ss]\"\n";
   cout << "\nQuota options:\n";
@@ -3110,6 +3112,9 @@ int main(int argc, const char **argv)
   std::optional<std::string> inject_error_at;
   std::optional<std::string> inject_abort_at;
 
+  rgw::zone_features::set enable_features;
+  rgw::zone_features::set disable_features;
+
   for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ) {
     if (ceph_argparse_double_dash(args, i)) {
       break;
@@ -3499,6 +3504,14 @@ int main(int argc, const char **argv)
       // do nothing
     } else if (ceph_argparse_witharg(args, i, &val, "--rgw-obj-fs", (char*)NULL)) {
       rgw_obj_fs = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--enable-feature", (char*)NULL)) {
+      if (!rgw::zone_features::supports(val)) {
+        std::cerr << "ERROR: Cannot enable unrecognized zone feature \"" << val << "\"" << std::endl;
+        return EINVAL;
+      }
+      enable_features.insert(val);
+    } else if (ceph_argparse_witharg(args, i, &val, "--disable-feature", (char*)NULL)) {
+      disable_features.insert(val);
     } else if (strncmp(*i, "-", 1) == 0) {
       cerr << "ERROR: invalid flag " << *i << std::endl;
       return EINVAL;
@@ -4290,6 +4303,10 @@ int main(int argc, const char **argv)
 
         bool *psync_from_all = (sync_from_all_specified ? &sync_from_all : nullptr);
         string *predirect_zone = (redirect_zone_set ? &redirect_zone : nullptr);
+        if (enable_features.empty()) { // enable all features by default
+          enable_features.insert(rgw::zone_features::supported.begin(),
+                                 rgw::zone_features::supported.end());
+        }
 
         ret = zonegroup.add_zone(zone,
                                  (is_master_set ? &is_master : NULL),
@@ -4297,7 +4314,8 @@ int main(int argc, const char **argv)
                                  endpoints, ptier_type,
                                  psync_from_all, sync_from, sync_from_rm,
                                  predirect_zone,
-				 store->svc.sync_modules->get_manager());
+				 store->svc.sync_modules->get_manager(),
+                                 enable_features, disable_features);
 	if (ret < 0) {
 	  cerr << "failed to add zone " << zone_name << " to zonegroup " << zonegroup.get_name() << ": "
 	       << cpp_strerror(-ret) << std::endl;
@@ -4323,6 +4341,22 @@ int main(int argc, const char **argv)
 
 	RGWZoneGroup zonegroup(zonegroup_name, is_master, g_ceph_context, store->svc.sysobj, realm.get_id(), endpoints);
         zonegroup.api_name = (api_name.empty() ? zonegroup_name : api_name);
+
+        zonegroup.enabled_features = enable_features;
+        if (zonegroup.enabled_features.empty()) { // enable all features by default
+          zonegroup.enabled_features.insert(rgw::zone_features::supported.begin(),
+                                            rgw::zone_features::supported.end());
+        }
+        for (const auto& feature : disable_features) {
+          auto i = zonegroup.enabled_features.find(feature);
+          if (i == zonegroup.enabled_features.end()) {
+            ldout(cct, 1) << "WARNING: zone feature \"" << feature
+                << "\" was not enabled in zonegroup " << zonegroup_name << dendl;
+            continue;
+          }
+          zonegroup.enabled_features.erase(i);
+        }
+
 	ret = zonegroup.create();
 	if (ret < 0) {
 	  cerr << "failed to create zonegroup " << zonegroup_name << ": " << cpp_strerror(-ret) << std::endl;
@@ -4472,6 +4506,22 @@ int main(int argc, const char **argv)
           need_update = true;
         }
 
+        for (const auto& feature : enable_features) {
+          zonegroup.enabled_features.insert(feature);
+          need_update = true;
+        }
+        for (const auto& feature : disable_features) {
+          auto i = zonegroup.enabled_features.find(feature);
+          if (i == zonegroup.enabled_features.end()) {
+            ldout(cct, 1) << "WARNING: zone feature \"" << feature
+                << "\" was not enabled in zonegroup "
+                << zonegroup.get_name() << dendl;
+            continue;
+          }
+          zonegroup.enabled_features.erase(i);
+          need_update = true;
+        }
+
         if (need_update) {
 	  ret = zonegroup.update();
 	  if (ret < 0) {
@@ -4515,6 +4565,32 @@ int main(int argc, const char **argv)
 	if (zonegroup.realm_id.empty() && !default_realm_not_exist) {
 	  zonegroup.realm_id = realm.get_id();
 	}
+        // validate zonegroup features
+        for (const auto& feature : zonegroup.enabled_features) {
+          if (!rgw::zone_features::supports(feature)) {
+            std::cerr << "ERROR: Unrecognized zonegroup feature \""
+                << feature << "\"" << std::endl;
+            return EINVAL;
+          }
+        }
+        for (const auto& [name, zone] : zonegroup.zones) {
+          // validate zone features
+          for (const auto& feature : zone.supported_features) {
+            if (!rgw::zone_features::supports(feature)) {
+              std::cerr << "ERROR: Unrecognized zone feature \""
+                  << feature << "\" in zone " << zone.name << std::endl;
+              return EINVAL;
+            }
+          }
+          // zone must support everything zonegroup does
+          for (const auto& feature : zonegroup.enabled_features) {
+            if (!zone.supports(feature)) {
+              std::cerr << "ERROR: Zone " << name << " does not support feature \""
+                  << feature << "\" required by zonegroup" << std::endl;
+              return EINVAL;
+            }
+          }
+        }
 	ret = zonegroup.create();
 	if (ret < 0 && ret != -EEXIST) {
 	  cerr << "ERROR: couldn't create zonegroup info: " << cpp_strerror(-ret) << std::endl;
@@ -4750,6 +4826,11 @@ int main(int argc, const char **argv)
           string *ptier_type = (tier_type_specified ? &tier_type : nullptr);
           bool *psync_from_all = (sync_from_all_specified ? &sync_from_all : nullptr);
           string *predirect_zone = (redirect_zone_set ? &redirect_zone : nullptr);
+          if (enable_features.empty()) { // enable all features by default
+            enable_features.insert(rgw::zone_features::supported.begin(),
+                                   rgw::zone_features::supported.end());
+          }
+
 	  ret = zonegroup.add_zone(zone,
                                    (is_master_set ? &is_master : NULL),
                                    (is_read_only_set ? &read_only : NULL),
@@ -4758,7 +4839,8 @@ int main(int argc, const char **argv)
                                    psync_from_all,
                                    sync_from, sync_from_rm,
                                    predirect_zone,
-				   store->svc.sync_modules->get_manager());
+				   store->svc.sync_modules->get_manager(),
+                                   enable_features, disable_features);
 	  if (ret < 0) {
 	    cerr << "failed to add zone " << zone_name << " to zonegroup " << zonegroup.get_name()
 		 << ": " << cpp_strerror(-ret) << std::endl;
@@ -5041,7 +5123,8 @@ int main(int argc, const char **argv)
                                  endpoints, ptier_type,
                                  psync_from_all, sync_from, sync_from_rm,
                                  predirect_zone,
-				 store->svc.sync_modules->get_manager());
+				 store->svc.sync_modules->get_manager(),
+                                 enable_features, disable_features);
 	if (ret < 0) {
 	  cerr << "failed to update zonegroup: " << cpp_strerror(-ret) << std::endl;
 	  return -ret;

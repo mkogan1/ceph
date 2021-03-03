@@ -820,10 +820,17 @@ struct RGWZoneGroup : public RGWSystemMetaObj {
   int set_as_default(bool exclusive = false) override;
   int create_default(bool old_format = false);
   int equals(const std::string& other_zonegroup) const;
-  int add_zone(const RGWZoneParams& zone_params, bool *is_master, bool *read_only,
-               const list<std::string>& endpoints, const std::string *ptier_type,
-               bool *psync_from_all, list<std::string>& sync_from, list<std::string>& sync_from_rm,
-               std::string *predirect_zone, RGWSyncModulesManager *sync_mgr);
+  int add_zone(const RGWZoneParams& zone_params,
+	       bool *is_master,
+	       bool *read_only,
+               const std::list<std::string>& endpoints,
+	       const std::string *ptier_type,
+               bool *psync_from_all,
+	       std::list<std::string>& sync_from,
+               std::list<std::string>& sync_from_rm, std::string *predirect_zone,
+	       RGWSyncModulesManager *sync_mgr,
+               const rgw::zone_features::set& enable_features,
+               const rgw::zone_features::set& disable_features);
   int remove_zone(const std::string& zone_id);
   int rename_zone(const RGWZoneParams& zone_params);
   rgw_pool get_pool(CephContext *cct) const override;

@@ -106,6 +106,11 @@ int RGWZoneGroup::create_default(bool old_format)
   default_zone.name = zone_params.get_name();
   default_zone.id = zone_params.get_id();
   master_zone = default_zone.id;
+
+  // enable all supported features
+  enabled_features.insert(rgw::zone_features::supported.begin(),
+                          rgw::zone_features::supported.end());
+  default_zone.supported_features = enabled_features;
   
   r = create();
   if (r < 0 && r != -EEXIST) {
@@ -179,7 +184,9 @@ int RGWZoneGroup::equals(const string& other_zonegroup) const
 int RGWZoneGroup::add_zone(const RGWZoneParams& zone_params, bool *is_master, bool *read_only,
                            const list<string>& endpoints, const string *ptier_type,
                            bool *psync_from_all, list<string>& sync_from, list<string>& sync_from_rm,
-                           string *predirect_zone, RGWSyncModulesManager *sync_mgr)
+                           string *predirect_zone, RGWSyncModulesManager *sync_mgr,
+                           const rgw::zone_features::set& enable_features,
+                           const rgw::zone_features::set& disable_features)
 {
   auto& zone_id = zone_params.get_id();
   auto& zone_name = zone_params.get_name();
@@ -218,8 +225,8 @@ int RGWZoneGroup::add_zone(const RGWZoneParams& zone_params, bool *is_master, bo
   if (ptier_type) {
     zone.tier_type = *ptier_type;
     if (!sync_mgr->get_module(*ptier_type, nullptr)) {
-      ldout(cct, 0) << "ERROR: could not found sync module: " << *ptier_type 
-                    << ",  valid sync modules: " 
+      ldout(cct, 0) << "ERROR: could not found sync module: " << *ptier_type
+                    << ",  valid sync modules: "
                     << sync_mgr->get_registered_module_names()
                     << dendl;
       return -ENOENT;
@@ -240,6 +247,24 @@ int RGWZoneGroup::add_zone(const RGWZoneParams& zone_params, bool *is_master, bo
 
   for (auto rm : sync_from_rm) {
     zone.sync_from.erase(rm);
+  }
+
+  zone.supported_features.insert(enable_features.begin(),
+                                 enable_features.end());
+
+  for (const auto& feature : disable_features) {
+    if (enabled_features.contains(feature)) {
+      lderr(cct) << "ERROR: Cannot disable zone feature \"" << feature
+          << "\" until it's been disabled in zonegroup " << name << dendl;
+      return -EINVAL;
+    }
+    auto i = zone.supported_features.find(feature);
+    if (i == zone.supported_features.end()) {
+      ldout(cct, 1) << "WARNING: zone feature \"" << feature
+          << "\" was not enabled in zone " << zone.name << dendl;
+      continue;
+    }
+    zone.supported_features.erase(i);
   }
 
   post_process_params();
