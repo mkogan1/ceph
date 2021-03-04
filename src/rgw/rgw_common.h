@@ -2152,7 +2152,10 @@ struct req_state : DoutPrefixProvider {
 
   vector<rgw::IAM::Policy> session_policies;
 
-  req_state(CephContext* _cct, RGWEnv* e, RGWUserInfo* u, uint64_t id); 
+  //Principal tags that come in as part of AssumeRoleWithWebIdentity
+  vector<std::pair<string, string>> principal_tags;
+
+  req_state(CephContext* _cct, RGWEnv* e, RGWUserInfo* u, uint64_t id);
   ~req_state();
 
   bool is_err() const { return err.is_err(); }
