@@ -145,6 +145,7 @@ static const actpair actpairs[] =
  { "sts:AssumeRole", stsAssumeRole},
  { "sts:AssumeRoleWithWebIdentity", stsAssumeRoleWithWebIdentity},
  { "sts:GetSessionToken", stsGetSessionToken},
+ { "sts:TagSession", stsTagSession},
 };
 
 struct PolicyParser;
@@ -1295,6 +1296,9 @@ const char* action_bit_string(uint64_t action) {
 
   case stsGetSessionToken:
     return "sts:GetSessionToken";
+
+  case stsTagSession:
+    return "sts:TagSession";
   }
   return "s3Invalid";
 }
