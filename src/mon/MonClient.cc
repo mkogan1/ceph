@@ -539,7 +539,7 @@ void MonClient::handle_auth(MAuthReply *m)
     _resend_mon_commands();
     send_log(true);
     if (active_con) {
-      std::swap(auth, active_con->get_auth());
+      auth = std::move(active_con->get_auth());
       global_id = active_con->get_global_id();
     }
   }
