@@ -47,6 +47,10 @@ public:
     reset();
   }
 
+  CephxClientHandler* clone() const override {
+    return new CephxClientHandler(*this);
+  }
+
   void reset() override {
     starting = true;
     server_challenge = 0;

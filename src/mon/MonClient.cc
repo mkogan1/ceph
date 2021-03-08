@@ -633,6 +633,9 @@ MonConnection& MonClient::_add_conn(unsigned rank, uint64_t global_id)
   auto peer = monmap.get_addr(rank);
   auto conn = messenger->get_connection(monmap.get_inst(rank));
   MonConnection mc(cct, conn, global_id);
+  if (auth) {
+    mc.get_auth().reset(auth->clone());
+  }
   auto inserted = pending_cons.insert(make_pair(peer, move(mc)));
   ldout(cct, 10) << "picked mon." << monmap.get_name(rank)
                  << " con " << conn
@@ -1243,12 +1246,15 @@ int MonConnection::_negotiate(MAuthReply *m,
 			      uint32_t want_keys,
 			      RotatingKeyRing* keyring)
 {
+  ldout(cct, 10) << __func__ << " protocol " << m->protocol << dendl;
   if (auth && (int)m->protocol == auth->get_protocol()) {
     // good, negotiation completed
+    ldout(cct, 10) << __func__ << " already have auth, reseting" << dendl;
     auth->reset();
     return 0;
   }
 
+  ldout(cct, 10) << __func__ << " creating new auth" << dendl;
   auth.reset(get_auth_client_handler(cct, m->protocol, keyring));
   if (!auth) {
     ldout(cct, 10) << "no handler for protocol " << m->protocol << dendl;
