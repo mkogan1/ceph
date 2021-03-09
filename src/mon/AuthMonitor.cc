@@ -392,6 +392,7 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
   __u32 proto = m->protocol;
   bool start = false;
   EntityName entity_name;
+  bool is_new_global_id = false;
 
   // set up handler?
   if (m->protocol == 0 && !s->auth_handler) {
@@ -510,6 +511,7 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
       assert(!paxos_writable);
       return false;
     }
+    is_new_global_id = true;
   }
 
   try {
@@ -521,7 +523,9 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
       if (m->monmap_epoch < mon->monmap->get_epoch())
 	mon->send_latest_monmap(m->get_connection().get());
 
-      proto = s->auth_handler->start_session(entity_name, response_bl, caps_info);
+      proto = s->auth_handler->start_session(entity_name, s->global_id,
+                                             is_new_global_id, response_bl,
+                                             caps_info);
       ret = 0;
       if (caps_info.allow_all) {
 	s->caps.set_allow_all();

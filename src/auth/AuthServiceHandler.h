@@ -27,20 +27,28 @@ struct AuthCapsInfo;
 struct AuthServiceHandler {
 protected:
   CephContext *cct;
-public:
   EntityName entity_name;
-  uint64_t global_id;
+  uint64_t global_id = 0;
 
-  explicit AuthServiceHandler(CephContext *cct_) : cct(cct_), global_id(0) {}
+public:
+  explicit AuthServiceHandler(CephContext *cct_) : cct(cct_) {}
 
   virtual ~AuthServiceHandler() { }
 
-  virtual int start_session(EntityName& name,
-                            bufferlist& result,
-                            AuthCapsInfo& caps) = 0;
+  int start_session(const EntityName& entity_name,
+                    uint64_t global_id,
+                    bool is_new_global_id,
+                    bufferlist& result,
+                    AuthCapsInfo& caps);
   virtual int handle_request(bufferlist::iterator& indata, bufferlist& result, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) = 0;
 
-  EntityName& get_entity_name() { return entity_name; }
+  const EntityName& get_entity_name() { return entity_name; }
+  uint64_t get_global_id() { return global_id; }
+
+private:
+  virtual int do_start_session(bool is_new_global_id,
+                               bufferlist& result,
+                               AuthCapsInfo& caps) = 0;
 };
 
 extern AuthServiceHandler *get_auth_service_handler(int type, CephContext *cct, KeyServer *ks);

@@ -29,12 +29,13 @@ public:
     : AuthServiceHandler(cct_), key_server(ks), server_challenge(0) {}
   ~CephxServiceHandler() override {}
   
-  int start_session(EntityName& name,
-                    bufferlist& result_bl,
-                    AuthCapsInfo& caps) override;
   int handle_request(bufferlist::iterator& indata, bufferlist& result_bl, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) override;
 
 private:
+  int do_start_session(bool is_new_global_id,
+                       bufferlist& result_bl,
+                       AuthCapsInfo& caps) override;
+
   void build_cephx_response_header(int request_type, int status,
                                    bufferlist& bl);
 };

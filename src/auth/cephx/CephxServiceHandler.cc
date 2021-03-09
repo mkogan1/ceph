@@ -26,12 +26,10 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "cephx server " << entity_name << ": "
 
-int CephxServiceHandler::start_session(EntityName& name,
-                                       bufferlist& result_bl,
-                                       AuthCapsInfo& caps)
+int CephxServiceHandler::do_start_session(bool is_new_global_id,
+                                          bufferlist& result_bl,
+                                          AuthCapsInfo& caps)
 {
-  entity_name = name;
-
   get_random_bytes((char *)&server_challenge, sizeof(server_challenge));
   if (!server_challenge)
     server_challenge = 1;  // always non-zero.
