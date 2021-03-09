@@ -35,7 +35,6 @@ public:
     ceph_abort();  // shouldn't get called
     return 0;
   }
-  void build_cephx_response_header(int request_type, int status, bufferlist& bl) { }
 };
 
 #endif

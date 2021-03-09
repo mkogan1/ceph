@@ -33,7 +33,10 @@ public:
                     bufferlist& result_bl,
                     AuthCapsInfo& caps) override;
   int handle_request(bufferlist::iterator& indata, bufferlist& result_bl, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) override;
-  void build_cephx_response_header(int request_type, int status, bufferlist& bl);
+
+private:
+  void build_cephx_response_header(int request_type, int status,
+                                   bufferlist& bl);
 };
 
 #endif
