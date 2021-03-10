@@ -760,7 +760,7 @@ void RGWSTSAssumeRoleWithWebIdentity::execute()
   }
 
   STS::AssumeRoleWithWebIdentityRequest req(s->cct, duration, providerId, policy, roleArn,
-                        roleSessionName, iss, sub, aud);
+                        roleSessionName, iss, sub, aud, s->principal_tags);
   STS::AssumeRoleWithWebIdentityResponse response = sts.assumeRoleWithWebIdentity(req);
   op_ret = std::move(response.assumeRoleResp.retCode);
 
