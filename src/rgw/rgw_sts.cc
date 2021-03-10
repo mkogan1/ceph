@@ -44,7 +44,8 @@ int Credentials::generateCredentials(CephContext* cct,
                           const boost::optional<string>& policy,
                           const boost::optional<string>& roleId,
                           const boost::optional<string>& role_session,
-                          const boost::optional<std::vector<string>> token_claims,
+                          const boost::optional<std::vector<string>>& token_claims,
+                          const boost::optional<std::vector<std::pair<string,string>>>& session_princ_tags,
                           boost::optional<rgw_user> user,
                           rgw::auth::Identity* identity)
 {
@@ -126,6 +127,9 @@ int Credentials::generateCredentials(CephContext* cct,
     token.role_session = role_session.get();
   }
 
+  if (session_princ_tags) {
+    token.principal_tags = std::move(*session_princ_tags);
+  }
   buffer::list input, enc_output;
   encode(token, input);
 
@@ -351,6 +355,7 @@ AssumeRoleWithWebIdentityResponse STSService::assumeRoleWithWebIdentity(AssumeRo
                                                                                       req.getPolicy(), roleId,
                                                                                       req.getRoleSessionName(),
                                                                                       token_claims,
+                                                                                      req.getPrincipalTags(),
                                                                                       user_id, nullptr);
   if (response.assumeRoleResp.retCode < 0) {
     return response;
@@ -398,6 +403,7 @@ AssumeRoleResponse STSService::assumeRole(AssumeRoleRequest& req)
                                               req.getPolicy(), roleId,
                                               req.getRoleSessionName(),
                                               boost::none,
+                                              boost::none,
                                               user_id, nullptr);
   if (response.retCode < 0) {
     return response;
@@ -433,6 +439,7 @@ GetSessionTokenResponse STSService::getSessionToken(GetSessionTokenRequest& req)
   //Generate Credentials
   if (ret = cred.generateCredentials(cct,
                                       req.getDuration(),
+                                      boost::none,
                                       boost::none,
                                       boost::none,
                                       boost::none,
