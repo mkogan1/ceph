@@ -2226,12 +2226,7 @@ void PG::activate(ObjectStore::Transaction& t,
 
   if (is_primary()) {
     // only update primary last_epoch_started if we will go active
-#if 0 // XXX
-    if (actingset.size() >= pool.info.min_size) {
-#else
-    if ((acting.size() >= pool.info.min_size) &&
-	pool.info.stretch_set_can_peer(acting, *get_osdmap(), NULL)) {
-#endif
+    if (acting_set_writeable()) {
       ceph_assert(cct->_conf->osd_find_best_info_ignore_history_les ||
 	     info.last_epoch_started <= activation_epoch);
       info.last_epoch_started = activation_epoch;
@@ -2543,12 +2538,7 @@ void PG::activate(ObjectStore::Transaction& t,
     release_pg_backoffs();
     projected_last_update = info.last_update;
   }
-#if 0 // XXX
-  if (actingset.size() >= pool.info.min_size) {
-#else
-  if ((acting.size() >= pool.info.min_size) &&
-      pool.info.stretch_set_can_peer(acting, *get_osdmap(), NULL)) {
-#endif
+  if (acting_set_writeable()) {
     PGLogEntryHandler handler{this, &t};
     pg_log.roll_forward(&handler);
   }
@@ -2625,12 +2615,7 @@ void PG::_activate_committed(epoch_t epoch, epoch_t activation_epoch)
 
     i.info.history.last_epoch_started = activation_epoch;
     i.info.history.last_interval_started = i.info.history.same_interval_since;
-#if 0 // XXX
-    if (actingset.size() >= pool.info.min_size) {
-#else
-    if ((acting.size() >= pool.info.min_size) &&
-	pool.info.stretch_set_can_peer(acting, *get_osdmap(), NULL)) {
-#endif
+    if (acting_set_writeable()) {
       state_set(PG_STATE_ACTIVE);
     } else {
       state_set(PG_STATE_PEERED);
@@ -9297,13 +9282,7 @@ boost::statechart::result PG::RecoveryState::Active::react(const AllReplicasActi
 	pg->osd->set_not_ready_to_merge_source(pgid);
       }
     }
-#if 0 // XXX
-  } else if (pg->actingset.size() < pg->pool.info.min_size) {
-#else
-  } else if ((pg->acting.size() < pg->pool.info.min_size) ||
-	     !pg->pool.info.stretch_set_can_peer(pg->acting,
-						 *pg->get_osdmap(), NULL)) {
-#endif
+  } else if (!pg->acting_set_writeable()) {
     pg->state_set(PG_STATE_PEERED);
   } else {
     pg->state_set(PG_STATE_ACTIVE);
