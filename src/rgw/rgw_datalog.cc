@@ -716,7 +716,9 @@ int RGWDataChangesLog::list_entries(int shard, int max_entries,
 				    std::optional<std::string_view> marker,
 				    std::string* out_marker, bool* truncated)
 {
-  assert(shard < num_shards);
+  if (shard >= num_shards) {
+    return -EINVAL;
+  }
   return bes->list(shard, max_entries, entries, marker, out_marker, truncated);
 }
 
@@ -747,7 +749,10 @@ int RGWDataChangesLog::list_entries(int max_entries,
 
 int RGWDataChangesLog::get_info(int shard_id, RGWDataChangesLogInfo *info)
 {
-  assert(shard_id < num_shards);
+  if (shard_id >= num_shards) {
+    return -EINVAL;
+  }
+
   auto be = bes->head();
   auto r = be->get_info(shard_id, info);
   if (!info->marker.empty()) {
@@ -781,7 +786,9 @@ int DataLogBackends::trim_entries(int shard_id, std::string_view marker)
 
 int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker)
 {
-  assert(shard_id < num_shards);
+  if (shard_id >= num_shards) {
+    return -EINVAL;
+  }
   return bes->trim_entries(shard_id, marker);
 }
 
@@ -892,7 +899,10 @@ int DataLogBackends::trim_generations(std::optional<uint64_t>& through) {
 int RGWDataChangesLog::trim_entries(int shard_id, std::string_view marker,
 				    librados::AioCompletion* c)
 {
-  assert(shard_id < num_shards);
+  if (shard_id >= num_shards) {
+    rgw_complete_aio_completion(c, -EINVAL);
+    return 0;
+  }
   bes->trim_entries(shard_id, marker, c);
   return 0;
 }
