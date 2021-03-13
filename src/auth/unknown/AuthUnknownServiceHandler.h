@@ -31,7 +31,10 @@ public:
                     AuthCapsInfo& caps) override {
     return CEPH_AUTH_UNKNOWN;
   }
-  int handle_request(bufferlist::iterator& indata, bufferlist& result_bl, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) {
+  int handle_request(bufferlist::iterator& indata,
+                     bufferlist& result_bl,
+                     AuthCapsInfo& caps,
+                     uint64_t *auid = NULL) {
     ceph_abort();  // shouldn't get called
     return 0;
   }

@@ -26,7 +26,10 @@ public:
     : AuthServiceHandler(cct_) {}
   ~AuthNoneServiceHandler() override {}
   
-  int handle_request(bufferlist::iterator& indata, bufferlist& result_bl, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) override {
+  int handle_request(bufferlist::iterator& indata,
+                     bufferlist& result_bl,
+                     AuthCapsInfo& caps,
+                     uint64_t *auid = NULL) override {
     return 0;
   }
 

@@ -168,12 +168,16 @@ struct CephXAuthenticate {
   uint64_t key;
   CephXTicketBlob old_ticket;
 
+  bool old_ticket_may_be_omitted;
+
   void encode(bufferlist& bl) const {
-    __u8 struct_v = 1;
+    __u8 struct_v = 3;
     ::encode(struct_v, bl);
     ::encode(client_challenge, bl);
     ::encode(key, bl);
     ::encode(old_ticket, bl);
+    uint32_t other_keys = 0;
+    ::encode(other_keys, bl);
   }
   void decode(bufferlist::iterator& bl) {
     __u8 struct_v;
@@ -181,7 +185,14 @@ struct CephXAuthenticate {
     ::decode(client_challenge, bl);
     ::decode(key, bl);
     ::decode(old_ticket, bl);
- }
+
+    // v2 and v3 encodings are the same, but:
+    // - some clients that send v1 or v2 don't populate old_ticket
+    //   on reconnects (but do on renewals)
+    // - any client that sends v3 or later is expected to populate
+    //   old_ticket both on reconnects and renewals
+    old_ticket_may_be_omitted = struct_v < 3;
+  }
 };
 WRITE_CLASS_ENCODER(CephXAuthenticate)
 

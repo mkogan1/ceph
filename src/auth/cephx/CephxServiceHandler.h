@@ -19,6 +19,8 @@
 #include "auth/Auth.h"
 
 class KeyServer;
+struct CephXAuthenticate;
+struct CephXServiceTicketInfo;
 
 class CephxServiceHandler  : public AuthServiceHandler {
   KeyServer *key_server;
@@ -29,13 +31,19 @@ public:
     : AuthServiceHandler(cct_), key_server(ks), server_challenge(0) {}
   ~CephxServiceHandler() override {}
   
-  int handle_request(bufferlist::iterator& indata, bufferlist& result_bl, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) override;
+  int handle_request(bufferlist::iterator& indata,
+                     bufferlist& result_bl,
+                     AuthCapsInfo& caps,
+                     uint64_t *auid = NULL) override;
 
 private:
   int do_start_session(bool is_new_global_id,
                        bufferlist& result_bl,
                        AuthCapsInfo& caps) override;
 
+  int verify_old_ticket(const CephXAuthenticate& req,
+			CephXServiceTicketInfo& old_ticket_info,
+			bool& should_enc_ticket);
   void build_cephx_response_header(int request_type, int status,
                                    bufferlist& bl);
 };
