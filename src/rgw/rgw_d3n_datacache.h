@@ -324,11 +324,7 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       // Read From Cache
       ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): READ FROM CACHE, oid=" << read_obj.oid << ", obj-ofs=" << obj_ofs << ", read_ofs=" << read_ofs << ", len=" << len << dendl;
       auto completed = d->aio->get(obj, rgw::Aio::cache_op(std::move(op), d->yield, obj_ofs, read_ofs, len, g_conf()->rgw_d3n_l1_datacache_persistent_path), cost, id);
-      if (g_conf()->rgw_d3n_l1_libaio_read) {
-        r = d->drain();
-      } else {
-        r = d->flush(std::move(completed));
-      }
+      r = d->drain();
       if (r < 0) {
         lsubdout(g_ceph_context, rgw, 0) << "D3nDataCache: Error: failed to drain/flush, r= " << r << dendl;
       }

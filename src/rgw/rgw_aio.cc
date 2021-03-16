@@ -138,27 +138,15 @@ Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t rea
     auto cs = new(&r.user_data) cache_state(aio);
     cs->c = new D3nL1CacheRequest();
 
-    if (g_conf()->rgw_d3n_l1_libaio_read) {
-      lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << ": libaio Read From Cache, oid=" << ref.obj.oid << dendl;
-      cs->c->prepare_libaio_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
-      int ret = cs->submit_libaio_op(cs->c);
-      if(ret < 0) {
-        lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << ": ERROR: submit_libaio_op, ret=" << ret << dendl;
-        r.result = -EINVAL;
-        cs->aio->put(r);
-        delete cs->c;
-        cs->c = nullptr;
-      }
-    } else {
-      lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << ": posix io Read From Cache, oid=" << ref.obj.oid << dendl;
-      int ret = cs->c->execute_io_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
-      if(ret < 0) {
-        lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << ": ERROR: execute_io_op, ret=" << ret << dendl;
-        r.result = -EINVAL;
-        cs->aio->put(r);
-        delete cs->c;
-        cs->c = nullptr;
-      }
+    lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << ": libaio Read From Cache, oid=" << ref.obj.oid << dendl;
+    cs->c->prepare_libaio_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
+    int ret = cs->submit_libaio_op(cs->c);
+    if(ret < 0) {
+      lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << ": ERROR: submit_libaio_op, ret=" << ret << dendl;
+      r.result = -EINVAL;
+      cs->aio->put(r);
+      delete cs->c;
+      cs->c = nullptr;
     }
   };
 }

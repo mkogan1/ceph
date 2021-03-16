@@ -7158,10 +7158,6 @@ std::vector<Option> get_rgw_options() {
     .set_default(true)
     .set_description("clear the content of the persistent data cache directory on start"),
 
-    Option("rgw_d3n_l1_libaio_read", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(true)
-    .set_description("Specified usage of libaio asynchronous IO or posix synchronous IO for reading from cache"),
-
     Option("rgw_d3n_l1_fadvise", Option::TYPE_INT, Option::LEVEL_ADVANCED)
     .set_default(POSIX_FADV_DONTNEED)
     .set_description("posix_fadvise() flag fir access pattern of cache files"),
