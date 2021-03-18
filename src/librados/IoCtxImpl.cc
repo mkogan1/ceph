@@ -23,14 +23,13 @@
 #include "include/ceph_assert.h"
 #include "common/valgrind.h"
 #include "common/EventTrace.h"
+#include "rgw/rgw_d3n_cacherequest.h"
 
 #define dout_subsys ceph_subsys_rados
 #undef dout_prefix
 #define dout_prefix *_dout << "librados: "
 
 namespace bs = boost::system;
-namespace ca = ceph::async;
-namespace cb = ceph::buffer;
 
 namespace librados {
 namespace {
@@ -744,7 +743,24 @@ int librados::IoCtxImpl::aio_operate_read(const object_t &oid,
   return 0;
 }
 
-  
+// D3nDataCache
+int librados::IoCtxImpl::cache_aio_operate_read(const object_t &oid, AioCompletionImpl *c, D3nL1CacheRequest *cc,  bufferlist *pbl) {
+
+   FUNCTRACE(client->cct);
+   OID_EVENT_TRACE(oid.name.c_str(), "Cache_READ_OP_BEGIN");
+   Context *oncomplete = new C_aio_Complete(c);
+
+#if defined(WITH_EVENTTRACE)
+   ((C_aio_Complete *) oncomplete)->oid = oid;
+#endif
+   c->is_read = true;
+   c->io = this;
+   cc->onack = oncomplete;
+   cc->bl = pbl;
+   return 0;
+}
+// D3nDataCache
+
 int librados::IoCtxImpl::aio_operate(const object_t& oid,
 				     ::ObjectOperation *o, AioCompletionImpl *c,
 				     const SnapContext& snap_context, int flags,

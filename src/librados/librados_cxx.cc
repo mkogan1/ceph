@@ -1672,6 +1672,14 @@ int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c,
                translate_flags(flags), pbl, trace_info);
 }
 
+// D3nDataCache
+int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c, D3nL1CacheRequest *cc, bufferlist *pbl) {
+  if (!cc) return -EINVAL;
+  object_t obj(oid);
+  return io_ctx_impl->cache_aio_operate_read(obj, c->pc, cc, pbl);
+}
+// D3nDataCache
+
 void librados::IoCtx::snap_set_read(snap_t seq)
 {
   io_ctx_impl->set_snap_read(seq);

@@ -341,14 +341,21 @@ int radosgw_Main(int argc, const char **argv)
     lsubdout(cct, rgw, 1) << "rgw_d3n: rgw_d3n_l1_eviction_policy=" << cct->_conf->rgw_d3n_l1_eviction_policy << dendl;
   }
   bool rgw_d3n_datacache_enabled = cct->_conf->rgw_d3n_l1_local_datacache_enabled;
+  for (list<string>::iterator iter = frontends.begin(); iter != frontends.end(); ++iter) {
+    string& f = *iter;
+    if (f.find("beast") == string::npos)
+      rgw_d3n_datacache_enabled = false;
+  }
+  if (cct->_conf->rgw_d3n_l1_local_datacache_enabled && rgw_d3n_datacache_enabled == false)
+    lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabled, (only the 'Beast' framework is currently supported)" << dendl;
   if (rgw_d3n_datacache_enabled && !cct->_conf->rgw_enable_ops_log) {
     lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires that rgw_enable_ops_log will be enabled also)" << dendl;
     rgw_d3n_datacache_enabled = false;
   }
-  if (rgw_d3n_datacache_enabled && (cct->_conf->rgw_max_chunk_size != cct->_conf->rgw_obj_stripe_size)) {
-    lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires that the chunk_size equals stripe_size)" << dendl;
-    rgw_d3n_datacache_enabled = false;
-  }
+  // if (rgw_d3n_datacache_enabled && (cct->_conf->rgw_max_chunk_size != cct->_conf->rgw_obj_stripe_size)) {
+  //   lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires that the chunk_size equals stripe_size)" << dendl;
+  //   rgw_d3n_datacache_enabled = false;
+  // }
   lsubdout(cct, rgw, 1) << "D3N datacache enabled: " << rgw_d3n_datacache_enabled << dendl;
   const DoutPrefix dp(cct.get(), dout_subsys, "rgw main: ");
   rgw::sal::RGWStore *store =

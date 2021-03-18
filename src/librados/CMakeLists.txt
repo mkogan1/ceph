@@ -4,6 +4,8 @@ add_library(librados_impl STATIC
   RadosClient.cc
   librados_util.cc
   librados_tp.cc)
+target_include_directories(librados_impl PRIVATE
+  $<TARGET_PROPERTY:spawn,INTERFACE_INCLUDE_DIRECTORIES>)
 
 # C/C++ API
 add_library(librados ${CEPH_SHARED}

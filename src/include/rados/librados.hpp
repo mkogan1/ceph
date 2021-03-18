@@ -14,6 +14,8 @@
 #include "librados_fwd.hpp"
 #include "rados_types.hpp"
 
+struct D3nL1CacheRequest;
+
 namespace libradosstriper
 {
   class RadosStriper;
@@ -1161,6 +1163,8 @@ inline namespace v14_2_0 {
     int operate(const std::string& oid, ObjectReadOperation *op, bufferlist *pbl, int flags);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op, int flags);
+    int aio_operate(const std::string& oid, AioCompletion *c, D3nL1CacheRequest *cc, bufferlist *pbl);  // D3nDataCache
+
     /**
      * Schedule an async write operation with explicit snapshot parameters
      *

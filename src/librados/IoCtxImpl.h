@@ -160,6 +160,7 @@ struct librados::IoCtxImpl {
 		  int flags, const blkin_trace_info *trace_info = nullptr);
   int aio_operate_read(const object_t& oid, ::ObjectOperation *o,
 		       AioCompletionImpl *c, int flags, bufferlist *pbl, const blkin_trace_info *trace_info = nullptr);
+  int cache_aio_operate_read(const object_t &oid, AioCompletionImpl *c, D3nL1CacheRequest* cc, bufferlist *pbl);  // D3nDataCache
 
   struct C_aio_stat_Ack : public Context {
     librados::AioCompletionImpl *c;

@@ -19,6 +19,7 @@
 
 #include "rgw_aio.h"
 #include "rgw_d3n_cacherequest.h"
+#include <spawn/spawn.hpp>
 
 namespace rgw {
 
@@ -68,8 +69,6 @@ void cache_aio_cb(sigval_t sigval) {
   int status = c->status();
   if (status == 0) {
     c->finish();
-    c->r->result = 0;
-    c->aio->put(*(c->r));
   } else {
     c->r->result = -EINVAL;
     c->aio->put(*(c->r));
@@ -132,21 +131,21 @@ Aio::OpFunc aio_abstract(Op&& op, boost::asio::io_context& context,
 
 
 template <typename Op>
-Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location) {
-  return [op = std::move(op), obj_ofs, read_ofs, read_len, location] (Aio* aio, AioResult& r) mutable{
-    auto& ref = r.obj.get_ref();
-    auto cs = new(&r.user_data) cache_state(aio);
-    cs->c = new D3nL1CacheRequest();
+Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, string location, boost::asio::io_context& context, spawn::yield_context yield) {
+  return [op = std::move(op), obj_ofs, read_ofs, read_len, location, &context, yield] (Aio* aio, AioResult& r) mutable{
 
-    lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << ": libaio Read From Cache, oid=" << ref.obj.oid << dendl;
-    cs->c->prepare_libaio_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
-    int ret = cs->submit_libaio_op(cs->c);
-    if(ret < 0) {
-      lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << ": ERROR: submit_libaio_op, ret=" << ret << dendl;
-      r.result = -EINVAL;
-      cs->aio->put(r);
-      delete cs->c;
-      cs->c = nullptr;
+    using namespace boost::asio;
+    async_completion<spawn::yield_context, void()> init(yield);
+    auto ex = get_associated_executor(init.completion_handler);
+    auto& ref = r.obj.get_ref();
+    D3nL1CacheRequest* c = new D3nL1CacheRequest();
+    c->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, cache_aio_cb, aio, &r, location);
+    librados::async_operate(context, ref.pool.ioctx(), ref.obj.oid, &op, c,
+                                bind_executor(ex, Handler{aio, r}));
+    int ret = c->submit_op();
+    if ( ret < 0 ) {
+        r.result = -1;
+        aio->put(r);
     }
   };
 }
@@ -171,7 +170,7 @@ Aio::OpFunc cache_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs,
   static_assert(!std::is_lvalue_reference_v<Op>);
   static_assert(!std::is_const_v<Op>);
   lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << "(), location=" << location << dendl;
-  return cache_aio_abstract(std::forward<Op>(op), obj_ofs, read_ofs, read_len, location);
+  return cache_aio_abstract(std::forward<Op>(op), obj_ofs, read_ofs, read_len, location, y.get_io_context(), y.get_yield_context());
 }
 
 } // anonymous namespace

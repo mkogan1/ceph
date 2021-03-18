@@ -28,6 +28,8 @@
 /// The boost::asio documentation duplicates these requirements here:
 /// http://www.boost.org/doc/libs/1_66_0/doc/html/boost_asio/reference/asynchronous_operations.html
 
+struct D3nL1CacheRequest;
+
 namespace librados {
 
 namespace detail {
@@ -137,6 +139,31 @@ auto async_write(ExecutionContext& ctx, IoCtx& io, const std::string& oid,
   }
   return init.result.get();
 }
+
+// D3nDataCache
+/// Calls IoCtx::aio_operate() and arranges for the AioCompletion to call a
+/// given handler with signature (boost::system::error_code, bufferlist).
+template <typename ExecutionContext, typename CompletionToken>
+auto async_operate(ExecutionContext& ctx, IoCtx& io, const std::string& oid,
+                   ObjectReadOperation *read_op, D3nL1CacheRequest *c,
+                   CompletionToken&& token)
+{
+  using Op = detail::AsyncOp<bufferlist>;
+  using Signature = typename Op::Signature;
+  boost::asio::async_completion<CompletionToken, Signature> init(token);
+  auto p = Op::create(ctx.get_executor(), init.completion_handler);
+  auto& op = p->user_data;
+
+  int ret = io.aio_operate(oid, op.aio_completion.get(), c, &op.result);
+  if (ret < 0) {
+    auto ec = boost::system::error_code{-ret, boost::system::system_category()};
+    ceph::async::post(std::move(p), ec, bufferlist{});
+  } else {
+    p.release(); // release ownership until completion
+  }
+  return init.result.get();
+}
+// D3nDataCache
 
 /// Calls IoCtx::aio_operate() and arranges for the AioCompletion to call a
 /// given handler with signature (boost::system::error_code, bufferlist).
