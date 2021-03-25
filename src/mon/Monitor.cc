@@ -4203,8 +4203,13 @@ void Monitor::_ms_dispatch(Message *m)
 
   if (s->auth_handler) {
     s->entity_name = s->auth_handler->get_entity_name();
+    ceph_assert(s->global_id == s->auth_handler->get_global_id());
+    s->global_id_status = s->auth_handler->get_global_id_status();
   }
-  dout(20) << " caps " << s->caps.get_str() << dendl;
+  dout(20) << " entity_name " << s->entity_name
+	   << " global_id " << s->global_id
+	   << " (" << s->global_id_status
+	   << ") caps " << s->caps.get_str() << dendl;
 
   if ((is_synchronizing() ||
        (s->global_id == 0 && !exited_quorum.is_zero())) &&
@@ -4264,6 +4269,31 @@ void Monitor::dispatch_op(MonOpRequestRef op)
   }
   if (dealt_with)
     return;
+
+  if (s->authenticated) {
+    // global_id_status == NONE: all sessions for auth_none,
+    // mon <-> mon sessions (including proxied sessions) for cephx
+    ceph_assert(s->global_id_status == global_id_status_t::NONE ||
+                s->global_id_status == global_id_status_t::NEW_OK ||
+                s->global_id_status == global_id_status_t::NEW_NOT_EXPOSED ||
+                s->global_id_status == global_id_status_t::RECLAIM_OK ||
+                s->global_id_status == global_id_status_t::RECLAIM_INSECURE);
+
+    if (cct->_conf->auth_expose_insecure_global_id_reclaim &&
+        s->global_id_status == global_id_status_t::NEW_NOT_EXPOSED) {
+      dout(5) << __func__ << " " << op->get_req()->get_source_inst()
+              << " may omit old_ticket on reconnects, discarding "
+              << *op->get_req() << " and forcing reconnect" << dendl;
+      ceph_assert(s->con && !s->proxy_con);
+      s->con->mark_down();
+      {
+        Mutex::Locker l(session_map_lock);
+        remove_session(s);
+      }
+      op->mark_zap();
+      return;
+    }
+  }
 
   /* well, maybe the op belongs to a service... */
   op->set_type_service();
