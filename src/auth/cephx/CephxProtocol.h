@@ -429,7 +429,8 @@ WRITE_CLASS_ENCODER(CephXAuthorize)
  * Decode an extract ticket
  */
 bool cephx_decode_ticket(CephContext *cct, KeyStore *keys,
-			 uint32_t service_id, CephXTicketBlob& ticket_blob,
+			 uint32_t service_id,
+			 const CephXTicketBlob& ticket_blob,
 			 CephXServiceTicketInfo& ticket_info);
 
 /*
@@ -453,8 +454,8 @@ extern bool cephx_verify_authorizer(
 static constexpr uint64_t AUTH_ENC_MAGIC = 0xff009cad8826aa55ull;
 
 template <typename T>
-void decode_decrypt_enc_bl(CephContext *cct, T& t, CryptoKey key, bufferlist& bl_enc, 
-			   std::string &error)
+void decode_decrypt_enc_bl(CephContext *cct, T& t, CryptoKey key,
+                           const bufferlist& bl_enc, std::string &error)
 {
   uint64_t magic;
   bufferlist bl;
