@@ -117,7 +117,7 @@ int MonClient::get_monmap_privately()
   std::uniform_int_distribution<unsigned> ranks(0, monmap.size() - 1);
   while (monmap.fsid.is_zero()) {
     auto rank = ranks(rng);
-    auto& pending_con = _add_conn(rank, 0);
+    auto& pending_con = _add_conn(rank);
     auto con = pending_con.get_con();
     ldout(cct, 10) << "querying mon." << monmap.get_name(rank) << " "
 		   << con->get_peer_addr() << dendl;
@@ -600,9 +600,9 @@ void MonClient::_reopen_session(int rank)
   _start_hunting();
 
   if (rank >= 0) {
-    _add_conn(rank, global_id);
+    _add_conn(rank);
   } else {
-    _add_conns(global_id);
+    _add_conns();
   }
 
   // throw out old queued messages
@@ -632,7 +632,7 @@ void MonClient::_reopen_session(int rank)
     _renew_subs();
 }
 
-MonConnection& MonClient::_add_conn(unsigned rank, uint64_t global_id)
+MonConnection& MonClient::_add_conn(unsigned rank)
 {
   auto peer = monmap.get_addr(rank);
   auto conn = messenger->get_connection(monmap.get_inst(rank));
@@ -648,7 +648,7 @@ MonConnection& MonClient::_add_conn(unsigned rank, uint64_t global_id)
   return inserted.first->second;
 }
 
-void MonClient::_add_conns(uint64_t global_id)
+void MonClient::_add_conns()
 {
   uint16_t min_priority = std::numeric_limits<uint16_t>::max();
   for (const auto& m : monmap.mon_info) {
@@ -670,7 +670,7 @@ void MonClient::_add_conns(uint64_t global_id)
     n = ranks.size();
   }
   for (unsigned i = 0; i < n; i++) {
-    _add_conn(ranks[i], global_id);
+    _add_conn(ranks[i]);
   }
 }
 
