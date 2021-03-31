@@ -1006,10 +1006,10 @@ TEST_F(IPPolicyTest, EvalIPAddress) {
 		   bufferlist::static_from_string(ip_address_full_example));
   Environment e;
   Environment allowedIP, blacklistedIP, allowedIPv6, blacklistedIPv6;
-  allowedIP["aws:SourceIp"] = "192.168.1.2";
-  allowedIPv6["aws:SourceIp"] = "::1";
-  blacklistedIP["aws:SourceIp"] = "192.168.1.1";
-  blacklistedIPv6["aws:SourceIp"] = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+  allowedIP.emplace("aws:SourceIp","192.168.1.2");
+  allowedIPv6.emplace("aws:SourceIp", "::1");
+  blacklistedIP.emplace("aws:SourceIp", "192.168.1.1");
+  blacklistedIPv6.emplace("aws:SourceIp", "2001:0db8:85a3:0000:0000:8a2e:0370:7334");
 
   auto trueacct = FakeIdentity(
     Principal::tenant("ACCOUNT-ID-WITHOUT-HYPHENS"));
