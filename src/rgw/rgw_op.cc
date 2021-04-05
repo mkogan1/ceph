@@ -1832,7 +1832,7 @@ void RGWGetObj::execute()
     op_ret = send_response_data(bl, 0, total_len);
     if (op_ret < 0)
     {
-      ldout(s->cct, 0) << "ERROR: failed to send_response_data ret= " << op_ret 
+      ldout(s->cct, 0) << "ERROR: failed to send_response_data ret= " << op_ret
                        << dendl;
       goto done_err;
     }
@@ -3048,7 +3048,7 @@ void RGWDeleteBucket::execute()
   if ( op_ret < 0) {
      ldout(s->cct, 1) << "WARNING: failed to sync user stats before bucket delete: op_ret= " << op_ret << dendl;
   }
-  
+
   op_ret = store->check_bucket_empty(s->bucket_info);
   if (op_ret < 0) {
     return;
@@ -3499,7 +3499,7 @@ void RGWPutObj::execute()
   int len;
   map<string, string>::iterator iter;
   bool multipart;
-  
+
   off_t fst;
   off_t lst;
   const auto& compression_type = store->get_zone_params().get_compression_type(
@@ -3836,7 +3836,7 @@ void RGWPutObj::execute()
                                (user_data.empty() ? nullptr : &user_data));
 
   // only atomic upload will upate version_id here
-  if (!multipart) 
+  if (!multipart)
     version_id = (static_cast<RGWPutObjProcessor_Atomic *>(processor))->get_version_id();
 
   /* produce torrent */
@@ -5157,7 +5157,7 @@ void RGWDeleteLC::execute()
   store->get_bucket_instance_obj(s->bucket, obj);
   store->set_prefetch_data(s->obj_ctx, obj);
   op_ret = get_system_obj_attrs(store, s, obj, orig_attrs, NULL, &s->bucket_info.objv_tracker);
-  if (op_ret < 0) {    
+  if (op_ret < 0) {
     return;
   }
 
@@ -5622,6 +5622,11 @@ void RGWCompleteMultipart::execute()
   op_ret = serializer.try_lock(raw_obj.oid, dur);
   if (op_ret < 0) {
     dout(0) << "RGWCompleteMultipart::execute() failed to acquire lock " << dendl;
+    if (op_ret == -ENOENT && check_previously_completed(parts)) {
+      ldout(s->cct, 1) << "NOTICE: This multipart completion is already completed" << dendl;
+      op_ret = 0;
+      return;
+    }
     op_ret = -ERR_INTERNAL_ERROR;
     s->err.message = "This multipart completion is already in progress";
     return;
@@ -5804,6 +5809,49 @@ int RGWCompleteMultipart::MPSerializer::try_lock(
     locked = true;
   }
   return ret;
+}
+
+bool RGWCompleteMultipart::check_previously_completed(const RGWMultiCompleteUpload* parts)
+{
+  // re-calculate the etag from the parts and compare to the existing object
+  rgw_obj obj(s->bucket, s->object);
+  map<string, bufferlist> attrs;
+  int ret = get_obj_attrs(store, *static_cast<RGWObjectCtx *>(s->obj_ctx), s->bucket_info, obj, attrs);
+  if (ret < 0) {
+    ldout(s->cct, 0) << __func__ << "() ERROR: get_obj_attrs() returned ret=" << ret << dendl;
+    return false;
+  }
+  map<string, bufferlist>::iterator aiter = attrs.find(RGW_ATTR_ETAG);
+  if (aiter == attrs.end()) {
+    ldout(s->cct, 0) << __func__ << "() ERROR: etag attr not found" << dendl;
+    return false;
+  }
+  string oetag = rgw_bl_str(aiter->second);
+
+  MD5 hash;
+  for (auto iter = parts->parts.begin() ; iter != parts->parts.end() ; ++iter) {
+    std::string partetag = rgw_string_unquote(iter->second);
+    char petag[CEPH_CRYPTO_MD5_DIGESTSIZE];
+    hex_to_buf(partetag.c_str(), petag, CEPH_CRYPTO_MD5_DIGESTSIZE);
+    hash.Update((const unsigned char *)petag, sizeof(petag));
+    ldout(s->cct, 20) << __func__ << "() re-calculating multipart etag: part: "
+                                   << iter->first << ", etag: " << partetag << dendl;
+  }
+
+  unsigned char final_etag[CEPH_CRYPTO_MD5_DIGESTSIZE];
+  char final_etag_str[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 16];
+  hash.Final(final_etag);
+  buf_to_hex(final_etag, CEPH_CRYPTO_MD5_DIGESTSIZE, final_etag_str);
+  snprintf(&final_etag_str[CEPH_CRYPTO_MD5_DIGESTSIZE * 2], sizeof(final_etag_str) - CEPH_CRYPTO_MD5_DIGESTSIZE * 2,
+           "-%lld", (long long)parts->parts.size());
+
+  if (oetag.compare(final_etag_str) != 0) {
+    ldout(s->cct, 1) << __func__ << "() NOTICE: etag mismatch: object etag:"
+                                 << oetag << ", re-calculated etag:" << final_etag_str << dendl;
+    return false;
+  }
+  ldout(s->cct, 5) << __func__ << "() object etag and re-calculated etag match, etag: " << oetag << dendl;
+  return true;
 }
 
 void RGWCompleteMultipart::complete()
@@ -7165,7 +7213,7 @@ void RGWGetBucketPolicy::execute()
   auto attrs = s->bucket_attrs;
   map<string, bufferlist>::iterator aiter = attrs.find(RGW_ATTR_IAM_POLICY);
   if (aiter == attrs.end()) {
-    ldout(s->cct, 0) << __func__ << " can't find bucket IAM POLICY attr" 
+    ldout(s->cct, 0) << __func__ << " can't find bucket IAM POLICY attr"
                      << " bucket_name = " << s->bucket_name << dendl;
     op_ret = -ERR_NO_SUCH_BUCKET_POLICY;
     s->err.message = "The bucket policy does not exist";
