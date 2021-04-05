@@ -441,7 +441,7 @@ static int commit_reshard(RGWRados* store,
 
   bool remove_index = true;
 
-  if (!store->svc()->zone->need_to_log_data()) {
+  if (!store->svc.zone->need_to_log_data()) {
     // if we're not syncing data, we can drop any existing logs
     layout.logs.clear();
   } else {
