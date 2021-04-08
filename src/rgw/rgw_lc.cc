@@ -1145,7 +1145,13 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 
     if(!if_already_run_today(head.start_date)) {
       head.start_date = now;
+#if 1
+      /* we MUST reach all the entries in the current lc shard,
+       * even if we couldn't process them all in a single run
+       * cycle/day */
+#else
       head.marker.clear();
+#endif
       ret = bucket_lc_prepare(index, worker);
       if (ret < 0) {
       dout(0) << "RGWLC::process() failed to update lc object " << obj_names[index] << ret << dendl;
@@ -1159,9 +1165,10 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
       goto exit;
     }
 
-    if (entry.bucket.empty())
-      goto exit;
-
+    /* When there are no more entries to process, entry will be
+     * equivalent to an empty marker and so the following resets the
+     * processing for the shard automatically when processing is
+     * finished for the shard */
     dout(5) << "RGWLC::process(): START entry 1: " << entry
 	    << " index: " << index << " worker ix: " << worker->ix
 	    << dendl;
@@ -1183,6 +1190,10 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 	      << dendl;
       goto exit;
     }
+
+    /* done with this shard */
+    if (entry.bucket.empty())
+      goto exit;
 
     dout(5) << "RGWLC::process(): START entry 2: " << entry
 	    << " index: " << index << " worker ix: " << worker->ix
