@@ -1094,7 +1094,11 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 	  << "index: " << index << " worker ix: " << worker->ix
 	  << dendl;
 
+  bool wrap_once{false};
+  string prior_cycle_marker{""};
+
   rados::cls::lock::Lock l(lc_index_lock_name);
+
   do {
     utime_t now = ceph_clock_now();
     //string = bucket_name:bucket_id ,int = LC_BUCKET_STATUS
@@ -1116,11 +1120,18 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 
     string marker;
     cls_rgw_lc_obj_head head;
+
+  restart:
     ret = cls_rgw_lc_get_head(store->lc_pool_ctx, obj_names[index], head);
     if (ret < 0) {
       dout(0) << "RGWLC::process() failed to get obj head "
 	      << obj_names[index] << ret << dendl;
       goto exit;
+    }
+
+    /* remember the initial marker for this shard */
+    if (!wrap_once) {
+      prior_cycle_marker = head.marker;
     }
 
     if (! (cct->_conf->rgw_lc_lock_max_time == 9969)) {
@@ -1165,6 +1176,31 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
       goto exit;
     }
 
+    /* if we are continuing a shard that wasn't exhausted in a prior
+     * cycle and therefore wrapped around to the start of the shard,
+     * we should also stop when we reach the marker we started with,
+     * resetting head.marker for the next cycle (we'll process the
+     * entire shard if the lifecycle policy for the corresponding
+     * bucket is cleared while we're working, but I think we can live
+     * with that) */
+    if (!prior_cycle_marker.empty() &&
+	head.marker == prior_cycle_marker) {
+      dout(5) <<
+	"RGWLC::process() wraparound finished shard="
+			 << obj_names[index]
+			 << " starting marker="
+			 << prior_cycle_marker
+			 << dendl;
+      head.marker = "";
+      ret = cls_rgw_lc_put_head(store->lc_pool_ctx, obj_names[index],  head);
+      if (ret < 0) {
+	dout(0) << "RGWLC::process() failed to put head "
+			   << obj_names[index]
+			   << dendl;
+      }
+      goto exit;
+    }
+
     /* When there are no more entries to process, entry will be
      * equivalent to an empty marker and so the following resets the
      * processing for the shard automatically when processing is
@@ -1192,8 +1228,23 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     }
 
     /* done with this shard */
-    if (entry.bucket.empty())
-      goto exit;
+    if (entry.bucket.empty()) {
+	/* handle the special case where the prior cycle didn't finish
+	 * processing this shard */
+	if (!prior_cycle_marker.empty() &&
+	    !wrap_once &&
+	    !going_down()) {
+	  dout(5) <<
+	    "RGWLC::process() wraparound shard="
+			     << obj_names[index]
+			     << " starting marker="
+			     << prior_cycle_marker
+			     << dendl;
+	  wrap_once = true;
+	  goto restart;
+	}
+	goto exit;
+    }
 
     dout(5) << "RGWLC::process(): START entry 2: " << entry
 	    << " index: " << index << " worker ix: " << worker->ix
