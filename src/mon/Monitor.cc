@@ -6723,7 +6723,6 @@ void Monitor::go_recovery_stretch_mode()
   if (!osdmon()->is_writeable()) {
     osdmon()->wait_for_writeable_ctx(new CMonGoRecovery(this));
   }
-  set_recovery_stretch_mode();
   osdmon()->trigger_recovery_stretch_mode();
 }
 
@@ -6817,7 +6816,6 @@ void Monitor::trigger_healthy_stretch_mode()
   }
 
   ceph_assert(osdmon()->osdmap.recovering_stretch_mode);
-  set_healthy_stretch_mode();
   osdmon()->trigger_healthy_stretch_mode();
   monmon()->trigger_healthy_stretch_mode();
 }
