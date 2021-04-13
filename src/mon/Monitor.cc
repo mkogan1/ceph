@@ -6731,6 +6731,7 @@ void Monitor::set_recovery_stretch_mode()
 {
   degraded_stretch_mode = true;
   recovering_stretch_mode = true;
+  osdmon()->set_recovery_stretch_mode();
 }
 
 void Monitor::maybe_go_degraded_stretch_mode()
@@ -6791,6 +6792,7 @@ void Monitor::set_degraded_stretch_mode()
 {
   degraded_stretch_mode = true;
   recovering_stretch_mode = false;
+  osdmon()->set_degraded_stretch_mode();
 }
 
 struct CMonGoHealthy : public Context {
@@ -6824,6 +6826,7 @@ void Monitor::set_healthy_stretch_mode()
 {
   degraded_stretch_mode = false;
   recovering_stretch_mode = false;
+  osdmon()->set_healthy_stretch_mode();
 }
 
 bool Monitor::session_stretch_allowed(MonSession *s, MonOpRequestRef& op)
