@@ -326,32 +326,32 @@ int rgw_log_op(RGWRados *store, RGWREST* const rest, struct req_state *s,
     return 0;
 
   if (s->bucket_name.empty()) {
-    ldout(s->cct, 5) << "nothing to log for operation" << dendl;
-    return -EINVAL;
-  }
-  if (s->err.ret == -ERR_NO_SUCH_BUCKET) {
-    if (!s->cct->_conf->rgw_log_nonexistent_bucket) {
-      ldout(s->cct, 5) << "bucket " << s->bucket << " doesn't exist, not logging" << dendl;
+    /* this case is needed for, e.g., list_buckets */
+  } else {
+    if (s->err.ret == -ERR_NO_SUCH_BUCKET) {
+      if (!s->cct->_conf->rgw_log_nonexistent_bucket) {
+	ldout(s->cct, 5) << "bucket " << s->bucket << " doesn't exist, not logging" << dendl;
+	return 0;
+      }
+      bucket_id = ""; // it's already ""
+    } else {
+      bucket_id = s->bucket.bucket_id;
+    }
+    rgw_make_bucket_entry_name(s->bucket_tenant, s->bucket_name, entry.bucket);
+
+    if (check_utf8(entry.bucket.c_str(), entry.bucket.size()) != 0) {
+      ldout(s->cct, 5) << "not logging op on bucket with non-utf8 name" << dendl;
       return 0;
     }
-    bucket_id = "";
-  } else {
-    bucket_id = s->bucket.bucket_id;
-  }
-  rgw_make_bucket_entry_name(s->bucket_tenant, s->bucket_name, entry.bucket);
 
-  if (check_utf8(entry.bucket.c_str(), entry.bucket.size()) != 0) {
-    ldout(s->cct, 5) << "not logging op on bucket with non-utf8 name" << dendl;
-    return 0;
-  }
+    if (!s->object.empty()) {
+      entry.obj = s->object;
+    } else {
+      entry.obj = rgw_obj_key("-");
+    }
 
-  if (!s->object.empty()) {
-    entry.obj = s->object;
-  } else {
-    entry.obj = rgw_obj_key("-");
-  }
-
-  entry.obj_size = s->obj_size;
+    entry.obj_size = s->obj_size;
+  } /* ! bucket_name.empty() */
 
   if (s->cct->_conf->rgw_remote_addr_param.length())
     set_param_str(s, s->cct->_conf->rgw_remote_addr_param.c_str(),
