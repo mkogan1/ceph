@@ -529,6 +529,7 @@ $DAEMONOPTS
 $CMONDEBUG
 $extra_conf
         mon cluster log file = $CEPH_OUT_DIR/cluster.mon.\$id.log
+        auth allow insecure global id reclaim = false
 [global]
 $extra_conf
 EOF
