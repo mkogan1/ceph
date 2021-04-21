@@ -4919,7 +4919,7 @@ std::vector<Option> get_global_options() {
     .set_description("Make fsck error (instead of warn) when objects without per-pg omap are found"),
 
     Option("bluestore_warn_on_no_per_pool_omap", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
-    .set_default(true)
+    .set_default(false)
     .set_description("Enable health indication on lack of per-pool omap"),
 
     Option("bluestore_warn_on_no_per_pg_omap", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
