@@ -3752,6 +3752,7 @@ int main(int argc, const char **argv)
     std::set<OPT> readonly_ops_list = {
                          OPT::USER_INFO,
 			 OPT::USER_STATS,
+			 OPT::USER_LIST,
 			 OPT::BUCKETS_LIST,
 			 OPT::BUCKET_LIMIT_CHECK,
 			 OPT::BUCKET_STATS,
@@ -3818,13 +3819,14 @@ int main(int argc, const char **argv)
     raw_storage_op = (raw_storage_ops_list.find(opt_cmd) != raw_storage_ops_list.end() ||
 			   raw_period_update || raw_period_pull);
     bool need_cache = readonly_ops_list.find(opt_cmd) == readonly_ops_list.end();
+    bool readonly_op = readonly_ops_list.find(opt_cmd) != readonly_ops_list.end();
 
     if (raw_storage_op) {
       store = StoreManager::get_raw_storage(dpp(), g_ceph_context, "rados");
     } else {
       store = StoreManager::get_storage(dpp(), g_ceph_context, "rados", false, false, false,
 					   false, false,
-					   need_cache && g_conf()->rgw_cache_enabled);
+					   need_cache && g_conf()->rgw_cache_enabled, readonly_op);
     }
     if (!store) {
       cerr << "couldn't init storage provider" << std::endl;

@@ -401,7 +401,7 @@ class RGWRados
   SafeTimer *timer;
 
   rgw::sal::RadosStore* store;
-  RGWGC *gc;
+  RGWGC *gc = nullptr;
   RGWLC *lc;
   RGWObjectExpirer *obj_expirer;
   bool use_gc_thread;
@@ -480,6 +480,7 @@ protected:
   RGWIndexCompletionManager *index_completion_manager{nullptr};
 
   bool use_cache{false};
+  bool readonly_op{false};
 
   int get_obj_head_ioctx(const RGWBucketInfo& bucket_info, const rgw_obj& obj, librados::IoCtx *ioctx);
 public:
@@ -498,6 +499,11 @@ public:
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;
+    return *this;
+  }
+
+  RGWRados& set_readonly_op(bool status) {
+    readonly_op = status;
     return *this;
   }
 

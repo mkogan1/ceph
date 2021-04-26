@@ -1199,8 +1199,12 @@ int RGWRados::init_complete(const DoutPrefixProvider *dpp)
 
   pools_initialized = true;
 
-  gc = new RGWGC();
-  gc->initialize(cct, this);
+  if (!readonly_op) {
+    gc = new RGWGC();
+    gc->initialize(cct, this);
+  } else {
+    ldpp_dout(dpp, 5) << "note: read-only set, GC not initialized" << dendl;
+  }
 
   obj_expirer = new RGWObjectExpirer(this->store);
 
