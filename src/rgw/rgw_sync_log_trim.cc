@@ -1253,3 +1253,25 @@ RGWCoroutine* BucketTrimManager::create_admin_bucket_trim_cr(RGWHTTPManager *htt
 }
 
 } // namespace rgw
+
+int bilog_trim(RGWRados* store,
+	       RGWBucketInfo& bucket_info, uint64_t gen, int shard_id,
+	       std::string_view start_marker, std::string_view end_marker)
+{
+  auto& logs = bucket_info.layout.logs;
+  auto log = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(gen));
+  if (log == logs.end()) {
+    ldout(store->ctx(), 5) << __PRETTY_FUNCTION__ << ":" << __LINE__
+			   << "ERROR: no log layout with gen=" << gen << dendl;
+    return -ENOENT;
+  }
+
+  auto log_layout = *log;
+
+  auto r = store->trim_bi_log_entries(bucket_info, log_layout, shard_id, start_marker, end_marker);
+  if (r < 0) {
+    ldout(store->ctx(), 5) << __PRETTY_FUNCTION__ << ":" << __LINE__
+			   << "ERROR: bilog_rados->log_trim returned r=" << r << dendl;
+  }
+  return r;
+}

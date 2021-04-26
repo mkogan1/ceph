@@ -571,20 +571,33 @@ void RGWOp_BILog_Info::send_response() {
 }
 
 void RGWOp_BILog_Delete::execute() {
+  bool gen_specified = false;
   string tenant_name = s->info.args.get("tenant"),
          bucket_name = s->info.args.get("bucket"),
          start_marker = s->info.args.get("start-marker"),
          end_marker = s->info.args.get("end-marker"),
-         bucket_instance = s->info.args.get("bucket-instance");
+         bucket_instance = s->info.args.get("bucket-instance"),
+	 gen_str = s->info.args.get("generation", &gen_specified);
 
   RGWBucketInfo bucket_info;
 
   http_ret = 0;
   if ((bucket_name.empty() && bucket_instance.empty()) ||
       end_marker.empty()) {
-    dout(5) << "ERROR: one of bucket and bucket instance, and also end-marker is mandatory" << dendl;
+    dout(5) << "ERROR: one of bucket or bucket instance, and also end-marker is mandatory" << dendl;
     http_ret = -EINVAL;
     return;
+  }
+
+  string err;
+  uint64_t gen = 0;
+  if (gen_specified) {
+    gen = strict_strtoll(gen_str.c_str(), 10, &err);
+    if (!err.empty()) {
+      ldpp_dout(s, 5) << "Error parsing generation param " << gen_str << dendl;
+      op_ret = -EINVAL;
+      return;
+    }
   }
 
   int shard_id;
@@ -607,23 +620,11 @@ void RGWOp_BILog_Delete::execute() {
     }
   }
 
-  const auto& logs = bucket_info.layout.logs;
-  auto log_layout = std::reference_wrapper{logs.back()};
-  auto gen = logs.back().gen; // TODO: remove this once gen is passed here
-  if (gen) {
-    auto i = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(gen));
-    if (i == logs.end()) {
-      ldpp_dout(s, 5) << "ERROR: no log layout with gen=" << gen << dendl;
-      op_ret = -ENOENT;
-      return;
-    }
-    log_layout = *i;
+  http_ret = bilog_trim(store, bucket_info, gen, shard_id, start_marker, end_marker);
+  if (op_ret < 0) {
+    ldpp_dout(s, 5) << "bilog_trim failed with op_ret=" << op_ret << dendl;
   }
 
-  http_ret = store->trim_bi_log_entries(bucket_info, log_layout, shard_id, start_marker, end_marker);
-  if (http_ret < 0) {
-    dout(5) << "ERROR: trim_bi_log_entries() " << dendl;
-  }
   return;
 }
 

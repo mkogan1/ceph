@@ -8094,18 +8094,11 @@ next:
       return -ret;
     }
 
-    const auto& logs = bucket_info.layout.logs;
-    auto log_layout = std::reference_wrapper{logs.back()};
-    if (gen) {
-      auto i = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(*gen));
-      if (i == logs.end()) {
-        cerr << "ERROR: no log layout with gen=" << *gen << std::endl;
-        return ENOENT;
-      }
-      log_layout = *i;
+    if (!gen) {
+      gen = 0;
     }
-
-    ret = store->trim_bi_log_entries(bucket_info, log_layout, shard_id, start_marker, end_marker);
+    ret = bilog_trim(store, bucket_info, *gen,
+		     shard_id, start_marker, end_marker);
     if (ret < 0) {
       cerr << "ERROR: trim_bi_log_entries(): " << cpp_strerror(-ret) << std::endl;
       return -ret;

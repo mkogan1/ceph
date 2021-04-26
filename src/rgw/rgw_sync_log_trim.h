@@ -21,6 +21,8 @@
 #include <boost/utility/string_view.hpp>
 #include "include/encoding.h"
 #include "common/ceph_time.h"
+#include "common/dout.h"
+#include "rgw/rgw_common.h"
 
 class CephContext;
 class RGWCoroutine;
@@ -106,5 +108,9 @@ struct BucketTrimStatus {
 } // namespace rgw
 
 WRITE_CLASS_ENCODER(rgw::BucketTrimStatus);
+
+int bilog_trim(RGWRados* store,
+	       RGWBucketInfo& bucket_info, uint64_t gen, int shard_id,
+	       std::string_view start_marker, std::string_view end_marker);
 
 #endif // RGW_SYNC_LOG_TRIM_H
