@@ -1,4 +1,4 @@
-// -*- mode:C; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
 #ifndef CEPH_CLS_RGW_CLIENT_H
@@ -195,7 +195,7 @@ public:
    * 2. One or more shards, shard id specified for each shard, e.g., 0#00002.12,1#00003.23.2
    *
    */
-  int from_string(const string& composed_marker, int shard_id) {
+  int from_string(std::string_view composed_marker, int shard_id) {
     value_by_shards.clear();
     vector<string> shards;
     get_str_vec(composed_marker, SHARDS_SEPARATOR.c_str(), shards);

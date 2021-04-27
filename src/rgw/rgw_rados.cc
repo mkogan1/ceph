@@ -9176,7 +9176,7 @@ int RGWRados::list_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_
   return 0;
 }
 
-int RGWRados::trim_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, int shard_id, string& start_marker, string& end_marker)
+int RGWRados::trim_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, int shard_id, std::string_view start_marker, std::string_view end_marker)
 {
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;

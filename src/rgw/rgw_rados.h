@@ -2321,7 +2321,7 @@ public:
 			    const rgw::bucket_index_layout_generation& idx_layout,
 			    int shard_id, RGWGetDirHeader_CB *ctx, int *num_aio);
   int list_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, int shard_id, string& marker, uint32_t max, std::list<rgw_bi_log_entry>& result, bool *truncated);
-  int trim_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id, string& marker, string& end_marker);
+  int trim_bi_log_entries(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id, std::string_view marker, std::string_view end_marker);
   int resync_bi_log_entries(const RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id);
   int stop_bi_log_entries(const RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id);
   int get_bi_log_status(RGWBucketInfo& bucket_info, const rgw::bucket_log_layout_generation& log_layout, const int shard_id, map<int, string>& max_marker);
