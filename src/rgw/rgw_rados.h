@@ -1222,7 +1222,7 @@ class RGWRados : public AdminSocketHook
   Mutex lock;
   SafeTimer *timer;
 
-  RGWGC *gc;
+  RGWGC *gc = nullptr;
   RGWLC *lc;
   RGWObjectExpirer *obj_expirer;
   bool use_gc_thread;
@@ -1305,6 +1305,7 @@ protected:
   RGWIndexCompletionManager *index_completion_manager{nullptr};
 
   bool use_cache{false};
+  bool use_gc{true};
 public:
   RGWRados(): lock("rados_timer_lock"), timer(NULL),
                gc(NULL), lc(NULL), obj_expirer(NULL), use_gc_thread(false), use_lc_thread(false), quota_threads(false),
@@ -1322,6 +1323,11 @@ public:
 
   RGWRados& set_use_cache(bool status) {
     use_cache = status;
+    return *this;
+  }
+
+  RGWRados& set_use_gc(bool status) {
+    use_gc = status;
     return *this;
   }
 
@@ -2508,16 +2514,16 @@ class RGWStoreManager {
 public:
   RGWStoreManager() {}
   static RGWRados *get_storage(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads,
-			       bool run_sync_thread, bool run_reshard_thread, bool use_cache = true) {
+			       bool run_sync_thread, bool run_reshard_thread, bool use_cache = true, bool use_gc = true) {
     RGWRados *store = init_storage_provider(cct, use_gc_thread, use_lc_thread, quota_threads, run_sync_thread,
-					    run_reshard_thread, use_cache);
+					    run_reshard_thread, use_cache, use_gc);
     return store;
   }
   static RGWRados *get_raw_storage(CephContext *cct) {
     RGWRados *store = init_raw_storage_provider(cct);
     return store;
   }
-  static RGWRados *init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metadata_cache);
+  static RGWRados *init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread, bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_metadata_cache, bool use_gc);
   static RGWRados *init_raw_storage_provider(CephContext *cct);
   static void close_storage(RGWRados *store);
 
