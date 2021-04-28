@@ -3486,15 +3486,27 @@ int main(int argc, const char **argv)
 			 OPT_RESHARD_STATUS,
   };
 
+  std::set<int> gc_ops_list = {
+			 OPT_GC_LIST,
+			 OPT_GC_PROCESS,
+			 OPT_OBJECT_RM,
+			 OPT_BUCKET_RM,  // --purge-objects
+			 OPT_USER_RM,    // --purge-data
+			 OPT_OBJECTS_EXPIRE,
+			 OPT_OBJECTS_EXPIRE_STALE_RM,
+			 OPT_LC_PROCESS
+  };
+
   bool raw_storage_op = (raw_storage_ops_list.find(opt_cmd) != raw_storage_ops_list.end() ||
                          raw_period_update || raw_period_pull);
   bool need_cache = readonly_ops_list.find(opt_cmd) == readonly_ops_list.end();
+  bool need_gc = (gc_ops_list.find(opt_cmd) != gc_ops_list.end()) && !bypass_gc;
 
   if (raw_storage_op) {
     store = RGWStoreManager::get_raw_storage(g_ceph_context);
   } else {
     store = RGWStoreManager::get_storage(g_ceph_context, false, false, false, false, false,
-      need_cache && g_conf()->rgw_cache_enabled);
+      need_cache && g_conf()->rgw_cache_enabled, need_gc);
   }
   if (!store) {
     cerr << "couldn't init storage provider" << std::endl;
