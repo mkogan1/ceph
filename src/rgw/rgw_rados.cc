@@ -1502,12 +1502,16 @@ int RGWRados::init_complete()
 
   pools_initialized = true;
 
-  gc = new RGWGC();
-  gc->initialize(cct, this);
+  if (use_gc) {
+    gc = new RGWGC();
+    gc->initialize(cct, this);
+  } else {
+    ldout(cct, 5) << "note: GC not initialized" << dendl;
+  }
 
   obj_expirer = new RGWObjectExpirer(this);
 
-  if (use_gc_thread) {
+  if (use_gc_thread && use_gc) {
     gc->start_processor();
     obj_expirer->start_processor();
   }
@@ -10418,11 +10422,12 @@ uint64_t RGWRados::next_bucket_id()
 }
 
 RGWRados *RGWStoreManager::init_storage_provider(CephContext *cct, bool use_gc_thread, bool use_lc_thread,
-						 bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_cache)
+						 bool quota_threads, bool run_sync_thread, bool run_reshard_thread, bool use_cache, bool use_gc)
 {
   RGWRados *store = new RGWRados;
 
   if ((*store).set_use_cache(use_cache)
+              .set_use_gc(use_gc)
               .set_run_gc_thread(use_gc_thread)
               .set_run_lc_thread(use_lc_thread)
               .set_run_quota_threads(quota_threads)
