@@ -1278,6 +1278,41 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             and h.status.lower() not in ['maintenance', 'offline']
         ]
 
+    def _check_valid_addr(self, host: str, addr: str) -> None:
+        # make sure hostname is resolvable before trying to make a connection
+        try:
+            utils.resolve_ip(addr)
+        except OrchestratorError as e:
+            msg = str(e) + f'''
+You may need to supply an address for {addr}
+
+Please make sure that the host is reachable and accepts connections using the cephadm SSH key
+To add the cephadm SSH key to the host:
+> ceph cephadm get-pub-key > ~/ceph.pub
+> ssh-copy-id -f -i ~/ceph.pub {self.ssh_user}@{addr}
+
+To check that the host is reachable open a new shell with the --no-hosts flag:
+> cephadm shell --no-hosts
+
+Then run the following:
+> ceph cephadm get-ssh-config > ssh_config
+> ceph config-key get mgr/cephadm/ssh_identity_key > ~/cephadm_private_key
+> chmod 0600 ~/cephadm_private_key
+> ssh -F ssh_config -i ~/cephadm_private_key {self.ssh_user}@{addr}'''
+            raise OrchestratorError(msg)
+
+        out, err, code = CephadmServe(self)._run_cephadm(
+            host, cephadmNoImage, 'check-host',
+            ['--expect-hostname', host],
+            addr=addr,
+            error_ok=True, no_fsid=True)
+        if code:
+            # err will contain stdout and stderr, so we filter on the message text to
+            # only show the errors
+            errors = [_i.replace("ERROR: ", "") for _i in err if _i.startswith('ERROR')]
+            raise OrchestratorError('Host %s (%s) failed check(s): %s' % (
+                host, addr, errors))
+
     def _add_host(self, spec):
         # type: (HostSpec) -> str
         """
@@ -1286,16 +1321,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         :param host: host name
         """
         assert_valid_host(spec.hostname)
-        out, err, code = CephadmServe(self)._run_cephadm(spec.hostname, cephadmNoImage, 'check-host',
-                                                         ['--expect-hostname', spec.hostname],
-                                                         addr=spec.addr,
-                                                         error_ok=True, no_fsid=True)
-        if code:
-            # err will contain stdout and stderr, so we filter on the message text to
-            # only show the errors
-            errors = [_i.replace("ERROR: ", "") for _i in err if _i.startswith('ERROR')]
-            raise OrchestratorError('New host %s (%s) failed check(s): %s' % (
-                spec.hostname, spec.addr, errors))
+        self._check_valid_addr(spec.hostname, spec.addr)
 
         self.inventory.add_host(spec)
         self.cache.prime_empty_host(spec.hostname)
@@ -1325,6 +1351,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
 
     @handle_orch_error
     def update_host_addr(self, host: str, addr: str) -> str:
+        self._check_valid_addr(host, addr)
         self.inventory.set_addr(host, addr)
         self._reset_con(host)
         self.event.set()  # refresh stray health check
