@@ -5,6 +5,8 @@ import logging
 import nose.core
 import nose.config
 
+from nose.plugins.manager import DefaultPluginManager
+from teuthology.config import config as teuth_config
 from teuthology.exceptions import ConfigError
 from teuthology.task import Task
 from teuthology import misc
@@ -59,19 +61,12 @@ class RGWMultisiteTests(Task):
         argv = [__name__] + extra_args
 
         log.info("running rgw multisite tests on '%s' with args=%r",
-                 tests.__name__, extra_args)
+                 self.module_path, extra_args)
 
-        # run nose tests in the rgw_multi.tests module
-        conf = nose.config.Config(stream=get_log_stream(), verbosity=2)
-        error_msg = ''
-        result = nose.run(defaultTest=tests.__name__, argv=argv, config=conf)
-        if not result:
-            error_msg += 'rgw multisite, '
-        result = nose.run(defaultTest=tests_ps.__name__, argv=argv, config=conf)
-        if not result:
-            error_msg += 'rgw multisite pubsub, '
-        if error_msg:
-            raise RuntimeError(error_msg + 'test failures')
+        # run nose tests in the module path
+        conf = nose.config.Config(stream=get_log_stream(), verbosity=2, workingDir=self.module_path)
+        conf.plugins = DefaultPluginManager() # overrides default = NoPlugins()
+        assert nose.run(argv=argv, config=conf), 'rgw multisite test failures'
 
 
 def get_log_stream():
