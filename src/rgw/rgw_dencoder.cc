@@ -412,30 +412,6 @@ void rgw_meta_sync_status::generate_test_instances(list<rgw_meta_sync_status*>& 
   o.push_back(new rgw_meta_sync_status);
 }
 
-void rgw_data_sync_info::generate_test_instances(list<rgw_data_sync_info*>& o)
-{
-  auto info = new rgw_data_sync_info;
-  info->state = rgw_data_sync_info::StateBuildingFullSyncMaps;
-  info->num_shards = 8;
-  o.push_back(info);
-  o.push_back(new rgw_data_sync_info);
-}
-
-void rgw_data_sync_marker::generate_test_instances(list<rgw_data_sync_marker*>& o)
-{
-  auto marker = new rgw_data_sync_marker;
-  marker->state = rgw_data_sync_marker::IncrementalSync;
-  marker->marker = "01234";
-  marker->pos = 5;
-  o.push_back(marker);
-  o.push_back(new rgw_data_sync_marker);
-}
-
-void rgw_data_sync_status::generate_test_instances(list<rgw_data_sync_status*>& o)
-{
-  o.push_back(new rgw_data_sync_status);
-}
-
 void objexp_hint_entry::generate_test_instances(list<objexp_hint_entry*>& o)
 {
   auto it = new objexp_hint_entry;
