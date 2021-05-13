@@ -987,7 +987,8 @@ void RGWOp_MDLog_Status::send_response()
 
 // not in header to avoid pulling in rgw_data_sync.h
 class RGWOp_BILog_Status : public RGWRESTOp {
-  std::vector<rgw_bucket_shard_sync_info> status;
+  bilog_status_v2 status;
+  int version = 1;
 public:
   int check_caps(RGWUserCaps& caps) override {
     return caps.check_cap("bilog", RGW_CAP_READ);
@@ -1007,6 +1008,8 @@ void RGWOp_BILog_Status::execute()
   const auto source_zone = s->info.args.get("source-zone");
   const auto source_key = s->info.args.get("source-bucket");
   auto key = s->info.args.get("bucket");
+  op_ret = s->info.args.get_int("version", &version, 1);
+
   if (key.empty()) {
     key = source_key;
   }
@@ -1057,11 +1060,28 @@ void RGWOp_BILog_Status::execute()
 
     ldout(s->cct, 20) << "RGWOp_BILog_Status::execute(): getting sync status for pipe=" << pipe << dendl;
 
-    http_ret = rgw_read_bucket_inc_sync_status(this, store,
-					       pipe, info, nullptr, &status);
+    if (version > 1) {
+      http_ret = rgw_read_bucket_full_sync_status(
+	this,
+	store,
+	pipe,
+	&status.sync_status,
+	s->yield);
+      if (op_ret < 0) {
+	ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
+	return;
+      }
+    }
 
-    if (http_ret < 0) {
-      lderr(s->cct) << "ERROR: rgw_bucket_sync_status() on pipe=" << pipe << " returned ret=" << http_ret << dendl;
+    op_ret = rgw_read_bucket_inc_sync_status(
+      this,
+      store,
+      pipe,
+      info,
+      nullptr,
+      &status.inc_status);
+    if (op_ret < 0) {
+      ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_inc_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
     }
     return;
   }
@@ -1111,24 +1131,39 @@ void RGWOp_BILog_Status::execute()
       pipe.dest.bucket = pinfo->bucket;
     }
 
+    if (version > 1) {
+      http_ret = rgw_read_bucket_full_sync_status(
+	this,
+	store,
+	pipe,
+	&status.sync_status,
+	s->yield);
+      if (op_ret < 0) {
+	ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
+	return;
+      }
+    }
     int r = rgw_read_bucket_inc_sync_status(this, store,
 					    pipe, *pinfo, &info, &current_status);
     if (r < 0) {
-      lderr(s->cct) << "ERROR: rgw_bucket_sync_status() on pipe=" << pipe << " returned ret=" << r << dendl;
-      http_ret = r;
+      ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_inc_sync_status() on pipe=" << pipe << " returned ret=" << r << dendl;
+      op_ret = r;
       return;
     }
 
-    if (status.empty()) {
-      status = std::move(current_status);
+    if (status.inc_status.empty()) {
+      status.inc_status = std::move(current_status);
     } else {
-      if (current_status.size() !=
-          status.size()) {
-        http_ret = -EINVAL;
-        lderr(s->cct) << "ERROR: different number of shards for sync status of buckets syncing from the same source: status.size()= " << status.size() << " current_status.size()=" << current_status.size() << dendl;
-        return;
+      if (current_status.size() != status.inc_status.size()) {
+        op_ret = -EINVAL;
+        ldpp_dout(this, -1) << "ERROR: different number of shards for sync status of buckets "
+	  "syncing from the same source: status.size()= "
+			    << status.inc_status.size()
+			    << " current_status.size()="
+			    << current_status.size() << dendl;
+	return;
       }
-      auto m = status.begin();
+      auto m = status.inc_status.begin();
       for (auto& cur_shard_status : current_status) {
         auto& result_shard_status = *m++;
         // always take the first marker, or any later marker that's smaller
@@ -1147,7 +1182,11 @@ void RGWOp_BILog_Status::send_response()
   end_header(s);
 
   if (http_ret >= 0) {
-    encode_json("status", status, s->formatter);
+    if (version < 2) {
+      encode_json("status", status.inc_status, s->formatter);
+    } else {
+      encode_json("status", status, s->formatter);
+    }
   }
   flusher.flush();
 }
