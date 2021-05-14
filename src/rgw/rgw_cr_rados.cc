@@ -602,13 +602,16 @@ int RGWAsyncGetBucketInstanceInfo::_send_request(const DoutPrefixProvider *dpp)
   return 0;
 }
 
-RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(const DoutPrefixProvider *dpp,
-                                         rgw::sal::RGWRadosStore *store,
-                                         const RGWBucketInfo& bucket_info,
-                                         int shard_id,
-                                         const std::string& start_marker,
-                                         const std::string& end_marker)
-  : RGWSimpleCoroutine(store->ctx()), bs(store->getRados()),
+RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(
+  const DoutPrefixProvider *dpp,
+  rgw::sal::RGWRadosStore* store,
+  const RGWBucketInfo& bucket_info,
+  int shard_id,
+  const rgw::bucket_index_layout_generation& generation,
+  const std::string& start_marker,
+  const std::string& end_marker)
+  : RGWSimpleCoroutine(store->ctx()), bucket_info(bucket_info),
+    shard_id(shard_id), generation(generation), bs(store->getRados()),
     start_marker(BucketIndexShardsManager::get_shard_marker(start_marker)),
     end_marker(BucketIndexShardsManager::get_shard_marker(end_marker))
 {
@@ -617,6 +620,12 @@ RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(const DoutPrefixProvider *dpp,
 
 int RGWRadosBILogTrimCR::send_request(const DoutPrefixProvider *dpp)
 {
+  int r = bs.init(dpp, bucket_info, generation, shard_id);
+  if (r < 0) {
+    ldpp_dout(dpp, -1) << "ERROR: bucket shard init failed ret=" << r << dendl;
+    return r;
+  }
+
   bufferlist in;
   cls_rgw_bi_log_trim_op call;
   call.start_marker = std::move(start_marker);
