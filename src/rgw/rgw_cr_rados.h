@@ -983,8 +983,7 @@ public:
 			     RGWBucketInfo& bucket_info,
 			     bool exclusive,
 			     real_time mtime,
-			     std::map<std::string, ceph::bufferlist>* attrs,
-                             const DoutPrefixProvider *dpp)
+			     std::map<std::string, ceph::bufferlist>* attrs)
     : RGWSimpleCoroutine(store->ctx()), async_rados(async_rados), store(store),
       bucket_info(bucket_info), exclusive(exclusive),
       mtime(mtime), attrs(attrs) {}
