@@ -920,14 +920,19 @@ public:
 };
 
 class RGWRadosBILogTrimCR : public RGWSimpleCoroutine {
+  const RGWBucketInfo& bucket_info;
+  int shard_id;
+  const rgw::bucket_index_layout_generation generation;
   RGWRados::BucketShard bs;
   std::string start_marker;
   std::string end_marker;
   boost::intrusive_ptr<RGWAioCompletionNotifier> cn;
  public:
   RGWRadosBILogTrimCR(const DoutPrefixProvider *dpp,
-                      rgw::sal::RGWRadosStore *store, const RGWBucketInfo& bucket_info,
-                      int shard_id, const std::string& start_marker,
+                      rgw::sal::RGWRadosStore* store, const RGWBucketInfo& bucket_info,
+                      int shard_id,
+		      const rgw::bucket_index_layout_generation& generation,
+		      const std::string& start_marker,
                       const std::string& end_marker);
 
   int send_request(const DoutPrefixProvider *dpp) override;
