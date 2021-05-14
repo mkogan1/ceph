@@ -2864,6 +2864,8 @@ public:
     if (from_remote_zone) {
       // don't sync bucket layout changes
       if (!exists) {
+	// replace peer's layout with default-constructed, then apply our defaults
+	bci.info.layout = rgw::BucketLayout{};
 	init_default_bucket_layout(store->ctx(), bci.info.layout,
 				   store->svc.zone->get_zone(),
 				   std::nullopt,
