@@ -592,16 +592,18 @@ int RGWAsyncGetBucketInstanceInfo::_send_request()
   return 0;
 }
 
-RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(RGWRados *store,
-                                         const RGWBucketInfo& bucket_info,
-                                         int shard_id,
-                                         const std::string& start_marker,
-                                         const std::string& end_marker)
+RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(
+  RGWRados* store,
+  const RGWBucketInfo& bucket_info,
+  int shard_id,
+  const rgw::bucket_index_layout_generation& generation,
+  const std::string& start_marker,
+  const std::string& end_marker)
   : RGWSimpleCoroutine(store->ctx()), bs(store),
     start_marker(BucketIndexShardsManager::get_shard_marker(start_marker)),
     end_marker(BucketIndexShardsManager::get_shard_marker(end_marker))
 {
-  bs.init(bucket_info, bucket_info.layout.current_index, shard_id);
+  bs.init(bucket_info, generation, shard_id);
 }
 
 int RGWRadosBILogTrimCR::send_request()
