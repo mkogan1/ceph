@@ -21,6 +21,7 @@
 #include "librbd/deep_copy/ImageCopyRequest.h"
 #include "librbd/deep_copy/MetadataCopyRequest.h"
 #include "librbd/deep_copy/SnapshotCopyRequest.h"
+#include "librbd/deep_copy/Handler.h"
 #include "librbd/exclusive_lock/Policy.h"
 #include "librbd/image/AttachChildRequest.h"
 #include "librbd/image/AttachParentRequest.h"
@@ -1880,9 +1881,10 @@ int Migration<I>::revert_data(I* src_image_ctx, I* dst_image_ctx,
                    << "snap_seqs=" << snap_seqs << dendl;
 
   C_SaferCond ctx;
+  deep_copy::ProgressHandler progress_handler(prog_ctx);
   auto request = deep_copy::ImageCopyRequest<I>::create(
     src_image_ctx, dst_image_ctx, src_snap_id_start, src_snap_id_end,
-    dst_snap_id_start, false, {}, snap_seqs, prog_ctx, &ctx);
+    dst_snap_id_start, false, {}, snap_seqs, &progress_handler, &ctx);
   request->send();
 
   r = ctx.wait();
