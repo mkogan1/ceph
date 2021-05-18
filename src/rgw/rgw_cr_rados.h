@@ -834,6 +834,27 @@ public:
   map<string, bufferlist> attrs;
 };
 
+class RGWAsyncPutBucketInstanceInfo : public RGWAsyncRadosRequest {
+  RGWRados* store;
+  RGWBucketInfo& bucket_info;
+  bool exclusive;
+  real_time mtime;
+  std::map<std::string, ceph::bufferlist>* attrs;
+
+protected:
+  int _send_request() override;
+public:
+  RGWAsyncPutBucketInstanceInfo(RGWCoroutine* caller,
+				RGWAioCompletionNotifier* cn,
+                                RGWRados* store,
+				RGWBucketInfo& bucket_info,
+				bool exclusive,
+				real_time mtime,
+				std::map<std::string, ceph::bufferlist>* attrs)
+    : RGWAsyncRadosRequest(caller, cn), store(store), bucket_info(bucket_info),
+      exclusive(exclusive), mtime(mtime), attrs(attrs) {}
+};
+
 class RGWGetBucketInstanceInfoCR : public RGWSimpleCoroutine {
   RGWAsyncRadosProcessor *async_rados;
   RGWRados *store;
@@ -842,7 +863,7 @@ class RGWGetBucketInstanceInfoCR : public RGWSimpleCoroutine {
   map<string, bufferlist> *pattrs;
 
   RGWAsyncGetBucketInstanceInfo *req{nullptr};
-  
+
 public:
   // metadata key constructor
   RGWGetBucketInstanceInfoCR(RGWAsyncRadosProcessor *_async_rados, RGWRados *_store,
@@ -880,6 +901,50 @@ public:
     if (pattrs) {
       *pattrs = std::move(req->attrs);
     }
+    return req->get_ret_status();
+  }
+};
+
+class RGWPutBucketInstanceInfoCR : public RGWSimpleCoroutine {
+  RGWAsyncRadosProcessor *async_rados;
+  RGWRados* store;
+  RGWBucketInfo& bucket_info;
+  bool exclusive;
+  real_time mtime;
+  std::map<std::string, ceph::bufferlist>* attrs;
+
+  RGWAsyncPutBucketInstanceInfo* req = nullptr;
+
+public:
+  // rgw_bucket constructor
+  RGWPutBucketInstanceInfoCR(RGWAsyncRadosProcessor *async_rados,
+			     RGWRados* store,
+			     RGWBucketInfo& bucket_info,
+			     bool exclusive,
+			     real_time mtime,
+			     std::map<std::string, ceph::bufferlist>* attrs)
+    : RGWSimpleCoroutine(store->ctx()), async_rados(async_rados), store(store),
+      bucket_info(bucket_info), exclusive(exclusive),
+      mtime(mtime), attrs(attrs) {}
+  ~RGWPutBucketInstanceInfoCR() override {
+    request_cleanup();
+  }
+  void request_cleanup() override {
+    if (req) {
+      req->finish();
+      req = nullptr;
+    }
+  }
+
+  int send_request() override {
+    req = new RGWAsyncPutBucketInstanceInfo(this,
+					    stack->create_completion_notifier(),
+					    store, bucket_info, exclusive,
+					    mtime, attrs);
+    async_rados->queue(req);
+    return 0;
+  }
+  int request_complete() override {
     return req->get_ret_status();
   }
 };

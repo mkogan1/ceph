@@ -592,6 +592,19 @@ int RGWAsyncGetBucketInstanceInfo::_send_request()
   return 0;
 }
 
+int RGWAsyncPutBucketInstanceInfo::_send_request()
+{
+  auto r = store->put_bucket_instance_info(bucket_info, exclusive,
+					    mtime, attrs);
+  if (r < 0) {
+    ldout(store->ctx(), 0) << "ERROR: failed to put bucket instance info for "
+			   << bucket_info.bucket << dendl;
+    return r;
+  }
+
+  return 0;
+}
+
 RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(
   RGWRados* store,
   const RGWBucketInfo& bucket_info,
