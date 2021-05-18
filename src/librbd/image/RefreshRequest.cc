@@ -1332,10 +1332,6 @@ void RefreshRequest<I>::apply() {
         m_image_ctx.parent_md = m_parent_md;
         m_image_ctx.migration_info = {};
       }
-    } else {
-      m_image_ctx.parent_md = m_parent_md;
-      m_image_ctx.migration_info = {};
-    }
   }
 
   for (size_t i = 0; i < m_snapc.snaps.size(); ++i) {
