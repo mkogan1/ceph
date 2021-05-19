@@ -5565,8 +5565,8 @@ int RGWRados::open_bucket_index(const RGWBucketInfo& bucket_info,
   get_bucket_index_objects(bucket_oid_base, idx_layout.layout.normal.num_shards,
 			   idx_layout.gen, &bucket_objs, shard_id);
   if (bucket_instance_ids) {
-    // TODO: generation need to be passed here
-    get_bucket_instance_ids(bucket_info, shard_id, bucket_instance_ids);
+    get_bucket_instance_ids(bucket_info, idx_layout.layout.normal.num_shards,
+                            shard_id, bucket_instance_ids);
   }
   return 0;
 }
@@ -10481,21 +10481,23 @@ int RGWRados::check_quota(const rgw_user& bucket_owner, rgw_bucket& bucket,
   return quota_handler->check_quota(bucket_owner, bucket, user_quota, bucket_quota, 1, obj_size);
 }
 
-void RGWRados::get_bucket_instance_ids(const RGWBucketInfo& bucket_info, int shard_id, map<int, string> *result)
+void RGWRados::get_bucket_instance_ids(const RGWBucketInfo& bucket_info,
+				       int num_shards, int shard_id,
+				       map<int, string> *result)
 {
   const rgw_bucket& bucket = bucket_info.bucket;
   string plain_id = bucket.name + ":" + bucket.bucket_id;
-  if (!bucket_info.layout.current_index.layout.normal.num_shards) {
+  if (!num_shards) {
     (*result)[0] = plain_id;
   } else {
     char buf[16];
     if (shard_id < 0) {
-      for (uint32_t i = 0; i < bucket_info.layout.current_index.layout.normal.num_shards; ++i) {
+      for (int i = 0; i < num_shards; ++i) {
         snprintf(buf, sizeof(buf), ":%d", i);
         (*result)[i] = plain_id + buf;
       }
     } else {
-      if (static_cast<uint32_t>(shard_id) > bucket_info.layout.current_index.layout.normal.num_shards) {
+      if (shard_id > num_shards) {
         return;
       }
       snprintf(buf, sizeof(buf), ":%d", shard_id);

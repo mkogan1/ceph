@@ -1260,7 +1260,7 @@ class RGWRados : public AdminSocketHook
   void build_bucket_index_marker(const string& shard_id_str, const string& shard_marker,
       string *marker);
 
-  void get_bucket_instance_ids(const RGWBucketInfo& bucket_info, int shard_id, map<int, string> *result);
+  void get_bucket_instance_ids(const RGWBucketInfo& bucket_info, int num_shards, int shard_id, map<int, string> *result);
 
   std::atomic<int64_t> max_req_id = { 0 };
   Mutex lock;
