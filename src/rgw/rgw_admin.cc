@@ -2513,8 +2513,10 @@ static int bucket_source_sync_status(RGWRados *store, const RGWZone& zone,
 
   out << indented{width} << "incremental sync on " << total_shards << " shards\n";
 
+  rgw_bucket_index_marker_info remote_info;
   BucketIndexShardsManager remote_markers;
-  r = rgw_read_remote_bilog_info(conn, source_bucket, remote_markers, null_yield);
+  r = rgw_read_remote_bilog_info(conn, source_bucket,
+                                 remote_info, remote_markers, null_yield);
   if (r < 0) {
     ldpp_dout(dpp(), -1) << "failed to read remote log: " << cpp_strerror(r) << dendl;
     return r;

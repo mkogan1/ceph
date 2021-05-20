@@ -143,10 +143,11 @@ int bucket_source_sync_checkpoint(const DoutPrefixProvider* dpp,
   return 0;
 }
 
-int source_bilog_markers(RGWSI_Zone* zone_svc,
-                         const rgw_sync_bucket_pipe& pipe,
-                         BucketIndexShardsManager& remote_markers,
-                         optional_yield y)
+int source_bilog_info(RGWSI_Zone* zone_svc,
+                      const rgw_sync_bucket_pipe& pipe,
+                      rgw_bucket_index_marker_info& info,
+                      BucketIndexShardsManager& markers,
+                      optional_yield y)
 {
   ceph_assert(pipe.source.zone);
 
@@ -157,7 +158,7 @@ int source_bilog_markers(RGWSI_Zone* zone_svc,
   }
 
   return rgw_read_remote_bilog_info(conn->second, *pipe.source.bucket,
-                                    remote_markers, y);
+                                    info, markers, y);
 }
 
 } // anonymous namespace
@@ -195,8 +196,9 @@ int rgw_bucket_sync_checkpoint(const DoutPrefixProvider* dpp,
     // fetch remote markers
     spawn::spawn(ioctx, [&] (spawn::yield_context yield) {
       auto y = optional_yield{ioctx, yield};
-      int r = source_bilog_markers(store->svc.zone, entry.pipe,
-                                   entry.remote_markers, y);
+      rgw_bucket_index_marker_info info;
+      int r = source_bilog_info(store->svc.zone, entry.pipe,
+                                info, entry.remote_markers, y);
       if (r < 0) {
         ldpp_dout(dpp, 0) << "failed to fetch remote bilog markers: "
             << cpp_strerror(r) << dendl;
