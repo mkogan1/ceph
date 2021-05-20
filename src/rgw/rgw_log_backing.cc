@@ -30,82 +30,59 @@ inline std::ostream& operator <<(std::ostream& m, const shard_check& t) {
 
 namespace {
 /// Return the shard type, and a bool to see whether it has entries.
-std::pair<shard_check, bool>
+shard_check
 probe_shard(librados::IoCtx& ioctx, const std::string& oid,
 	    bool& fifo_unsupported, optional_yield y)
 {
   auto cct = static_cast<CephContext*>(ioctx.cct());
-  bool omap = false;
-  {
-    librados::ObjectReadOperation op;
-    cls_log_header header;
-    cls_log_info(op, &header);
-    auto r = rgw_rados_operate(ioctx, oid, &op, nullptr, y);
-    if (r == -ENOENT) {
-      return { shard_check::dne, {} };
-    }
-
-    if (r < 0) {
-      lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		 << " error probing for omap: r=" << r
-		 << ", oid=" << oid << dendl;
-      return { shard_check::corrupt, {} };
-    }
-    if (header != cls_log_header{})
-      omap = true;
-  }
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		 << " probing oid=" << oid
+		 << dendl;
   if (!fifo_unsupported) {
     std::unique_ptr<rgw::cls::fifo::FIFO> fifo;
     auto r = rgw::cls::fifo::FIFO::open(ioctx, oid,
 					&fifo, y,
 					std::nullopt, true);
-    if (r < 0 && !(r == -ENOENT || r == -ENODATA || r == -EPERM)) {
-      lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		 << " error probing for fifo: r=" << r
-		 << ", oid=" << oid << dendl;
-      return { shard_check::corrupt, {} };
-    }
-    if (fifo && omap) {
-      lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		 << " fifo and omap found: oid=" << oid << dendl;
-      return { shard_check::corrupt, {} };
-    }
-    if (fifo) {
-      bool more = false;
-      std::vector<rgw::cls::fifo::list_entry> entries;
-      r = fifo->list(1, nullopt, &entries, &more, y);
-      if (r < 0) {
-	lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		   << ": unable to list entries: r=" << r
-		   << ", oid=" << oid << dendl;
-	return { shard_check::corrupt, {} };
-      }
-      return { shard_check::fifo, !entries.empty() };
-    }
-    if (r == -EPERM) {
-      // Returned by OSD id CLS module not loaded.
-      fifo_unsupported = true;
-    }
-  }
-  if (omap) {
-    std::list<cls_log_entry> entries;
-    std::string out_marker;
-    bool truncated = false;
-    librados::ObjectReadOperation op;
-    cls_log_list(op, {}, {}, {}, 1, entries,
-		 &out_marker, &truncated);
-    auto r = rgw_rados_operate(ioctx, oid, &op, nullptr, y);
-    if (r < 0) {
-      lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		 << ": failed to list: r=" << r << ", oid=" << oid << dendl;
-      return { shard_check::corrupt, {} };
-    }
-    return { shard_check::omap, !entries.empty() };
-  }
+    switch (r) {
+    case 0:
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		     << ": oid=" << oid << " is FIFO"
+		     << dendl;
+      return shard_check::fifo;
+      break;
 
-  // An object exists, but has never had FIFO or cls_log entries written
-  // to it. Likely just the marker Omap.
-  return { shard_check::dne, {} };
+    case -ENODATA:
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		     << ": oid=" << oid << " is empty and therefore OMAP"
+		     << dendl;
+      return shard_check::omap;
+      break;
+
+    case -ENOENT:
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		     << ": oid=" << oid << " does not exist"
+		     << dendl;
+      return shard_check::dne;
+      break;
+
+    case -EPERM:
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		     << ": FIFO is unsupported, marking."
+		     << dendl;
+      fifo_unsupported = true;
+      return shard_check::omap;
+      break;
+
+    default:
+      lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		 << ": error probing: r=" << r
+		 << ", oid=" << oid << dendl;
+      return shard_check::corrupt;
+    }
+  } else {
+    // Since FIFO is unsupported, OMAP is the only alternative
+    return shard_check::omap;
+  }
 }
 
 tl::expected<log_type, int>
@@ -149,7 +126,7 @@ log_backing_type(librados::IoCtx& ioctx,
   auto check = shard_check::dne;
   bool fifo_unsupported = false;
   for (int i = 0; i < shards; ++i) {
-    auto [c, e] = probe_shard(ioctx, get_oid(i), fifo_unsupported, y);
+    auto c = probe_shard(ioctx, get_oid(i), fifo_unsupported, y);
     if (c == shard_check::corrupt)
       return tl::unexpected(-EIO);
     if (c == shard_check::dne) continue;
@@ -669,7 +646,7 @@ int logback_generations::remove_empty(optional_yield y) noexcept {
       for (const auto& [gen_id, e] : es) {
 	ceph_assert(e.pruned);
 	r = log_remove(ioctx, shards,
-		       [this, gen_id](int shard) {
+		       [this, gen_id = gen_id](int shard) {
 			 return this->get_oid(gen_id, shard);
 		       }, (gen_id == 0), y);
 	if (r) {
