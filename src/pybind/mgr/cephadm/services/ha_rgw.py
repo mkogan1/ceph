@@ -70,7 +70,7 @@ class HA_RGWService(CephService):
             assert daemon.hostname is not None
             rgw_servers.append(self.rgw_server(
                 daemon.name(),
-                resolve_ip(daemon.hostname),
+                resolve_ip(self.mgr.inventory.get_addr(daemon.hostname)),
                 daemon.ports[0] if daemon.ports else 80
             ))
 
@@ -114,11 +114,11 @@ class HA_RGWService(CephService):
         # remove host, daemon is being deployed on from all_hosts list for
         # other_ips in conf file and converter to ips
         all_hosts.remove(host)
-        other_ips = [resolve_ip(h) for h in all_hosts]
+        other_ips = [resolve_ip(self.mgr.inventory.get_addr(h)) for h in all_hosts]
 
         ka_context = {'spec': spec, 'state': state,
                       'other_ips': other_ips,
-                      'host_ip': resolve_ip(host)}
+                      'host_ip': resolve_ip(self.mgr.inventory.get_addr(host))}
 
         keepalived_conf = self.mgr.template.render(
             'services/keepalived/keepalived.conf.j2', ka_context)
