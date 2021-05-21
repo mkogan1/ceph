@@ -6,6 +6,7 @@
 
 #include "include/scope_guard.h"
 
+#include "rgw_datalog.h"
 #include "rgw_rados.h"
 #include "rgw_zone.h"
 #include "rgw_bucket.h"
@@ -484,6 +485,17 @@ static int commit_reshard(RGWRados* store,
       // non-fatal error
     }
     return ret;
+  }
+
+  if (store->svc.zone->need_to_log_data()) {
+    for (uint32_t shard_id = 0; shard_id < prev.current_index.layout.normal.num_shards; ++shard_id) {
+      ret = store->data_log->add_entry(bucket_info, prev.logs.back(), shard_id);
+      if (ret < 0) {
+        ldout(store->ctx(), 1) << "WARNING: failed writing data log (bucket_info.bucket="
+        << bucket_info.bucket << ", shard_id=" << shard_id << "of generation="
+        << prev.logs.back().gen << ")" << dendl;
+        }
+      }
   }
 
   // on success, delete index shard objects from the old layout (ignore errors)
