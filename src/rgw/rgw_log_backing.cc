@@ -81,7 +81,7 @@ probe_shard(librados::IoCtx& ioctx, const std::string& oid,
     }
   } else {
     // Since FIFO is unsupported, OMAP is the only alternative
-    return shard_check::corrupt;
+    return shard_check::omap;
   }
 }
 
