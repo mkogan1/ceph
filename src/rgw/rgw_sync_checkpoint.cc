@@ -144,7 +144,7 @@ int bucket_source_sync_checkpoint(const DoutPrefixProvider* dpp,
   std::vector<rgw_bucket_shard_sync_info> status;
   status.resize(std::max<size_t>(1, num_shards));
   r = rgw_read_bucket_inc_sync_status(dpp, store, pipe, bucket_info,
-					  &source_bucket_info, &status);
+                                      &source_bucket_info, full_status.incremental_gen, &status);
   if (r < 0) {
     return r;
   }
@@ -159,7 +159,8 @@ int bucket_source_sync_checkpoint(const DoutPrefixProvider* dpp,
         << "      local status: " << status << '\n'
         << "    remote markers: " << remote_markers << dendl;
     std::this_thread::sleep_until(delay_until);
-    r = rgw_read_bucket_inc_sync_status(dpp, store, pipe, bucket_info, &source_bucket_info, &status);
+    r = rgw_read_bucket_inc_sync_status(dpp, store, pipe, bucket_info,
+                                        &source_bucket_info, full_status.incremental_gen, &status);
     if (r < 0) {
       return r;
     }
