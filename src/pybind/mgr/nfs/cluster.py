@@ -126,12 +126,22 @@ class NFSCluster:
                 ('2404:6800:4009:80d::200e', 2049, 0, 0))]
                 """
                 try:
+                    if cluster.ip:
+                        ip = cluster.ip
+                    else:
+                        c = self.mgr.get_hosts()
+                        orchestrator.raise_if_exception(c)
+                        hosts = [h for h in c.result
+                                 if h.hostname == cluster.hostname]
+                        if hosts:
+                            ip = resolve_ip(hosts[0].addr)
+                        else:
+                            # sigh
+                            ip = resolve_ip(cluster.hostname)
                     host_ip.append({
                             "hostname": cluster.hostname,
-                            "ip": list(set([ip[4][0] for ip in socket.getaddrinfo(
-                                cluster.hostname, 2049, flags=socket.AI_CANONNAME,
-                                type=socket.SOCK_STREAM)])),
-                            "port": 2049  # Default ganesha port
+                            "ip": ip,
+                            "port": 2049
                             })
                 except socket.gaierror:
                     continue
