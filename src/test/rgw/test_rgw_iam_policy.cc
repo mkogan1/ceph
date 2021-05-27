@@ -114,11 +114,6 @@ public:
     return 0;
   }
 
-  uint32_t get_identity_type() const override {
-    abort();
-    return 0;
-  }
-
   string get_acct_name() const override {
     abort();
     return 0;
@@ -138,6 +133,10 @@ public:
       return true;
     }
     return ids.find(id) != ids.end() || ids.find(Principal::wildcard()) != ids.end();
+  }
+
+  uint32_t get_identity_type() const override {
+    return TYPE_RGW;
   }
 };
 
