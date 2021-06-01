@@ -121,7 +121,11 @@ static constexpr std::uint64_t iamCreateOIDCProvider = s3All + 14;
 static constexpr std::uint64_t iamDeleteOIDCProvider = s3All + 15;
 static constexpr std::uint64_t iamGetOIDCProvider = s3All + 16;
 static constexpr std::uint64_t iamListOIDCProviders = s3All + 17;
-static constexpr std::uint64_t iamAll = s3All + 18;
+static constexpr std::uint64_t iamTagRole = s3All + 18;
+static constexpr std::uint64_t iamListRoleTags = s3All + 19;
+static constexpr std::uint64_t iamUntagRole = s3All + 20;
+static constexpr std::uint64_t iamAll = s3All + 21;
+
 static constexpr std::uint64_t stsAssumeRole = iamAll + 1;
 static constexpr std::uint64_t stsAssumeRoleWithWebIdentity = iamAll + 2;
 static constexpr std::uint64_t stsGetSessionToken = iamAll + 3;
@@ -136,10 +140,10 @@ using NotAction_t = Action_t;
 
 static const Action_t None(0);
 static const Action_t s3AllValue("1111111111111111111111111111111111111111111111111111111111111");
-static const Action_t iamAllValue("111111111111100000000000000000000000000000000000000000000000000000000000000");
-static const Action_t stsAllValue("11110000000000000000000000000000000000000000000000000000000000000000000000000000");
+static const Action_t iamAllValue("1111111111111111111100000000000000000000000000000000000000000000000000000000000000");
+static const Action_t stsAllValue("111100000000000000000000000000000000000000000000000000000000000000000000000000000000000");
 //Modify allValue if more Actions are added
-static const Action_t allValue("111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+static const Action_t allValue("1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
 
 namespace {
 // Please update the table in doc/radosgw/s3/authentication.rst if you

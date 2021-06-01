@@ -449,6 +449,8 @@ static constexpr char AWS4_UNSIGNED_PAYLOAD_HASH[] = "UNSIGNED-PAYLOAD";
 static constexpr char AWS4_STREAMING_PAYLOAD_HASH[] = \
   "STREAMING-AWS4-HMAC-SHA256-PAYLOAD";
 
+bool is_non_s3_op(RGWOpType op_type);
+
 int parse_v4_credentials(const req_info& info,                     /* in */
 			 boost::string_view& access_key_id,        /* out */
 			 boost::string_view& credential_scope,     /* out */
