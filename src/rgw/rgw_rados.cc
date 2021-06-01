@@ -5181,7 +5181,7 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y)
 int RGWRados::delete_obj(RGWObjectCtx& obj_ctx,
                          const RGWBucketInfo& bucket_info,
                          const rgw_obj& obj,
-                         int versioning_status,
+                         int versioning_status, // versioning flags in enum RGWBucketFlags
                          uint16_t bilog_flags,
                          const real_time& expiration_time,
                          rgw_zone_set *zones_trace)

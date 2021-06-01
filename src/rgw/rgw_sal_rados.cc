@@ -695,7 +695,12 @@ int RGWRadosObject::RadosReadOp::get_attr(const char *name, bufferlist& dest, op
   return parent_op.get_attr(name, dest, y);
 }
 
-int RGWRadosObject::delete_object(RGWObjectCtx* obj_ctx, ACLOwner obj_owner, ACLOwner bucket_owner, ceph::real_time unmod_since, bool high_precision_time, uint64_t epoch, string& version_id, optional_yield y)
+int RGWRadosObject::delete_object(RGWObjectCtx* obj_ctx,
+				  ACLOwner obj_owner, ACLOwner bucket_owner,
+				  ceph::real_time unmod_since, bool high_precision_time, uint64_t epoch,
+				  std::string& version_id,
+				  optional_yield y,
+				  bool prevent_versioning)
 {
   int ret = 0;
   RGWRados::Object del_target(store->getRados(), bucket->get_info(), *obj_ctx, get_obj());
@@ -704,7 +709,8 @@ int RGWRadosObject::delete_object(RGWObjectCtx* obj_ctx, ACLOwner obj_owner, ACL
   del_op.params.olh_epoch = epoch;
   del_op.params.marker_version_id = version_id;
   del_op.params.bucket_owner = bucket_owner.get_id();
-  del_op.params.versioning_status = bucket->get_info().versioning_status();
+  del_op.params.versioning_status =
+    prevent_versioning ? 0 : bucket->get_info().versioning_status();
   del_op.params.obj_owner = obj_owner;
   del_op.params.unmod_since = unmod_since;
   del_op.params.high_precision_time = high_precision_time;
