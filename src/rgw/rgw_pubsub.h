@@ -43,6 +43,7 @@ struct rgw_s3_key_filter {
 WRITE_CLASS_ENCODER(rgw_s3_key_filter)
 
 using KeyValueList = boost::container::flat_map<std::string, std::string>;
+using KeyMultiValueMap = multimap<std::string, std::string>;
 
 struct rgw_s3_key_value_filter {
   KeyValueList kvl;
@@ -151,6 +152,10 @@ struct rgw_pubsub_s3_notification {
 bool match(const rgw_s3_key_filter& filter, const std::string& key);
 // return true if the key matches the metadata/tags rules of the metadata/tags filter
 bool match(const rgw_s3_key_value_filter& filter, const KeyValueList& kvl);
+
+// return true if the key matches the tag rules of the tag filter
+bool match(const rgw_s3_key_value_filter& filter, const KeyMultiValueMap& kv);
+
 // return true if the event type matches (equal or contained in) one of the events in the list
 bool match(const rgw::notify::EventTypeList& events, rgw::notify::EventType event);
 
@@ -253,7 +258,7 @@ struct rgw_pubsub_s3_record {
   // meta data
   KeyValueList x_meta_map;
   // tags
-  KeyValueList tags;
+  KeyMultiValueMap tags;
   // opaque data received from the topic
   // could be used to identify the gateway
   std::string opaque_data;
