@@ -627,6 +627,77 @@ test_purge() {
     rbd snap purge --image-id $ID
     rbd trash purge
     rbd trash ls | wc -l | grep 0
+
+    # test purging a clone with a chain of auto-delete parents
+    rbd create $RBD_CREATE_ARGS --size 256 testimg1
+    rbd snap create testimg1@snap
+    rbd clone --rbd-default-clone-format=2 testimg1@snap testimg2
+    rbd snap rm testimg1@snap
+    rbd create $RBD_CREATE_ARGS --size 256 testimg3
+    rbd snap create testimg2@snap
+    rbd clone --rbd-default-clone-format=2 testimg2@snap testimg4
+    rbd clone --rbd-default-clone-format=2 testimg2@snap testimg5
+    rbd snap rm testimg2@snap
+    rbd snap create testimg4@snap
+    rbd clone --rbd-default-clone-format=2 testimg4@snap testimg6
+    rbd snap rm testimg4@snap
+    rbd rm --rbd_move_parent_to_trash_on_remove=true testimg1
+    rbd rm --rbd_move_parent_to_trash_on_remove=true testimg2
+    rbd trash mv testimg3
+    rbd rm --rbd_move_parent_to_trash_on_remove=true testimg4
+    rbd trash ls | wc -l | grep 4
+    rbd trash purge 2>&1 | grep 'some expired images could not be removed'
+    rbd trash ls | wc -l | grep 3
+    rbd trash ls | grep testimg1
+    rbd trash ls | grep testimg2
+    rbd trash ls | grep testimg4
+    rbd trash mv testimg6
+    rbd trash ls | wc -l | grep 4
+    rbd trash purge 2>&1 | grep 'some expired images could not be removed'
+    rbd trash ls | wc -l | grep 2
+    rbd trash ls | grep testimg1
+    rbd trash ls | grep testimg2
+    rbd trash mv testimg5
+    rbd trash ls | wc -l | grep 3
+    rbd trash purge
+    rbd trash ls | wc -l | grep 0
+
+    rbd create $RBD_CREATE_ARGS --size 256 testimg1
+    rbd snap create testimg1@snap
+    rbd clone --rbd-default-clone-format=2 testimg1@snap testimg2
+    rbd snap rm testimg1@snap
+    rbd create $RBD_CREATE_ARGS --size 256 testimg3
+    rbd snap create testimg3@snap  # pin testimg3
+    rbd snap create testimg2@snap
+    rbd clone --rbd-default-clone-format=2 testimg2@snap testimg4
+    rbd clone --rbd-default-clone-format=2 testimg2@snap testimg5
+    rbd snap rm testimg2@snap
+    rbd snap create testimg4@snap
+    rbd clone --rbd-default-clone-format=2 testimg4@snap testimg6
+    rbd snap rm testimg4@snap
+    rbd rm --rbd_move_parent_to_trash_on_remove=true testimg1
+    rbd rm --rbd_move_parent_to_trash_on_remove=true testimg2
+    rbd trash mv testimg3
+    rbd rm --rbd_move_parent_to_trash_on_remove=true testimg4
+    rbd trash ls | wc -l | grep 4
+    rbd trash purge 2>&1 | grep 'some expired images could not be removed'
+    rbd trash ls | wc -l | grep 4
+    rbd trash mv testimg6
+    rbd trash ls | wc -l | grep 5
+    rbd trash purge 2>&1 | grep 'some expired images could not be removed'
+    rbd trash ls | wc -l | grep 3
+    rbd trash ls | grep testimg1
+    rbd trash ls | grep testimg2
+    rbd trash ls | grep testimg3
+    rbd trash mv testimg5
+    rbd trash ls | wc -l | grep 4
+    rbd trash purge 2>&1 | grep 'some expired images could not be removed'
+    rbd trash ls | wc -l | grep 1
+    rbd trash ls | grep testimg3
+    ID=$(rbd trash ls | awk '{ print $1 }')
+    rbd snap purge --image-id $ID
+    rbd trash purge
+    rbd trash ls | wc -l | grep 0
 }
 
 test_deep_copy_clone() {
