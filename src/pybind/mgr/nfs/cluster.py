@@ -14,6 +14,19 @@ from .export import NFSRados, exception_handler
 log = logging.getLogger(__name__)
 
 
+def resolve_ip(hostname: str) -> str:
+    try:
+        r = socket.getaddrinfo(hostname, None, flags=socket.AI_CANONNAME,
+                               type=socket.SOCK_STREAM)
+        # pick first v4 IP, if present
+        for a in r:
+            if a[0] == socket.AF_INET:
+                return a[4][0]
+        return r[0][4][0]
+    except socket.gaierror as e:
+        raise NFSInvalidOperation(f"Cannot resolve IP for host {hostname}: {e}")
+
+
 def cluster_setter(func):
     def set_pool_ns_clusterid(nfs, *args, **kwargs):
         nfs._set_pool_namespace(kwargs['cluster_id'])
