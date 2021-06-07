@@ -36,7 +36,8 @@ namespace api {
 template <typename I>
 const typename Trash<I>::TrashImageSources Trash<I>::RESTORE_SOURCE_WHITELIST {
     cls::rbd::TRASH_IMAGE_SOURCE_USER,
-    cls::rbd::TRASH_IMAGE_SOURCE_MIRRORING
+    cls::rbd::TRASH_IMAGE_SOURCE_MIRRORING,
+    cls::rbd::TRASH_IMAGE_SOURCE_USER_PARENT
   };
 
 namespace {
@@ -385,7 +386,8 @@ int Trash<I>::purge(IoCtx& io_ctx, time_t expire_ts,
   trash_entries.erase(
       std::remove_if(trash_entries.begin(), trash_entries.end(),
                      [](librbd::trash_image_info_t info) {
-                       return info.source != RBD_TRASH_IMAGE_SOURCE_USER;
+                       return info.source != RBD_TRASH_IMAGE_SOURCE_USER &&
+                         info.source != RBD_TRASH_IMAGE_SOURCE_USER_PARENT;
                      }),
       trash_entries.end());
 
