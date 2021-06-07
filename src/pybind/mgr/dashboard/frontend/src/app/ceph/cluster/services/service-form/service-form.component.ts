@@ -200,7 +200,7 @@ export class ServiceFormComponent extends CdForm implements OnInit {
       // Remove service types:
       // osd       - This is deployed a different way.
       // container - This should only be used in the CLI.
-      this.serviceTypes = _.difference(resp, ['container', 'osd']).sort();
+      this.serviceTypes = _.difference(resp, ['container', 'osd', 'ha-rgw']).sort();
     });
     this.hostService.list().subscribe((resp: object[]) => {
       const options: SelectOption[] = [];
