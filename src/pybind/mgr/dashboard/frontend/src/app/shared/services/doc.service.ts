@@ -23,8 +23,8 @@ export class DocService {
     });
   }
 
-  urlGenerator(section: string, release = '5'): string {
-    const docVersion = release === 'master' ? '5' : release;
+  urlGenerator(section: string, release = 'pacific'): string {
+    const docVersion = release === 'pacific' ? '5' : release;
     const domain = `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/${docVersion}/html/`;
     const domainRedHat = `https://www.redhat.com/en/about/`;
 
