@@ -1,12 +1,15 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#ifndef CEPH_CLS_RGW_TYPES_H
-#define CEPH_CLS_RGW_TYPES_H
+#pragma once
 
 #include <boost/container/flat_map.hpp>
 #include "common/ceph_time.h"
 #include "common/Formatter.h"
+
+#undef FMT_HEADER_ONLY
+#define FMT_HEADER_ONLY 1
+#include <fmt/format.h>
 
 #include "rgw/rgw_basic_types.h"
 
@@ -279,7 +282,15 @@ struct cls_rgw_obj_key {
   cls_rgw_obj_key(const string &_name) : name(_name) {}
   cls_rgw_obj_key(const string& n, const string& i) : name(n), instance(i) {}
 
-  void set(const string& _name) {
+  std::string to_string() const {
+    return fmt::format("{}({})", name, instance);
+  }
+
+  bool empty() const {
+    return name.empty();
+  }
+
+  void set(const std::string& _name) {
     name = _name;
   }
 
@@ -287,6 +298,7 @@ struct cls_rgw_obj_key {
     return (name.compare(k.name) == 0) &&
            (instance.compare(k.instance) == 0);
   }
+
   bool operator<(const cls_rgw_obj_key& k) const {
     int r = name.compare(k.name);
     if (r == 0) {
@@ -294,18 +306,24 @@ struct cls_rgw_obj_key {
     }
     return (r < 0);
   }
+
   bool operator>(const cls_rgw_obj_key& k) const {
     return k < *this;
   }
+
   bool operator<=(const cls_rgw_obj_key& k) const {
     return !(k < *this);
   }
+
   bool operator>=(const cls_rgw_obj_key& k) const {
     return !(k > *this);
   }
-  bool empty() const {
-    return name.empty();
+
+  std::ostream& operator<<(std::ostream& out) const {
+    out << to_string();
+    return out;
   }
+
   void encode(bufferlist &bl) const {
     ENCODE_START(1, 1, bl);
     encode(name, bl);
@@ -1212,5 +1230,3 @@ struct cls_rgw_reshard_entry
   void get_key(string *key) const;
 };
 WRITE_CLASS_ENCODER(cls_rgw_reshard_entry)
-
-#endif
