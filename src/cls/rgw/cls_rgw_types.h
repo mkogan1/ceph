@@ -1,10 +1,10 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#ifndef CEPH_CLS_RGW_TYPES_H
-#define CEPH_CLS_RGW_TYPES_H
+#pragma once
 
 #include <boost/container/flat_map.hpp>
+#include <fmt/format.h>
 #include "common/ceph_time.h"
 #include "common/Formatter.h"
 
@@ -339,6 +339,10 @@ struct cls_rgw_obj_key {
   cls_rgw_obj_key() {}
   cls_rgw_obj_key(const std::string &_name) : name(_name) {}
   cls_rgw_obj_key(const std::string& n, const std::string& i) : name(n), instance(i) {}
+
+  operator std::string() const {
+    return fmt::format("{}({})", name, instance);
+  }
 
   void set(const std::string& _name) {
     name = _name;
@@ -1283,5 +1287,3 @@ struct cls_rgw_reshard_entry
   void get_key(std::string *key) const;
 };
 WRITE_CLASS_ENCODER(cls_rgw_reshard_entry)
-
-#endif
