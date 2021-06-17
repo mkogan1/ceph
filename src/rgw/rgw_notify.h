@@ -57,6 +57,7 @@ struct reservation_t {
   const req_state* const s;
   size_t size;
   rgw::sal::RGWObject* const object;
+  KeyValueMap cached_metadata;
 
   reservation_t(rgw::sal::RGWRadosStore* _store, const req_state* _s, rgw::sal::RGWObject* _object) : 
       store(_store), s(_s), object(_object) {}
