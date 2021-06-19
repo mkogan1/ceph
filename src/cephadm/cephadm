@@ -48,12 +48,12 @@ from pathlib import Path
 FuncT = TypeVar('FuncT', bound=Callable)
 
 # Default container images -----------------------------------------------------
-DEFAULT_IMAGE = 'registry.redhat.io/rhceph-beta/rhceph-5-rhel8:latest'
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph/rhceph-5-rhel8:latest'
 DEFAULT_IMAGE_IS_MASTER = False
 DEFAULT_IMAGE_RELEASE = 'pacific'
 DEFAULT_PROMETHEUS_IMAGE = "registry.redhat.io/openshift4/ose-prometheus:v4.6"
 DEFAULT_NODE_EXPORTER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.5"
-DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8:latest"
+DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph/rhceph-5-dashboard-rhel8:latest"
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.5"
 # XXX: not accounted for in backported downstream change
 #DEFAULT_HAPROXY_IMAGE = 'docker.io/library/haproxy:2.3'
