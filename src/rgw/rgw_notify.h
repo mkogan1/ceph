@@ -56,11 +56,14 @@ struct reservation_t {
   rgw::sal::RGWRadosStore* const store;
   const req_state* const s;
   size_t size;
+
   rgw::sal::RGWObject* const object;
+  const std::string* const object_name;
   KeyValueMap cached_metadata;
 
-  reservation_t(rgw::sal::RGWRadosStore* _store, const req_state* _s, rgw::sal::RGWObject* _object) : 
-      store(_store), s(_s), object(_object) {}
+  reservation_t(rgw::sal::RGWRadosStore* _store, const req_state* _s, 
+      rgw::sal::RGWObject* _object, const std::string* _object_name) :
+      store(_store), s(_s), object(_object), object_name(_object_name) {}
 
   // dtor doing resource leak guarding
   // aborting the reservation if not already committed or aborted
