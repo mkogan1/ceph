@@ -80,6 +80,7 @@ int publish_commit(rgw::sal::RGWObject* obj,
         uint64_t size,
         const ceph::real_time& mtime, 
         const std::string& etag, 
+        const std::string& version,
         EventType event_type,
         reservation_t& reservation);
 
