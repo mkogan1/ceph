@@ -336,7 +336,7 @@ WebTokenEngine::validate_signature_using_cert(const DoutPrefixProvider* dpp, con
 }
 
 void
-WebTokenEngine::validate_signature_using_n_e(const DoutPrefixProvider* dpp, const jwt::decoded_jwt& decoded, const string& n, const string& e, const string &algorithm) const
+WebTokenEngine::validate_signature_using_n_e(const DoutPrefixProvider* dpp, const jwt::decoded_jwt& decoded, const string &algorithm, const string& n, const string& e) const
 {
   try {
     if (algorithm == "RS256") {
@@ -351,6 +351,9 @@ WebTokenEngine::validate_signature_using_n_e(const DoutPrefixProvider* dpp, cons
       auto verifier = jwt::verify()
                   .allow_algorithm(jwt::algorithm::rs512().setModulusAndExponent(n,e));
       verifier.verify(decoded);
+    } else {
+      ldpp_dout(dpp, 0) << "Invalid algorithm: " << algorithm << dendl;
+      throw std::runtime_error("Invalid algorithm: " + algorithm);
     }
   } catch (std::runtime_error& e) {
     ldpp_dout(dpp, 0) << "Signature validation using n, e failed: " << e.what() << dendl;
@@ -358,6 +361,7 @@ WebTokenEngine::validate_signature_using_n_e(const DoutPrefixProvider* dpp, cons
   }
   catch (...) {
     ldpp_dout(dpp, 0) << "Signature validation n, e failed" << dendl;
+    throw;
   }
   ldpp_dout(dpp, 10) << "Verified signature using n and e"<< dendl;
   return;
