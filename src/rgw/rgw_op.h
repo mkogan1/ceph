@@ -422,14 +422,6 @@ public:
 
   virtual int get_params(optional_yield y) = 0;
   virtual int send_response_data_error(optional_yield y) = 0;
-
-  bool get_cache_request() {
-    const char* oid = s->info.env->get("HTTP_D3N");
-    if (!oid)
-      return false;
-    return !strcmp(oid, "yes") ? true : false;
-  }
-
   virtual int send_response_data(bufferlist& bl, off_t ofs, off_t len) = 0;
 
   const char* name() const override { return "get_obj"; }
@@ -455,10 +447,6 @@ public:
 
   int handle_data(bufferlist& bl, off_t bl_ofs, off_t bl_len) override {
     return op->get_data_cb(bl, bl_ofs, bl_len);
-  }
-
-  bool get_cache_request() {
-    return op->get_cache_request();
   }
 };
 
