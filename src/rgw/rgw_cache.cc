@@ -6,7 +6,6 @@
 
 #include <errno.h>
 
-
 #define dout_subsys ceph_subsys_rgw
 
 
@@ -353,3 +352,4 @@ ObjectCache::~ObjectCache()
     cache->unregistered();
   }
 }
+

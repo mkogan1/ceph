@@ -20,7 +20,6 @@
 #include "rgw_notify.h"
 #include "rgw_oidc_provider.h"
 #include "rgw_role.h"
-#include "rgw_cache.h"
 #include "cls/lock/cls_lock_client.h"
 
 namespace rgw { namespace sal {

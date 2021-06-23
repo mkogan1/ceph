@@ -340,6 +340,10 @@ int radosgw_Main(int argc, const char **argv)
     lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires that the chunk_size equals stripe_size)" << dendl;
     rgw_d3n_datacache_enabled = false;
   }
+  if (rgw_d3n_datacache_enabled && !cct->_conf->rgw_beast_enable_async) {
+    lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires yield context - rgw_beast_enable_async=true)" << dendl;
+    rgw_d3n_datacache_enabled = false;
+  }
   lsubdout(cct, rgw, 1) << "D3N datacache enabled: " << rgw_d3n_datacache_enabled << dendl;
 
   const DoutPrefix dp(cct.get(), dout_subsys, "rgw main: ");

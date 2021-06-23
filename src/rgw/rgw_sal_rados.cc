@@ -2435,8 +2435,6 @@ int RadosRole::delete_obj(const DoutPrefixProvider *dpp, optional_yield y)
 
 } // namespace rgw::sal
 
-
-
 extern "C" {
 
 void* newStore(void)

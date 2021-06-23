@@ -1102,7 +1102,7 @@ public:
     ATTRSMOD_MERGE   = 2
   };
 
-  D3nDataCache* d3n_datacache{nullptr};
+  D3nDataCache* d3n_data_cache{nullptr};
 
   int rewrite_obj(RGWBucketInfo& dest_bucket_info, rgw::sal::Object* obj, const DoutPrefixProvider *dpp, optional_yield y);
 
@@ -1288,7 +1288,6 @@ public:
 
   int append_atomic_test(const DoutPrefixProvider *dpp, const RGWObjState* astate, librados::ObjectOperation& op);
 
-  virtual int flush_read_list(const DoutPrefixProvider *dpp, struct get_obj_data* d);
   virtual int get_obj_iterate_cb(const DoutPrefixProvider *dpp,
                          const rgw_raw_obj& read_obj, off_t obj_ofs,
                          off_t read_ofs, off_t len, bool is_head_obj,
@@ -1602,41 +1601,9 @@ struct get_obj_data {
   }
 
   D3nGetObjData d3n_get_data;
-  std::list<bufferlist> d3n_read_list;
-  std::list<string> d3n_pending_oid_list;
-  void d3n_add_pending_oid(std::string oid);
-  std::string d3n_get_pending_oid(const DoutPrefixProvider *dpp);
-  atomic_bool d3n_bypass_cache_write{false};
+  bool d3n_bypass_cache_write{false};
 
-  int flush(rgw::AioResultList&& results) {
-    int r = rgw::check_for_errors(results);
-    if (r < 0) {
-      return r;
-    }
-    std::list<bufferlist> bl_list;
-
-    auto cmp = [](const auto& lhs, const auto& rhs) { return lhs.id < rhs.id; };
-    results.sort(cmp); // merge() requires results to be sorted first
-    completed.merge(results, cmp); // merge results in sorted order
-
-    while (!completed.empty() && completed.front().id == offset) {
-      auto bl = std::move(completed.front().data);
-      completed.pop_front_and_dispose(std::default_delete<rgw::AioResultEntry>{});
-
-      bl_list.push_back(bl);
-      offset += bl.length();
-      int r = client_cb->handle_data(bl, 0, bl.length());
-      if (r < 0) {
-        return r;
-      }
-    }
-
-    if (rgwrados->get_use_datacache()) {
-      const std::lock_guard l(d3n_get_data.d3n_lock);
-      d3n_read_list.splice(d3n_read_list.end(), bl_list);
-    }
-    return 0;
-  }
+  int flush(rgw::AioResultList&& results);
 
   void cancel() {
     // wait for all completions to drain and ignore the results

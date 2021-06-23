@@ -95,13 +95,14 @@ Aio::OpFunc aio_abstract(Op&& op, boost::asio::io_context& context,
 }
 
 
-template <typename Op>
-Aio::OpFunc d3n_cache_aio_abstract(Op&& op, optional_yield y, off_t read_ofs, off_t read_len, std::string& location) {
-  return [op = std::move(op), y, read_ofs, read_len, location] (Aio* aio, AioResult& r) mutable {
+Aio::OpFunc d3n_cache_aio_abstract(const DoutPrefixProvider *dpp, optional_yield y, off_t read_ofs, off_t read_len, std::string& location) {
+  return [dpp, y, read_ofs, read_len, location] (Aio* aio, AioResult& r) mutable {
+    // d3n data cache requires yield context (rgw_beast_enable_async=true)
+    ceph_assert(y);
     auto& ref = r.obj.get_ref();
     auto c = std::make_unique<D3nL1CacheRequest>();
     lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: d3n_cache_aio_abstract(): libaio Read From Cache, oid=" << ref.obj.oid << dendl;
-    c->file_aio_read_abstract(y.get_io_context(), y.get_yield_context(), location, read_ofs, read_len, aio, r);
+    c->file_aio_read_abstract(dpp, y.get_io_context(), y.get_yield_context(), location, read_ofs, read_len, aio, r);
   };
 }
 
@@ -118,18 +119,6 @@ Aio::OpFunc aio_abstract(Op&& op, optional_yield y) {
   return aio_abstract(std::forward<Op>(op));
 }
 
-template <typename Op>
-Aio::OpFunc d3n_cache_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs,
-                                   off_t read_ofs, off_t read_len, std::string& location) {
-  static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
-  static_assert(!std::is_lvalue_reference_v<Op>);
-  static_assert(!std::is_const_v<Op>);
-  if (y) {
-    return d3n_cache_aio_abstract(std::forward<Op>(op), y, read_ofs, read_len, location);
-  }
-  return aio_abstract(std::forward<Op>(op));
-}
-
 } // anonymous namespace
 
 Aio::OpFunc Aio::librados_op(librados::ObjectReadOperation&& op,
@@ -141,9 +130,9 @@ Aio::OpFunc Aio::librados_op(librados::ObjectWriteOperation&& op,
   return aio_abstract(std::move(op), y);
 }
 
-Aio::OpFunc Aio::d3n_cache_op(librados::ObjectReadOperation&& op, optional_yield y,
-                              off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location) {
-  return d3n_cache_aio_abstract(std::move(op), y, obj_ofs, read_ofs, read_len, location);
+Aio::OpFunc Aio::d3n_cache_op(const DoutPrefixProvider *dpp, optional_yield y,
+                              off_t read_ofs, off_t read_len, std::string& location) {
+  return d3n_cache_aio_abstract(dpp, y, read_ofs, read_len, location);
 }
 
 } // namespace rgw
