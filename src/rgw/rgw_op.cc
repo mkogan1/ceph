@@ -526,7 +526,7 @@ static int read_obj_policy(RGWRados *store,
     if (bucket_owner.compare(s->user->user_id) != 0 &&
         ! s->auth.identity->is_admin_of(bucket_owner)) {
       auto r = eval_identity_or_session_policies(s->iam_user_policies, s->env,
-                                  *s->auth.identity, rgw::IAM::s3ListBucket,
+                                  boost::none, rgw::IAM::s3ListBucket,
                                   ARN(bucket));
       if (r == Effect::Allow)
         return -ENOENT;
@@ -541,7 +541,7 @@ static int read_obj_policy(RGWRados *store,
       }
       if (! s->session_policies.empty()) {
         r = eval_identity_or_session_policies(s->session_policies, s->env,
-                                  *s->auth.identity, rgw::IAM::s3ListBucket,
+                                  boost::none, rgw::IAM::s3ListBucket,
                                   ARN(bucket));
         if (r == Effect::Allow)
           return -ENOENT;
