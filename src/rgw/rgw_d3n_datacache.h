@@ -147,14 +147,11 @@ public:
 template <class T>
 class D3nRGWDataCache : public T {
 
-  D3nDataCache d3n_data_cache;
-
 public:
   D3nRGWDataCache() {}
 
   int init_rados() override {
     int ret;
-    d3n_data_cache.init(T::cct);
     ret = T::init_rados();
     if (ret < 0)
       return ret;
@@ -162,44 +159,10 @@ public:
     return 0;
   }
 
-  int flush_read_list(const DoutPrefixProvider *dpp, struct get_obj_data* d);
   int get_obj_iterate_cb(const DoutPrefixProvider *dpp, const rgw_raw_obj& read_obj, off_t obj_ofs,
                          off_t read_ofs, off_t len, bool is_head_obj,
                          RGWObjState *astate, void *arg) override;
 };
-
-
-template<typename T>
-int D3nRGWDataCache<T>::flush_read_list(const DoutPrefixProvider *dpp, struct get_obj_data* d) {
-  ldpp_dout(dpp, 20) << "D3nDataCache: D3nRGWDataCache<T>::" << __func__ << "()" << dendl;
-  const std::lock_guard l(d->d3n_get_data.d3n_lock);
-  std::list<bufferlist> lbl;
-  lbl.swap(d->d3n_read_list);
-  d->d3n_read_list.clear();
-
-  int r = 0;
-
-  std::string oid;
-  std::list<bufferlist>::iterator iter;
-  for (iter = lbl.begin(); iter != lbl.end(); ++iter) {
-    bufferlist& bl = *iter;
-    oid = d->d3n_get_pending_oid(dpp);
-    if (oid.empty()) {
-      lsubdout(g_ceph_context, rgw, 0) << "ERROR: D3nDataCache: flush_read_list(): d3n_get_pending_oid() returned empty oid" << dendl;
-      r = -ENOENT;
-      break;
-    }
-    ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): bypass write to datacache : " << d->d3n_bypass_cache_write << dendl;
-    if (bl.length() <= g_conf()->rgw_get_obj_max_req_size && !d->d3n_bypass_cache_write) {
-      ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): bl.length <= rgw_get_obj_max_req_size (default 4MB) - write to datacache, bl.length=" << bl.length() << dendl;
-      d3n_data_cache.put(bl, bl.length(), oid);
-    } else {
-      ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): bl.length > rgw_get_obj_max_req_size (default 4MB), bl.length()=" << bl.length() << dendl;
-    }
-  }
-
-  return r;
-}
 
 template<typename T>
 int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const rgw_raw_obj& read_obj, off_t obj_ofs,
@@ -239,7 +202,7 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       return r;
     }
 
-    ldpp_dout(dpp, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+    ldpp_dout(dpp, 20) << "D3nDataCache::" << __func__ << "(): oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
     op.read(read_ofs, len, nullptr, nullptr);
 
     const uint64_t cost = len;
@@ -256,8 +219,6 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
     const uint64_t cost = len;
     const uint64_t id = obj_ofs; // use logical object offset for sorting replies
     oid = read_obj.oid;
-
-    d->d3n_add_pending_oid(oid);
 
     auto obj = d->rgwrados->svc.rados->obj(read_obj);
     r = obj.open(dpp);
@@ -277,10 +238,10 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
     } else
       d->d3n_bypass_cache_write = false;
 
-    if (d3n_data_cache.get(oid, len)) {
+    if (d->rgwrados->d3n_data_cache->get(oid, len)) {
       // Read From Cache
       ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): READ FROM CACHE: oid=" << read_obj.oid << ", obj-ofs=" << obj_ofs << ", read_ofs=" << read_ofs << ", len=" << len << dendl;
-      auto completed = d->aio->get(obj, rgw::Aio::d3n_cache_op(d->yield, read_ofs, len, d3n_data_cache.cache_location), cost, id);
+      auto completed = d->aio->get(obj, rgw::Aio::d3n_cache_op(d->yield, read_ofs, len, d->rgwrados->d3n_data_cache->cache_location), cost, id);
       r = d->flush(std::move(completed));
       if (r < 0) {
         lsubdout(g_ceph_context, rgw, 0) << "D3nDataCache: " << __func__ << "(): Error: failed to drain/flush, r= " << r << dendl;

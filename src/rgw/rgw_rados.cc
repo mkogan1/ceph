@@ -1083,8 +1083,8 @@ void RGWRados::finalize()
 
   delete binfo_cache;
   delete obj_tombstone_cache;
-  if (d3n_datacache)
-    delete d3n_datacache;
+  if (d3n_data_cache)
+    delete d3n_data_cache;
 
   if (reshard_wait.get()) {
     reshard_wait->stop();
@@ -1123,11 +1123,12 @@ int RGWRados::init_rados()
   if (ret < 0) {
     return ret;
   }
+
   cr_registry = crs.release();
 
   if (use_datacache) {
-    d3n_datacache = new D3nDataCache();
-    d3n_datacache->init(cct);
+    d3n_data_cache = new D3nDataCache();
+    d3n_data_cache->init(cct);
   }
 
   return ret;
@@ -6357,23 +6358,41 @@ int RGWRados::Object::Read::read(int64_t ofs, int64_t end, bufferlist& bl, optio
   return bl.length();
 }
 
-
-void get_obj_data::d3n_add_pending_oid(std::string oid)
-{
-  const std::lock_guard l(d3n_get_data.d3n_lock);
-  d3n_pending_oid_list.push_back(oid);
-}
-
-string get_obj_data::d3n_get_pending_oid(const DoutPrefixProvider *dpp)
-{
-  ldpp_dout(dpp, 20) << "D3nDataCache: RGWRados::" << __func__ << "()" << dendl;
-  string str;
-  str.clear();
-  if (!d3n_pending_oid_list.empty()) {
-    str = d3n_pending_oid_list.front();
-    d3n_pending_oid_list.pop_front();
+int get_obj_data::flush(rgw::AioResultList&& results) {
+  int r = rgw::check_for_errors(results);
+  if (r < 0) {
+    return r;
   }
-  return str;
+  std::list<bufferlist> bl_list;
+
+  auto cmp = [](const auto& lhs, const auto& rhs) { return lhs.id < rhs.id; };
+  results.sort(cmp); // merge() requires results to be sorted first
+  completed.merge(results, cmp); // merge results in sorted order
+
+  while (!completed.empty() && completed.front().id == offset) {
+    auto bl = std::move(completed.front().data);
+
+    bl_list.push_back(bl);
+    offset += bl.length();
+    int r = client_cb->handle_data(bl, 0, bl.length());
+    if (r < 0) {
+      return r;
+    }
+
+    if (rgwrados->get_use_datacache()) {
+      const std::lock_guard l(d3n_get_data.d3n_lock);
+      auto oid = completed.front().obj.get_ref().obj.oid;
+      ldout(g_ceph_context, 20) << "D3nDataCache: " << __func__ << "(): bypass write to datacache : " << d3n_bypass_cache_write << dendl;
+      if (bl.length() <= g_conf()->rgw_get_obj_max_req_size && !d3n_bypass_cache_write) {
+        ldout(g_ceph_context, 20) << "D3nDataCache: " << __func__ << "(): bl.length <= rgw_get_obj_max_req_size (default 4MB) - write to datacache, bl.length=" << bl.length() << dendl;
+        rgwrados->d3n_data_cache->put(bl, bl.length(), oid);
+      } else {
+        ldout(g_ceph_context, 20) << "D3nDataCache: " << __func__ << "(): bl.length > rgw_get_obj_max_req_size (default 4MB), bl.length()=" << bl.length() << dendl;
+      }
+    }
+    completed.pop_front_and_dispose(std::default_delete<rgw::AioResultEntry>{});
+  }
+  return 0;
 }
 
 static int _get_obj_iterate_cb(const DoutPrefixProvider *dpp,
@@ -6386,7 +6405,6 @@ static int _get_obj_iterate_cb(const DoutPrefixProvider *dpp,
                                       is_head_obj, astate, arg);
 }
 
-int RGWRados::flush_read_list(const DoutPrefixProvider *dpp, struct get_obj_data* d) { return 0; }
 
 int RGWRados::get_obj_iterate_cb(const DoutPrefixProvider *dpp,
                                  const rgw_raw_obj& read_obj, off_t obj_ofs,
@@ -6459,16 +6477,9 @@ int RGWRados::Object::Read::iterate(const DoutPrefixProvider *dpp, int64_t ofs, 
   }
 
   if (store->get_use_datacache()) {
-
     r = data.drain();
     if (r < 0) {
       ldpp_dout(dpp, 0) << "D3nDataCache: " << __func__ << "(): Error: data cache drain returned: " << r << dendl;
-      return r;
-    }
-    ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): flush read list" << dendl;
-    int rf = store->flush_read_list(dpp, &data);
-    if (rf < 0) {
-      ldpp_dout(dpp, 0) << "D3nDataCache: " << __func__ << "(): Error: flush read list returned: " << rf << dendl;
     }
     return r;
   } else {
