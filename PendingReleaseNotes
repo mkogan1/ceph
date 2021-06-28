@@ -16,6 +16,10 @@
 * RGW: S3 bucket notification events now contain `eTag` instead of `etag`, fixing
   a deviation from the message format observed on AWS.
 
+* fs: A file system can be created with a specific ID ("fscid"). This is useful
+  in certain recovery scenarios, e.g., monitor database lost and rebuilt, and
+  the restored file system is expected to have the same ID as before.
+
 * RGW: S3 bucket notification events now contain an `eTag` key instead of `etag`,
   and eventName values no longer carry the `s3:` prefix, fixing deviations from
   the message format observed on AWS.
