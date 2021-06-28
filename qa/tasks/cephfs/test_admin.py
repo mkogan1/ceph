@@ -158,6 +158,78 @@ class TestAdminCommands(CephFSTestCase):
             self._check_pool_application_metadata_key_value(
                 pool_names[i], 'cephfs', keys[i], fs_name)
 
+    def test_fs_new_with_specific_id(self):
+        """
+        That a file system can be created with a specific ID.
+        """
+        self.fs.delete_all_filesystems()
+        fs_name = "test_fs_specific_id"
+        fscid = 100
+        keys = ['metadata', 'data']
+        pool_names = [fs_name+'-'+key for key in keys]
+        mon_cmd = self.fs.mon_manager.raw_cluster_cmd
+        for p in pool_names:
+            mon_cmd('osd', 'pool', 'create', p, str(self.fs.pgs_per_fs_pool))
+        mon_cmd('fs', 'new', fs_name, pool_names[0], pool_names[1], '--fscid', fscid, '--force')
+        self.fs.status().get_fsmap(fscid)
+        for i in range(2):
+            self._check_pool_application_metadata_key_value(pool_names[i], 'cephfs', keys[i], fs_name)
+
+    def test_fs_new_with_specific_id_idempotency(self):
+        """
+        That command to create file system with specific ID is idempotent.
+        """
+        self.fs.delete_all_filesystems()
+        fs_name = "test_fs_specific_id"
+        fscid = 100
+        keys = ['metadata', 'data']
+        pool_names = [fs_name+'-'+key for key in keys]
+        mon_cmd = self.fs.mon_manager.raw_cluster_cmd
+        for p in pool_names:
+            mon_cmd('osd', 'pool', 'create', p, str(self.fs.pgs_per_fs_pool))
+        mon_cmd('fs', 'new', fs_name, pool_names[0], pool_names[1], '--fscid', fscid, '--force')
+        mon_cmd('fs', 'new', fs_name, pool_names[0], pool_names[1], '--fscid', fscid, '--force')
+        self.fs.status().get_fsmap(fscid)
+
+    def test_fs_new_with_specific_id_fails_without_force_flag(self):
+        """
+        That command to create file system with specific ID fails without '--force' flag.
+        """
+        fs_name = "test_fs_specific_id"
+        fscid = 100
+        keys = ['metadata', 'data']
+        pool_names = [fs_name+'-'+key for key in keys]
+        mon_cmd = self.fs.mon_manager.raw_cluster_cmd
+        for p in pool_names:
+            mon_cmd('osd', 'pool', 'create', p, str(self.fs.pgs_per_fs_pool))
+        try:
+            mon_cmd('fs', 'new', fs_name, pool_names[0], pool_names[1], '--fscid', fscid, '--force')
+        except CommandFailedError as ce:
+            self.assertEqual(ce.exitstatus, errno.EINVAL,
+                "invalid error code on creating a file system with specifc ID without --force flag")
+        else:
+            self.fail("expected creating file system with specific ID without '--force' flag to fail")
+
+    def test_fs_new_with_specific_id_fails_already_in_use(self):
+        """
+        That creating file system with ID already in use fails.
+        """
+        fs_name = "test_fs_specific_id"
+        # file system ID already in use
+        fscid =  self.fs.status().map['filesystems'][0]['id']
+        keys = ['metadata', 'data']
+        pool_names = [fs_name+'-'+key for key in keys]
+        mon_cmd = self.fs.mon_manager.raw_cluster_cmd
+        for p in pool_names:
+            mon_cmd('osd', 'pool', 'create', p, str(self.fs.pgs_per_fs_pool))
+        try:
+            mon_cmd('fs', 'new', fs_name, pool_names[0], pool_names[1], '--fscid', fscid, '--force')
+        except CommandFailedError as ce:
+            self.assertEqual(ce.exitstatus, errno.EINVAL,
+                "invalid error code on creating a file system with specifc ID that is already in use")
+        else:
+            self.fail("expected creating file system with ID already in use to fail")
+
 
 class TestConfigCommands(CephFSTestCase):
     """
