@@ -270,7 +270,8 @@ void FSMap::print_summary(Formatter *f, ostream *out) const
 
 
 Filesystem::ref FSMap::create_filesystem(std::string_view name,
-    int64_t metadata_pool, int64_t data_pool, uint64_t features)
+    int64_t metadata_pool, int64_t data_pool, uint64_t features,
+    fs_cluster_id_t fscid)
 {
   auto fs = Filesystem::create();
   fs->mds_map.epoch = epoch;
@@ -283,10 +284,20 @@ Filesystem::ref FSMap::create_filesystem(std::string_view name,
   fs->mds_map.modified = ceph_clock_now();
   fs->mds_map.enabled = true;
   if (features & CEPH_FEATURE_SERVER_JEWEL) {
-    fs->fscid = next_filesystem_id++;
-    // ANONYMOUS is only for upgrades from legacy mdsmaps, we should
-    // have initialized next_filesystem_id such that it's never used here.
-    ceph_assert(fs->fscid != FS_CLUSTER_ID_ANONYMOUS);
+    if (fscid == FS_CLUSTER_ID_NONE) {
+      fs->fscid = next_filesystem_id++;
+    } else {
+      fs->fscid = fscid;
+      next_filesystem_id = std::max(fscid,  (fs_cluster_id_t)next_filesystem_id) + 1;
+    }
+    // File system's ID can be FS_CLUSTER_ID_ANONYMOUS if we're recovering
+    // a legacy file system by passing FS_CLUSTER_ID_ANONYMOUS as the desired
+    // file system ID
+    if (fscid != FS_CLUSTER_ID_ANONYMOUS) {
+      // ANONYMOUS is only for upgrades from legacy mdsmaps, we should
+      // have initialized next_filesystem_id such that it's never used here.
+      ceph_assert(fs->fscid != FS_CLUSTER_ID_ANONYMOUS);
+    }
   } else {
     // Use anon fscid because this will get thrown away when encoding
     // as legacy MDSMap for legacy mons.
