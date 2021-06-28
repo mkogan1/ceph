@@ -34,7 +34,7 @@ struct D3nL1CacheRequest {
     void operator()(struct aiocb* c) {
       if(c->aio_fildes > 0) {
         if( ::close(c->aio_fildes) != 0) {
-          lsubdout(g_ceph_context, rgw, 2) << "ERROR: D3nDataCache: " << __func__ << "(): can't close file, errno=" << -errno << dendl;
+          lsubdout(g_ceph_context, rgw_datacache, 2) << "D3nDataCache: " << __func__ << "(): Error - can't close file, errno=" << -errno << dendl;
         }
       }
       delete c;
@@ -49,13 +49,14 @@ struct D3nL1CacheRequest {
     using Signature = void(boost::system::error_code, bufferlist);
     using Completion = ceph::async::Completion<Signature, AsyncFileReadOp>;
 
-    int init(const std::string& file_path, off_t read_ofs, off_t read_len, void* arg) {
+    int init(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, off_t read_len, void* arg) {
+      ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): file_path=" << file_path << dendl;
       aio_cb.reset(new struct aiocb);
       memset(aio_cb.get(), 0, sizeof(struct aiocb));
       aio_cb->aio_fildes = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY|O_CLOEXEC|O_BINARY));
       if(aio_cb->aio_fildes < 0) {
         int err = errno;
-        lsubdout(g_ceph_context, rgw, 1) << "ERROR: D3nDataCache: " << __func__ << "(): can't open " << file_path << " : " << cpp_strerror(err) << dendl;
+        ldpp_dout(dpp, 1) << "ERROR: D3nDataCache: " << __func__ << "(): can't open " << file_path << " : " << cpp_strerror(err) << dendl;
         return -err;
       }
       if (g_conf()->rgw_d3n_l1_fadvise != POSIX_FADV_NORMAL)
@@ -68,14 +69,15 @@ struct D3nL1CacheRequest {
       aio_cb->aio_nbytes = read_len;
       aio_cb->aio_offset = read_ofs;
       aio_cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
-      aio_cb->aio_sigevent.sigev_notify_function = aio_dispatch;
+      aio_cb->aio_sigevent.sigev_notify_function = libaio_cb_aio_dispatch;
       aio_cb->aio_sigevent.sigev_notify_attributes = nullptr;
       aio_cb->aio_sigevent.sigev_value.sival_ptr = arg;
 
       return 0;
     }
 
-    static void aio_dispatch(sigval_t sigval) {
+    static void libaio_cb_aio_dispatch(sigval_t sigval) {
+      lsubdout(g_ceph_context, rgw_datacache, 20) << "D3nDataCache: " << __func__ << "()" << dendl;
       auto p = std::unique_ptr<Completion>{static_cast<Completion*>(sigval.sival_ptr)};
       auto op = std::move(p->user_data);
       const int ret = -aio_error(op.aio_cb.get());
@@ -95,7 +97,7 @@ struct D3nL1CacheRequest {
   };
 
   template <typename ExecutionContext, typename CompletionToken>
-  auto async_read(ExecutionContext& ctx, const std::string& file_path,
+  auto async_read(const DoutPrefixProvider *dpp, ExecutionContext& ctx, const std::string& file_path,
                   off_t read_ofs, off_t read_len, CompletionToken&& token) {
     using Op = AsyncFileReadOp;
     using Signature = typename Op::Signature;
@@ -103,12 +105,12 @@ struct D3nL1CacheRequest {
     auto p = Op::create(ctx.get_executor(), init.completion_handler);
     auto& op = p->user_data;
 
-    int ret = op.init(file_path, read_ofs, read_len, p.get());
-
+    ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): file_path=" << file_path << dendl;
+    int ret = op.init(dpp, file_path, read_ofs, read_len, p.get());
     if(0 == ret) {
       ret = ::aio_read(op.aio_cb.get());
     }
-
+    ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): ::aio_read(), ret=" << ret << dendl;
     if(ret < 0) {
       auto ec = boost::system::error_code{-ret, boost::system::system_category()};
       ceph::async::post(std::move(p), ec, bufferlist{});
@@ -129,7 +131,7 @@ struct D3nL1CacheRequest {
     }
   };
 
-  void file_aio_read_abstract(boost::asio::io_context& context, spawn::yield_context yield,
+  void file_aio_read_abstract(const DoutPrefixProvider *dpp, boost::asio::io_context& context, spawn::yield_context yield,
                               std::string& file_path, off_t read_ofs, off_t read_len,
                               rgw::Aio* aio, rgw::AioResult& r) {
     using namespace boost::asio;
@@ -137,7 +139,8 @@ struct D3nL1CacheRequest {
     auto ex = get_associated_executor(init.completion_handler);
 
     auto& ref = r.obj.get_ref();
-    async_read(context, file_path+"/"+ref.obj.oid, read_ofs, read_len, bind_executor(ex, d3n_libaio_handler{aio, r}));
+    ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): oid=" << ref.obj.oid << dendl;
+    async_read(dpp, context, file_path+"/"+ref.obj.oid, read_ofs, read_len, bind_executor(ex, d3n_libaio_handler{aio, r}));
   }
 
 };
