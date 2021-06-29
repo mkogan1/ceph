@@ -1601,7 +1601,7 @@ struct get_obj_data {
   }
 
   D3nGetObjData d3n_get_data;
-  bool d3n_bypass_cache_write{false};
+  atomic_bool d3n_bypass_cache_write{false};
 
   int flush(rgw::AioResultList&& results);
 
