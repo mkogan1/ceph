@@ -439,6 +439,11 @@ int RGWRadosObject::read_attrs(RGWRados::Object::Read &read_op, optional_yield y
   return read_op.prepare(y, dpp);
 }
 
+std::string RGWRadosStore::get_cluster_id(const DoutPrefixProvider* dpp,  optional_yield y)
+{
+  return rados->get_cluster_fsid(dpp, y);
+}
+
 int RGWRadosObject::set_obj_attrs(const DoutPrefixProvider *dpp, RGWObjectCtx* rctx, RGWAttrs* setattrs, RGWAttrs* delattrs, optional_yield y, rgw_obj* target_obj)
 {
   RGWAttrs empty;
