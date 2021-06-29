@@ -431,6 +431,11 @@ int RGWRadosObject::get_obj_state(const DoutPrefixProvider *dpp, RGWObjectCtx *r
   return store->getRados()->get_obj_state(dpp, rctx, bucket.get_info(), obj, state, follow_olh, y);
 }
 
+std::string RGWRadosStore::get_cluster_id(const DoutPrefixProvider* dpp,  optional_yield y)
+{
+  return rados->get_cluster_fsid(dpp, y);
+}
+
 int RGWRadosObject::read_attrs(RGWRados::Object::Read &read_op, optional_yield y, const DoutPrefixProvider *dpp, rgw_obj *target_obj)
 {
   read_op.params.attrs = &attrs;

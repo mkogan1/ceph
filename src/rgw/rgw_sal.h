@@ -71,6 +71,11 @@ class RGWStore {
     RGWStore() {}
     virtual ~RGWStore() = default;
 
+    /** Name of this store provider (e.g., RADOS") */
+    virtual const char* get_name() const = 0;
+    /** Get cluster unique identifier */
+    virtual std::string get_cluster_id(const DoutPrefixProvider* dpp,  optional_yield y) = 0;
+  
     virtual std::unique_ptr<RGWUser> get_user(const rgw_user& u) = 0;
     virtual std::unique_ptr<RGWObject> get_object(const rgw_obj_key& k) = 0;
     virtual int get_bucket(const DoutPrefixProvider *dpp, RGWUser* u, const rgw_bucket& b, std::unique_ptr<RGWBucket>* bucket, optional_yield y) = 0;
@@ -93,6 +98,7 @@ class RGWStore {
 			    std::unique_ptr<RGWBucket>* bucket,
 			    optional_yield y) = 0;
     virtual RGWBucketList* list_buckets(void) = 0;
+
     virtual bool is_meta_master() = 0;
     virtual int forward_request_to_master(const DoutPrefixProvider *dpp, RGWUser* user, obj_version *objv,
 					  bufferlist& in_data, JSONParser *jp, req_info& info,
