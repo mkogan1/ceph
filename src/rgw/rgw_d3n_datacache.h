@@ -235,8 +235,7 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
       r = d->flush(std::move(completed));
       return r;
-    } else
-      d->d3n_bypass_cache_write = false;
+    }
 
     if (d->rgwrados->d3n_data_cache->get(oid, len)) {
       // Read From Cache
