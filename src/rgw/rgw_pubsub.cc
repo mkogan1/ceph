@@ -240,8 +240,10 @@ void rgw_pubsub_s3_record::dump(Formatter *f) const {
   encode_json("eventVersion", eventVersion, f);
   encode_json("eventSource", eventSource, f);
   encode_json("awsRegion", awsRegion, f);
-  utime_t ut(eventTime);
-  encode_json("eventTime", ut, f);
+  {
+    utime_t ut(eventTime);
+    ut.gmtime_iso8601(f->dump_stream("eventTime"));
+  }
   encode_json("eventName", eventName, f);
   {
     Formatter::ObjectSection s(*f, "userIdentity");
