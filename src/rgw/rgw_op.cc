@@ -5098,20 +5098,24 @@ void RGWCopyObj::execute(optional_yield y)
 
   encode_delete_at_attr(delete_at, attrs);
 
-  // get src object size (cached in obj_ctx from verify_permission())
-  RGWObjState* astate = nullptr;
-  op_ret = src_object->get_obj_state(s->obj_ctx, *src_bucket, &astate,
-                                     s->yield, true);
+  uint64_t obj_size = 0;
+  {
+    // get src object size (cached in obj_ctx from verify_permission())
+    RGWObjState* astate = nullptr;
+    op_ret = src_object->get_obj_state(s->obj_ctx, *src_bucket, &astate,
+                                       s->yield, true);
     if (op_ret < 0) {
       return;
     }
-
+    obj_size = astate->size;
+  
     if (!s->system_request) { // no quota enforcement for system requests
-    // enforce quota against the destination bucket owner
-    op_ret = dest_bucket->check_quota(user_quota, bucket_quota,
+      // enforce quota against the destination bucket owner
+      op_ret = dest_bucket->check_quota(user_quota, bucket_quota,
 				      astate->accounted_size, y);
-    if (op_ret < 0) {
-      return;
+      if (op_ret < 0) {
+        return;
+      }
     }
   }
 
@@ -5154,7 +5158,7 @@ void RGWCopyObj::execute(optional_yield y)
 	   s->yield);
 
   // send request to notification manager
-  const auto ret = rgw::notify::publish_commit(s->object.get(), astate->size, mtime, etag, 
+  const auto ret = rgw::notify::publish_commit(s->object.get(), obj_size, mtime, etag, 
       dest_object->get_instance(), event_type, res);
   if (ret < 0) {
     ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
