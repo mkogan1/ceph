@@ -7925,7 +7925,7 @@ static std::vector<Option> get_rbd_options() {
 
     Option("rbd_persistent_cache_mode", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("disabled")
-    .set_enum_allowed({"disabled", "rwl", "ssd"})
+    .set_enum_allowed({"disabled", "rwl"})
     .set_description("enable persistent write back cache for this volume"),
 
     Option("rbd_persistent_cache_log_periodic_stats", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)

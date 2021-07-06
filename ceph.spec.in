@@ -33,7 +33,7 @@
 %bcond_without selinux
 %ifarch x86_64 ppc64le
 %bcond_without rbd_rwl_cache
-%bcond_without rbd_ssd_cache
+%bcond_with rbd_ssd_cache
 %global _system_pmdk 1
 %else
 %bcond_with rbd_rwl_cache
@@ -60,7 +60,7 @@
 %bcond_without lttng
 %global _system_pmdk 1
 %bcond_without rbd_rwl_cache
-%bcond_without rbd_ssd_cache
+%bcond_with rbd_ssd_cache
 %else
 %bcond_with lttng
 %global _system_pmdk 0
