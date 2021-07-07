@@ -1,6 +1,7 @@
 #include "include/random.h"
 #include "common/errno.h"
 
+#include "rgw/rgw_cache.h"
 #include "svc_notify.h"
 #include "svc_finisher.h"
 #include "svc_zone.h"
@@ -354,7 +355,7 @@ void RGWSI_Notify::_set_enabled(bool status)
   }
 }
 
-int RGWSI_Notify::distribute(const string& key, bufferlist& bl)
+int RGWSI_Notify::distribute(const string& key, const RGWCacheNotifyInfo& cni)
 {
   /* The RGW uses the control pool to store the watch notify objects.
     The precedence in RGWSI_Notify::do_start is to call to zone_svc->start and later to init_watch().
@@ -366,17 +367,19 @@ int RGWSI_Notify::distribute(const string& key, bufferlist& bl)
     RGWSI_RADOS::Obj notify_obj = pick_control_obj(key);
 
     ldout(cct, 10) << "distributing notification oid=" << notify_obj.get_ref().obj
-        << " bl.length()=" << bl.length() << dendl;
-    return robust_notify(notify_obj, bl);
+		       << " cni=" << cni << dendl;
+    return robust_notify(notify_obj, cni);
   }
   return 0;
 }
 
-int RGWSI_Notify::robust_notify(RGWSI_RADOS::Obj& notify_obj, bufferlist& bl)
+int RGWSI_Notify::robust_notify(RGWSI_RADOS::Obj& notify_obj,
+                                const RGWCacheNotifyInfo& cni)
 {
   // The reply of every machine that acks goes in here.
   boost::container::flat_set<std::pair<uint64_t, uint64_t>> acks;
-  bufferlist rbl;
+  bufferlist bl, rbl;
+  encode(cni, bl);
 
   // First, try to send, without being fancy about it.
   auto r = notify_obj.notify(bl, 0, &rbl);
@@ -384,7 +387,7 @@ int RGWSI_Notify::robust_notify(RGWSI_RADOS::Obj& notify_obj, bufferlist& bl)
   // If that doesn't work, get serious.
   if (r < 0) {
     ldout(cct, 1) << "robust_notify: If at first you don't succeed: "
-		  << cpp_strerror(-r) << dendl;
+		      << cpp_strerror(-r) << dendl;
 
 
     auto p = rbl.cbegin();
@@ -456,7 +459,7 @@ int RGWSI_Notify::robust_notify(RGWSI_RADOS::Obj& notify_obj, bufferlist& bl)
 	  }
 	} catch (const buffer::error& e) {
 	  ldout(cct, 0) << "robust_notify: notify response parse failed: "
-			<< e.what() << dendl;
+                        << e.what() << dendl;
 	  continue;
 	}
 	// If we got a good parse and timeouts is empty, that means
