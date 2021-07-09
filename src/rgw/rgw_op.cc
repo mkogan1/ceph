@@ -447,7 +447,7 @@ int modify_obj_attr(RGWRados* store, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucke
   RGWRados::Object::Read read_op(&op_target);
 
   read_op.params.attrs = &attrs;
-  
+
   int r = read_op.prepare();
   if (r < 0) {
     return r;
@@ -791,7 +791,7 @@ int rgw_build_object_policies(RGWRados *store, struct req_state *s,
     }
     s->object_acl = std::make_unique<RGWAccessControlPolicy>(s->cct);
     rgw_obj obj(s->bucket, s->object);
-      
+
     store->set_atomic(s->obj_ctx, obj);
     if (prefetch_data) {
       store->set_prefetch_data(s->obj_ctx, obj);
@@ -1302,7 +1302,7 @@ void RGWGetBucketTags::pre_exec()
   rgw_bucket_object_pre_exec(s);
 }
 
-void RGWGetBucketTags::execute() 
+void RGWGetBucketTags::execute()
 {
   auto iter = s->bucket_attrs.find(RGW_ATTR_TAGS);
   if (iter != s->bucket_attrs.end()) {
@@ -2883,7 +2883,7 @@ void RGWDeleteBucketWebsite::execute()
     bufferlist in_data;
     op_ret = forward_request_to_master(s, nullptr, store, in_data, nullptr);
     if (op_ret < 0) {
-      ldpp_dout(this, 0) << "NOTICE: forward_to_master failed on bucket=" << s->bucket.name 
+      ldpp_dout(this, 0) << "NOTICE: forward_to_master failed on bucket=" << s->bucket.name
 	                 << "returned err=" << op_ret << dendl;
       return;
     }
@@ -3626,7 +3626,7 @@ void RGWDeleteBucket::execute()
   if ( op_ret < 0) {
      ldpp_dout(this, 1) << "WARNING: failed to sync user stats before bucket delete: op_ret= " << op_ret << dendl;
   }
-  
+
   op_ret = store->check_bucket_empty(s->bucket_info);
   if (op_ret < 0) {
     return;
@@ -5061,7 +5061,7 @@ void RGWDeleteObj::execute()
   if (!s->object.empty()) {
     /* check if obj exists, read orig attrs */
     op_ret = get_obj_attrs(store, *(s->obj_ctx), s->bucket_info, obj, attrs);
-    
+
     if (need_object_expiration() || multipart_delete) {
       /* check if obj exists, read orig attrs */
       op_ret = get_obj_attrs(store, *(s->obj_ctx), s->bucket_info, obj, attrs);
@@ -5120,7 +5120,7 @@ void RGWDeleteObj::execute()
     // make reservation for notification if needed
     rgw::notify::reservation_t res(store, s, s->object);
     const auto versioned_object = s->bucket_info.versioning_enabled();
-    const auto event_type = versioned_object && s->object.have_instance() ? 
+    const auto event_type = versioned_object && s->object.have_instance() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     op_ret = rgw::notify::publish_reserve(event_type, res);
     if (op_ret < 0) {
@@ -5215,16 +5215,17 @@ bool RGWCopyObj::parse_copy_location(const boost::string_view& url_src,
     params_str = url_src.substr(pos + 1);
   }
 
-  boost::string_view dec_src{name_str};
-  if (dec_src[0] == '/')
-    dec_src.remove_prefix(1);
+  if (name_str[0] == '/') // trim leading slash
+    name_str.remove_prefix(1);
+
+  std::string dec_src = url_decode(name_str);
 
   pos = dec_src.find('/');
   if (pos == string::npos)
     return false;
 
-  bucket_name = url_decode(dec_src.substr(0, pos));
-  key.name = url_decode(dec_src.substr(pos + 1));
+  bucket_name = dec_src.substr(0, pos);
+  key.name = dec_src.substr(pos + 1);
 
   if (key.name.empty()) {
     return false;
@@ -5539,7 +5540,7 @@ void RGWCopyObj::execute()
 
 	// make reservation for notification if needed
   rgw::notify::reservation_t res(store, s, s->object);
-  const auto event_type = rgw::notify::ObjectCreatedCopy; 
+  const auto event_type = rgw::notify::ObjectCreatedCopy;
   op_ret = rgw::notify::publish_reserve(event_type, res);
   if (op_ret < 0) {
     return;
@@ -6696,7 +6697,7 @@ void RGWCompleteMultipart::execute()
   } else {
     ldpp_dout(this, 0) << "WARNING: failed to remove object " << meta_obj << dendl;
   }
-  
+
   const auto ret = rgw::notify::publish_commit(s->object, ofs, ceph::real_clock::now(), final_etag_str, event_type, res);
 
   if (ret < 0) {
@@ -7198,8 +7199,8 @@ void RGWDeleteMultiObj::execute()
 
     // make reservation for notification if needed
     const auto versioned_object = s->bucket_info.versioning_enabled();
-    rgw::notify::reservation_t res(store, s, obj.key); 
-    const auto event_type = versioned_object && obj.key.have_instance() ? 
+    rgw::notify::reservation_t res(store, s, obj.key);
+    const auto event_type = versioned_object && obj.key.have_instance() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     op_ret = rgw::notify::publish_reserve(event_type, res);
     if (op_ret < 0) {
