@@ -4796,7 +4796,7 @@ void RGWDeleteObj::execute(optional_yield y)
     }
 
     s->object->set_atomic(s->obj_ctx);
-    
+
     bool ver_restored = false;
     op_ret = s->object->swift_versioning_restore(s->obj_ctx, ver_restored, this);
     if (op_ret < 0) {
@@ -4863,16 +4863,17 @@ bool RGWCopyObj::parse_copy_location(const std::string_view& url_src,
     params_str = url_src.substr(pos + 1);
   }
 
-  std::string_view dec_src{name_str};
-  if (dec_src[0] == '/')
-    dec_src.remove_prefix(1);
+  if (name_str[0] == '/') // trim leading slash
+    name_str.remove_prefix(1);
+
+  std::string dec_src = url_decode(name_str);
 
   pos = dec_src.find('/');
   if (pos == string::npos)
     return false;
 
-  bucket_name = url_decode(dec_src.substr(0, pos));
-  key.name = url_decode(dec_src.substr(pos + 1));
+  bucket_name = dec_src.substr(0, pos);
+  key.name = dec_src.substr(pos + 1);
 
   if (key.name.empty()) {
     return false;
@@ -5135,7 +5136,7 @@ void RGWCopyObj::execute(optional_yield y)
       return;
     }
     obj_size = astate->size;
-  
+
     if (!s->system_request) { // no quota enforcement for system requests
       // enforce quota against the destination bucket owner
       op_ret = dest_bucket->check_quota(user_quota, bucket_quota,
