@@ -779,6 +779,8 @@ int DataLogBackends::trim_entries(int shard_id, std::string_view marker)
       r = -ENODATA;
     if (r == -ENODATA && be->gen_id < target_gen)
       r = 0;
+    if (be->gen_id == target_gen)
+      break;
     l.lock();
   };
   return r;
