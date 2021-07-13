@@ -657,7 +657,7 @@ WRITE_CLASS_ENCODER(rgw_cls_bi_put_op)
 
 struct rgw_cls_bi_list_op {
   uint32_t max;
-  string name;
+  string name_filter; // limit resultto one object and its instances
   string marker;
 
   rgw_cls_bi_list_op() : max(0) {}
@@ -665,7 +665,7 @@ struct rgw_cls_bi_list_op {
   void encode(bufferlist& bl) const {
     ENCODE_START(1, 1, bl);
     encode(max, bl);
-    encode(name, bl);
+    encode(name_filter, bl);
     encode(marker, bl);
     ENCODE_FINISH(bl);
   }
@@ -673,7 +673,7 @@ struct rgw_cls_bi_list_op {
   void decode(bufferlist::const_iterator& bl) {
     DECODE_START(1, bl);
     decode(max, bl);
-    decode(name, bl);
+    decode(name_filter, bl);
     decode(marker, bl);
     DECODE_FINISH(bl);
   }
