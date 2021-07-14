@@ -407,7 +407,7 @@ int RGWSI_Notify::robust_notify(const DoutPrefixProvider *dpp,
   // If we timed out, get serious.
   if (r == -ETIMEDOUT) {
     RGWCacheNotifyInfo info;
-    info.op = REMOVE_OBJ;
+    info.op = INVALIDATE_OBJ;
     info.obj = cni.obj;
     bufferlist retrybl;
     encode(info, retrybl);
