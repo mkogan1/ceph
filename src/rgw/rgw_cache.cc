@@ -210,7 +210,9 @@ void ObjectCache::put(const string& name, ObjectCacheInfo& info, rgw_cache_entry
     target.version = info.version;
 }
 
-bool ObjectCache::remove(const string& name)
+// WARNING: This function /must not/ be modified to cache a
+// negative lookup. It must only invalidate.
+bool ObjectCache::invalidate_remove(const string& name)
 {
   RWLock::WLocker l(lock);
 
