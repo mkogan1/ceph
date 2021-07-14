@@ -74,10 +74,10 @@ int RGWSI_SysObj_Cache::remove(RGWSysObjectCtxBase& obj_ctx,
   normalize_pool_and_obj(obj.pool, obj.oid, pool, oid);
 
   string name = normal_name(pool, oid);
-  cache.remove(name);
+  cache.invalidate_remove(name);
 
   ObjectCacheInfo info;
-  int r = distribute_cache(name, obj, info, REMOVE_OBJ);
+  int r = distribute_cache(name, obj, info, INVALIDATE_OBJ);
   if (r < 0) {
     ldout(cct, 0) << "ERROR: " << __func__ << "(): failed to distribute cache: r=" << r << dendl;
   }
@@ -244,7 +244,7 @@ int RGWSI_SysObj_Cache::set_attrs(const rgw_raw_obj& obj,
     if (r < 0)
       ldout(cct, 0) << "ERROR: failed to distribute cache for " << obj << dendl;
   } else {
-    cache.remove(name);
+    cache.invalidate_remove(name);
   }
 
   return ret;
@@ -286,7 +286,7 @@ int RGWSI_SysObj_Cache::write(const rgw_raw_obj& obj,
     if (r < 0)
       ldout(cct, 0) << "ERROR: failed to distribute cache for " << obj << dendl;
   } else {
-    cache.remove(name);
+    cache.invalidate_remove(name);
   }
 
   return ret;
@@ -319,7 +319,7 @@ int RGWSI_SysObj_Cache::write_data(const rgw_raw_obj& obj,
     if (r < 0)
       ldout(cct, 0) << "ERROR: failed to distribute cache for " << obj << dendl;
   } else {
-    cache.remove(name);
+    cache.invalidate_remove(name);
   }
 
   return ret;
@@ -426,8 +426,8 @@ int RGWSI_SysObj_Cache::watch_cb(uint64_t notify_id,
   case UPDATE_OBJ:
     cache.put(name, info.obj_info, NULL);
     break;
-  case REMOVE_OBJ:
-    cache.remove(name);
+  case INVALIDATE_OBJ:
+    cache.invalidate_remove(name);
     break;
   default:
     ldout(cct, 0) << "WARNING: got unknown notification op: " << info.op << dendl;
@@ -494,7 +494,7 @@ int RGWSI_SysObj_Cache::call_inspect(const std::string& target, Formatter* f)
 
 int RGWSI_SysObj_Cache::call_erase(const std::string& target)
 {
-  return cache.remove(target);
+  return cache.invalidate_remove(target);
 }
 
 int RGWSI_SysObj_Cache::call_zap()
