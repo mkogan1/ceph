@@ -673,10 +673,11 @@ int RGWDataChangesLog::add_entry(const rgw_bucket& bucket, int shard_id) {
 
 int DataLogBackends::list(int shard, int max_entries,
 			  std::vector<rgw_data_change_log_entry>& entries,
-			  std::optional<std::string_view> marker,
-			  std::string* out_marker, bool* truncated)
+			  std::string_view marker,
+			  std::string* out_marker,
+			  bool* truncated)
 {
-  const auto [start_id, start_cursor] = cursorgeno(marker);
+  const auto [start_id, start_cursor] = cursorgen(marker);
   auto gen_id = start_id;
   std::string out_cursor;
   while (max_entries > 0) {
@@ -713,7 +714,7 @@ int DataLogBackends::list(int shard, int max_entries,
 
 int RGWDataChangesLog::list_entries(int shard, int max_entries,
 				    std::vector<rgw_data_change_log_entry>& entries,
-				    std::optional<std::string_view> marker,
+				    std::string_view marker,
 				    std::string* out_marker, bool* truncated)
 {
   if (shard >= num_shards) {
@@ -729,7 +730,7 @@ int RGWDataChangesLog::list_entries(int max_entries,
   bool truncated;
   entries.clear();
   for (; marker.shard < num_shards && int(entries.size()) < max_entries;
-       marker.shard++, marker.marker.reset()) {
+       marker.shard++, marker.marker.clear()) {
     int ret = list_entries(marker.shard, max_entries - entries.size(),
 			   entries, marker.marker, NULL, &truncated);
     if (ret == -ENOENT) {
