@@ -1048,12 +1048,12 @@ Effect eval_or_pass(const boost::optional<Policy>& policy,
 		    const rgw::IAM::Environment& env,
 		    boost::optional<const rgw::auth::Identity&> id,
 		    const uint64_t op,
-		    const ARN& arn,
+		    const ARN& resource,
 				boost::optional<rgw::IAM::PolicyPrincipal&> princ_type=boost::none) {
   if (!policy)
     return Effect::Pass;
   else
-    return policy->eval(env, id, op, arn, princ_type);
+    return policy->eval(env, id, op, resource, princ_type);
 }
 
 }
@@ -1061,17 +1061,17 @@ Effect eval_or_pass(const boost::optional<Policy>& policy,
 Effect eval_identity_or_session_policies(const vector<Policy>& policies,
                           const rgw::IAM::Environment& env,
                           const uint64_t op,
-                          const ARN& arn) {
-  auto policy_res = Effect::Pass, prev_res = Effect::Pass;
-  for (auto& policy : policies) {
-    if (policy_res = eval_or_pass(policy, env, boost::none, op, arn); policy_res == Effect::Deny)
-      return policy_res;
-    else if (policy_res == Effect::Allow)
+                          const ARN& resource) {
+  auto usr_policy_res = Effect::Pass, prev_res = Effect::Pass;
+  for (auto& user_policy : policies) {
+    if (usr_policy_res = eval_or_pass(user_policy, env, boost::none, op, resource); usr_policy_res == Effect::Deny)
+      return usr_policy_res;
+    else if (usr_policy_res == Effect::Allow)
       prev_res = Effect::Allow;
-    else if (policy_res == Effect::Pass && prev_res == Effect::Allow)
-      policy_res = Effect::Allow;
+    else if (usr_policy_res == Effect::Pass && prev_res == Effect::Allow)
+      usr_policy_res = Effect::Allow;
   }
-  return policy_res;
+  return usr_policy_res;
 }
 
 bool verify_user_permission(const DoutPrefixProvider* dpp,
