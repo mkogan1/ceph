@@ -1048,11 +1048,11 @@ Effect eval_or_pass(const boost::optional<Policy>& policy,
 		    const rgw::IAM::Environment& env,
 		    boost::optional<const rgw::auth::Identity&> id,
 		    const uint64_t op,
-		    const ARN& arn) {
+		    const ARN& resource) {
   if (!policy)
     return Effect::Pass;
   else
-    return policy->eval(env, id, op, arn);
+    return policy->eval(env, id, op, resource);
 }
 
 }
@@ -1061,10 +1061,10 @@ Effect eval_user_policies(const vector<Policy>& user_policies,
                           const rgw::IAM::Environment& env,
                           boost::optional<const rgw::auth::Identity&> id,
                           const uint64_t op,
-                          const ARN& arn) {
+                          const ARN& resource) {
   auto usr_policy_res = Effect::Pass, prev_res = Effect::Pass;
   for (auto& user_policy : user_policies) {
-    if (usr_policy_res = eval_or_pass(user_policy, env, id, op, arn); usr_policy_res == Effect::Deny)
+    if (usr_policy_res = eval_or_pass(user_policy, env, id, op, resource); usr_policy_res == Effect::Deny)
       return usr_policy_res;
     else if (usr_policy_res == Effect::Allow)
       prev_res = Effect::Allow;

@@ -439,7 +439,7 @@ struct Statement {
 
   Effect eval(const Environment& e,
 	      boost::optional<const rgw::auth::Identity&> ida,
-	      std::uint64_t action, const ARN& resource) const;
+	      std::uint64_t action, boost::optional<const ARN&> resource) const;
 
   Effect eval_principal(const Environment& e,
 		       boost::optional<const rgw::auth::Identity&> ida) const;
@@ -471,7 +471,7 @@ struct Policy {
 
   Effect eval(const Environment& e,
 	      boost::optional<const rgw::auth::Identity&> ida,
-	      std::uint64_t action, const ARN& resource) const;
+	      std::uint64_t action, boost::optional<const ARN&> resource) const;
 
   Effect eval_principal(const Environment& e,
 	      boost::optional<const rgw::auth::Identity&> ida) const;
