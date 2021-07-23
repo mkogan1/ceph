@@ -3745,7 +3745,9 @@ public:
       stable_timestamp(stable_timestamp)
   {}
 
-  RGWCoroutine *store_marker(const string& new_marker, uint64_t index_pos, const real_time& timestamp) override {
+  const rgw_raw_obj& get_obj() const { return obj; }
+
+  RGWCoroutine* store_marker(const string& new_marker, uint64_t index_pos, const real_time& timestamp) override {
     sync_marker.position = new_marker;
     sync_marker.timestamp = timestamp;
 
@@ -4535,8 +4537,21 @@ int RGWBucketShardIncrementalSyncCR::operate()
       if (retcode < 0) {
         ldout(cct, 20) << "failed to update bucket sync status: "
             << cpp_strerror(retcode) << dendl;
-        drain_all();
         return set_cr_error(retcode);
+      }
+      yield {
+        // delete the shard status object
+	rgw_rados_ref status_obj;
+	retcode = sync_env->store->get_raw_obj_ref(marker_tracker.get_obj(), &status_obj);
+	if (retcode < 0) {
+          return set_cr_error(retcode);
+        }
+        call(new RGWRadosRemoveOidCR(sync_env->store, std::move(status_obj.ioctx),
+				     status_obj.obj.oid));
+        if (retcode < 0) {
+          ldout(cct, 20) << "failed to remove shard status object: " << cpp_strerror(retcode) << dendl;
+          return set_cr_error(retcode);
+        }
       }
     }
 
