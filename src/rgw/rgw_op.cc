@@ -8183,6 +8183,16 @@ void RGWPutObjRetention::execute(optional_yield y)
         op_ret = -EACCES;
         return;
       }
+    } else if (old_obj_retention.get_mode() == obj_retention.get_mode()) {
+      // ok if retention mode doesn't change
+    } else if (obj_retention.get_mode() == "GOVERNANCE") {
+      s->err.message = "can't change retention mode from COMPLIANCE to GOVERNANCE";
+      op_ret = -EACCES;
+      return;
+    } else if (!bypass_perm || !bypass_governance_mode) {
+      s->err.message = "can't change retention mode from GOVERNANCE without governance bypass";
+      op_ret = -EACCES;
+      return;
     }
   }
 
