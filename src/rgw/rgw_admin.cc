@@ -7541,7 +7541,8 @@ next:
       }
     }
 
-    RGWStorageStats stats;
+    constexpr bool omit_utilized_stats = false;
+    RGWStorageStats stats(omit_utilized_stats);
     ceph::real_time last_stats_sync;
     ceph::real_time last_stats_update;
     int ret = store->ctl()->user->read_stats(dpp(), user_id, &stats, null_yield,
