@@ -59,6 +59,7 @@ class HostAssignment(object):
     def __init__(self,
                  spec,  # type: ServiceSpec
                  hosts: List[orchestrator.HostSpec],
+                 unreachable_hosts: List[orchestrator.HostSpec],
                  daemons: List[orchestrator.DaemonDescription],
                  networks: Dict[str, Dict[str, List[str]]] = {},
                  filter_new_host=None,  # type: Optional[Callable[[str],bool]]
@@ -67,6 +68,7 @@ class HostAssignment(object):
         assert spec
         self.spec = spec  # type: ServiceSpec
         self.hosts: List[orchestrator.HostSpec] = hosts
+        self.unreachable_hosts: List[orchestrator.HostSpec] = unreachable_hosts
         self.filter_new_host = filter_new_host
         self.service_name = spec.service_name()
         self.daemons = daemons
@@ -163,6 +165,7 @@ class HostAssignment(object):
         existing_active: List[orchestrator.DaemonDescription] = []
         existing_standby: List[orchestrator.DaemonDescription] = []
         existing_slots: List[DaemonPlacement] = []
+        to_add: List[DaemonPlacement] = []
         to_remove: List[orchestrator.DaemonDescription] = []
         others = candidates.copy()
         for dd in daemons:
@@ -183,23 +186,32 @@ class HostAssignment(object):
         existing = existing_active + existing_standby
 
         # If we don't have <count> the list of candidates is definitive.
-        if count is None:
-            logger.debug('Provided hosts: %s' % candidates)
-            return candidates, others, to_remove
+        if not count:
+            to_add = [dd for dd in others if dd.hostname not in [
+                h.hostname for h in self.unreachable_hosts]]
+        else:
+            # The number of new slots that need to be selected in order to fulfill count
+            need = count - len(existing)
 
-        # The number of new slots that need to be selected in order to fulfill count
-        need = count - len(existing)
+            # we don't need any additional placements
+            if need <= 0:
+                to_remove.extend(existing[count:])
+                to_remove = [d for d in to_remove if d.hostname not in [
+                    h.hostname for h in self.unreachable_hosts]]
+                del existing_slots[count:]
+                return existing_slots, [], to_remove
 
-        # we don't need any additional placements
-        if need <= 0:
-            to_remove.extend(existing[count:])
-            del existing_slots[count:]
-            return existing_slots, [], to_remove
-
-        # ask the scheduler to select additional slots
-        to_add = others[:need]
-        logger.debug('Combine hosts with existing daemons %s + new hosts %s' % (
-            existing, to_add))
+            # ask the scheduler to select additional slots
+            for dp in others:
+                if need <= 0:
+                    break
+                if dp.hostname not in [h.hostname for h in self.unreachable_hosts]:
+                    to_add.append(dp)
+                    need -= 1  # this is last use of need in this function so it can work as a counter
+            logger.debug('Combine hosts with existing daemons %s + new hosts %s' % (
+                existing, to_add))
+        to_remove = [d for d in to_remove if d.hostname not in [
+            h.hostname for h in self.unreachable_hosts]]
         return existing_slots + to_add, to_add, to_remove
 
     def find_ip_on_host(self, hostname: str, subnets: List[str]) -> Optional[str]:

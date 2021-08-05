@@ -132,6 +132,7 @@ def run_scheduler_test(results, mk_spec, hosts, daemons, key_elems):
             host_res, to_add, to_remove = HostAssignment(
                 spec=spec,
                 hosts=hosts,
+                unreachable_hosts=[],
                 daemons=daemons,
             ).place()
             if isinstance(host_res, list):
@@ -147,6 +148,7 @@ def run_scheduler_test(results, mk_spec, hosts, daemons, key_elems):
             host_res, to_add, to_remove = HostAssignment(
                 spec=spec,
                 hosts=hosts,
+                unreachable_hosts=[],
                 daemons=daemons
             ).place()
 
@@ -588,6 +590,7 @@ def test_node_assignment(service_type, placement, hosts, daemons,
     all_slots, to_add, to_remove = HostAssignment(
         spec=spec,
         hosts=[HostSpec(h, labels=['foo']) for h in hosts],
+        unreachable_hosts=[],
         daemons=daemons,
         allow_colo=allow_colo,
     ).place()
@@ -690,6 +693,7 @@ def test_node_assignment2(service_type, placement, hosts,
     hosts, to_add, to_remove = HostAssignment(
         spec=ServiceSpec(service_type, placement=placement),
         hosts=[HostSpec(h, labels=['foo']) for h in hosts],
+        unreachable_hosts=[],
         daemons=daemons,
     ).place()
     assert len(hosts) == expected_len
@@ -723,6 +727,7 @@ def test_node_assignment3(service_type, placement, hosts,
     hosts, to_add, to_remove = HostAssignment(
         spec=ServiceSpec(service_type, placement=placement),
         hosts=[HostSpec(h) for h in hosts],
+        unreachable_hosts=[],
         daemons=daemons,
     ).place()
     assert len(hosts) == expected_len
@@ -768,6 +773,7 @@ def test_node_assignment4(spec, networks, daemons,
     all_slots, to_add, to_remove = HostAssignment(
         spec=spec,
         hosts=[HostSpec(h, labels=['foo']) for h in networks.keys()],
+        unreachable_hosts=[],
         daemons=daemons,
         allow_colo=True,
         networks=networks,
@@ -851,6 +857,7 @@ def test_bad_specs(service_type, placement, hosts, daemons, expected):
         hosts, to_add, to_remove = HostAssignment(
             spec=ServiceSpec(service_type, placement=placement),
             hosts=[HostSpec(h) for h in hosts],
+            unreachable_hosts=[],
             daemons=daemons,
         ).place()
     assert str(e.value) == expected
@@ -1026,8 +1033,105 @@ def test_active_assignment(service_type, placement, hosts, daemons, expected, ex
     hosts, to_add, to_remove = HostAssignment(
         spec=spec,
         hosts=[HostSpec(h) for h in hosts],
+        unreachable_hosts=[],
         daemons=daemons,
     ).place()
     assert sorted([h.hostname for h in hosts]) in expected
+    assert sorted([h.hostname for h in to_add]) in expected_add
+    assert sorted([h.name() for h in to_remove]) in expected_remove
+
+
+class UnreachableHostsTest(NamedTuple):
+    service_type: str
+    placement: PlacementSpec
+    hosts: List[str]
+    unreachables_hosts: List[str]
+    daemons: List[DaemonDescription]
+    expected_add: List[List[str]]
+    expected_remove: List[List[str]]
+
+
+@pytest.mark.parametrize("service_type,placement,hosts,unreachable_hosts,daemons,expected_add,expected_remove",
+                         [
+                             UnreachableHostsTest(
+                                 'mgr',
+                                 PlacementSpec(count=3),
+                                 'host1 host2 host3'.split(),
+                                 ['host2'],
+                                 [],
+                                 [['host1', 'host3']],
+                                 [[]],
+                             ),
+                             UnreachableHostsTest(
+                                 'mgr',
+                                 PlacementSpec(hosts=['host3']),
+                                 'host1 host2 host3'.split(),
+                                 ['host1'],
+                                 [
+                                     DaemonDescription('mgr', 'a', 'host1'),
+                                     DaemonDescription('mgr', 'b', 'host2'),
+                                     DaemonDescription('mgr', 'c', 'host3', is_active=True),
+                                 ],
+                                 [[]],
+                                 [['mgr.b']],
+                             ),
+                             UnreachableHostsTest(
+                                 'mgr',
+                                 PlacementSpec(count=3),
+                                 'host1 host2 host3 host4'.split(),
+                                 ['host1'],
+                                 [
+                                     DaemonDescription('mgr', 'a', 'host1'),
+                                     DaemonDescription('mgr', 'b', 'host2'),
+                                     DaemonDescription('mgr', 'c', 'host3', is_active=True),
+                                 ],
+                                 [[]],
+                                 [[]],
+                             ),
+                             UnreachableHostsTest(
+                                 'mgr',
+                                 PlacementSpec(count=1),
+                                 'host1 host2 host3 host4'.split(),
+                                 'host1 host3'.split(),
+                                 [
+                                     DaemonDescription('mgr', 'a', 'host1'),
+                                     DaemonDescription('mgr', 'b', 'host2'),
+                                     DaemonDescription('mgr', 'c', 'host3', is_active=True),
+                                 ],
+                                 [[]],
+                                 [['mgr.b']],
+                             ),
+                             UnreachableHostsTest(
+                                 'mgr',
+                                 PlacementSpec(count=3),
+                                 'host1 host2 host3 host4'.split(),
+                                 ['host2'],
+                                 [],
+                                 [['host1', 'host3', 'host4']],
+                                 [[]],
+                             ),
+                             UnreachableHostsTest(
+                                 'mgr',
+                                 PlacementSpec(count=3),
+                                 'host1 host2 host3 host4'.split(),
+                                 'host1 host4'.split(),
+                                 [],
+                                 [['host2', 'host3']],
+                                 [[]],
+                             ),
+
+                         ])
+def test_unreachable_host(service_type, placement, hosts, unreachable_hosts, daemons, expected_add, expected_remove):
+
+    spec = ServiceSpec(service_type=service_type,
+                       service_id=None,
+                       placement=placement)
+
+    hosts, to_add, to_remove = HostAssignment(
+        spec=spec,
+        hosts=[HostSpec(h) for h in hosts],
+        unreachable_hosts=[HostSpec(h) for h in unreachable_hosts],
+        daemons=daemons,
+    ).place()
     assert sorted([h.hostname for h in to_add]) in expected_add
     assert sorted([h.name() for h in to_remove]) in expected_remove

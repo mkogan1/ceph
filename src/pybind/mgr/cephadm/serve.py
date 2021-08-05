@@ -608,7 +608,8 @@ class CephadmServe:
 
         ha = HostAssignment(
             spec=spec,
-            hosts=self.mgr._hosts_with_daemon_inventory(),
+            hosts=self.mgr._schedulable_hosts(),
+            unreachable_hosts=self.mgr._unreachable_hosts(),
             daemons=daemons,
             networks=self.mgr.cache.networks,
             filter_new_host=matches_network if service_type == 'mon'
