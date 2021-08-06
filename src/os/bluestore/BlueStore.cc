@@ -13720,6 +13720,10 @@ void BlueStore::_do_write_big(
     if (!wctx->compress) {
       auto end = o->extent_map.extent_map.end();
 
+      dout(20) << __func__ << " may be defer: 0x" << std::hex
+	       << offset << "~" << l
+               << std::dec << dendl;
+
       if (prefer_deferred_size_snapshot &&
           l <= prefer_deferred_size_snapshot * 2) {
         // Single write that spans two adjusted existing blobs can result
@@ -13794,13 +13798,17 @@ void BlueStore::_do_write_big(
             _do_write_big_apply_deferred(txc, c, o, tail_info,
               blp, wctx);
           }
+	  dout(20) << __func__ << " defer big: 0x" << std::hex
+		   << offset << "~" << l
+		   << std::dec << dendl;
           offset += l;
           length -= l;
-          logger->inc(l_bluestore_write_big_blobs, remaining ? 2 : 1);
+	  logger->inc(l_bluestore_write_big_blobs, remaining ? 2 : 1);
           logger->inc(l_bluestore_write_big_deferred, remaining ? 2 : 1);
           continue;
         }
       }
+      dout(20) << __func__ << " lookup for blocks to reuse..." << dendl;
 
       o->extent_map.punch_hole(c, offset, l, &wctx->old_extents);
 
@@ -13812,7 +13820,6 @@ void BlueStore::_do_write_big(
         prev_ep = ep;
         --prev_ep;
       }
-      dout(20) << __func__ << " no deferred" << dendl;
 
       auto min_off = offset >= max_bsize ? offset - max_bsize : 0;
       // search suitable extent in both forward and reverse direction in
@@ -13822,9 +13829,8 @@ void BlueStore::_do_write_big(
       do {
 	any_change = false;
 	if (ep != end && ep->logical_offset < offset + max_bsize) {
-          dout(20) << __func__ << " considering " << *ep << dendl;
-          dout(20) << __func__ << " considering " << *(ep->blob)
-            << " bstart 0x" << std::hex << ep->blob_start() << std::dec << dendl;
+          dout(20) << __func__ << " considering " << *ep
+                   << " bstart 0x" << std::hex << ep->blob_start() << std::dec << dendl;
 
           if (offset >= ep->blob_start() &&
               ep->blob->can_reuse_blob(min_alloc_size, max_bsize,
@@ -13842,9 +13848,8 @@ void BlueStore::_do_write_big(
 	}
 
 	if (prev_ep != end && prev_ep->logical_offset >= min_off) {
-          dout(20) << __func__ << " considering rev " << *prev_ep << dendl;
-          dout(20) << __func__ << " considering reverse " << *(prev_ep->blob)
-            << " bstart 0x" << std::hex << prev_ep->blob_start() << std::dec << dendl;
+          dout(20) << __func__ << " considering rev " << *prev_ep
+                   << " bstart 0x" << std::hex << prev_ep->blob_start() << std::dec << dendl;
           if (prev_ep->blob->can_reuse_blob(min_alloc_size, max_bsize,
                                     	    offset - prev_ep->blob_start(),
                                     	    &l)) {
@@ -13872,6 +13877,10 @@ void BlueStore::_do_write_big(
     bufferlist t;
     blp.copy(l, t);
     wctx->write(offset, b, l, b_off, t, b_off, l, false, new_blob);
+    dout(20) << __func__ << " schedule write big: 0x"
+      << std::hex << offset << "~" << l << std::dec
+      << (new_blob ? " new " : " reuse ")
+      << *b << dendl;
     offset += l;
     length -= l;
     logger->inc(l_bluestore_write_big_blobs);
