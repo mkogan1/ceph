@@ -8,7 +8,7 @@ from mgr_module import HandleCommandResult
 from orchestrator import DaemonDescription
 from ceph.deployment.service_spec import AlertManagerSpec
 from cephadm.services.cephadmservice import CephadmService, CephadmDaemonDeploySpec
-from mgr_util import verify_tls, ServerConfigException, create_self_signed_cert
+from mgr_util import verify_tls, ServerConfigException, create_self_signed_cert, build_url
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +75,9 @@ class GrafanaService(CephadmService):
         # TODO: signed cert
         dd = self.get_active_daemon(daemon_descrs)
         assert dd.hostname is not None
-        service_url = 'https://{}:{}'.format(
-            self._inventory_get_addr(dd.hostname), self.DEFAULT_SERVICE_PORT)
+        addr = dd.ip if dd.ip else self._inventory_get_addr(dd.hostname)
+        port = dd.ports[0] if dd.ports else self.DEFAULT_SERVICE_PORT
+        service_url = build_url(scheme='https', host=addr, port=port)
         self._set_service_url_on_dashboard(
             'Grafana',
             'dashboard get-grafana-api-url',
