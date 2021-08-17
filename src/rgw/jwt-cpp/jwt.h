@@ -331,7 +331,13 @@ namespace jwt {
 				if (e && n) {
 					EVP_PKEY* pRsaKey = EVP_PKEY_new();
 					RSA* rsa = RSA_new();
+					#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
+					rsa->n = n;
+					rsa->e = e;
+					rsa->d = nullptr;
+					#else
 					RSA_set0_key(rsa, n, e, nullptr);
+					#endif
 					EVP_PKEY_assign_RSA(pRsaKey, rsa);
 					shared_ptr<EVP_PKEY> p(pRsaKey, EVP_PKEY_free);
 					pkey = p;
