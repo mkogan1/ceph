@@ -1061,17 +1061,15 @@ void RGWOp_BILog_Status::execute()
 
     ldout(s->cct, 20) << "RGWOp_BILog_Status::execute(): getting sync status for pipe=" << pipe << dendl;
 
-    if (version > 1) {
-      http_ret = rgw_read_bucket_full_sync_status(
-	this,
-	store,
-	pipe,
-	&status.sync_status,
-	s->yield);
-      if (op_ret < 0) {
-	ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
-	return;
-      }
+    http_ret = rgw_read_bucket_full_sync_status(
+      this,
+      store,
+      pipe,
+      &status.sync_status,
+      s->yield);
+    if (http_ret < 0) {
+      ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
+      return;
     }
 
     op_ret = rgw_read_bucket_inc_sync_status(
@@ -1133,19 +1131,19 @@ void RGWOp_BILog_Status::execute()
       pipe.dest.bucket = pinfo->bucket;
     }
 
-    if (version > 1) {
-      http_ret = rgw_read_bucket_full_sync_status(
-	this,
-	store,
-	pipe,
-	&status.sync_status,
-	s->yield);
-      if (op_ret < 0) {
-	ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
-	return;
-      }
+    http_ret = rgw_read_bucket_full_sync_status(
+      this,
+      store,
+      pipe,
+      &status.sync_status,
+      s->yield);
+    if (op_ret < 0) {
+      ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
+      return;
     }
-    int r = rgw_read_bucket_inc_sync_status(this, store, pipe, *pinfo, &info, status.sync_status.incremental_gen, &current_status);
+
+    int r = rgw_read_bucket_inc_sync_status(this, store,
+					    pipe, *pinfo, &info, status.sync_status.incremental_gen, &current_status);
     if (r < 0) {
       ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_inc_sync_status() on pipe=" << pipe << " returned ret=" << r << dendl;
       op_ret = r;
