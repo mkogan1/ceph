@@ -413,6 +413,39 @@ void rgw_filter_attrset(map<string, bufferlist>& unfiltered_attrset, const strin
   }
 }
 
+void rgw_fix_etag(CephContext *cct, map<string, bufferlist> *attrset)
+{
+  if (!attrset)
+    return;
+  map<string, bufferlist>::iterator iter;
+  iter = attrset->find(RGW_ATTR_ETAG);
+  if (iter == attrset->end())
+    return;
+  bufferlist& etagbl = iter->second;
+  if (etagbl.length() < CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+    return;
+  }
+  if (etagbl.length() == CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
+	!etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
+    return;
+  }
+  if (etagbl.length() > CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
+	etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
+	std::isdigit(etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
+    return;
+  }
+  if (etagbl.length() == CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+    etagbl.append('\0');
+    return;
+  }
+  std::string etag = etagbl.to_str();
+  ldout(cct, 2) << "fixing etag <" << etag << ">" << dendl;
+  etagbl.clear();
+  etag.resize(CEPH_CRYPTO_MD5_DIGESTSIZE*2);
+  etagbl.append(etag.c_str(), CEPH_CRYPTO_MD5_DIGESTSIZE*2+1);
+  return;
+}
+
 RGWDataAccess::RGWDataAccess(rgw::sal::RGWRadosStore *_store) : store(_store)
 {
   sysobj_ctx = std::make_unique<RGWSysObjectCtx>(store->svc()->sysobj->init_obj_ctx());
