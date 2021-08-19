@@ -1071,6 +1071,7 @@ void RGWOp_BILog_Status::execute()
       ldpp_dout(this, -1) << "ERROR: rgw_read_bucket_full_sync_status() on pipe=" << pipe << " returned ret=" << op_ret << dendl;
       return;
     }
+    status.inc_status.resize(status.sync_status.shards_done_with_gen.size());
 
     op_ret = rgw_read_bucket_inc_sync_status(
       this,
@@ -1142,6 +1143,7 @@ void RGWOp_BILog_Status::execute()
       return;
     }
 
+    current_status.resize(status.sync_status.shards_done_with_gen.size());
     int r = rgw_read_bucket_inc_sync_status(this, store,
 					    pipe, *pinfo, &info, status.sync_status.incremental_gen, &current_status);
     if (r < 0) {
