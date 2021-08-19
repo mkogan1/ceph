@@ -109,6 +109,39 @@ const char *rgw_find_mime_by_ext(string& ext)
   return iter->second.c_str();
 }
 
+void rgw_fix_etag(CephContext *cct, map<std::string, bufferlist> *attrset)
+{
+  if (!attrset)
+    return;
+  map<string, bufferlist>::iterator iter;
+  iter = attrset->find(RGW_ATTR_ETAG);
+  if (iter == attrset->end())
+    return;
+  bufferlist& etagbl = iter->second;
+  if (etagbl.length() < CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+    return;
+  }
+  if (etagbl.length() == CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
+	!etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
+    return;
+  }
+  if (etagbl.length() > CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
+	etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
+	std::isdigit(etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
+    return;
+  }
+  if (etagbl.length() == CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+    etagbl.append('\0');
+    return;
+  }
+  std::string etag = etagbl.to_str();
+  ldout(cct, 2) << "fixing etag <" << etag << ">" << dendl;
+  etagbl.clear();
+  etag.resize(CEPH_CRYPTO_MD5_DIGESTSIZE*2);
+  etagbl.append(etag.c_str(), CEPH_CRYPTO_MD5_DIGESTSIZE*2+1);
+  return;
+}
+
 int rgw_tools_init(const DoutPrefixProvider *dpp, CephContext *cct)
 {
   ext_mime_map = new std::map<std::string, std::string>;
