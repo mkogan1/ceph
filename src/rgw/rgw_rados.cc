@@ -8196,6 +8196,7 @@ int RGWRados::raw_obj_stat(rgw_raw_obj& obj, uint64_t *psize, real_time *pmtime,
     *pmtime = ceph::real_clock::from_timespec(mtime_ts);
   if (attrs) {
     rgw_filter_attrset(unfiltered_attrset, RGW_ATTR_PREFIX, attrs);
+    rgw_fix_etag(cct, attrs);
   }
 
   return 0;
