@@ -1213,6 +1213,8 @@ int RGWPutObjTags::verify_permission()
 
   //Using buckets tags for authorization makes more sense.
   auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
+  if (has_s3_existing_tag)
+    rgw_iam_add_objtags(this, store, s, true, false);
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
   if (!verify_object_permission(this, s,iam_action))
