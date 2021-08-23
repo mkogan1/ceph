@@ -405,7 +405,7 @@ def get_default_addr():
         return result
 
 
-def build_url(host: str, scheme: Optional[str] = None, port: Optional[int] = None) -> str:
+def build_url(host: str, scheme: Optional[str] = None, port: Optional[int] = None, path: str = '') -> str:
     """
     Build a valid URL. IPv6 addresses specified in host will be enclosed in brackets
     automatically.
@@ -418,6 +418,10 @@ def build_url(host: str, scheme: Optional[str] = None, port: Optional[int] = Non
 
     >>> build_url('fce:9af7:a667:7286:4917:b8d3:34df:8373', port=80, scheme='http')
     'http://[fce:9af7:a667:7286:4917:b8d3:34df:8373]:80'
+
+    >>> build_url('example.com', 'https', 443, path='/metrics')
+    'https://example.com:443/metrics'
+
 
     :param scheme: The scheme, e.g. http, https or ftp.
     :type scheme: str
@@ -433,7 +437,7 @@ def build_url(host: str, scheme: Optional[str] = None, port: Optional[int] = Non
     pr = urllib.parse.ParseResult(
         scheme=scheme if scheme else '',
         netloc=netloc,
-        path='',
+        path=path,
         params='',
         query='',
         fragment='')
