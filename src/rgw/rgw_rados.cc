@@ -1868,6 +1868,8 @@ int RGWRados::Bucket::List::list_objects_ordered(
       rgw_obj_index_key index_key = entry.key;
       rgw_obj_key obj(index_key);
 
+      rgw_fix_etag(cct, entry.meta.etag);
+
       ldpp_dout(dpp, 20) << "RGWRados::Bucket::List::" << __func__ <<
 	" considering entry " << entry.key << dendl;
 
@@ -8062,6 +8064,7 @@ int RGWRados::bi_get_instance(const DoutPrefixProvider *dpp, const RGWBucketInfo
     ldpp_dout(dpp, 0) << "ERROR: failed to decode bi_entry()" << dendl;
     return -EIO;
   }
+  rgw_fix_etag(cct, dirent->meta.etag);
 
   return 0;
 }
@@ -8761,6 +8764,9 @@ int RGWRados::cls_bucket_list_unordered(const DoutPrefixProvider *dpp,
 
       bool force_check = force_check_filter &&
 	force_check_filter(dirent.key.name);
+
+      rgw_fix_etag(cct, dirent.meta.etag);
+
       if ((!dirent.exists && !dirent.is_delete_marker()) ||
 	  !dirent.pending_map.empty() ||
 	  force_check) {
