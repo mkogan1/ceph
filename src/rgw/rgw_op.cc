@@ -7883,7 +7883,7 @@ int RGWBulkUploadOp::handle_file(const boost::string_ref path,
   std::map<std::string, ceph::bufferlist> attrs;
   std::string etag = calc_md5;
   ceph::bufferlist etag_bl;
-  etag_bl.append(etag.c_str(), etag.size() + 1);
+  etag_bl.append(etag.c_str(), etag.size());
   attrs.emplace(RGW_ATTR_ETAG, std::move(etag_bl));
 
   /* Create metadata: ACLs. */
