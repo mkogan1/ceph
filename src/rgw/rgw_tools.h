@@ -268,4 +268,7 @@ using RGWDataAccessRef = std::shared_ptr<RGWDataAccess>;
 /// calls and error handling.
 void rgw_complete_aio_completion(librados::AioCompletion* c, int r);
 
+void rgw_fix_etag(CephContext *cct, bufferlist& etagbl);
+void rgw_fix_etag(CephContext *cct, string& etag);
+
 #endif
