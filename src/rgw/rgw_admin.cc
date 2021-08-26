@@ -1123,6 +1123,8 @@ log_type get_log_type(const string& type_str) {
   return static_cast<log_type>(0xff);
 }
 
+#if 0
+// XXX not used?  remove me.
 void dump_bi_entry(bufferlist& bl, BIIndexType index_type, Formatter *formatter)
 {
   auto iter = bl.cbegin();
@@ -1132,6 +1134,7 @@ void dump_bi_entry(bufferlist& bl, BIIndexType index_type, Formatter *formatter)
       {
         rgw_bucket_dir_entry entry;
         decode(entry, iter);
+        rgw_fix_etag(xxx, entry.meta.etag);
         encode_json("entry", entry, formatter);
       }
       break;
@@ -1147,6 +1150,7 @@ void dump_bi_entry(bufferlist& bl, BIIndexType index_type, Formatter *formatter)
       break;
   }
 }
+#endif
 
 static void show_user_info(RGWUserInfo& info, Formatter *formatter)
 {
