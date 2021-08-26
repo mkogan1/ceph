@@ -279,4 +279,8 @@ void rgw_complete_aio_completion(librados::AioCompletion* c, int r);
 // (Currently providing nullptr will wipe all attributes.)
 
 std::map<std::string, ceph::buffer::list>* no_change_attrs();
+
+void rgw_fix_etag(CephContext *cct, bufferlist& etagbl);
+void rgw_fix_etag(CephContext *cct, string& etag);
+
 #endif
