@@ -389,29 +389,7 @@ void rgw_fix_etag(CephContext *cct, map<string, bufferlist> *attrset)
   iter = attrset->find(RGW_ATTR_ETAG);
   if (iter == attrset->end())
     return;
-  bufferlist& etagbl = iter->second;
-  if (etagbl.length() < CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
-    return;
-  }
-  if (etagbl.length() == CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
-	!etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
-    return;
-  }
-  if (etagbl.length() > CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
-	etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
-	std::isdigit(etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
-    return;
-  }
-  if (etagbl.length() == CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
-    etagbl.append('\0');
-    return;
-  }
-  std::string etag = etagbl.to_str();
-  ldout(cct, 2) << "fixing etag <" << etag << ">" << dendl;
-  etagbl.clear();
-  etag.resize(CEPH_CRYPTO_MD5_DIGESTSIZE*2);
-  etagbl.append(etag.c_str(), CEPH_CRYPTO_MD5_DIGESTSIZE*2+1);
-  return;
+  rgw_fix_etag(cct, iter->second);
 }
 
 RGWDataAccess::RGWDataAccess(RGWRados *_store) : store(_store)
@@ -603,4 +581,38 @@ void rgw_complete_aio_completion(librados::AioCompletion* c, int r) {
   librados::C_AioCompleteAndSafe cb(pc);
   // NOT complete, since complete would free it.
   cb.finish(r);
+}
+
+void rgw_fix_etag(CephContext *cct, bufferlist& etagbl)
+{
+  if (etagbl.length() <= CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+    return;
+  }
+  if (etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
+	std::isdigit(etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
+    return;
+  }
+  std::string etag = etagbl.to_str();
+  if (etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
+    ldout(cct, 2) << "trimming junk from etag <" << etag << ">" << dendl;
+  }
+  etagbl.clear();
+  etagbl.append(etag.c_str(), CEPH_CRYPTO_MD5_DIGESTSIZE*2);
+  return;
+}
+
+void rgw_fix_etag(CephContext *cct, string& etag)
+{
+  if (etag.length() <= CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+    return;
+  }
+  if (etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
+	std::isdigit(etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
+    return;
+  }
+  if (etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
+    ldout(cct, 2) << "trimming junk from etag <" << etag << ">" << dendl;
+  }
+  etag.resize(CEPH_CRYPTO_MD5_DIGESTSIZE*2);
+  return;
 }
