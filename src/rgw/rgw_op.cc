@@ -893,8 +893,11 @@ static int rgw_iam_add_objtags(const DoutPrefixProvider *dpp, RGWRados* store, s
 }
 
 static int rgw_iam_add_objtags(const DoutPrefixProvider *dpp, RGWRados* store, struct req_state* s, bool has_existing_obj_tag, bool has_resource_tag) {
-  rgw_obj obj = rgw_obj(s->bucket, s->object);
-  return rgw_iam_add_objtags(dpp, store, s, obj, has_existing_obj_tag, has_resource_tag);
+  if (!s->object.empty()) {
+    rgw_obj obj = rgw_obj(s->bucket, s->object);
+    return rgw_iam_add_objtags(dpp, store, s, obj, has_existing_obj_tag, has_resource_tag);
+  }
+  return 0;
 }
 
 static int rgw_iam_add_buckettags(const DoutPrefixProvider *dpp, struct req_state* s, map <string, bufferlist>& attrs) {
@@ -1212,7 +1215,7 @@ int RGWPutObjTags::verify_permission()
     rgw::IAM::s3PutObjectVersionTagging;
 
   //Using buckets tags for authorization makes more sense.
-  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, false);
+  auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, s, true);
   if (has_s3_existing_tag)
     rgw_iam_add_objtags(this, store, s, true, false);
   if (has_s3_resource_tag)
