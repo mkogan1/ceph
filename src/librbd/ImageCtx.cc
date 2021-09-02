@@ -732,7 +732,7 @@ public:
                                 bool thread_safe) {
     ldout(cct, 20) << __func__ << dendl;
 
-    RWLock::WLocker md_locker(image_lock);
+    std::unique_lock md_locker(image_lock);
 
     // reset settings back to global defaults
     for (auto& key : config_overrides) {

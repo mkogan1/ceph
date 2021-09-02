@@ -857,7 +857,7 @@ template <typename I>
 void ImageReplayer<I>::restart(Context *on_finish)
 {
   {
-    Mutex::Locker locker(m_lock);
+    std::lock_guard locker(m_lock);
     m_restart_requested = true;
   }
 
