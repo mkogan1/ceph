@@ -6440,7 +6440,8 @@ void RGWDeleteMultiObj::execute()
     // verify_object_lock
     bool check_obj_lock = obj.key.have_instance() && s->bucket_info.obj_lock_enabled();
     if (check_obj_lock) {
-      int get_attrs_response = get_obj_attrs(store, s, obj, attrs);
+      int get_attrs_response =
+	get_obj_attrs(store, *(s->obj_ctx), s->bucket_info, obj, attrs);
       if (get_attrs_response < 0) {
         if (get_attrs_response == -ENOENT) {
           // object maybe delete_marker, skip check_obj_lock
