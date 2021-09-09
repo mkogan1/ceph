@@ -8,6 +8,7 @@ from ceph_volume.util.device import Device
 from ceph_volume import decorators, terminal, process
 from ceph_volume.api import lvm as api
 from ceph_volume.systemd import systemctl
+from ceph_volume.devices.lvm.common import valid_osd_id
 
 
 logger = logging.getLogger(__name__)
@@ -535,6 +536,7 @@ class NewVolume(object):
             '--osd-id',
             required=True,
             help='Specify an OSD ID to attach new volume to',
+            type=valid_osd_id,
         )
 
         parser.add_argument(
