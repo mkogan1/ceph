@@ -379,11 +379,11 @@ add_executable(ceph_test_librgw_admin_user test_librgw_admin_user.cc)
 target_link_libraries(ceph_test_librgw_admin_user
   rgw_admin_user
   cls_otp_client
+  cls_2pc_queue_client
   librados
   ceph-common
   ${UNITTEST_LIBS}
   ${EXTRALIBS}
-  cls_2pc_queue_client
    )
 
 endif(${WITH_RADOSGW})
