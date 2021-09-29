@@ -98,10 +98,9 @@ DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph/rhceph-5-dashboard-rhel8:late
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.6"
 
 #XXX: not accounted for in backported downstream change
-#DEFAULT_HAPROXY_IMAGE = 'docker.io/library/haproxy:2.3'
-#DEFAULT_KEEPALIVED_IMAGE = 'docker.io/arcts/keepalived'
-=======
->>>>>>> a1773ceb602... mgr/cephadm: update downstream monitoring tags
+#XXX:  https://bugzilla.redhat.com/show_bug.cgi?id=2007648
+DEFAULT_HAPROXY_IMAGE = 'docker.io/library/haproxy:2.3'
+DEFAULT_KEEPALIVED_IMAGE = 'docker.io/arcts/keepalived'
 # ------------------------------------------------------------------------------
 
 
