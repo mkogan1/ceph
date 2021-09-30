@@ -92,7 +92,7 @@ const char *rgw_find_mime_by_ext(std::string& ext);
 void rgw_filter_attrset(std::map<std::string, bufferlist>& unfiltered_attrset, const std::string& check_prefix,
                         std::map<std::string, bufferlist> *attrset);
 
-void rgw_fix_etag(CephContext *, map<string, bufferlist> *);
+void rgw_fix_etag(CephContext *, std::map<std::string, bufferlist> *);
 
 /// indicates whether the current thread is in boost::asio::io_context::run(),
 /// used to log warnings if synchronous librados calls are made
@@ -281,6 +281,6 @@ void rgw_complete_aio_completion(librados::AioCompletion* c, int r);
 std::map<std::string, ceph::buffer::list>* no_change_attrs();
 
 void rgw_fix_etag(CephContext *cct, bufferlist& etagbl);
-void rgw_fix_etag(CephContext *cct, string& etag);
+void rgw_fix_etag(CephContext *cct, std::string& etag);
 
 #endif
