@@ -619,34 +619,59 @@ void rgw_complete_aio_completion(librados::AioCompletion* c, int r) {
 
 void rgw_fix_etag(CephContext *cct, bufferlist& etagbl)
 {
-  if (etagbl.length() <= CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+  auto l { etagbl.length() };
+  if (l <= CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
     return;
   }
-  if (etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
+  if (l > CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
+	etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
 	std::isdigit(etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
-    return;
+    while ((--l)) {
+      if (std::isdigit(etagbl[l])) {
+        break;
+      }
+    }
+    ++l;
+    if (l == etagbl.length()) {
+      return;
+    }
+  } else {
+      l = CEPH_CRYPTO_MD5_DIGESTSIZE*2;
   }
   std::string etag = etagbl.to_str();
-  if (etagbl[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
+  if (l < etagbl.length() && etagbl[l]) {
     ldout(cct, 2) << "trimming junk from etag <" << etag << ">" << dendl;
   }
   etagbl.clear();
-  etagbl.append(etag.c_str(), CEPH_CRYPTO_MD5_DIGESTSIZE*2);
+  etagbl.append(etag.c_str(), l);
   return;
 }
 
-void rgw_fix_etag(CephContext *cct, string& etag)
+void rgw_fix_etag(CephContext *cct, std::string& etag)
 {
-  if (etag.length() <= CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
+  auto l { etag.length() };
+  if (l <= CEPH_CRYPTO_MD5_DIGESTSIZE*2) {
     return;
   }
-  if (etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
+  if (l > CEPH_CRYPTO_MD5_DIGESTSIZE*2+1 &&
+	etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2] == '-' &&
 	std::isdigit(etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2+1])) {
-    return;
+    while ((--l)) {
+      if (std::isdigit(etag[l])) {
+        break;
+      }
+    }
+    ++l;
+    if (l == etag.length()) {
+      return;
+    }
   }
-  if (etag[CEPH_CRYPTO_MD5_DIGESTSIZE*2]) {
+  else {
+    l = CEPH_CRYPTO_MD5_DIGESTSIZE*2;
+  }
+  if (l < etag.length() && etag[l]) {
     ldout(cct, 2) << "trimming junk from etag <" << etag << ">" << dendl;
   }
-  etag.resize(CEPH_CRYPTO_MD5_DIGESTSIZE*2);
+  etag.resize(l);
   return;
 }
