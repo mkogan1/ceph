@@ -7706,6 +7706,18 @@ std::vector<Option> get_rgw_options() {
    .set_default(false)
    .set_description("Conditionally skip the processing (but not the scheduling) of bucket lifecycle"),
 
+   Option("rgw_allow_notification_secrets_in_cleartext", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+   .set_default(false)
+   .add_service("rgw")
+   .add_see_also("rgw_trust_forwarded_https")
+   .set_description("Allows sending secrets (e.g. passwords) over non encrypted HTTP messages.")
+   .set_long_description("When bucket notification endpoint require secrets (e.g. passwords), "
+                         "we allow the topic creation only over HTTPS messages. "
+                         "This parameter can be set to \"true\" to bypass this check. "
+                         "Use this only if radosgw is on a trusted private network, and the message "
+                         "broker cannot be configured without password authentication. Otherwise, this will "
+                         "leak the credentials of your message broker and compromise its security."),
+
    Option("rgw_inject_admin_log_get_error_probability", Option::TYPE_FLOAT,
 	   Option::LEVEL_DEV)
    .set_default(0)
