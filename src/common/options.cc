@@ -7185,6 +7185,19 @@ std::vector<Option> get_rgw_options() {
         "headers in any request.)")
     .add_see_also("rgw_crypt_require_ssl"),
 
+    Option("rgw_allow_notification_secrets_in_cleartext", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_default(false)
+    .set_description("Allows sending secrets (e.g. passwords) over non encrypted HTTP messages.")
+    .set_long_description(
+        "When bucket notification endpoint require secrets (e.g. passwords), "
+        "we allow the topic creation only over HTTPS messages. "
+        "This parameter can be set to \"true\" to bypass this check. "
+        "Use this only if radosgw is on a trusted private network, and the message "
+        "broker cannot be configured without password authentication. Otherwise, this will "
+        "leak the credentials of your message broker and compromise its security.")
+    .add_see_also("rgw_trust_forwarded_https")
+    .add_service("rgw"),
+
     Option("rgw_crypt_require_ssl", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(true)
     .set_description("Requests including encryption key headers must be sent over ssl"),
