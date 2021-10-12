@@ -720,7 +720,7 @@ int rgw_build_object_policies(rgw::sal::RGWRadosStore *store, struct req_state *
     s->object_acl = std::make_unique<RGWAccessControlPolicy>(s->cct);
 
     s->object->set_bucket(s->bucket.get());
-      
+
     s->object->set_atomic(s->obj_ctx);
     if (prefetch_data) {
       s->object->set_prefetch_data(s->obj_ctx);
@@ -1605,6 +1605,8 @@ static int iterate_user_manifest_parts(CephContext * const cct,
 
   rgw::sal::RGWBucket::ListResults results;
   MD5 etag_sum;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  etag_sum.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   do {
     static constexpr auto MAX_LIST_OBJS = 100u;
     int r = bucket->list(params, MAX_LIST_OBJS, results, y);
@@ -1882,6 +1884,8 @@ int RGWGetObj::handle_slo_manifest(bufferlist& bl, optional_yield y)
   map<uint64_t, rgw_slo_part> slo_parts;
 
   MD5 etag_sum;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  etag_sum.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   total_len = 0;
 
   for (const auto& entry : slo_info.entries) {
@@ -3702,6 +3706,8 @@ void RGWPutObj::execute(optional_yield y)
   char calc_md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
   unsigned char m[CEPH_CRYPTO_MD5_DIGESTSIZE];
   MD5 hash;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   bufferlist bl, aclbl, bs;
   int len;
   
@@ -4140,6 +4146,8 @@ void RGWPostObj::execute(optional_yield y)
     char calc_md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
     unsigned char m[CEPH_CRYPTO_MD5_DIGESTSIZE];
     MD5 hash;
+    // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+    hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
     ceph::buffer::list bl, aclbl;
     int len = 0;
 
@@ -4828,7 +4836,7 @@ void RGWDeleteObj::execute(optional_yield y)
     }
 
     // send request to notification manager
-    const auto ret = rgw::notify::publish_commit(s->object.get(), obj_size, ceph::real_clock::now(), etag, 
+    const auto ret = rgw::notify::publish_commit(s->object.get(), obj_size, ceph::real_clock::now(), etag,
         version_id, event_type, res);
     if (ret < 0) {
       ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
@@ -5100,7 +5108,7 @@ void RGWCopyObj::execute(optional_yield y)
 
   // make reservation for notification if needed
   rgw::notify::reservation_t res(store, s, s->object.get(), nullptr);
-  const auto event_type = rgw::notify::ObjectCreatedCopy; 
+  const auto event_type = rgw::notify::ObjectCreatedCopy;
   op_ret = rgw::notify::publish_reserve(event_type, res, nullptr);
   if (op_ret < 0) {
     return;
@@ -5177,7 +5185,7 @@ void RGWCopyObj::execute(optional_yield y)
 	   s->yield);
 
   // send request to notification manager
-  const auto ret = rgw::notify::publish_commit(s->object.get(), obj_size, mtime, etag, 
+  const auto ret = rgw::notify::publish_commit(s->object.get(), obj_size, mtime, etag,
       dest_object->get_instance(), event_type, res);
   if (ret < 0) {
     ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
@@ -5480,6 +5488,8 @@ void RGWPutLC::execute(optional_yield y)
   ldpp_dout(this, 15) << "read len=" << data.length() << " data=" << (buf ? buf : "") << dendl;
 
   MD5 data_hash;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  data_hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   unsigned char data_hash_res[CEPH_CRYPTO_MD5_DIGESTSIZE];
   data_hash.Update(reinterpret_cast<const unsigned char*>(buf), data.length());
   data_hash.Final(data_hash_res);
@@ -5841,9 +5851,9 @@ void RGWInitMultipart::execute(optional_yield y)
 
     op_ret = obj_op->write_meta(bl.length(), 0, s->yield);
   } while (op_ret == -EEXIST);
-  
+
   // send request to notification manager
-  const auto ret = rgw::notify::publish_commit(s->object.get(), s->obj_size, ceph::real_clock::now(), attrs[RGW_ATTR_ETAG].to_str(), 
+  const auto ret = rgw::notify::publish_commit(s->object.get(), s->obj_size, ceph::real_clock::now(), attrs[RGW_ATTR_ETAG].to_str(),
       "", event_type, res);
   if (ret < 0) {
     ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
@@ -5992,7 +6002,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
     return;
   }
   attrs = meta_obj->get_attrs();
-  
+
   // make reservation for notification if needed
   rgw::notify::reservation_t res(store, s, meta_obj.get(), &s->object->get_name());
   const auto event_type = rgw::notify::ObjectCreatedCompleteMultipartUpload;
@@ -6069,9 +6079,9 @@ void RGWCompleteMultipart::execute(optional_yield y)
           ldpp_dout(this, 0) << "ERROR: compression type was changed during multipart upload ("
                            << cs_info.compression_type << ">>" << obj_part.cs_info.compression_type << ")" << dendl;
           op_ret = -ERR_INVALID_PART;
-          return; 
+          return;
       }
-      
+
       if (part_compressed) {
         int64_t new_ofs; // offset in compression data for new part
         if (cs_info.blocks.size() > 0)
@@ -6085,7 +6095,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
           cb.len = block.len;
           cs_info.blocks.push_back(cb);
           new_ofs = cb.new_ofs + cb.len;
-        } 
+        }
         if (!compressed)
           cs_info.compression_type = obj_part.cs_info.compression_type;
         cs_info.orig_size += obj_part.cs_info.orig_size;
@@ -6173,7 +6183,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
   }
 
   // send request to notification manager
-  const auto ret = rgw::notify::publish_commit(s->object.get(), ofs, ceph::real_clock::now(), final_etag_str, 
+  const auto ret = rgw::notify::publish_commit(s->object.get(), ofs, ceph::real_clock::now(), final_etag_str,
       target_obj->get_instance(), event_type, res);
   if (ret < 0) {
     ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
@@ -6511,7 +6521,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
 				   rgw::IAM::s3DeleteObjectVersion,
 				   obj_arn);
       }
-      if ((e == Effect::Deny) || 
+      if ((e == Effect::Deny) ||
           (usr_policy_res == Effect::Pass && e == Effect::Pass && !acl_allowed)) {
 	      send_partial_response(*iter, false, "", -EACCES);
 	      continue;
@@ -6553,7 +6563,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
     // make reservation for notification if needed
     const auto versioned_object = s->bucket->versioning_enabled();
     rgw::notify::reservation_t res(store, s, obj.get(), nullptr);
-    const auto event_type = versioned_object && obj->get_instance().empty() ? 
+    const auto event_type = versioned_object && obj->get_instance().empty() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     op_ret = rgw::notify::publish_reserve(event_type, res, nullptr);
     if (op_ret < 0) {
@@ -6572,7 +6582,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
     send_partial_response(*iter, obj->get_delete_marker(), version_id, op_ret);
 
     // send request to notification manager
-    const auto ret = rgw::notify::publish_commit(obj.get(), obj_size, ceph::real_clock::now(), etag, 
+    const auto ret = rgw::notify::publish_commit(obj.get(), obj_size, ceph::real_clock::now(), etag,
         version_id, event_type, res);
     if (ret < 0) {
       ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
@@ -7079,6 +7089,8 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
   ssize_t len = 0;
   size_t ofs = 0;
   MD5 hash;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   do {
     ceph::bufferlist data;
     len = body.get_at_most(s->cct->_conf->rgw_max_chunk_size, data);
