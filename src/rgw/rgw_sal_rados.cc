@@ -215,7 +215,7 @@ int RGWRadosBucket::load_by_name(const DoutPrefixProvider *dpp, const std::strin
   return store->getRados()->get_bucket_instance_info(*rctx, info.bucket, info, NULL, &attrs, y, dpp);
 }
 
-int RGWRadosBucket::get_bucket_stats(const DoutPrefixProvider *dpp, 
+int RGWRadosBucket::get_bucket_stats(const DoutPrefixProvider *dpp,
 				     RGWBucketInfo& bucket_info,
 				     const bucket_index_layout_generation& idx_layout,
 				     int shard_id,

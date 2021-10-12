@@ -416,7 +416,7 @@ static int get_multipart_info(const DoutPrefixProvider *dpp, struct req_state *s
   return get_multipart_info(dpp, s, meta_obj.get(), upload_info);
 }
 
-static int read_bucket_policy(const DoutPrefixProvider *dpp, 
+static int read_bucket_policy(const DoutPrefixProvider *dpp,
                               rgw::sal::RGWStore *store,
                               struct req_state *s,
                               RGWBucketInfo& bucket_info,
@@ -743,7 +743,7 @@ int rgw_build_object_policies(const DoutPrefixProvider *dpp, rgw::sal::RGWRadosS
     s->object_acl = std::make_unique<RGWAccessControlPolicy>(s->cct);
 
     s->object->set_bucket(s->bucket.get());
-      
+
     s->object->set_atomic(s->obj_ctx);
     if (prefetch_data) {
       s->object->set_prefetch_data(s->obj_ctx);
@@ -1752,6 +1752,8 @@ static int iterate_user_manifest_parts(const DoutPrefixProvider *dpp,
 
   rgw::sal::RGWBucket::ListResults results;
   MD5 etag_sum;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  etag_sum.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   do {
     static constexpr auto MAX_LIST_OBJS = 100u;
     int r = bucket->list(dpp, params, MAX_LIST_OBJS, results, y);
@@ -2029,6 +2031,8 @@ int RGWGetObj::handle_slo_manifest(bufferlist& bl, optional_yield y)
   map<uint64_t, rgw_slo_part> slo_parts;
 
   MD5 etag_sum;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  etag_sum.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   total_len = 0;
 
   for (const auto& entry : slo_info.entries) {
@@ -3933,6 +3937,8 @@ void RGWPutObj::execute(optional_yield y)
   char calc_md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
   unsigned char m[CEPH_CRYPTO_MD5_DIGESTSIZE];
   MD5 hash;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   bufferlist bl, aclbl, bs;
   int len;
   
@@ -4404,6 +4410,8 @@ void RGWPostObj::execute(optional_yield y)
     char calc_md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
     unsigned char m[CEPH_CRYPTO_MD5_DIGESTSIZE];
     MD5 hash;
+    // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+    hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
     ceph::buffer::list bl, aclbl;
     int len = 0;
 
@@ -5492,7 +5500,7 @@ void RGWCopyObj::execute(optional_yield y)
 
   // make reservation for notification if needed
   rgw::notify::reservation_t res(this, store, s, s->object.get());
-  const auto event_type = rgw::notify::ObjectCreatedCopy; 
+  const auto event_type = rgw::notify::ObjectCreatedCopy;
   op_ret = rgw::notify::publish_reserve(this, event_type, res, nullptr);
   if (op_ret < 0) {
     return;
@@ -5878,6 +5886,8 @@ void RGWPutLC::execute(optional_yield y)
   ldpp_dout(this, 15) << "read len=" << data.length() << " data=" << (buf ? buf : "") << dendl;
 
   MD5 data_hash;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  data_hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   unsigned char data_hash_res[CEPH_CRYPTO_MD5_DIGESTSIZE];
   data_hash.Update(reinterpret_cast<const unsigned char*>(buf), data.length());
   data_hash.Final(data_hash_res);
@@ -6289,7 +6299,7 @@ void RGWInitMultipart::execute(optional_yield y)
 
     op_ret = obj_op->write_meta(this, bl.length(), 0, s->yield);
   } while (op_ret == -EEXIST);
-  
+
   // send request to notification manager
   const auto ret = rgw::notify::publish_commit(s->object.get(), s->obj_size, ceph::real_clock::now(), attrs[RGW_ATTR_ETAG].to_str(), "", event_type, res, this);
   if (ret < 0) {
@@ -6546,9 +6556,9 @@ void RGWCompleteMultipart::execute(optional_yield y)
           ldpp_dout(this, 0) << "ERROR: compression type was changed during multipart upload ("
                            << cs_info.compression_type << ">>" << obj_part.cs_info.compression_type << ")" << dendl;
           op_ret = -ERR_INVALID_PART;
-          return; 
+          return;
       }
-      
+
       if (part_compressed) {
         int64_t new_ofs; // offset in compression data for new part
         if (cs_info.blocks.size() > 0)
@@ -6562,7 +6572,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
           cb.len = block.len;
           cs_info.blocks.push_back(cb);
           new_ofs = cb.new_ofs + cb.len;
-        } 
+        }
         if (!compressed)
           cs_info.compression_type = obj_part.cs_info.compression_type;
         cs_info.orig_size += obj_part.cs_info.orig_size;
@@ -7143,7 +7153,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
     // make reservation for notification if needed
     const auto versioned_object = s->bucket->versioning_enabled();
     rgw::notify::reservation_t res(this, store, s, obj.get());
-    const auto event_type = versioned_object && obj->get_instance().empty() ? 
+    const auto event_type = versioned_object && obj->get_instance().empty() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     op_ret = rgw::notify::publish_reserve(this, event_type, res, nullptr);
     if (op_ret < 0) {
@@ -7693,6 +7703,8 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
   ssize_t len = 0;
   size_t ofs = 0;
   MD5 hash;
+  // Allow use of MD5 digest in FIPS mode for non-cryptographic purposes
+  hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   do {
     ceph::bufferlist data;
     len = body.get_at_most(s->cct->_conf->rgw_max_chunk_size, data);
