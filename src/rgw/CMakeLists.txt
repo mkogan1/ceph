@@ -299,6 +299,7 @@ install(TARGETS radosgw DESTINATION bin)
 
 set(radosgw_admin_srcs
   rgw_admin.cc
+  rgw_sync_checkpoint.cc
   rgw_orphan.cc)
 add_executable(radosgw-admin ${radosgw_admin_srcs})
 target_link_libraries(radosgw-admin ${rgw_libs} librados

@@ -57,6 +57,8 @@ extern "C" {
 #include "rgw_zone.h"
 #include "rgw_pubsub.h"
 #include "rgw_sync_module_pubsub.h"
+#include "rgw_bucket_sync.h"
+#include "rgw_sync_checkpoint.h"
 
 #include "services/svc_sync_modules.h"
 
@@ -110,6 +112,7 @@ void usage()
   cout << "  bucket chown               link bucket to specified user and update its object ACLs\n";
   cout << "  bucket reshard             reshard bucket\n";
   cout << "  bucket rewrite             rewrite all objects in the specified bucket\n";
+  cout << "  bucket sync checkpoint     poll a bucket's sync status until it catches up to its remote\n";
   cout << "  bucket sync disable        disable bucket sync\n";
   cout << "  bucket sync enable         enable bucket sync\n";
   cout << "  bucket radoslist           list rados objects backing bucket's objects\n";
@@ -397,6 +400,25 @@ void usage()
   generic_client_usage();
 }
 
+void init_optional_bucket(std::optional<rgw_bucket>& opt_bucket,
+                          std::optional<string>& opt_tenant,
+                          std::optional<string>& opt_bucket_name,
+                          std::optional<string>& opt_bucket_id)
+{
+  if (opt_tenant || opt_bucket_name || opt_bucket_id) {
+    opt_bucket.emplace();
+    if (opt_tenant) {
+      opt_bucket->tenant = *opt_tenant;
+    }
+    if (opt_bucket_name) {
+      opt_bucket->name = *opt_bucket_name;
+    }
+    if (opt_bucket_id) {
+      opt_bucket->bucket_id = *opt_bucket_id;
+    }
+  }
+}
+
 enum {
   OPT_NO_CMD = 0,
   OPT_USER_CREATE,
@@ -420,6 +442,7 @@ enum {
   OPT_BUCKET_UNLINK,
   OPT_BUCKET_STATS,
   OPT_BUCKET_CHECK,
+  OPT_BUCKET_SYNC_CHECKPOINT,
   OPT_BUCKET_SYNC_STATUS,
   OPT_BUCKET_SYNC_MARKERS,
   OPT_BUCKET_SYNC_INIT,
@@ -3063,6 +3086,20 @@ int main(int argc, const char **argv)
   rgw::notify::EventTypeList event_types;
 
   std::optional<std::string> rgw_obj_fs; // radoslist field separator
+  ceph::timespan opt_retry_delay_ms = std::chrono::milliseconds(2000);
+  ceph::timespan opt_timeout_sec = std::chrono::seconds(60);
+  std::optional<rgw_bucket> opt_bucket;
+  std::optional<string> opt_tenant;
+  std::optional<string> opt_bucket_name;
+  std::optional<string> opt_bucket_id;
+  std::optional<rgw_bucket> opt_source_bucket;
+  std::optional<string> opt_source_tenant;
+  std::optional<string> opt_source_bucket_name;
+  std::optional<string> opt_source_bucket_id;
+  std::optional<rgw_bucket> opt_dest_bucket;
+  std::optional<string> opt_dest_tenant;
+  std::optional<string> opt_dest_bucket_name;
+  std::optional<string> opt_dest_bucket_id;
 
   for (std::vector<const char*>::iterator i = args.begin(); i != args.end(); ) {
     if (ceph_argparse_double_dash(args, i)) {
@@ -3077,6 +3114,7 @@ int main(int argc, const char **argv)
       new_user_id.from_str(val);
     } else if (ceph_argparse_witharg(args, i, &val, "--tenant", (char*)NULL)) {
       tenant = val;
+      opt_tenant = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--user_ns", (char*)NULL)) {
       user_ns = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--access-key", (char*)NULL)) {
@@ -3092,6 +3130,7 @@ int main(int argc, const char **argv)
       display_name = val;
     } else if (ceph_argparse_witharg(args, i, &val, "-b", "--bucket", (char*)NULL)) {
       bucket_name = val;
+      opt_bucket_name = val;
     } else if (ceph_argparse_witharg(args, i, &val, "-p", "--pool", (char*)NULL)) {
       pool_name = val;
       pool = rgw_pool(pool_name);
@@ -3217,6 +3256,7 @@ int main(int argc, const char **argv)
       set_temp_url_key = true;
     } else if (ceph_argparse_witharg(args, i, &val, "--bucket-id", (char*)NULL)) {
       bucket_id = val;
+      opt_bucket_id = val;
       if (bucket_id.empty()) {
         cerr << "no value for bucket-id" << std::endl;
         exit(1);
@@ -3420,6 +3460,22 @@ int main(int argc, const char **argv)
       event_id = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--event-type", "--event-types", (char*)NULL)) {
       rgw::notify::from_string_list(val, event_types);
+    } else if (ceph_argparse_witharg(args, i, &val, "--retry-delay-ms", (char*)NULL)) {
+      opt_retry_delay_ms = std::chrono::milliseconds(atoi(val.c_str()));
+    } else if (ceph_argparse_witharg(args, i, &val, "--timeout-sec", (char*)NULL)) {
+      opt_timeout_sec = std::chrono::seconds(atoi(val.c_str()));
+    } else if (ceph_argparse_witharg(args, i, &val, "--source-tenant", (char*)NULL)) {
+      opt_source_tenant = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--source-bucket", (char*)NULL)) {
+      opt_source_bucket_name = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--source-bucket-id", (char*)NULL)) {
+      opt_source_bucket_id = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--dest-tenant", (char*)NULL)) {
+      opt_dest_tenant = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--dest-bucket", (char*)NULL)) {
+      opt_dest_bucket_name = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--dest-bucket-id", (char*)NULL)) {
+      opt_dest_bucket_id = val;
     } else if (ceph_argparse_binary_flag(args, i, &detail, NULL, "--detail", (char*)NULL)) {
       // do nothing
     } else if (ceph_argparse_witharg(args, i, &val, "--rgw-obj-fs", (char*)NULL)) {
@@ -3472,6 +3528,13 @@ int main(int argc, const char **argv)
           break;
       }
     }
+
+    init_optional_bucket(opt_bucket, opt_tenant,
+                         opt_bucket_name, opt_bucket_id);
+    init_optional_bucket(opt_source_bucket, opt_source_tenant,
+                         opt_source_bucket_name, opt_source_bucket_id);
+    init_optional_bucket(opt_dest_bucket, opt_dest_tenant,
+                         opt_dest_bucket_name, opt_dest_bucket_id);
 
     if (tenant.empty()) {
       tenant = user_id.tenant;
@@ -7671,6 +7734,45 @@ next:
     }
   }
 
+  if (opt_cmd == OPT_BUCKET_SYNC_CHECKPOINT) {
+    std::optional<rgw_zone_id> opt_source_zone;
+    if (!source_zone.empty()) {
+      opt_source_zone = source_zone;
+    }
+    if (bucket_name.empty()) {
+      cerr << "ERROR: bucket not specified" << std::endl;
+      return EINVAL;
+    }
+    RGWBucketInfo bucket_info;
+    rgw_bucket bucket;
+    int ret = init_bucket(tenant, bucket_name, bucket_id, bucket_info, bucket);
+    if (ret < 0) {
+      return -ret;
+    }
+
+    if (!store->bucket_imports_data(bucket_info.bucket)) {
+      std::cout << "Sync is disabled for bucket " << bucket_name << std::endl;
+      return 0;
+    }
+
+    RGWBucketSyncPolicyHandlerRef handler;
+    ret = store->get_sync_policy_handler(std::nullopt, bucket, &handler);
+    if (ret < 0) {
+      std::cerr << "ERROR: failed to get policy handler for bucket ("
+          << bucket_info.bucket << "): r=" << ret << ": " << cpp_strerror(-ret) << std::endl;
+      return -ret;
+    }
+
+    auto timeout_at = ceph::coarse_mono_clock::now() + opt_timeout_sec;
+    ret = rgw_bucket_sync_checkpoint(dpp(), store, *handler, bucket_info,
+                                     opt_source_zone, opt_source_bucket,
+                                     opt_retry_delay_ms, timeout_at);
+    if (ret < 0) {
+      lderr(store->ctx()) << "bucket sync checkpoint failed: " << cpp_strerror(ret) << dendl;
+      return -ret;
+    }
+  }
+
   if ((opt_cmd == OPT_BUCKET_SYNC_DISABLE) || (opt_cmd == OPT_BUCKET_SYNC_ENABLE)) {
     if (bucket_name.empty()) {
       cerr << "ERROR: bucket not specified" << std::endl;
@@ -8256,7 +8358,7 @@ next:
       cerr << "MFA creation failed, error: " << cpp_strerror(-ret) << std::endl;
       return -ret;
     }
-    
+
     RGWUserInfo& user_info = user_op.get_user_info();
     user_info.mfa_ids.insert(totp_serial);
     user_op.set_mfa_ids(user_info.mfa_ids);
