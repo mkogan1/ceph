@@ -10,7 +10,10 @@ from cephadm.services.osd import OSDService
 from cephadm.services.monitoring import GrafanaService, AlertmanagerService, PrometheusService, \
     NodeExporterService
 from cephadm.services.exporter import CephadmExporter
-from ceph.deployment.service_spec import IscsiServiceSpec
+from cephadm.module import CephadmOrchestrator
+from ceph.deployment.service_spec import IscsiServiceSpec, MonitoringSpec, AlertManagerSpec, \
+    ServiceSpec, RGWSpec
+from cephadm.tests.fixtures import with_host, with_service, _run_cephadm
 
 from orchestrator import OrchestratorError
 from orchestrator._interface import DaemonDescription
@@ -226,3 +229,40 @@ class TestISCSIService:
                                        'https://user:password@[FEDC:BA98:7654:3210:FEDC:BA98:7654:3210]:5000')
 
         assert dashboard_expected_call in self.mgr.check_mon_command.mock_calls
+
+
+class TestRGWService:
+
+    @pytest.mark.parametrize(
+        "frontend, ssl, expected",
+        [
+            ('beast', False, 'beast endpoint=[fd00:fd00:fd00:3000::1]:80'),
+            ('beast', True,
+             'beast ssl_endpoint=[fd00:fd00:fd00:3000::1]:443 ssl_certificate=config://rgw/cert/rgw.foo'),
+            ('civetweb', False, 'civetweb port=[fd00:fd00:fd00:3000::1]:80'),
+            ('civetweb', True,
+             'civetweb port=[fd00:fd00:fd00:3000::1]:443s ssl_certificate=config://rgw/cert/rgw.foo'),
+        ]
+    )
+    @patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
+    def test_rgw_update(self, frontend, ssl, expected, cephadm_module: CephadmOrchestrator):
+        with with_host(cephadm_module, 'host1'):
+            cephadm_module.cache.update_host_devices_networks(
+                'host1',
+                dls=cephadm_module.cache.devices['host1'],
+                nets={
+                    'fd00:fd00:fd00:3000::/64': {
+                        'if0': ['fd00:fd00:fd00:3000::1']
+                    }
+                })
+            s = RGWSpec(service_id="foo",
+                        networks=['fd00:fd00:fd00:3000::/64'],
+                        ssl=ssl,
+                        rgw_frontend_type=frontend)
+            with with_service(cephadm_module, s) as dds:
+                _, f, _ = cephadm_module.check_mon_command({
+                    'prefix': 'config get',
+                    'who': f'client.{dds[0]}',
+                    'key': 'rgw_frontends',
+                })
+                assert f == expected
