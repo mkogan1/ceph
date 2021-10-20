@@ -6787,6 +6787,14 @@ std::vector<Option> get_rgw_options() {
         "the rgw_curl_low_speed_limit for the library to consider it too slow and abort. "
         "Set it zero to disable this."),
 
+    Option("rgw_curl_tcp_keepalive", Option::TYPE_INT, Option::LEVEL_ADVANCED)
+    .set_default(0)
+    .set_long_description(
+      "Enable TCP keepalive on the HTTP client sockets managed by libcurl. This does not "
+      "apply to connections received by the HTTP frontend, but only to HTTP requests sent "
+      "by radosgw. Examples include requests to Keystone for authentication, sync requests "
+      "from multisite, and requests to key management servers for SSE."),
+								 
     Option("rgw_copy_obj_progress", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
     .set_default(true)
     .set_description("Send progress report through copy operation")
