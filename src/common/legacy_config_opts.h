@@ -1441,6 +1441,7 @@ OPTION(rgw_curl_buffersize, OPT_INT) // set preferred receive buffer size for cu
 OPTION(rgw_curl_wait_timeout_ms, OPT_INT) // timeout for certain curl calls
 OPTION(rgw_curl_low_speed_limit, OPT_INT) // low speed limit for certain curl calls
 OPTION(rgw_curl_low_speed_time, OPT_INT) // low speed time for certain curl calls
+OPTION(rgw_curl_tcp_keepalive, OPT_INT) // enable TCP keepalive
 OPTION(rgw_copy_obj_progress, OPT_BOOL) // should dump progress during long copy operations?
 OPTION(rgw_copy_obj_progress_every_bytes, OPT_INT) // min bytes between copy progress output
 OPTION(rgw_sync_obj_etag_verify, OPT_BOOL) // verify if the copied object from remote is identical to source
