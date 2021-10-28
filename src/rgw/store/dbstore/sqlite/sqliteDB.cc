@@ -515,10 +515,17 @@ void *SQLiteDB::openDB(const DoutPrefixProvider *dpp)
     goto out;
   }
 
+  //if (sqlite3_config(SQLITE_CONFIG_SINGLETHREAD) != SQLITE_OK) { 
+  //if (sqlite3_config(SQLITE_CONFIG_MULTITHREAD) != SQLITE_OK) { 
+  if (sqlite3_config(SQLITE_CONFIG_SERIALIZED) != SQLITE_OK) {
+    ldpp_dout(dpp, 0) << "Failed to set sqlite3_config(SQLITE_CONFIG_SERIALIZED)" << dendl;
+    abort();
+  }
   rc = sqlite3_open_v2(dbname.c_str(), (sqlite3**)&db,
       SQLITE_OPEN_READWRITE |
-      SQLITE_OPEN_CREATE |
-      SQLITE_OPEN_NOMUTEX,
+      SQLITE_OPEN_CREATE,
+      //SQLITE_OPEN_FULLMUTEX,
+      //SQLITE_OPEN_NOMUTEX,
       NULL);
 
   if (rc) {
@@ -530,7 +537,25 @@ void *SQLiteDB::openDB(const DoutPrefixProvider *dpp)
 
   exec(dpp, "PRAGMA foreign_keys=ON", NULL);
 
+  //// exec(dpp, "PRAGMA journal_mode=OFF; PRAGMA synchronous=0; PRAGMA cache_size=1000000; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA journal_mode=OFF; PRAGMA synchronous=0; PRAGMA cache_size=1048576; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA journal_mode = OFF; PRAGMA synchronous = 0;", NULL);
+  //exec(dpp, "PRAGMA synchronous = 0; PRAGMA cache_size = 1048576; PRAGMA locking_mode = EXCLUSIVE; PRAGMA temp_store = MEMORY;", NULL);
+  //// exec(dpp, "PRAGMA journal_mode=OFF; PRAGMA synchronous=0; PRAGMA page_size=65536; PRAGMA cache_size=32768; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA journal_mode=OFF; PRAGMA synchronous=0; PRAGMA cache_size=1000000; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA synchronous=0; PRAGMA page_size=65536; PRAGMA cache_size=32768; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA synchronous=0; PRAGMA cache_size=32768; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA journal_mode=OFF; PRAGMA synchronous=0; PRAGMA cache_size=16384; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  ////exec(dpp, "PRAGMA journal_mode=OFF; PRAGMA synchronous=0; PRAGMA cache_size=32768; PRAGMA locking_mode=EXCLUSIVE; PRAGMA temp_store=MEMORY;", NULL);
+  //exec(dpp, "PRAGMA synchronous=FULL; PRAGMA locking_mode=NORMAL;", NULL);
+  //exec(dpp, "PRAGMA synchronous=EXTRA; PRAGMA locking_mode=NORMAL;", NULL);
+  //exec(dpp, "PRAGMA synchronous=EXTRA; PRAGMA locking_mode=EXCLUSIVE;", NULL);
+
+  
+  std::cerr << "#MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): rgw_dbstore_pragma=" << std::quoted(rgw_dbstore_pragma) << std::endl;
+  std::cerr << "#MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): sqlite3_threadsafe()=" << sqlite3_threadsafe() << std::endl;
   ldpp_dout(dpp, 10) << "Setting database PRAGMAs: " << std::quoted(rgw_dbstore_pragma) << dendl;
+  //abort();
   exec(dpp, rgw_dbstore_pragma.c_str(), NULL);
   
 out:

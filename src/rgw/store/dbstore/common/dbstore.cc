@@ -249,8 +249,17 @@ out:
 int DB::ProcessOp(const DoutPrefixProvider *dpp, string Op, struct DBOpParams *params) {
   int ret = -1;
   class DBOp *db_op;
+  //std::cerr << "#MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): Op=" << std::quoted(Op) << ", thread id=0x" << std::hex << std::this_thread::get_id() << std::dec << std::endl;
 
-  Lock(dpp);
+
+  if (Op == "GetUser" || Op == "InsertUser" || Op == "RemoveUser" ||
+      Op == "GetBucket" || Op == "InsertBucket" || Op == "UpdateBucket" ||
+      Op == "RemoveBucket" || Op == "ListUserBuckets") {
+    Lock(dpp);
+  }
+  // else {
+  //   std::cerr << "#MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): Op=" << std::quoted(Op) << ", thread id=0x" << std::hex << std::this_thread::get_id() << std::dec << std::endl;
+  // }
   db_op = getDBOp(dpp, Op, params);
 
   if (!db_op) {
@@ -260,7 +269,11 @@ int DB::ProcessOp(const DoutPrefixProvider *dpp, string Op, struct DBOpParams *p
   }
   ret = db_op->Execute(dpp, params);
 
-  Unlock(dpp);
+  if (Op == "GetUser" || Op == "InsertUser" || Op == "RemoveUser" ||
+      Op == "GetBucket" || Op == "InsertBucket" || Op == "UpdateBucket" ||
+      Op == "RemoveBucket" || Op == "ListUserBuckets") {
+    Unlock(dpp);
+  }
   if (ret) {
     ldpp_dout(dpp, 0)<<"In Process op Execute failed for fop(" \
       <<Op.c_str()<<") " << dendl;
