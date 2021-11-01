@@ -2193,8 +2193,10 @@ void RGWBucketInfo::decode(bufferlist::const_iterator& bl) {
   }
   if (struct_v >= 22) {
     decode(layout, bl);
+  } else if (layout.current_index.layout.type == rgw::BucketIndexType::Normal) {
+    layout.logs.push_back(rgw::log_layout_from_index(0, layout.current_index));
   }
-  
+
   DECODE_FINISH(bl);
 }
 
