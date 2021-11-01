@@ -225,7 +225,7 @@ int rgw_bucket_sync_checkpoint(const DoutPrefixProvider* dpp,
     entry.pipe = pipe;
 
     // fetch remote markers
-    spawn::spawn(ioctx, [&] (spawn::yield_context yield) {
+    spawn::spawn(ioctx, [&] (yield_context yield) {
       auto y = optional_yield{ioctx, yield};
       rgw_bucket_index_marker_info info;
       int r = source_bilog_info(dpp, store->svc()->zone, entry.pipe,
@@ -238,7 +238,7 @@ int rgw_bucket_sync_checkpoint(const DoutPrefixProvider* dpp,
       entry.latest_gen = info.latest_gen;
     });
     // fetch source bucket info
-    spawn::spawn(ioctx, [&] (spawn::yield_context yield) {
+    spawn::spawn(ioctx, [&] (yield_context yield) {
       auto y = optional_yield{ioctx, yield};
       auto obj_ctx = store->svc()->sysobj->init_obj_ctx();
       int r = store->getRados()->get_bucket_instance_info(
