@@ -1798,7 +1798,7 @@ public:
       int complete_del(int64_t poolid, uint64_t epoch,
                        ceph::real_time& removed_mtime, /* mtime of removed object */
                        list<rgw_obj_index_key> *remove_objs);
-      int cancel();
+      int cancel(std::list<rgw_obj_index_key> *remove_objs);
 
       const string *get_optag() { return &optag; }
 
@@ -2229,7 +2229,9 @@ public:
                            RGWObjCategory category, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_complete_del(BucketShard& bs, string& tag, int64_t pool, uint64_t epoch, rgw_obj& obj,
                            ceph::real_time& removed_mtime, list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
-  int cls_obj_complete_cancel(BucketShard& bs, string& tag, rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
+  int cls_obj_complete_cancel(BucketShard& bs, std::string& tag, rgw_obj& obj,
+                              std::list<rgw_obj_index_key> *remove_objs,
+                              uint16_t bilog_flags, rgw_zone_set *zones_trace = nullptr);
   int cls_obj_set_bucket_tag_timeout(RGWBucketInfo& bucket_info, uint64_t timeout);
 
   using ent_map_t =
