@@ -26,6 +26,30 @@
        [innerHtml]="'Only available for RBD images with <strong>fast-diff</strong> enabled'"></div>
 </ng-template>
 
+<ng-template #provisionedNotAvailableTooltipTpl
+             let-row="row">
+  <span *ngIf="row.disk_usage === null; else provisioned">
+    <span class="text-muted"
+          [tooltip]="usageNotAvailableTooltipTpl"
+          placement="top"
+          i18n>N/A</span>
+    </span>
+  <ng-template #provisioned
+               i18n>{{row.disk_usage | dimlessBinary}}</ng-template>
+</ng-template>
+
+<ng-template #totalProvisionedNotAvailableTooltipTpl
+             let-row="row">
+  <span *ngIf="row.total_disk_usage === null; else totalProvisioned">
+    <span class="text-muted"
+          [tooltip]="usageNotAvailableTooltipTpl"
+          placement="top"
+          i18n>N/A</span>
+  </span>
+  <ng-template #totalProvisioned
+               i18n>{{row.total_disk_usage | dimlessBinary}}</ng-template>
+</ng-template>
+
 <ng-template #parentTpl
              let-value="value">
   <span *ngIf="value">{{ value.pool_name }}/{{ value.image_name }}@{{ value.snap_name }}</span>
