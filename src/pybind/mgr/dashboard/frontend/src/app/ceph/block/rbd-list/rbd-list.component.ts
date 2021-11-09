@@ -50,6 +50,10 @@ export class RbdListComponent implements OnInit {
   flattenTpl: TemplateRef<any>;
   @ViewChild('removingStatTpl')
   removingStatTpl: TemplateRef<any>;
+  @ViewChild('provisionedNotAvailableTooltipTpl')
+  provisionedNotAvailableTooltipTpl: TemplateRef<any>;
+  @ViewChild('totalProvisionedNotAvailableTooltipTpl')
+  totalProvisionedNotAvailableTooltipTpl: TemplateRef<any>;
 
   permission: Permission;
   tableActions: CdTableAction[];
@@ -205,14 +209,16 @@ export class RbdListComponent implements OnInit {
         prop: 'disk_usage',
         cellClass: 'text-center',
         flexGrow: 1,
-        pipe: this.dimlessBinaryPipe
+        pipe: this.dimlessBinaryPipe,
+        cellTemplate: this.provisionedNotAvailableTooltipTpl
       },
       {
         name: this.i18n('Total provisioned'),
         prop: 'total_disk_usage',
         cellClass: 'text-center',
         flexGrow: 1,
-        pipe: this.dimlessBinaryPipe
+        pipe: this.dimlessBinaryPipe,
+        cellTemplate: this.totalProvisionedNotAvailableTooltipTpl
       },
       {
         name: this.i18n('Parent'),
