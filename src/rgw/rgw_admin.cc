@@ -1147,8 +1147,10 @@ static int init_bucket(const string& tenant_name,
     if (bucket_id.empty()) {
       r = store->getRados()->get_bucket_info(store->svc(), tenant_name, bucket_name, bucket_info, nullptr, null_yield, dpp(), pattrs);
     } else {
-      string bucket_instance_id = bucket_name + ":" + bucket_id;
-      r = store->getRados()->get_bucket_instance_info(obj_ctx, bucket_instance_id, bucket_info, NULL, pattrs, null_yield, dpp());
+      bucket.name = bucket_name;
+      bucket.tenant = tenant_name;
+      bucket.bucket_id = bucket_id;
+      r = store->getRados()->get_bucket_instance_info(obj_ctx, bucket, bucket_info, NULL, pattrs, null_yield, dpp());
     }
     if (r < 0) {
       cerr << "could not get bucket info for bucket=" << bucket_name << std::endl;
