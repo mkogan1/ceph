@@ -764,6 +764,8 @@ static int get_cmd(const char *cmd, const char *prev_cmd, const char *prev_prev_
         return OPT_BUCKET_SYNC_DISABLE;
       if (strcmp(cmd, "enable") == 0)
         return OPT_BUCKET_SYNC_ENABLE;
+      if (strcmp(cmd, "checkpoint") == 0)
+        return OPT_BUCKET_SYNC_CHECKPOINT;
     } else if ((strcmp(prev_cmd, "limit") == 0) &&
 	       (strcmp(cmd, "check") == 0)) {
       return OPT_BUCKET_LIMIT_CHECK;
