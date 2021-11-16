@@ -604,6 +604,10 @@ do_rgw_conf() {
 [client.rgw.${current_port}]
         rgw frontends = $rgw_frontend port=${current_port}
         admin socket = ${CEPH_OUT_DIR}/radosgw.${current_port}.asok
+        rgw_d3n_l1_local_datacache_enabled=true
+        rgw_d3n_l1_datacache_persistent_path=/home/centos/ceph_upstream/build/cache_dir
+        rgw_d3n_l1_datacache_size=10737418240
+
 EOF
         current_port=$((current_port + 1))
 done
