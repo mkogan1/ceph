@@ -36,7 +36,8 @@ namespace http = boost::beast::http;
 namespace ssl = boost::asio::ssl;
 #endif
 
-using parse_buffer = boost::beast::flat_static_buffer<65536>;
+static constexpr size_t parse_buffer_size = 65536;
+using parse_buffer = boost::beast::flat_static_buffer<parse_buffer_size>;
 
 // use mmap/mprotect to allocate 512k coroutine stacks
 auto make_stack_allocator() {
@@ -163,6 +164,7 @@ using SharedMutex = ceph::async::SharedMutex<boost::asio::io_context::executor_t
 template <typename Stream>
 void handle_connection(boost::asio::io_context& context,
                        RGWProcessEnv& env, Stream& stream,
+                       size_t header_limit,
                        parse_buffer& buffer, bool is_ssl,
                        bool ignore_bad_content_length,
                        SharedMutex& pause_mutex,
@@ -171,8 +173,6 @@ void handle_connection(boost::asio::io_context& context,
                        spawn::yield_context yield,
                        ceph::timespan request_timeout)
 {
-  // limit header to 4k, since we read it all into a single flat_buffer
-  static constexpr size_t header_limit = 4096;
   // don't impose a limit on the body, since we read it in pieces
   static constexpr size_t body_limit = std::numeric_limits<size_t>::max();
   bool must_close = false;
@@ -355,6 +355,7 @@ class AsioFrontend {
   RGWFrontendConfig* conf;
   boost::asio::io_context context;
   ceph::timespan request_timeout = std::chrono::milliseconds(REQUEST_TIMEOUT);
+  size_t header_limit = 16384;
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
   boost::optional<ssl::context> ssl_context;
   int init_ssl();
@@ -513,15 +514,32 @@ int AsioFrontend::init()
 // Setting global timeout
   auto timeout = config.find("request_timeout_ms");
   if (timeout != config.end()) {
-    auto timeout_number = ceph::parse<uint64_t>(timeout->second.data());
+    auto timeout_number = ceph::parse<uint64_t>(timeout->second);
     if (timeout_number) {
       request_timeout =  std::chrono::milliseconds(*timeout_number);
     } else {
       lderr(ctx()) << "WARNING: invalid value for request_timeout_ms: "
-      << timeout->second.data() << " setting it to the default value: "
+      << timeout->second << " setting it to the default value: "
       << REQUEST_TIMEOUT << dendl;
     }
-  } 
+  }
+
+  auto max_header_size = config.find("max_header_size");
+  if (max_header_size != config.end()) {
+    auto limit = ceph::parse<uint64_t>(max_header_size->second);
+    if (!limit) {
+      lderr(ctx()) << "WARNING: invalid value for max_header_size: "
+          << max_header_size->second << ", using the default value: "
+          << header_limit << dendl;
+    } else if (*limit > parse_buffer_size) { // can't exceed parse buffer size
+      header_limit = parse_buffer_size;
+      lderr(ctx()) << "WARNING: max_header_size " << max_header_size->second
+          << " capped at maximum value " << header_limit << dendl;
+    } else {
+      header_limit = *limit;
+    }
+  }
+
 #ifdef WITH_RADOSGW_BEAST_OPENSSL
   int r = init_ssl();
   if (r < 0) {
@@ -766,7 +784,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
           return;
         }
         buffer->consume(bytes);
-	  handle_connection(context, env, stream, *buffer, true, ic,
+	  handle_connection(context, env, stream, header_limit, *buffer, true, ic,
 			    pause_mutex, scheduler.get(), ec, yield,
 			    request_timeout);
         if (!ec) {
@@ -785,7 +803,7 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         auto c = connections.add(conn);
         auto buffer = std::make_unique<parse_buffer>();
         boost::system::error_code ec;
-        handle_connection(context, env, s, *buffer, false, ic, pause_mutex,
+        handle_connection(context, env, s, header_limit, *buffer, false, ic, pause_mutex,
                           scheduler.get(), ec, yield, request_timeout);
         s.socket().shutdown(tcp::socket::shutdown_both, ec);
       }, make_stack_allocator());
