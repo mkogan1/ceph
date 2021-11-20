@@ -247,6 +247,35 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       }
       return r;
     } else {
+      /* PORTING */
+      //Check the directory if it is in a remote cache
+      
+      //This is a dummy variable which is supposed to reflect whether the object is in a remote cache
+      //Since the directory functions have not yet been ported, hard-code r to 0 
+      r = 0;
+
+      if (r == 0) {
+	ldpp_dout(dpp,20) << "PORTING D4N: object is stored at a remote rgw instance as indicated by the directory" << dendl;
+	
+	//To fetch the object from a remote rgw we require 2 things
+	//i) the http destination of the RGW
+	//ii) the path of the object in the corresponding bucket in the remote rgw
+	std::string dest, path;
+	
+	dest = "http://" ;
+
+	path = "";
+
+	ldpp_dout(dpp,20) << "PORTING D4N: retreived the dest= " << dest << " of the remote rgw instance and the path=" << path << " of the object" << dendl;
+
+	//Once we get both path and dest, we then require to do a remote request which involves two things
+	//i) A remote request instance
+	//ii) A remote operation in rgw::Aio
+	ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl; 
+
+      }
+    
+      //After fetching from remote cache, write it to local cache
       // Write To Cache
       ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): WRITE TO CACHE: oid=" << read_obj.oid << ", obj-ofs=" << obj_ofs << ", read_ofs=" << read_ofs << " len=" << len << dendl;
       auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
