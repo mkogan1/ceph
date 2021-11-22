@@ -26,7 +26,7 @@
 #include "services/svc_rados.h" // cant forward declare RGWSI_RADOS::Obj
 
 #include "rgw_common.h"
-
+#include "rgw_d3n_datacache.h" //for porting remote op
 #include "include/function2.hpp"
 
 struct D3nGetObjData;
@@ -99,6 +99,10 @@ class Aio {
                             optional_yield y);
   static OpFunc d3n_cache_op(const DoutPrefixProvider *dpp, optional_yield y,
                              off_t read_ofs, off_t read_len, std::string& location);
+  /*static OpFunc remote_op(librados::ObjectReadOperation&& op, optional_yield y, //in D4N string is not pass by reference
+                             off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location,
+                              RemoteRequest *c, cache_block *c_block, std::string path,  D3nDataCache *d); 
+                              */                          
 };
 
 } // namespace rgw
