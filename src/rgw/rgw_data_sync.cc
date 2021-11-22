@@ -1227,6 +1227,10 @@ struct rgw_sync_pipe_info_set {
     return handlers.end();
   }
 
+  size_t size() const {
+    return handlers.size();
+  }
+
   bool empty() const {
     return handlers.empty();
   }
@@ -4722,7 +4726,7 @@ int RGWRunBucketSourcesSyncCR::operate()
       return set_cr_done();
     }
 
-    for (siter = pipes.begin(); siter != pipes.end(); ++siter) {
+    for (siter = pipes.begin(); siter != pipes.end(); ++siter, ++cur_shard_progress) {
       ldpp_dout(sync_env->dpp, 20) << __func__ << "(): sync pipe=" << *siter << dendl;
 
       sync_pair.dest_bucket = siter->target.get_bucket();
