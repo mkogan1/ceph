@@ -9,6 +9,7 @@
 #include "rgw_auth_s3.h"
 #include "rgw_op.h"
 #include "rgw_crypt_sanitize.h"
+#include "rgw_directory.h"
 
 #if __has_include(<filesystem>)
 #include <filesystem>
@@ -176,6 +177,51 @@ void D3nDataCache::d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c)
     outstanding_write_size -= c->cb->aio_nbytes;
     lru_insert_head(chunk_info);
   }
+
+  // EC528 Fall 2021 Mandy Edit:
+  cache_obj cacheObj;
+  cache_block cacheBlock;
+  cache_block *cachePtr = NULL;
+  cachePtr = (cache_block *)malloc(sizeof(cache_block)); // free memory later
+
+  // "Mandy", "myBucket", "obj", NULL, 10, time(0), "eTag", NULL, NULL, NULL, NULL, NULL, NULL, false, false, NULL, 0, false, false
+
+  cacheObj.owner = "Mandy";
+  cacheBlock.c_obj = cacheObj;
+  cacheBlock.offset = 0;
+  cacheBlock.block_id = 1;
+  cacheBlock.size_in_bytes = 20;
+  cacheBlock.etag = "Mandy_etag1";
+  cacheBlock.access_count = 5;
+  cacheBlock.lastAccessTime = 7;
+  cacheBlock.cachedOnRemote = false;
+
+  RGWBlockDirectory rgwVar;
+  int rgwSetValue = rgwVar.setValue(cachePtr);
+  int rgwOutput = rgwVar.getValue(cachePtr);
+
+  ldout(cct, 5) << "Mandy: rgwSetValue: " << rgwSetValue << " rgwOutput: " << rgwOutput <<dendl;
+
+  /*
+  //  ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
+
+  // call RGWBlockDirectory::setValue
+  // https://github.com/ekaynar/ceph-master/blob/datacache/src/rgw/rgw_cache.cc
+  // https://github.com/ekaynar/ceph-master/blob/datacache/src/rgw/rgw_cache.h 
+  // create dummy c block, pass set value and pass c block 
+  // log file in build/out/radosgw.8000.log --> put name with capital letter to search for error  
+  Edit vstart file
+  MON=1 OSD=1 RGW=1 MGR=0 MDS=0 ../src/vstart.sh -n -d -o debug_ms=0 \
+  -o rgw_d3n_l1_local_datacache_enabled=true \
+  -o rgw_d3n_l1_datacache_persistent_path=/tmp \
+  -o rgw_d3n_l1_datacache_size=10737418240 \
+
+
+if this doesn't work, ask for all config varaibles to start d3n and send him these 3
+reverify when i do search for directory, confirm put in cache is the right place 
+  
+
+  */
   delete c;
   c = nullptr;
 }
