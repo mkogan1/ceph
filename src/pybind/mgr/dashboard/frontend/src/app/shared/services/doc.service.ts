@@ -29,14 +29,14 @@ export class DocService {
     const domainRedHat = `https://www.redhat.com/en/about/`;
 
     const sections = {
-      iscsi: `${domain}dashboard_guide/block_devices#iscsi-functions`,
-      prometheus: `${domain}dashboard_guide/managing-the-cluster#viewing-and-managing-alerts`,
-      'nfs-ganesha': `${domain}dashboard_guide/object-gateway#nfs-ganesha`,
-      'rgw-nfs': `${domain}object_gateway_configuration_and_administration_guide/rgw-configuration-rgw#exporting-the-namespace-to-nfs-ganesha-rgw`,
-      rgw: `${domain}dashboard_guide/object-gateway`,
+      iscsi: `${domain}dashboard_guide/management-of-block-devices-using-the-ceph-dashboard#management-of-iscsi-functions-on-the-ceph-dashboard`,
+      prometheus: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard`,
+      'nfs-ganesha': `${domain}dashboard_guide/management-of-nfs-ganesha-exports-on-the-ceph-dashboard#configuring-nfs-ganesha-daemons-on-the-ceph-dashboard_dash`,
+      'rgw-nfs': `${domain}dashboard_guide/management-of-nfs-ganesha-exports-on-the-ceph-dashboard`,
+      rgw: `${domain}dashboard_guide/management-of-ceph-object-gateway-using-the-dashboard`,
       dashboard: `${domain}dashboard_guide/`,
-      grafana: `${domain}dashboard_guide/managing-the-cluster#managing-the-prometheus-environment_dash`,
-      orch: `${domain}operations_guide/orchestrator/`,
+      grafana: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard#enabling-monitoring-stack_dash`,
+      orch: `${domain}operations_guide/introduction-to-the-ceph-orchestrator`,
       pgs: `https://access.redhat.com/labs/cephpgc/`,
       help: `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/`,
       terms: `${domainRedHat}all-policies-guidelines/`,
