@@ -5,6 +5,9 @@ from ceph_volume.util.device import Device
 from ceph_volume.util import disk
 
 
+def valid_osd_id(val):
+    return str(int(val))
+
 class ValidDevice(object):
 
     def __init__(self, as_string=False, gpt_ok=False):
