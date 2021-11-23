@@ -30,12 +30,12 @@ export class DocService {
 
     const sections = {
       iscsi: `${domain}dashboard_guide/management-of-block-devices-using-the-ceph-dashboard#management-of-iscsi-functions-on-the-ceph-dashboard`,
-      prometheus: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard#enabling-prometheus-alerts_dash`,
+      prometheus: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard`,
       'nfs-ganesha': `${domain}dashboard_guide/management-of-nfs-ganesha-exports-on-the-ceph-dashboard#configuring-nfs-ganesha-daemons-on-the-ceph-dashboard_dash`,
       'rgw-nfs': `${domain}dashboard_guide/management-of-nfs-ganesha-exports-on-the-ceph-dashboard`,
       rgw: `${domain}dashboard_guide/management-of-ceph-object-gateway-using-the-dashboard`,
       dashboard: `${domain}dashboard_guide/`,
-      grafana: `${domain}dashboard_guide/managing-the-cluster#managing-the-prometheus-environment_dash`,
+      grafana: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard#enabling-monitoring-stack_dash`,
       orch: `${domain}operations_guide/introduction-to-the-ceph-orchestrator`,
       pgs: `https://access.redhat.com/labs/cephpgc/`,
       help: `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/`,
