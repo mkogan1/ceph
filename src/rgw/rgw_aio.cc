@@ -16,12 +16,16 @@
 #include <type_traits>
 #include "include/rados/librados.hpp"
 #include "librados/librados_asio.h"
-#include "rgw_d3n_datacache.h" //added for remote_op -Daniel
+//#include "rgw_d3n_datacache.h" //added for remote_op -Daniel
 
 #include "rgw_aio.h"
 #include "rgw_d3n_cacherequest.h"
 
+
+struct RemoteRequest; //PORTED
+struct D3nDataCache; //Perhaps this will appease the remoteOp?
 namespace rgw {
+
 
 namespace {
 
@@ -107,44 +111,63 @@ Aio::OpFunc d3n_cache_aio_abstract(const DoutPrefixProvider *dpp, optional_yield
   };
 }
 //PORTING -Daniel
+void remote_aio_cb(RemoteRequest *c){ //all below commented out by original designers
 
-template <typename Op>
-Aio::OpFunc remote_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string dest,  RemoteRequest *c, boost::asio::io_context& context, spawn::yield_context yield, cache_block *c_block, std::string path, D3nDataCache *dc) {
+/*	 lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << "(): Read From Cache " << c->r->id <<" key " << c->key  << dendl;
+        auto& r = *(c->r);
+        auto s = reinterpret_cast<remote_state*>(&r.user_data); 
+  //      c->r->result = 0;
+//s->aio->put(*(c->r));
+	 lsubdout(g_ceph_context, rgw, 1) << "D3nDataCache: " << __func__ << "(): Read From Cache s " << r.id <<" key " << c->key  << dendl;*/
+	c->finish();
+
+}
+template <typename Op> 
+Aio::OpFunc remote_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, //REMOTE_AIO_ABSTRACT 1
+                                std::string dest,  RemoteRequest *c, boost::asio::io_context& context, 
+                                spawn::yield_context yield, cache_block *c_block, std::string path, D3nDataCache *dc) {
   return [op = std::move(op), obj_ofs, read_ofs, read_len, dest, c, &context, yield, c_block, path, dc] (Aio* aio, AioResult& r) mutable{
-  };}//putting this here temporarily --Daniel
-      /*	  auto& ref = r.obj.get_ref();
+
+      /*	  auto& ref = r.obj.get_ref(); //This stuff was commented out by the original designers -Daniel
     auto cs = new(&r.user_data) remote_state(aio, r);
     cs->c = new RemoteRequest();
     cs->c->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, dest, aio, &r, c_block, path, remote_aio_cb);
     dc->submit_remote_req(cs->c);
 
-//structural comment here 
-	
+*/
+	 //DELETE THIS COMMENT TO REIMPLEMENT THIS FUNCTION
   using namespace boost::asio;
   async_completion<spawn::yield_context, void()> init(yield);
   auto ex = get_associated_executor(init.completion_handler);
   auto& ref = r.obj.get_ref();
   RemoteRequest* cc = new RemoteRequest();
+
   cc->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, dest, aio, &r, c_block, path, remote_aio_cb);
   librados::async_operate(context, ref.pool.ioctx(), ref.obj.oid, &op, cc,
                              bind_executor(ex, Handler{aio, r}));
    //DataCache *ab = static_cast<DataCache *>(dc);
-   dc->submit_remote_req(cc);
+   dc->submit_remote_req(cc); //The compiler sees this as a "incomplete class", since we just declared it above. I wonder how
+                              //we can implement D3nDataCache as a structure without including d3n_datacache.h -Daniel
 
   };
 }
-/*
+
 template <typename Op>
-Aio::OpFunc remote_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, off_t read_len, string dest,  RemoteRequest *c, cache_block *c_block, string path, DataCache *dc) {
+Aio::OpFunc remote_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, //REMOTE_AIO_ABSTRACT 2
+                                off_t read_len, std::string dest,  RemoteRequest *c, cache_block *c_block, 
+                                std::string path, D3nDataCache *dc) {
+                                  
   static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
   static_assert(!std::is_lvalue_reference_v<Op>);
   static_assert(!std::is_const_v<Op>);
   #ifdef HAVE_BOOST_CONTEXT
   return remote_aio_abstract(std::forward<Op>(op),obj_ofs, read_ofs, read_len, dest, c,  y.get_io_context(), y.get_yield_context(),c_block , path, dc);
   #endif
+  
+ return 0; //temporary
 }
 //PORTING ENDS
-*/
+
 template <typename Op>
 Aio::OpFunc aio_abstract(Op&& op, optional_yield y) {
   static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
@@ -176,10 +199,14 @@ Aio::OpFunc Aio::d3n_cache_op(const DoutPrefixProvider *dpp, optional_yield y,
 //PORTING -Daniel
 //There's just the cache op and the abstract op in D4N, I'm going to see if I can focus this on grabbing backend
 //disc stuff first.
-Aio::OpFunc Aio::remote_op(librados::ObjectReadOperation&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string dest,  RemoteRequest *c, cache_block *c_block, std::string path, D3nDataCache *dc) {
+Aio::OpFunc Aio::remote_op(librados::ObjectReadOperation&& op, boost::asio::io_context& context, optional_yield y,
+                             off_t obj_ofs, off_t read_ofs, off_t read_len, std::string dest,
+                             RemoteRequest *c, cache_block *c_block, std::string path, D3nDataCache *dc) {
     return remote_aio_abstract(std::move(op), y, obj_ofs, read_ofs, read_len, dest, c, c_block, path, dc);
 }
 //PORTING ENDS
-
-
+/*
+Op&& op, optional_yield y, off_t obj_ofs, off_t read_ofs, off_t read_len, string dest,  
+RemoteRequest *c, cache_block *c_block, string path, DataCache *dc) 
+*/
 } // namespace rgw

@@ -55,6 +55,7 @@ set(librgw_common_srcs
   rgw_bucket_sync.cc
   rgw_cache.cc
   rgw_d3n_datacache.cc
+  rgw_d3n_cacherequest.cc
   rgw_common.cc
   rgw_compression.cc
   rgw_etag_verifier.cc

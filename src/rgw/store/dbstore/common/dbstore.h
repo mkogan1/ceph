@@ -1577,7 +1577,7 @@ class DB {
       int iterate_obj(const DoutPrefixProvider *dpp,
           const RGWBucketInfo& bucket_info, const rgw_obj& obj,
           off_t ofs, off_t end, uint64_t max_chunk_size,
-          iterate_obj_cb cb, void *arg);
+          iterate_obj_cb cb, void *arg); //error thrown: no known conversion for argument 8 from ‘rgw::store::db_get_obj_data’ to ‘void*
     };
     int get_obj_iterate_cb(const DoutPrefixProvider *dpp,
         const raw_obj& read_obj, off_t obj_ofs,

@@ -19,6 +19,7 @@
 #include "rgw_aio.h"
 #include "rgw_cache.h"
 
+class RGWRESTConn; //For porting
 
 struct D3nGetObjData {
   std::mutex d3n_lock;
@@ -144,5 +145,99 @@ struct D3nL1CacheRequest {
   }
 
 };
+
+//PORTING BEGINS -Daniel
+class CacheRequest {
+  public:
+  
+    ceph::mutex lock = ceph::make_mutex("CacheRequest");
+    int sequence;
+    int stat;
+    bufferlist *bl=nullptr;
+    off_t ofs;
+    off_t read_ofs;
+    off_t read_len;   
+    rgw::AioResult* r = nullptr;
+    std::string key;
+    rgw::Aio* aio = nullptr;
+    librados::AioCompletion *lc;
+    Context *onack;
+    CacheRequest() :  sequence(0), stat(-1), bl(nullptr), ofs(0),  read_ofs(0), read_len(0), lc(nullptr){};
+    virtual ~CacheRequest(){};
+    virtual void release()=0;
+    virtual void cancel_io()=0;
+    virtual int status()=0;
+    virtual void finish()=0;
+    
+};
+
+typedef   void (*f)( RemoteRequest* func ); //Pointer to a function. Not sure what it does, but it won't work right now
+struct RemoteRequest : public CacheRequest{
+  std::string dest;
+  void *tp;
+  RGWRESTConn *conn; //Need to find and implement this class. -Daniel
+  std::string path;
+  std::string ak;
+  std::string sk; 
+  //bufferlist pbl;// =nullptr;
+  std::string s;
+  size_t sizeleft;
+  const char *readptr;
+  f func; //Oh, is the typedef not working on line 149? -Daniel
+  cache_block *c_block;
+  RemoteRequest() :  CacheRequest(), c_block(nullptr) {}
+
+
+  ~RemoteRequest(){}
+  int prepare_op(std::string key,  bufferlist *bl, off_t read_len, off_t ofs, off_t read_ofs,
+                std::string dest, rgw::Aio* aio, rgw::AioResult* r, cache_block *c_block,
+                std::string path, void(*f)(RemoteRequest*));
+ 
+  void release (){
+//    lock.lock();
+//    lock.unlock();
+  }
+
+  void cancel_io(){
+    lock.lock();
+    stat = ECANCELED;
+    lock.unlock();
+  }
+ 
+  void finish(){
+    lock.lock();
+    bl->append(s.c_str(), s.size());
+    s.clear();
+    onack->complete(0);
+    lock.unlock();
+    delete this;
+  }
+
+  int status(){
+    return 0;
+  }
+
+};
+/*
+int RemoteRequest::prepare_op(std::string key,  bufferlist *bl, off_t read_len, off_t ofs, off_t read_ofs,
+                              std::string dest, rgw::Aio* aio, rgw::AioResult* r, cache_block *c_block, 
+                              std::string path, void(*func)(RemoteRequest*)){
+
+  this->r = r;
+  this->aio = aio;
+//  this->bl = bl;
+  this->ofs = ofs;
+  this->read_ofs = read_ofs;
+  this->key = key;
+  this->read_len = read_len;
+  this->dest = dest;
+  this->path = path;
+  this->ak = c_block->c_obj.accesskey.id;
+  this->sk = c_block->c_obj.accesskey.key;
+  this->func= func;
+ 
+  return 0;
+} *///whats the worst that could happen putting this in a .h file instead of a .cc file? A LOT TODO:: Put in its own .cc file
+//PORTING ENDS
 
 #endif

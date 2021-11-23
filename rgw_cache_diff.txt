@@ -1,0 +1,1469 @@
+							      >	uint64_t expected_size = 0;
+using namespace std;					      |	/*datacache*/
+							      >	#include <iostream>
+							      >	#include <fstream> // writing to file
+							      >	#include <sstream> // writing to memory (a string)
+							      >	#include <unistd.h>
+							      >	#include <fcntl.h>
+							      >	#include <signal.h>
+							      >	#include <stdlib.h>
+							      >	#include <stdio.h>
+							      >	#include "rgw_rest_conn.h"
+							      >	#include <openssl/hmac.h>
+							      >	#include <ctime>
+							      >	#include <mutex>
+							      >	#include <curl/curl.h>
+							      >	#include <time.h>
+							      >	#include <algorithm>
+							      >	#include <string>
+							      >	//#include "rgw_cacherequest.h"
+							      >	static const std::string base64_chars =
+							      >	"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+							      >	"abcdefghijklmnopqrstuvwxyz"
+							      >	"0123456789+/";
+int ObjectCache::get(const DoutPrefixProvider *dpp, const str |
+							      >	static inline bool is_base64(unsigned char c) {
+							      >	  return (isalnum(c) || (c == '+') || (c == '/'));
+							      >	}
+							      >	std::string base64_encode(unsigned char const* bytes_to_encod
+							      >	  std::string ret;
+							      >	  int i = 0;
+							      >	  int j = 0;
+							      >	  unsigned char char_array_3[3];
+							      >	  unsigned char char_array_4[4];
+							      >	  while (in_len--) {
+							      >	    char_array_3[i++] = *(bytes_to_encode++);
+							      >	    if (i == 3) {
+							      >	      char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+							      >	      char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((c
+							      >	      char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((c
+							      >	      char_array_4[3] = char_array_3[2] & 0x3f;
+							      >
+							      >	      for(i = 0; (i <4) ; i++)
+							      >		ret += base64_chars[char_array_4[i]];
+							      >	      i = 0;
+							      >	    }
+							      >	  }
+							      >
+							      >	  if (i)
+							      >	  {
+							      >	    for(j = i; j < 3; j++)
+							      >	      char_array_3[j] = '\0';
+							      >
+							      >	    char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+							      >	    char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((cha
+							      >	    char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((cha
+							      >	    char_array_4[3] = char_array_3[2] & 0x3f;
+							      >
+							      >	    for (j = 0; (j < i + 1); j++)
+							      >	      ret += base64_chars[char_array_4[j]];
+							      >
+							      >	    while((i++ < 3))
+							      >	      ret += '=';
+							      >	  }
+							      >	  return ret;
+							      >	}
+							      >
+							      >
+							      >
+							      >
+							      >
+							      >
+							      >	int ObjectCache::get(const string& name, ObjectCacheInfo& inf
+  std::unique_lock wl{lock, std::defer_lock}; // may be promo <
+    ldpp_dout(dpp, 10) << "cache get: name=" << name << " : m |	    ldout(cct, 10) << "cache get: name=" << name << " : miss"
+       (ceph::coarse_mono_clock::now() - iter->second.info.ti |	      (ceph::coarse_mono_clock::now() - iter->second.info.tim
+    ldpp_dout(dpp, 10) << "cache get: name=" << name << " : e |	    ldout(cct, 10) << "cache get: name=" << name << " : expir
+    wl.lock(); // write lock for expiration		      |	    std::unique_lock wl{lock};  // write lock for insertion
+        kv.first->invalidate(kv.second);		      |		kv.first->invalidate(kv.second);
+    ldpp_dout(dpp, 20) << "cache get: touching lru, lru_count |	    ldout(cct, 20) << "cache get: touching lru, lru_counter="
+                   << " promotion_ts=" << entry->lru_promotio |	      << " promotion_ts=" << entry->lru_promotion_ts << dendl
+    wl.lock(); // write lock for touch_lru()		      |	    std::unique_lock wl{lock};  // write lock for insertion
+      ldpp_dout(dpp, 10) << "lost race! cache get: name=" <<  |	      ldout(cct, 10) << "lost race! cache get: name=" << name
+      touch_lru(dpp, name, *entry, iter->second.lru_iter);    |	      touch_lru(name, *entry, iter->second.lru_iter);
+  if(src.status == -ENOENT) {				      <
+    ldpp_dout(dpp, 10) << "cache get: name=" << name << " : h <
+    if (perfcounter) perfcounter->inc(l_rgw_cache_hit);	      <
+    return -ENODATA;					      <
+  }							      <
+    ldpp_dout(dpp, 10) << "cache get: name=" << name << " : t |	    ldout(cct, 10) << "cache get: name=" << name << " : type 
+                   << std::hex << mask << ", cached=0x" << sr |	      << std::hex << mask << ", cached=0x" << src.flags
+                   << std::dec << ")" << dendl;		      |	      << std::dec << ")" << dendl;
+  ldpp_dout(dpp, 10) << "cache get: name=" << name << " : hit |	  ldout(cct, 10) << "cache get: name=" << name << " : hit (re
+                 << std::hex << mask << ", cached=0x" << src. |	    << std::hex << mask << ", cached=0x" << src.flags
+                 << std::dec << ")" << dendl;		      |	    << std::dec << ")" << dendl;
+bool ObjectCache::chain_cache_entry(const DoutPrefixProvider  |	bool ObjectCache::chain_cache_entry(std::initializer_list<rgw
+                                    std::initializer_list<rgw |	    RGWChainedCache::Entry *chained_entry)
+				    RGWChainedCache::Entry *c <
+    ldpp_dout(dpp, 10) << "chain_cache_entry: cache_locator=" |	    ldout(cct, 10) << "chain_cache_entry: cache_locator="
+		   << cache_info->cache_locator << dendl;     |	      << cache_info->cache_locator << dendl;
+      ldpp_dout(dpp, 20) << "chain_cache_entry: couldn't find |	      ldout(cct, 20) << "chain_cache_entry: couldn't find cac
+      ldpp_dout(dpp, 20) << "chain_cache_entry: entry.gen ("  |	      ldout(cct, 20) << "chain_cache_entry: entry.gen (" << e
+		     << ") != cache_info.gen (" << cache_info |		<< ") != cache_info.gen (" << cache_info->gen << ")"
+		     << dendl;				      |		<< dendl;
+					       chained_entry- |		  chained_entry->key));
+void ObjectCache::put(const DoutPrefixProvider *dpp, const st |	void ObjectCache::put(const string& name, ObjectCacheInfo& in
+  ldpp_dout(dpp, 10) << "cache put: name=" << name << " info. |	  ldout(cct, 10) << "cache put: name=" << name << " info.flag
+                 << std::hex << info.flags << std::dec << den |	    << std::hex << info.flags << std::dec << dendl;
+  touch_lru(dpp, name, entry, entry.lru_iter);		      |	  touch_lru(name, entry, entry.lru_iter);
+  // put() must include the latest version if we're going to  <
+  target.flags &= ~CACHE_FLAG_OBJV;			      <
+							      <
+      ldpp_dout(dpp, 10) << "updating xattr: name=" << iter-> |	      ldout(cct, 10) << "updating xattr: name=" << iter->firs
+      ldpp_dout(dpp, 10) << "removing xattr: name=" << iter-> |	      ldout(cct, 10) << "removing xattr: name=" << iter->firs
+      ldpp_dout(dpp, 10) << "appending xattr: name=" << iter- |	      ldout(cct, 10) << "appending xattr: name=" << iter->fir
+// WARNING: This function /must not/ be modified to cache a   |	bool ObjectCache::remove(const string& name)
+// negative lookup. It must only invalidate.		      <
+bool ObjectCache::invalidate_remove(const DoutPrefixProvider  <
+  ldpp_dout(dpp, 10) << "removing " << name << " from cache"  |	  ldout(cct, 10) << "removing " << name << " from cache" << d
+void ObjectCache::touch_lru(const DoutPrefixProvider *dpp, co |	void ObjectCache::touch_lru(const string& name, ObjectCacheEn
+			    std::list<string>::iterator& lru_ |	    std::list<string>::iterator& lru_iter)
+    ldpp_dout(dpp, 10) << "adding " << name << " to cache LRU |	    ldout(cct, 10) << "adding " << name << " to cache LRU end
+    ldpp_dout(dpp, 10) << "moving " << name << " to cache LRU |	    ldout(cct, 10) << "moving " << name << " to cache LRU end
+			     std::list<string>::iterator& lru |	    std::list<string>::iterator& lru_iter)
+       iter != entry.chained_entries.end(); ++iter) {	      |	      iter != entry.chained_entries.end(); ++iter) {
+							      >	}
+							      >
+							      >
+							      >	/* datacache */
+							      >
+							      >	DataCache::DataCache() : cct(NULL), free_data_cache_size(0), 
+							      >
+							      >	void DataCache::submit_remote_req(RemoteRequest *c){
+							      >	  string endpoint=cct->_conf->backend_url;
+							      >	  cache_lock.lock();
+							      >
+							      >	  ldout(cct, 1) << "submit_remote_req, dest " << c->dest << "
+							      >	  if ((c->dest).compare(endpoint) == 0) {
+							      >	        datalake_hit ++;
+							      >		    ldout(cct, 1) << "submit_remote_req, datalake_hit
+							      >	  } else {
+							      >	        remote_hit++;
+							      >		    ldout(cct, 1) << "submit_remote_req, remote_hit "
+							      >	  }
+							      >	  cache_lock.unlock();
+							      >
+							      >	  tp->addTask(new RemoteS3Request(c, cct));
+							      >	}
+							      >
+							      >	void DataCache::retrieve_block_info(cache_block* c_block, RGW
+							      >	  ldout(cct, 0) << __func__ <<dendl;
+							      >	  int ret = store->blkDirectory->getValue(c_block);
+							      >	}
+							      >
+							      >
+							      >	void DataCache::copy_aged_obj(RGWRados *store, uint64_t inter
+							      >		ldout(cct, 20) << __func__ << dendl;
+							      >		time_t rawTime = time(NULL);
+							      >	    time_t now =  mktime(gmtime(&rawTime));
+							      >		obj_cache_lock.lock();
+							      >	    ObjectDataInfo *del_entry;
+							      >	    del_entry = obj_tail;
+							      >		obj_cache_lock.unlock();
+							      >
+							      >		while (obj_head != NULL and del_entry != NULL) {
+							      >		  
+							      >		  ldout(cct, 20) << __func__ << del_entry->c_obj->obj
+							      >		  double seconds = difftime(now,del_entry->c_obj->cre
+							      >		  if (seconds < (double(interval)*60))
+							      >			break;
+							      >		 
+							      >		  cache_obj *c_obj = new cache_obj();
+							      >	      c_obj->bucket_name = del_entry->c_obj->bucket_name;
+							      >	      c_obj->obj_name = del_entry->c_obj->obj_name;
+							      >		  
+							      >		  // Check Object exists or not
+							      >		  if ( !store->get_obj(c_obj)){
+							      >			obj_cache_lock.lock();
+							      >			string obj_id = del_entry->obj_id;
+							      >			ObjectDataInfo *aged_item;
+							      >	        aged_item = del_entry;
+							      >			map<string, ObjectDataInfo*>::iterator iter =
+							      >			if (iter != write_cache_map.end())
+							      >	          write_cache_map.erase(obj_id);
+							      >			  obj_lru_remove(aged_item);
+							      >			  obj_cache_lock.unlock();
+							      >			  del_entry = obj_tail;
+							      >		  }
+							      >
+							      >		  // Check the object is intermediate data or not
+							      >		  c_obj->bucket_name = del_entry->c_obj->bucket_name;
+							      >		  c_obj->obj_name = del_entry->c_obj->obj_name;
+							      >		  c_obj->size_in_bytes = del_entry->c_obj->size_in_by
+							      >		  c_obj->owner = del_entry->c_obj->owner;
+							      >		  string owner_obj =  del_entry->c_obj->owner;
+							      >		  
+							      >		   
+							      >		  int ret = objDirectory->getValue(c_obj);
+							      >	      // Don't age if it is intermediate
+							      >	      if (objDirectory->getValue(c_obj) == 0  && c_obj->inter
+							      >	        //obj_cache_lock.lock();
+							      >			del_entry = del_entry->lru_prev;
+							      >			ldout(cct, 20) << __func__ << "inter" <<del_e
+							      >	        //obj_lru_insert_head(del_entry);
+							      >	        //obj_cache_lock.unlock();
+							      >		//small object coalesing writes
+							      >		 } else if (c_obj->size_in_bytes < cct->_conf->rgw_ob
+							      >			string obj_id = del_entry->obj_id;
+							      >			obj_cache_lock.lock();
+							      >			total_write_size += c_obj->size_in_bytes;
+							      >			small_writes->push_back(obj_id+"_"+std::to_st
+							      >			ObjectDataInfo *aged_item;
+							      >	        aged_item = del_entry;
+							      >			map<string, ObjectDataInfo*>::iterator iter =
+							      >			if (iter != write_cache_map.end())
+							      >			  write_cache_map.erase(obj_id);
+							      >
+							      >		    obj_lru_remove(aged_item);
+							      >			obj_cache_lock.unlock();
+							      >			del_entry = obj_tail;
+							      >			
+							      >			if (total_write_size >=  cct->_conf->coalesin
+							      >			  std::list<string> *outgoing_small_writes = 
+							      >			  obj_cache_lock.lock();
+							      >			  while(!small_writes->empty()){
+							      >			  string aging_candidate = small_writes->fron
+							      >			  outgoing_small_writes->push_back(aging_cand
+							      >			  small_writes->pop_front();
+							      >			  }
+							      >			  uint64_t t_size = total_write_size;
+							      >			  total_write_size = 0;
+							      >			  obj_cache_lock.unlock();
+							      >			  RemoteRequest *c =  new RemoteRequest();
+							      >			  aging_tp->addTask(new CopyRemoteS3Object(th
+							      >			  }
+							      >		  
+							      >		  
+							      >		  } else {
+							      >			ldout(cct, 20) << __func__ << " Large Object"
+							      >			string obj_id = del_entry->obj_id;
+							      >			ObjectDataInfo *aged_item;
+							      >			aged_item = del_entry;
+							      >			del_entry = del_entry->lru_prev;
+							      >			obj_cache_lock.lock();
+							      >			map<string, ObjectDataInfo*>::iterator iter =
+							      >	        if (iter != write_cache_map.end())
+							      >	          write_cache_map.erase(obj_id);
+							      >	        obj_lru_remove(aged_item);
+							      >	        obj_cache_lock.unlock();
+							      >			uint64_t t_size = c_obj->size_in_bytes;
+							      >			RemoteRequest *c =  new RemoteRequest();
+							      >			std::list<string> *outgoing_small_writes = ne
+							      >			outgoing_small_writes->push_back(obj_id+"_"+s
+							      >			aging_tp->addTask(new CopyRemoteS3Object(this
+							      >
+							      >		  }
+							      >		  
+							      >		  
+							      >		  
+							      >		  /*
+							      >		   else {
+							      >			ldout(cct, 20) << __func__ << " aging large o
+							      >			string del_oid = del_entry->obj_id;
+							      >		    time_t now = time(NULL);
+							      >		   double diff = difftime(now, del_entry->c_obj->crea
+							      >			if (diff < double(interval*60)) {
+							      >			  std::list<string> outgoing_small_writes;
+							      >			  string owner = c_obj->owner;
+							      >			  uint64_t t_size = c_obj->size_in_bytes;
+							      >			  RemoteRequest *c =  new RemoteRequest();
+							      >			  aging_tp->addTask(new CopyRemoteS3Object(th
+							      >				
+							      >			  obj_cache_lock.lock();
+							      >			  map<string, ObjectDataInfo*>::iterator iter
+							      >			  if (iter != write_cache_map.end()){
+							      >				write_cache_map.erase(del_oid);
+							      >			  }
+							      >			  obj_lru_remove(del_entry);
+							      >			  obj_cache_lock.unlock(); 
+							      >			}
+							      >			else { break; }
+							      >		  }
+							      >		  */
+							      >	  }
+							      >	  //ldout(cct, 20) << __func__ << "out of while loop "<< dend
+							      >	}
+							      >
+							      >
+							      >	void DataCache::directoryUpdate(string del_oid, int64_t del_w
+							      >	{
+							      >	  ldout(cct, 20) << __func__ << dendl;
+							      >	  std::thread([del_oid, del_weight, this]() {
+							      >	      int ret = blkDirectory->updateGlobalWeight(del_oid, del
+							      >	  }).detach();
+							      >
+							      >	}
+							      >	/*
+							      >	void DataCache::directoryResetGlobal(string del_oid)
+							      >	{
+							      >	  ldout(cct, 20) << __func__ << dendl;
+							      >	  std::thread([del_oid, del_weight, this]() {
+							      >		 int  ret = blkDirectory->resetGlobalWeight(del_oid);
+							      >	  }).detach();
+							      >
+							      >	}
+							      >	*/
+							      >
+							      >	void DataCache::timer_start(RGWRados *store, uint64_t interva
+							      >	{
+							      >	  ldout(cct, 20) << __func__ << dendl;
+							      >	  std::thread([store, interval, this]() {
+							      >	  while(true){
+							      >		this->copy_aged_obj(store, interval);
+							      >	//	std::this_thread::sleep_for(std::chrono::seconds(30))
+							      >		std::this_thread::sleep_for(std::chrono::minutes(inte
+							      >	  }
+							      >	  }).detach();
+							      >	  
+							      >	}
+							      >
+							      >	int DataCache::getUid() {
+							      >	    return ++uid;
+							      >	}
+							      >
+							      >	int CopyRemoteS3Object::submit_http_put_request_s3(){
+							      >	  int ret = store->copy_remote(store, c_obj);
+							      >	  return ret;
+							      >	}
+							      >
+							      >	int CopyRemoteS3Object::submit_coalesing_writes_s3(){
+							      >	  int ret =  store->copy_small_remote(store, owner_obj, t_siz
+							      >	  return ret;
+							      >	}
+							      >
+							      >	void CopyRemoteS3Object::run() {
+							      >	  int max_retries = cct->_conf->max_aging_retries;
+							      >	  int ret = 0;
+							      >	  for (int i=0; i<max_retries; i++ ){
+							      >		if(coales_write){
+							      >		  if(!(ret = submit_http_put_coalesed_requests_s3()))
+							      >		   return;	
+							      >		  }
+							      >		  ldout(cct, 0) << "ERROR: " << __func__  << "submit_
+							      >	      return;
+							      >		  }
+							      >		
+							      >		
+							      >		else {
+							      >		  if(!(ret = submit_http_put_request_s3())){
+							      >			ret = store->delete_writecache_obj(store, c_o
+							      >
+							      >			return;
+							      >		  }
+							      >		  ldout(cct, 0) << "ERROR: " << __func__  << "submit_
+							      >		  return;
+							      >		}
+							      >	  }
+							      >	}
+							      >
+							      >	void DataCache::init_writecache_aging(RGWRados *store){
+							      >	  ldout(cct, 0) << __func__ <<dendl;
+							      >	  
+							      >	  timer_start(store, cct->_conf->aging_interval_in_minutes);
+							      >
+							      >	}
+							      >
+							      >	size_t DataCache::get_used_pool_capacity(string pool_name, RG
+							      >
+							      >	  ldout(cct, 0) << __func__ <<dendl;
+							      >	  size_t used_capacity = 0;
+							      >	/*
+							      >	  librados::Rados *rados = store->get_rados_handle();
+							      >	  list<string> vec;
+							      >	  int r = rados->pool_list(vec);
+							      >	  //  vec.push_back(pool_name);
+							      >	  map<string,librados::pool_stat_t> stats;
+							      >	  r = rados->get_pool_stats(vec, stats);
+							      >	  if (r < 0) {
+							      >	    ldout(cct, 0) << "error fetching pool stats: " <<dendl;
+							      >	    return -1;
+							      >	  }
+							      >	  for (map<string,librados::pool_stat_t>::iterator i = stats.
+							      >	    const char *pool_name = i->first.c_str();
+							      >	    librados::pool_stat_t& s = i->second;
+							      >	  }*/
+							      >	  return used_capacity; //return used size
+							      >	}
+							      >
+							      >
+							      >	int cacheAioWriteRequest::create_io(bufferlist& bl, uint64_t 
+							      >	  std::string location = cct->_conf->rgw_datacache_path + "/"
+							      >	  int ret = 0;
+							      >	  cb = new struct aiocb;
+							      >	  mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+							      >	  memset(cb, 0, sizeof(struct aiocb));
+							      >	  ret = fd = ::open(location.c_str(), O_WRONLY | O_CREAT | O_
+							      >	  if (fd < 0)
+							      >	  {
+							      >	    ldout(cct, 0) << "ERROR: create_aio_write_request: open f
+							      >	    goto done;
+							      >	  }
+							      >	  cb->aio_fildes = fd;
+							      >
+							      >	  data = malloc(len);
+							      >	  if(!data)
+							      >	  {
+							      >	    ldout(cct, 0) << "ERROR: create_aio_write_request: memory
+							      >	    goto close_file;
+							      >	  }
+							      >	  cb->aio_buf = data;
+							      >	  memcpy((void *)data, bl.c_str(), len);
+							      >	  cb->aio_nbytes = len;
+							      >	  goto done;	
+							      >	close_file:
+							      >	  ::close(fd);
+							      >	done:
+							      >	  ldout(cct, 0) << "done" << dendl;
+							      >	  return ret;
+							      >	}
+							      >
+							      >
+							      >	void DataCache::cache_aio_write_completion_cb(cacheAioWriteRe
+							      >	  //LFUDA 
+							      >	  if(cct->_conf->rgw_lfuda == true){
+							      >		cache_lock.lock();
+							      >		outstanding_write_list.remove(c->key);
+							      >		element el;
+							      >		el.obj_id = c->key;
+							      >		el.size_in_bytes = c->c_block.size_in_bytes;
+							      >		ldout(cct, 1) << __func__  << " oid " << el.obj_id
+							      >	                                        << " element_size  " 
+							      >	                                        << " cache_weight  " 
+							      >	                                        << " size " << c->cb-
+							      >
+							      >	  lfu_cache_map[c->key] = {el,cache_weight} ;
+							      >	  freq_map[cache_weight].push_back(c->key);
+							      >	  key_iter[c->key] = --freq_map[cache_weight].end();
+							      >	/*
+							      >	    m_dynamic_age_list.push_back(el);
+							      >	    m_open_list_end = m_dynamic_age_list.end();
+							      >	    --m_open_list_end;
+							      >	    auto key_position = m_key_map.emplace(el.obj_id, m_open_l
+							      >	    auto lfu_position = m_lfu_list.emplace(cache_weight, m_op
+							      >
+							      >	    m_open_list_end->key_position =  key_position;
+							      >	    m_open_list_end->lfu_position =  lfu_position;	
+							      >	*/
+							      >		total_cache_weight += cache_weight;
+							      >		cache_lock.unlock();
+							      >		
+							      >		//c->c_block.access_count = cache_weight;
+							      >		int64_t avg_w = 0;
+							      >		if( m_dynamic_age_list.size() != 0)
+							      >	          avg_w = round(total_cache_weight/m_dynamic_age_list
+							      >	  
+							      >		 /*update free size*/
+							      >	    eviction_lock.lock();
+							      >	    free_data_cache_size -= c->cb->aio_nbytes;
+							      >	    outstanding_write_size -=  c->cb->aio_nbytes;
+							      >	    eviction_lock.unlock();
+							      >		time_t rawTime = time(NULL);
+							      >	    c->c_block.lastAccessTime = mktime(gmtime(&rawTime));
+							      >		if (c->c_block.cachedOnRemote){
+							      >		  c->c_block.access_count = cache_weight;
+							      >		}
+							      >		else 
+							      >		  c->c_block.access_count = 0;
+							      >	    int ret = blkDirectory->setValue(&(c->c_block));
+							      >		//      ret = blkDirectory->setAvgCacheWeight(avg_w);
+							      >	    c->release();
+							      >	  }
+							      >
+							      >	  
+							      >	  
+							      >	  
+							      >	  // LFU
+							      >	  else {
+							      >	  ChunkDataInfo  *chunk_info = nullptr;
+							      >	  ldout(cct, 10) << __func__  << " oid " << c->key << dendl; 
+							      >	  cache_lock.lock();
+							      >	  outstanding_write_list.remove(c->key);
+							      >	  chunk_info = new ChunkDataInfo;
+							      >	  chunk_info->obj_id = c->key;
+							      >	  chunk_info->set_ctx(cct);
+							      >	  chunk_info->size = c->cb->aio_nbytes;
+							      >	  cache_map.insert(pair<string, ChunkDataInfo*>(c->key, chunk
+							      >	  cache_lock.unlock();
+							      >	  
+							      >	  /*update free size*/
+							      >	  eviction_lock.lock();
+							      >	  free_data_cache_size -= c->cb->aio_nbytes;
+							      >	  outstanding_write_size -=  c->cb->aio_nbytes;
+							      >	  lru_insert_head(chunk_info);
+							      >	  eviction_lock.unlock();
+							      >	  
+							      >	  time_t rawTime = time(NULL);
+							      >	  c->c_block.lastAccessTime = mktime(gmtime(&rawTime));  
+							      >	  c->c_block.access_count = 0;
+							      >	  int ret = blkDirectory->setValue(&(c->c_block));
+							      >	  ldout(cct, 20) << __func__ <<"key done:" <<c->key << " ret:
+							      >	  c->release(); 
+							      >	  }
+							      >	}
+							      >
+							      >
+							      >	void _cache_aio_write_completion_cb(sigval_t sigval) {
+							      >	  cacheAioWriteRequest *c = (cacheAioWriteRequest *)sigval.si
+							      >	  c->priv_data->cache_aio_write_completion_cb(c);
+							      >	}
+							      >
+							      >	int DataCache::create_aio_write_request(bufferlist& bl, uint6
+							      >	  ldout(cct, 10) << __func__  << " oid " << c_b->c_obj.obj_na
+							      >	  struct cacheAioWriteRequest *wr= new struct cacheAioWriteRe
+							      >	  int ret = 0;
+							      >	  if (wr->create_io(bl, len, key) < 0) {
+							      >	    ldout(cct, 0) << "Error: create_io " << dendl;
+							      >	    goto done;
+							      >	  }
+							      >
+							      >	  wr->cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
+							      >	  wr->cb->aio_sigevent.sigev_notify_function = _cache_aio_wri
+							      >	  wr->cb->aio_sigevent.sigev_notify_attributes = NULL;
+							      >	  wr->cb->aio_sigevent.sigev_value.sival_ptr = (void*)wr;
+							      >	  wr->key = key;
+							      >	  wr->priv_data = this;
+							      >	  wr->c_block = *c_b;
+							      >
+							      >	  if((ret= ::aio_write(wr->cb)) != 0) {
+							      >	    ldout(cct, 0) << "Error: aio_write failed "<< ret << dend
+							      >	    goto error;
+							      >	  }
+							      >	  return 0;
+							      >
+							      >	error:
+							      >	  wr->release();
+							      >	done:
+							      >	  return ret;
+							      >
+							      >
+							      >	}
+							      >	bool DataCache::get(string oid, bool isRemote) {
+							      >
+							      >	  string key = oid;
+							      >	  const char x = '/';
+							      >	  const char y = '_';
+							      >	  std::replace(key.begin(), key.end(), x, y);
+							      >
+							      >	  ldout(cct, 0) << __func__ << "key:"<< key << dendl;
+							      >	  bool exist = false;
+							      >	  int ret = 0;
+							      >	  string location = cct->_conf->rgw_datacache_path + "/"+ key
+							      >	  // LFUDA
+							      >	  if(cct->_conf->rgw_lfuda == true){
+							      >	  int64_t avg_w = 0;
+							      >	  auto start = chrono::steady_clock::now();
+							      >	  cache_lock.lock();
+							      >	    /*
+							      >		auto key_position = m_key_map.find(key);
+							      >	    if ( key_position != m_key_map.end() ){
+							      >	        exist = true;
+							      >	        local_hit += 1;
+							      >	        ldout(cct, 0) << __func__ << " local_hit: "<< local_h
+							      >	        if (!isRemote){
+							      >	          ldout(cct, 0) << __func__ << "local request:"<< key
+							      >	          element& e =  *(key_position->second);
+							      >	          auto use_count = e.lfu_position->first;
+							      >	          m_lfu_list.erase(e.lfu_position);
+							      >	          int64_t new_w = use_count + cache_weight;
+							      >	          e.lfu_position = m_lfu_list.emplace(new_w, e.key_po
+							      >	          total_cache_weight += cache_weight;
+							      >	          avg_w = round(total_cache_weight/m_dynamic_age_list
+							      >			  }
+							      >	    */
+							      >		 if (lfu_cache_map.find(key) != lfu_cache_map.end()) 
+							      >			exist = true;
+							      >	        local_hit += 1;
+							      >	        ldout(cct, 0) << __func__ << " local_hit: "<< local_h
+							      >	        if (!isRemote){
+							      >	          ldout(cct, 0) << __func__ << "local request:"<< key
+							      >			  freq_map[lfu_cache_map[key].second].erase(k
+							      >			  int64_t new_freq = lfu_cache_map[key].secon
+							      >			  freq_map[new_freq].push_back(key);
+							      >			  key_iter[key] = --freq_map[new_freq].end();
+							      >			  total_cache_weight += cache_weight;
+							      >	//		  avg_w = round(total_cache_weight/m_dynamic_
+							      >			}
+							      >		auto end2 = chrono::steady_clock::now();
+							      >		ldout(cct,10) << __func__  << " lfuda hit ms " << chr
+							      >		}
+							      >		else{
+							      >		auto end2 = chrono::steady_clock::now();
+							      >	  ldout(cct,10) << __func__  << " lfuda miss ms " << chrono::
+							      >	  cache_lock.unlock();
+							      >	  return exist;
+							      >
+							      >	  //LRU
+							      >	  } else {
+							      >	  auto start = chrono::steady_clock::now();
+							      >	  cache_lock.lock();
+							      >	  map<string, ChunkDataInfo*>::iterator iter = cache_map.find
+							      >	  if (!(iter == cache_map.end())){
+							      >	     // check inside cache whether file exists or not!!!! the
+							      >	     struct ChunkDataInfo *chdo = iter->second;
+							      >	     if(access(location.c_str(), F_OK ) != -1 ) { // file exi
+							      >	 	  exist = true;
+							      >	 	  /* LRU */
+							      >	 	  eviction_lock.lock();
+							      >	 	  lru_remove(chdo);
+							      >	 	  lru_insert_head(chdo);
+							      >		  local_hit += 1;
+							      >		  ldout(cct, 0) << __func__ << " filexist:"<< key << 
+							      >	 	  eviction_lock.unlock();
+							      >
+							      >	      } else { /*LRU*/
+							      >		  ldout(cct, 0) << __func__ << " in map but file not 
+							      >		  ret = evict_from_directory(oid);
+							      >		  cache_map.erase(key);
+							      >	 	  eviction_lock.lock();
+							      >	 	  free_data_cache_size += chdo->size;
+							      >		  lru_remove(chdo);
+							      >	      delete chdo;
+							      >		  exist = false;
+							      >	 	  eviction_lock.unlock();
+							      >	     }
+							      >
+							      >	  } else {
+							      >		ldout(cct, 0) << __func__ << "key not in map:"<< key 
+							      >	  }
+							      >	  cache_lock.unlock();
+							      >	  auto end2 = chrono::steady_clock::now();
+							      >	  ldout(cct,10) << __func__ << " lru req ms " << chrono::dura
+							      >	  return exist;
+							      >	  }
+							      >	}
+							      >
+							      >	int DataCache::evict_from_directory(string key){
+							      >	   /*update directory*/
+							      >	    string hosts;
+							      >	    int ret = blkDirectory->getHosts(key, hosts);
+							      >	    stringstream sloction(hosts);
+							      >	    string tmp;
+							      >	    stringstream ss;
+							      >	    vector<string> hosts_list;
+							      >	    size_t i = 0;
+							      >	    while(getline(sloction, tmp, '_')){
+							      >	      if (tmp != cct->_conf->remote_cache_addr){
+							      >	        hosts_list.push_back(tmp);
+							      >	        if(i != 0)
+							      >	          ss << "_";
+							      >	        ss << tmp;
+							      >	        i+=1;
+							      >	      }
+							      >	    }
+							      >	    hosts = ss.str();
+							      >		if (hosts_list.size() <= 0){
+							      >	      ret = blkDirectory->delValue(key);
+							      >	    } else {
+							      >	      ret = blkDirectory->updateField(key, "host_list", hosts
+							      >	    }
+							      >		return 0;
+							      >	}
+							      >
+							      >	void DataCache::set_remote_cache_list(){
+							      >	      remote_cache_count = 0;
+							      >	          stringstream sloction(cct->_conf->remote_cache_list
+							      >	      string tmp;
+							      >	      while(getline(sloction, tmp, ',')){
+							      >	        if (tmp.compare(cct->_conf->remote_cache_addr) != 0)
+							      >	                {
+							      >	          remote_cache_list.push_back(tmp);
+							      >	                  //remote_cache_weight_map.insert(pair<strin
+							      >	                }
+							      >	      }
+							      >	          remote_cache_count = remote_cache_list.size();
+							      >	    }
+							      >	size_t DataCache::lfuda_eviction2(){
+							      >	  int n_entries = 0, ret = 0;
+							      >	  size_t freed_size = 0;
+							      >	  int64_t avg_w = 0;
+							      >	  string del_oid, location;
+							      >	  auto start = chrono::steady_clock::now();
+							      >	  cache_lock.lock();
+							      >	  int64_t del_weight = freq_map.begin()->first;
+							      >	  del_oid = freq_map[del_weight].front();
+							      >	  element tmp; 
+							      >	  tmp.obj_id = lfu_cache_map[del_oid].first.obj_id;
+							      >	  tmp.size_in_bytes = lfu_cache_map[del_oid].first.size_in_by
+							      >	  lfu_cache_map.erase(del_oid);
+							      >	  key_iter.erase(del_oid);
+							      >	  freq_map[del_weight].pop_front();
+							      >	  ldout(cct, 10) << __func__  << "victim id: "<< del_oid << d
+							      >
+							      >	  cache_block *victim = new cache_block();
+							      >	  victim->cachedOnRemote = false;
+							      >	  victim->access_count = 0;
+							      >
+							      >	  ret = blkDirectory->getValue(victim, del_oid);
+							      >	  if (ret < 0)
+							      >		ldout(cct, 10) << __func__  <<" ERROR: not in directo
+							      >	  if(true){
+							      >	//  if (victim->cachedOnRemote) {
+							      >		ldout(cct, 10) << __func__  <<" remote copy exists: "
+							      >	    freed_size = tmp.size_in_bytes;
+							      >	    cache_weight = del_weight;
+							      >	    total_cache_weight = total_cache_weight - cache_weight;
+							      >		cache_lock.unlock();
+							      >		auto end2 = chrono::steady_clock::now();
+							      >	    ldout(cct,10) << __func__  << " remote_copy ms " << chron
+							      >	    location = cct->_conf->rgw_datacache_path + "/" + del_oid
+							      >	    remove(location.c_str());
+							      >	    directoryUpdate(del_oid, del_weight, true);
+							      >	    return freed_size;
+							      >	  }
+							      >	}
+							      >
+							      >
+							      >	size_t DataCache::lfuda_eviction(){
+							      >	  int n_entries = 0;
+							      >	  size_t freed_size = 0;
+							      >	  string del_oid, location;
+							      >	  auto start = chrono::steady_clock::now();
+							      >	  cache_lock.lock();
+							      >	  auto it = m_lfu_list.begin()->second;
+							      >	  auto e = *it;
+							      >	  del_oid = e.obj_id;
+							      >	  size_t del_size = e.size_in_bytes;
+							      >	  int64_t del_weight = e.lfu_position->first;
+							      >	  int ret = 0;
+							      >	  int64_t avg_w = 0;
+							      >	  ldout(cct, 10) << __func__  << "victim id: "<< del_oid << d
+							      >	  m_lfu_list.erase(e.lfu_position);
+							      >	  cache_block *victim = new cache_block();
+							      >	  victim->cachedOnRemote = false;
+							      >	  victim->access_count = 0;
+							      >	//  victim_list.push_back(del_oid);
+							      >	//  cache_lock.unlock();
+							      >
+							      >	  ret = blkDirectory->getValue(victim, del_oid);
+							      >	  if (ret < 0)
+							      >	        ldout(cct, 10) << __func__  <<" ERROR: not in directo
+							      >	    //The block has a copy on another remote cache
+							      >	  if (victim->cachedOnRemote) {
+							      >	         ldout(cct, 10) << __func__  <<" remote copy exists: 
+							      >	         freed_size = del_size;
+							      >	         m_dynamic_age_list.erase(it);
+							      >	  //       m_key_map.erase(e.key_position);
+							      >	         m_key_map.erase(del_oid);
+							      >	         cache_weight = del_weight;
+							      >	         total_cache_weight = total_cache_weight - cache_weig
+							      >	//		 victim_list.remove(del_oid);
+							      >	         cache_lock.unlock();
+							      >			auto end2 = chrono::steady_clock::now();
+							      >	        ldout(cct,10) << __func__  << " remote_copy ms " << c
+							      >	         if( m_dynamic_age_list.size() != 0)
+							      >	                avg_w = round(total_cache_weight/m_dynamic_ag
+							      >	         location = cct->_conf->rgw_datacache_path + "/" + de
+							      >
+							      >	           remove(location.c_str());
+							      >			   directoryUpdate(del_oid, del_weight, true)
+							      >	//         ret = blkDirectory->updateGlobalWeight(del_oid, de
+							      >	//       ret = blkDirectory->setAvgCacheWeight(avg_w);
+							      >	         return freed_size;
+							      >
+							      >	  // Last copy of the block
+							      >	  } else {
+							      >	        if (victim->access_count != 0) {
+							      >	          del_weight += victim->access_count;
+							      >	          ldout(cct, 10) << __func__  <<" last copy with glob
+							      >	          auto key_position = m_key_map.find(del_oid);
+							      >	          if ( key_position != m_key_map.end() ){
+							      >	                element& el =  *(key_position->second);
+							      >	                el.lfu_position = m_lfu_list.emplace(del_weig
+							      >	          }
+							      >	          total_cache_weight += victim->access_count;
+							      >	          if( m_dynamic_age_list.size() != 0)
+							      >	                avg_w = round(total_cache_weight/m_dynamic_ag
+							      >		//	  victim_list.remove(del_oid);
+							      >	          cache_lock.unlock();
+							      >			   auto end2 = chrono::steady_clock::now();
+							      >	           ldout(cct,10) << __func__  << " last copy, dw ms "
+							      >	          ret = blkDirectory->resetGlobalWeight(del_oid);
+							      >	//		  directoryResetGlobal(del_oid);
+							      >	//        ret = blkDirectory->setAvgCacheWeight(avg_w);
+							      >	          return 0;
+							      >
+							      >	        } else {
+							      >	          string cache_id = "";
+							      >			  //        this->getRemoteCacheWeight();
+							      >	/*        int min = INT_MAX;
+							      >	          for (auto it = remote_cache_weight_map.begin(); it 
+							      >	                 if (min > it->second && it->second > 0) {
+							      >	                   cache_id = it->first;
+							      >	                   min = it->second;
+							      >	        }        } */
+							      >	          if ( false ) {
+							      >	          //if ( del_weight > min ) {
+							      >	/*
+							      >	            ldout(cct, 10) << __func__  <<" last copy, no dw,
+							      >	                RemoteRequest *c =  new RemoteRequest();
+							      >	                c->req_type = 0;
+							      >	                c->path = del_oid;
+							      >	                c->dest =  cache_id;
+							      >	                c->sizeleft = e.size_in_bytes;
+							      >	                tp->addTask(new RemoteS3Request(c, cct));
+							      >
+							      >	                cache_lock.lock();
+							      >	                eviction_lock.lock();
+							      >	                freed_size = del_size;
+							      >	*/
+							      >	//              m_key_map.erase(e.key_position);
+							      >	                m_dynamic_age_list.erase(it);
+							      >	                cache_weight = del_weight;
+							      >	                total_cache_weight = total_cache_weight - cac
+							      >	        size_t avg_w = round (total_cache_weight/m_dynamic_ag
+							      >	                eviction_lock.unlock();
+							      >	                cache_lock.unlock();
+							      >	//        ret = blkDirectory->setAvgCacheWeight(avg_w);
+							      >	        location = cct->_conf->rgw_datacache_path + "/" + del
+							      >	        remove(location.c_str());
+							      >	        ret = blkDirectory->updateGlobalWeight(del_oid, del_w
+							      >	                return freed_size;
+							      >	          } else {
+							      >	            ldout(cct, 10) << __func__  <<" last copy, no glo
+							      >	                freed_size = del_size;
+							      >		//			cache_lock.lock();
+							      >	                m_dynamic_age_list.erase(it);
+							      >
+							      >					                //m_key_map.e
+							      >	                m_key_map.erase(del_oid);
+							      >	                cache_weight = del_weight;
+							      >	                total_cache_weight = total_cache_weight - cac
+							      >	                if( m_dynamic_age_list.size() != 0)
+							      >	                  avg_w = round(total_cache_weight/m_dynamic_
+							      >		//			victim_list.remove(del_oid);
+							      >	                cache_lock.unlock();
+							      >					auto end2 = chrono::steady_cl
+							      >					ldout(cct,10) << __func__ << 
+							      >	//              ret = blkDirectory->setAvgCacheWeight(avg_w);
+							      >	                location = cct->_conf->rgw_datacache_path + "
+							      >	                remove(location.c_str());
+							      >					directoryUpdate(del_oid, del_
+							      >	//                ret = blkDirectory->updateGlobalWeight(del_
+							      >	                return freed_size;
+							      >	          }
+							      >	        }
+							      >	  }
+							      >
+							      >
+							      >
+							      >
+							      >
+							      >
+							      >	}
+							      >
+							      >
+							      >
+							      >	size_t DataCache::lru_eviction(){
+							      >	  auto start = chrono::steady_clock::now();
+							      >	  int n_entries = 0;
+							      >	  size_t freed_size = 0;
+							      >	  ChunkDataInfo *del_entry;
+							      >	  string del_oid, location;
+							      >
+							      >	  n_entries = cache_map.size();
+							      >	  ldout(cct, 10) << __func__  <<" del_id1 map size:" << n_ent
+							      >	  
+							      >	  cache_lock.lock();
+							      >	  eviction_lock.lock();
+							      >	  del_entry = tail;
+							      >	  if (del_entry == nullptr) {
+							      >	    ldout(cct, 10) << "D3nDataCache: lru_eviction: del_entry=
+							      >		eviction_lock.unlock();
+							      >	    cache_lock.unlock();
+							      >	    return 0;
+							      >	  }
+							      >
+							      >	 
+							      >	  ldout(cct, 10) << __func__  <<" del_id:" << del_entry->obj_
+							      >	  lru_remove(del_entry);
+							      >	  eviction_lock.unlock();
+							      >
+							      >	  //cache_lock.lock();
+							      >	  n_entries = cache_map.size();
+							      >	  if (n_entries <= 0){
+							      >	    cache_lock.unlock();
+							      >	    return -1;
+							      >	  }
+							      >	  del_oid = del_entry->obj_id;
+							      >	  map<string, ChunkDataInfo*>::iterator iter = cache_map.find
+							      >	  if (iter != cache_map.end()) {
+							      >		cache_map.erase(del_oid); // oid
+							      >	  }
+							      >	  cache_lock.unlock();
+							      >	   auto end2 = chrono::steady_clock::now();
+							      >	  ldout(cct,10) << __func__ << "  ms " << chrono::duration_ca
+							      >	  int ret = evict_from_directory(del_oid);
+							      >	  freed_size = del_entry->size;
+							      >	  free(del_entry);
+							      >	  //delete del_entry;
+							      >	  location = cct->_conf->rgw_datacache_path + "/" + del_oid; 
+							      >	  remove(location.c_str());
+							      >	  return freed_size;
+							      >
+							      >	}
+							      >
+							      >	void DataCache::put_obj(cache_obj* c_obj){
+							      >	  string obj_id = c_obj->bucket_name +"_"+c_obj->obj_name;
+							      >	  ldout(cct, 10) << __func__  <<" oid:" << obj_id <<dendl;
+							      >
+							      >	  obj_cache_lock.lock();
+							      >	  map<string, ObjectDataInfo*>::iterator iter = write_cache_m
+							      >	  if (!(iter == write_cache_map.end())){
+							      >		struct ObjectDataInfo *chdo = iter->second;
+							      >		obj_lru_remove(chdo);
+							      >	    ldout(cct, 10) << __func__  <<" size_in_byte:"<< chdo->c_
+							      >		chdo->c_obj->creationTime = c_obj->creationTime;
+							      >		chdo->c_obj->etag = c_obj->etag;
+							      >		chdo->c_obj->size_in_bytes = c_obj->size_in_bytes;
+							      >	    ldout(cct, 10) << __func__  <<" size_in_byte:"<< chdo->c_
+							      >		obj_lru_insert_head(chdo);
+							      >	  }
+							      >	  else{
+							      >	//	ObjectDataInfo *obj_info = NULL;
+							      >		cache_obj *nco = new cache_obj();
+							      >		nco->bucket_name = c_obj->bucket_name;
+							      >		nco->obj_name = c_obj->obj_name;
+							      >		nco->size_in_bytes = c_obj->size_in_bytes;
+							      >		nco->etag = c_obj->etag;
+							      >		nco->owner = c_obj->owner;
+							      >		nco->creationTime = c_obj->creationTime;
+							      >		ObjectDataInfo *obj_info  = new ObjectDataInfo();
+							      >		//obj_info  = new ObjectDataInfo;
+							      >		obj_info->obj_id = obj_id;
+							      >		obj_info->c_obj = nco;
+							      >		obj_info->set_ctx(cct);
+							      >		write_cache_map.insert(pair<string, ObjectDataInfo*>(
+							      >		obj_lru_insert_head(obj_info);
+							      >	  }
+							      >	  obj_cache_lock.unlock();
+							      >	}
+							      >
+							      >	void DataCache::put(bufferlist& bl, uint64_t len, string oid_
+							      >
+							      >	  string obj_id = oid_orig;
+							      >	  const char x = '/';
+							      >	  const char y = '_';
+							      >	  std::replace(obj_id.begin(), obj_id.end(), x, y);
+							      >	//  string key2 = c_block.c_obj.bucket_name + "_"+tmp_oname+"
+							      >
+							      >	  ldout(cct, 10) << __func__  <<" oid:" << obj_id <<dendl;
+							      >	  int ret = 0;
+							      >	  int64_t freed_size = 0, _free_data_cache_size = 0, _outstan
+							      >
+							      >	  cache_lock.lock();
+							      >	  if(cct->_conf->rgw_lfuda == true){
+							      >	   if (lfu_cache_map.find(obj_id) != lfu_cache_map.end()) {
+							      >		 ldout(cct, 10) << "Warning: obj data already is cach
+							      >	      cache_lock.unlock();
+							      >	      return;
+							      >	   }
+							      >	  /* auto key_position = m_key_map.find(obj_id);
+							      >		ldout(cct, 10) << __func__  <<" oid:" << obj_id <<den
+							      >	    if ( key_position != m_key_map.end() ){
+							      >		   ldout(cct, 10) << "Warning: obj data already is ca
+							      >	      cache_lock.unlock();
+							      >	      return;
+							      >	    }
+							      >	 */
+							      >	  
+							      >	  }
+							      >	  
+							      >	   else { 
+							      >	  map<string, ChunkDataInfo *>::iterator iter = cache_map.fin
+							      >		if (iter != cache_map.end()) {
+							      >		  cache_lock.unlock();
+							      >		  ldout(cct, 10) << "Warning: obj data already is cac
+							      >		  return;
+							      >		}
+							      >	  }
+							      >	  std::list<std::string>::iterator it = std::find(outstanding
+							      >	  if (it != outstanding_write_list.end()) {
+							      >	    cache_lock.unlock();
+							      >	    ldout(cct, 10) << "Warning: write is already issued, no r
+							      >	    return;
+							      >	  }
+							      >
+							      >	  outstanding_write_list.push_back(obj_id);
+							      >	  cache_lock.unlock();
+							      >	  
+							      >	  eviction_lock.lock();
+							      >	  _free_data_cache_size = free_data_cache_size;
+							      >	  _outstanding_write_size = outstanding_write_size;
+							      >	  eviction_lock.unlock();
+							      >	  
+							      >	  ldout(cct, 20) << __func__ << "key: "<<obj_id<< "len: "<< l
+							      >	//  while (len >= (_free_data_cache_size - _outstanding_write
+							      >	   while (static_cast<int64_t>(len) >= static_cast<int64_t>(_
+							      >	    ldout(cct, 20) << "Datacache Eviction r=" << ret << "key"
+							      >		if(cct->_conf->rgw_lfuda == true)
+							      >		  ret = lfuda_eviction2();
+							      >		else
+							      >		  ret = lru_eviction();
+							      >	    if(ret < 0)
+							      >	      return;
+							      >	    freed_size += ret;
+							      >	  }
+							      >
+							      >	  ret = create_aio_write_request(bl, len, obj_id, c_block);
+							      >	  if (ret < 0) {
+							      >	    cache_lock.lock();
+							      >	    outstanding_write_list.remove(obj_id);
+							      >	    cache_lock.unlock();
+							      >	    ldout(cct, 10) << "Error: create_aio_write_request is fai
+							      >	    return;
+							      >	  }
+							      >	  
+							      >	   eviction_lock.lock();
+							      >	   free_data_cache_size += freed_size;
+							      >	   outstanding_write_size += len;
+							      >	   eviction_lock.unlock();
+							      >
+							      >	}
+							      >
+							      >	static size_t _remote_req_cb(void *ptr, size_t size, size_t n
+							      >	  RemoteRequest *req = static_cast<RemoteRequest *>(param);
+							      >	//  req->bl->append((char *)ptr, size*nmemb);
+							      >	   req->s.append((char *)ptr, size*nmemb);
+							      >	  //lsubdout(g_ceph_context, rgw, 1) << __func__ << " data is
+							      >	  return size*nmemb;
+							      >	}
+							      >
+							      >	string RemoteS3Request::sign_s3_request(string HTTP_Verb, str
+							      >	  std::string Content_Type = "application/x-www-form-urlencod
+							      >	  std::string Content_MD5 ="";
+							      >	  std::string CanonicalizedResource = uri.c_str();
+							      >	  std::string StringToSign = HTTP_Verb + "\n" + Content_MD5 +
+							      >	  char key[YourSecretAccessKeyID.length()+1] ;
+							      >	  strcpy(key, YourSecretAccessKeyID.c_str());
+							      >	  const char * data = StringToSign.c_str();
+							      >	  unsigned char* digest;
+							      >	  digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*
+							      >	  std::string signature = base64_encode(digest, 20);
+							      >	  return signature;
+							      >	}
+							      >
+							      >
+							      >	string DataCache::sign_s3_request(string HTTP_Verb, string ur
+							      >	  std::string CanonicalizedResource = uri.c_str();
+							      >	  std::string StringToSign = HTTP_Verb + "\n" + "" +"\n" + ""
+							      >	  char key[YourSecretAccessKeyID.length()+1] ;
+							      >	  strcpy(key, YourSecretAccessKeyID.c_str());
+							      >	  const char * data = StringToSign.c_str();
+							      >	  unsigned char* digest;
+							      >	  digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*
+							      >	  std::string signature = base64_encode(digest, 20);
+							      >	  return signature;
+							      >	}
+							      >
+							      >
+							      >	string RemoteS3Request::get_date(){
+							      >	  time_t now = time(0);
+							      >	  tm *gmtm = gmtime(&now);
+							      >	  string date;
+							      >	  char buffer[128];
+							      >	  std::strftime(buffer,128,"%a, %d %b %Y %X %Z",gmtm);
+							      >	  date = buffer;
+							      >	  return date;
+							      >	}
+							      >
+							      >	string DataCache::get_date(){
+							      >	  time_t now = time(0);
+							      >	  tm *gmtm = gmtime(&now);
+							      >	  string date;
+							      >	  char buffer[128];
+							      >	  std::strftime(buffer,128,"%a, %d %b %Y %X %Z",gmtm);
+							      >	  date = buffer;
+							      >	  return date;
+							      >	}
+							      >
+							      >	string CopyRemoteS3Object::get_date(){
+							      >	  time_t now = time(0);
+							      >	  tm *gmtm = gmtime(&now);
+							      >	  string date;
+							      >	  char buffer[128];
+							      >	  std::strftime(buffer,128,"%a, %d %b %Y %X %Z",gmtm);
+							      >	  date = buffer;
+							      >	  return date;
+							      >	}
+							      >
+							      >	string CopyRemoteS3Object::sign_s3_request(string HTTP_Verb, 
+							      >	  std::string Content_Type = "text/plain";
+							      >	  std::string Content_MD5 ="";
+							      >	  std::string CanonicalizedResource = uri.c_str();
+							      >	  std::string StringToSign = HTTP_Verb + "\n" + Content_MD5 +
+							      >	  char key[YourSecretAccessKeyID.length()+1] ;
+							      >	  strcpy(key, YourSecretAccessKeyID.c_str());
+							      >	  const char * data = StringToSign.c_str();
+							      >	  unsigned char* digest;
+							      >	  digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*
+							      >	  std::string signature = base64_encode(digest, 20);
+							      >	  return signature;
+							      >
+							      >	}
+							      >
+							      >	static size_t send_http_data(char *ptr, const size_t size, co
+							      >	{
+							      >	 // lsubdout(g_ceph_context, rgw, 1) << __func__ << " data is
+							      >	  RemoteRequest *req = static_cast<RemoteRequest *>(param);
+							      >	  size_t ret;
+							      >	  curl_off_t nread;
+							      >	  size_t buffer_size = size*nmemb;
+							      >	  size_t copy_this_much = req->sizeleft;
+							      >	  
+							      >	  if(req->sizeleft) {
+							      >		size_t copy_this_much = req->sizeleft;
+							      >		if(copy_this_much > buffer_size)
+							      >	      copy_this_much = buffer_size;
+							      >		memcpy(ptr, req->readptr, copy_this_much);
+							      >	    req->readptr += copy_this_much;
+							      >		req->sizeleft -= copy_this_much;
+							      >		  return copy_this_much;
+							      >		  }
+							      >		  return 0;
+							      >
+							      >	  }
+							      >
+							      >	static size_t header_callback(void *pData, size_t tSize, size
+							      >	{
+							      >	  size_t length = tSize * tCount, index = 0;
+							      >	    while (index < length)
+							      >	    {
+							      >	        unsigned char *temp = (unsigned char *)pData + index;
+							      >	        if ((temp[0] == '\r') || (temp[0] == '\n'))
+							      >	            break;
+							      >	        index++;
+							      >	    }
+							      >
+							      >	    std::string str((unsigned char*)pData, (unsigned char*)pD
+							      >	    std::map<std::string, std::string>* pmHeader = (std::map<
+							      >	    size_t pos = str.find(' ');
+							      >	    if (pos != std::string::npos)
+							      >	        pmHeader->insert(std::pair<std::string, std::string> 
+							      >		
+							      >	  return tCount;
+							      >
+							      >	}
+							      >
+							      >
+							      >
+							      >
+							      >	size_t get_callback(void *ptr, size_t size, size_t nmemb, std
+							      >	{
+							      >	  s->append(static_cast<char *>(ptr), size*nmemb);
+							      >	  return size*nmemb;
+							      >	}
+							      >
+							      >
+							      >	std::string ReplaceAll(std::string str, const std::string& fr
+							      >	    size_t start_pos = 0;
+							      >	    while((start_pos = str.find(from, start_pos)) != std::str
+							      >	        str.replace(start_pos, from.length(), to);
+							      >	        start_pos += to.length(); // Handles case where 'to' 
+							      >	    }
+							      >	    return str;
+							      >	}
+							      >
+							      >	int DataCache::submit_http_get_requests_s3(cache_obj *c_obj, 
+							      >	  CURL *curl_handle;
+							      >	  std::string s;
+							      >	  CURLcode res;
+							      >	  string uri="/"+c_obj->bucket_name+"/";
+							      >	  string date = get_date();
+							      >	  string AWSAccessKeyId="TX2XS2M6LVH5WJWBCW53";
+							      >	  string YourSecretAccessKeyID="BKg6KC5DpUhWDRukuINZidEv06vbT
+							      >	  string signature = sign_s3_request("GET", uri, date, YourSe
+							      >	  string Authorization = "AWS "+ AWSAccessKeyId +":" + signat
+							      >	  ldout(cct,10) << __func__ << " bucketname " << c_obj->bucke
+							      >	  ldout(cct,10) << __func__ << " marker " << marker  <<" pref
+							      >	  uri = "/"+c_obj->bucket_name+"/?delimiter=%2F";
+							      >
+							      >	  if (marker != ""){
+							      >		string tmp = ReplaceAll(string(marker), std::string("
+							      >	//	string tmp = ReplaceAll(string(tmp2), std::string("."
+							      >		uri = uri +"&marker=" + tmp;
+							      >	  }
+							      >	  if (prefix != ""){
+							      >		string tmp = ReplaceAll(string(prefix), std::string("
+							      >	//	string tmp = ReplaceAll(string(tmp2), std::string("."
+							      >	//	ldout(cct,10) << __func__ << " tmp2 "<< tmp2<< " tmp 
+							      >		uri = uri +"&prefix=" + tmp;
+							      >	  }
+							      >	//  if (max_b != 0) 
+							      >	//	uri = uri+"&max-keys="+ to_string(max_b);
+							      >	  ldout(cct,10) << __func__ << " uri  "<< uri << dendl; 
+							      >	  
+							      >	  string loc =  "http://" + cct->_conf->backend_url + uri;
+							      >	  string auth="Authorization: " + Authorization;
+							      >	  string timestamp="Date: " + date;
+							      >	  string user_agent="User-Agent: rgw_datacache";
+							      >	  curl_handle = curl_easy_init();
+							      >	   if(curl_handle) {
+							      >	    struct curl_slist *chunk = NULL;
+							      >	    chunk = curl_slist_append(chunk, auth.c_str());
+							      >	    chunk = curl_slist_append(chunk, timestamp.c_str());
+							      >	    chunk = curl_slist_append(chunk, user_agent.c_str());
+							      >	    res = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, c
+							      >		curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, 
+							      >		curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION,
+							      >		curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &s);
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_URL, loc.c_str());
+							      >	    res = curl_easy_perform(curl_handle); //run the curl comm
+							      >	    curl_easy_reset(curl_handle);
+							      >	    curl_slist_free_all(chunk);
+							      >	    curl_easy_cleanup(curl_handle);
+							      >	  }
+							      >		c_obj->acl = s;
+							      >	    ldout(cct,10) << __func__ << " url " <<  uri <<"first "<<
+							      >
+							      >		return 0;
+							      >	}
+							      >
+							      >
+							      >	int DataCache::submit_http_head_requests_s3(cache_obj *c_obj)
+							      >	  ldout(cct,10) << __func__   << dendl;
+							      >	  int ret=-1;
+							      >	  std::map<std::string, std::string> mHeader;
+							      >	  CURL *curl_handle;
+							      >	  CURLcode res;
+							      >	  string uri="/"+c_obj->bucket_name+"/"+c_obj->obj_name;
+							      >	  string date = get_date();
+							      >	  string AWSAccessKeyId="TX2XS2M6LVH5WJWBCW53";
+							      >	  string YourSecretAccessKeyID="BKg6KC5DpUhWDRukuINZidEv06vbT
+							      >	  string signature = sign_s3_request("HEAD", uri, date, YourS
+							      >	  string Authorization = "AWS "+ AWSAccessKeyId +":" + signat
+							      >	  string loc =  "http://" + cct->_conf->backend_url + uri;
+							      >	  string auth="Authorization: " + Authorization;
+							      >	  string timestamp="Date: " + date;
+							      >	//  string content_type="Content-Type: application/x-www-form
+							      >	  string user_agent="User-Agent: rgw_datacache";
+							      >	  curl_handle = curl_easy_init();
+							      >	  if(curl_handle) {
+							      >	    struct curl_slist *chunk = NULL;
+							      >	    chunk = curl_slist_append(chunk, auth.c_str());
+							      >	    chunk = curl_slist_append(chunk, timestamp.c_str());
+							      >	    chunk = curl_slist_append(chunk, user_agent.c_str());
+							      >	  //  chunk = curl_slist_append(chunk, content_type.c_str());
+							      >	    res = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, c
+							      >		curl_easy_setopt(curl_handle, CURLOPT_HEADERFUNCTION,
+							      >		curl_easy_setopt(curl_handle, CURLOPT_HEADERDATA, &mH
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_URL, loc.c_str());
+							      >		curl_easy_setopt(curl_handle, CURLOPT_NOBODY, 1L);
+							      >	//	curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
+							      >		curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L)
+							      >		res = curl_easy_perform(curl_handle); //run the curl 
+							      >		curl_easy_reset(curl_handle);
+							      >	    curl_slist_free_all(chunk);
+							      >	    curl_easy_cleanup(curl_handle);
+							      >	  }
+							      >
+							      >		std::map<std::string, std::string>::const_iterator it
+							      >	    for (itt = mHeader.begin(); itt != mHeader.end(); itt++)
+							      >	    {
+							      >			ldout(cct,10) << __func__ << "first "<< itt->
+							      >			string line = itt->first;
+							      >			if (line.find("HTTP") != std::string::npos){
+							      >			  string code = itt->second;
+							      >			  size_t pos = code.find(' ');
+							      >			  if (pos != std::string::npos){
+							      >				string strNew = code.substr(0, pos);
+							      >				ret = stoull(strNew);
+							      >			  }
+							      >			}
+							      >			if (line.find("Content-Length:") != std::stri
+							      >			    string size = itt->second;
+							      >			    ldout(cct,10) << __func__ << "Content-Len
+							      >	            c_obj->size_in_bytes = stoull(size);
+							      >			  }
+							      >			if (line.find("ETag:") != std::string::npos){
+							      >			    string etag = itt->second;
+							      >			    ldout(cct,10) << __func__ << "ETag: "<< e
+							      >	            c_obj->etag = etag;
+							      >			  }
+							      >			if (line.find("Rgwx-Mtime:") != std::string::
+							      >			    double lastmod = stod(itt->second);
+							      >			    const time_t lastAccessTime = lastmod;
+							      >	            c_obj->lastAccessTime = lastAccessTime;
+							      >				ldout(cct,10) << __func__ << "Rgwx-Mt
+							      >			  }
+							      >	/*		if (line.find("Last-Modified:") != std::strin
+							      >			    string lastmod2 = itt->second;
+							      >			    time_t lastAccessTime;
+							      >				struct tm tm;
+							      >				strptime(lastmod2.c_str(), "%a, %d %h
+							      >				time_t t = mktime(&tm);
+							      >	//            c_obj->lastAccessTime = t;
+							      >				ldout(cct,10) << __func__ << "Last-Mo
+							      >			  }*/
+							      >
+							      >		  }
+							      >		  
+							      >	 /*Content-Length: 222
+							      >	< x-amz-request-id: tx00000000000000000002b-00608b7651-48e03f
+							      >	< Accept-Ranges: bytes
+							      >	< Content-Type: application/xml
+							      >	< Date: Fri, 30 Apr 2021 03:15:29 GMT
+							      >	< Connection: Keep-Alive
+							      >	*/
+							      >			
+							      >			
+							      >	  
+							      >	  return ret;
+							      >
+							      >	}
+							      >
+							      >	int CopyRemoteS3Object::submit_http_put_coalesed_requests_s3(
+							      >	  
+							      >	  req->bl = &pbl;
+							      >	  
+							      >	  int ret =  store->copy_small_remote(store, owner_obj, t_siz
+							      >	  req->sizeleft = t_size;
+							      >	  req->readptr =  req->bl->c_str();
+							      >	  //string AWSAccessKeyId = c_obj->accesskey.id;
+							      >	  //string YourSecretAccessKeyID = c_obj->accesskey.key;
+							      >	  
+							      >	  std::time_t result = std::time(0);
+							      >	  srand(time(NULL));
+							      >	  float random_num = (float)rand()/RAND_MAX;
+							      >	  string dest_bucket_name = cct->_conf->coalesced_write_bucke
+							      >	  const string dest_obj_name = cct->_conf->host +"_"+ std::to
+							      >
+							      >	  CURLcode res;
+							      >	  string uri="/"+dest_bucket_name+"/"+dest_obj_name;
+							      >	  string date = get_date();
+							      >	  string AWSAccessKeyId="TX2XS2M6LVH5WJWBCW53";
+							      >	  string YourSecretAccessKeyID="BKg6KC5DpUhWDRukuINZidEv06vbT
+							      >	  string signature = sign_s3_request("PUT", uri, date, YourSe
+							      >	  string Authorization = "AWS "+ AWSAccessKeyId +":" + signat
+							      >	  string loc =  "http://" + cct->_conf->backend_url + uri;
+							      >	  string auth="Authorization: " + Authorization;
+							      >	  string timestamp="Date: " + date;
+							      >	//  string user_agent="User-Agent: aws-sdk-java/1.7.4 Linux/3
+							      >	  string user_agent="User-Agent: rgw_datacache";
+							      >
+							      >	   string content_type="Content-Type: text/plain";
+							      >	  curl_handle = curl_easy_init();
+							      >	  if(curl_handle) {
+							      >	    struct curl_slist *chunk = NULL;
+							      >	    chunk = curl_slist_append(chunk, auth.c_str());
+							      >	    chunk = curl_slist_append(chunk, timestamp.c_str());
+							      >	    chunk = curl_slist_append(chunk, user_agent.c_str());
+							      >	    chunk = curl_slist_append(chunk, content_type.c_str());
+							      >	    res = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, c
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_URL, loc.c_str());
+							      >		curl_easy_setopt(curl_handle, CURLOPT_UPLOAD, 1L);
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_READFUNCTION, send_
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_READDATA, (void*)re
+							      >		curl_easy_setopt(curl_handle, CURLOPT_INFILESIZE, t_s
+							      >	    res = curl_easy_perform(curl_handle); //run the curl comm
+							      >	    curl_easy_cleanup(curl_handle);
+							      >	  }
+							      >
+							      >	  if(res == CURLE_HTTP_RETURNED_ERROR) {
+							      >		ldout(cct,10) << "__func__ " << " CURLE_HTTP_RETURNED
+							      >		return -1;
+							      >		}
+							      >
+							      >	  if (res != CURLE_OK)
+							      >		return -1;
+							      >	  
+							      >	  return 0;
+							      >
+							      >
+							      >
+							      >
+							      >	}
+							      >
+							      >
+							      >
+							      >	int RemoteS3Request::submit_http_get_request_s3(){
+							      >	  //int begin = req->ofs + req->read_ofs;
+							      >	  //int end = req->ofs + req->read_ofs + req->read_len - 1;
+							      >	  auto start = chrono::steady_clock::now();
+							      >
+							      >	  off_t begin = req->ofs;
+							      >	  off_t end = req->ofs + req->read_len - 1;
+							      >	  std::string range = std::to_string(begin)+ "-"+ std::to_str
+							      >	  if (req->dest.compare("")==0)
+							      >		req->dest = cct->_conf->backend_url;
+							      >	  //std::string range = std::to_string( (int)req->ofs + (int)
+							      >	  ldout(cct, 10) << __func__  << " key " << req->key << " ran
+							      >	  
+							      >	  CURLcode res;
+							      >	  string uri = "/"+ req->path;;
+							      >	  //string uri = "/"+req->c_block->c_obj.bucket_name + "/" +r
+							      >	  string date = get_date();
+							      >	   
+							      >	  //string AWSAccessKeyId=req->c_block->c_obj.accesskey.id;
+							      >	  //string YourSecretAccessKeyID=req->c_block->c_obj.accesske
+							      >	  string AWSAccessKeyId=req->ak;
+							      >	  string YourSecretAccessKeyID=req->sk;
+							      >	  string signature = sign_s3_request("GET", uri, date, YourSe
+							      >	  string Authorization = "AWS "+ AWSAccessKeyId +":" + signat
+							      >	  string loc =  req->dest + uri;
+							      >	  string auth="Authorization: " + Authorization;
+							      >	  string timestamp="Date: " + date;
+							      >	  string user_agent="User-Agent: aws-sdk-java/1.7.4 Linux/3.1
+							      >	  string content_type="Content-Type: application/x-www-form-u
+							      >	  curl_handle = curl_easy_init();
+							      >	  if(curl_handle) {
+							      >	    struct curl_slist *chunk = NULL;
+							      >	    chunk = curl_slist_append(chunk, auth.c_str());
+							      >	    chunk = curl_slist_append(chunk, timestamp.c_str());
+							      >	    chunk = curl_slist_append(chunk, user_agent.c_str());
+							      >	    chunk = curl_slist_append(chunk, content_type.c_str());
+							      >	    chunk = curl_slist_append(chunk, "CACHE_GET_REQ:rgw_datac
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_RANGE, range.c_str(
+							      >	    res = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, c
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_URL, loc.c_str());
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L)
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _rem
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
+							      >	//    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
+							      >	    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void*)r
+							      >	    res = curl_easy_perform(curl_handle); //run the curl comm
+							      >	    curl_easy_reset(curl_handle);
+							      >	    curl_slist_free_all(chunk);
+							      >	    curl_easy_cleanup(curl_handle);
+							      >	  }
+							      >	  if(res == CURLE_HTTP_RETURNED_ERROR) {
+							      >	   ldout(cct,10) << "__func__ " << " CURLE_HTTP_RETURNED_ERRO
+							      >	   return -1;
+							      >	  }
+							      >	   auto end2 = chrono::steady_clock::now();
+							      >	   ldout(cct,10) << __func__  << " done dest " <<req->dest <<
+							      >	   chrono::duration_cast<chrono::microseconds>(end2 - start).
+							      >	   << dendl; 
+							      >	  if (res != CURLE_OK) { return -1;}
+							      >	  else { return 0; }
+							      >
+							      >	}
+							      >
+							      >	void RemoteS3Request::run() {
+							      >
+							      >	  ldout(cct, 20) << __func__  <<dendl;
+							      >	  int max_retries = cct->_conf->max_remote_retries;
+							      >	  int r = 0;
+							      >	  for (int i=0; i<max_retries; i++ ){
+							      >	    if(!(r = submit_http_get_request_s3()) && (req->s.size() 
+							      >	       ldout(cct, 0) <<  __func__  << "remote get success"<<r
+							      >	//       req->func(req);
+							      >	        req->finish();
+							      >	      	return;
+							      >	    }
+							      >	    if(req->s.size() != req->read_len){
+							      >	//#if(req->bl->length() != r->read_len){
+							      >	       req->s.clear();
+							      >	    }
+							      >	    req->s.clear();
+							      >	    }
+							      >
+							      >	    if (r == ECANCELED) {
+							      >	    ldout(cct, 0) << "ERROR: " << __func__  << "(): remote s3
+							      >	    req->r->result = -1;
+							      >	    req->aio->put(*(req->r));
+							      >	    return;
+							      >	    }
+							      >

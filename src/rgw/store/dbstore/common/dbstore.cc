@@ -1406,14 +1406,15 @@ int DB::get_obj_iterate_cb(const DoutPrefixProvider *dpp,
 
 int DB::Object::Read::iterate(const DoutPrefixProvider *dpp, int64_t ofs, int64_t end, RGWGetDataCB *cb)
 {
-  DB *store = source->get_store();
+  DB *store = source->get_store(); //source needs to give a c_block value (?)
   const uint64_t chunk_size = store->get_max_chunk_size();
 
   db_get_obj_data data(store, cb, ofs);
 
+
   int r = source->iterate_obj(dpp, source->get_bucket_info(), state.obj,
-      ofs, end, chunk_size, _get_obj_iterate_cb, &data);
-  if (r < 0) {
+      ofs, end, chunk_size, _get_obj_iterate_cb, &data); //this is asking for inputs, not an argument template
+  if (r < 0) {                                                                    //We need to get a value/declare cache_block c_block
     ldpp_dout(dpp, 0) << "iterate_obj() failed with " << r << dendl;
     return r;
   }
