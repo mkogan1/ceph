@@ -15,6 +15,11 @@
 #include "cls/version/cls_version_types.h"
 #include "rgw_common.h"
 
+/* PORTING: D4N */
+//Add new header files
+#include "rgw_threadpool.h" //Implement this badboy
+
+
 enum {
   UPDATE_OBJ,
   INVALIDATE_OBJ,

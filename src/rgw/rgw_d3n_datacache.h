@@ -100,6 +100,7 @@ public:
   int d3n_io_write(bufferlist& bl, unsigned int len, std::string oid);
   int d3n_libaio_create_write_request(bufferlist& bl, unsigned int len, std::string oid);
   void d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c);
+  //TODO: add all submit_remote functions
   size_t random_eviction();
   size_t lru_eviction();
 
