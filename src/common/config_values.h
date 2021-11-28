@@ -22,6 +22,8 @@ class ConfigValues {
   // for populating md_config_impl::legacy_values in ctor
   friend struct md_config_t;
 
+
+
 public:
   EntityName name;
   /// cluster name
@@ -32,7 +34,12 @@ public:
   // apply_changes
   using changed_set_t = std::set<std::string>;
   changed_set_t changed;
-
+  //This is a terrible horrible placeholder until we can ask the mentors about the config files and how we
+  //actually can get the backend url into the ConfigValues class --Daniel
+  std::string backend_url;
+  int max_remote_retries;
+  //Horrible nasty placeholders end
+  
 // This macro block defines C members of the md_config_t struct
 // corresponding to the definitions in legacy_config_opts.h.
 // These C members are consumed by code that was written before

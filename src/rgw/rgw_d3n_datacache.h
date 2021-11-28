@@ -4,6 +4,7 @@
 #ifndef CEPH_RGWD3NDATACACHE_H
 #define CEPH_RGWD3NDATACACHE_H
 
+
 #include "rgw_rados.h"
 #include <curl/curl.h>
 
@@ -13,12 +14,16 @@
 #include <signal.h>
 #include "include/Context.h"
 #include "include/lru.h"
+
 #include "rgw_d3n_cacherequest.h"
+#include "rgw_threadpool.h" //PORTING THREADPOOL
 
 
 /*D3nDataCache*/
 struct D3nDataCache;
-
+struct RemoteRequest; //For submit_remote_req
+class CacheThreadPool;
+//class RemoteS3Request;
 
 struct D3nChunkDataInfo : public LRUObject {
 	CephContext *cct;
@@ -67,7 +72,10 @@ private:
   std::set<std::string> d3n_outstanding_write_list;
   std::mutex d3n_cache_lock;
   std::mutex d3n_eviction_lock;
-
+  //FOR REMOTE REQUESTS
+  int datalake_hit;
+  int remote_hit;
+  //may require initialization
   CephContext *cct;
   enum class _io_type {
     SYNC_IO = 1,
@@ -83,6 +91,11 @@ private:
   uint64_t outstanding_write_size = 0;
   struct D3nChunkDataInfo* head;
   struct D3nChunkDataInfo* tail;
+
+  //PORTING THREADPOOL
+  CacheThreadPool *tp;
+  CacheThreadPool *aging_tp;
+  //PORTING ENDS
 
 private:
   void add_io();
@@ -101,6 +114,9 @@ public:
   int d3n_libaio_create_write_request(bufferlist& bl, unsigned int len, std::string oid);
   void d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c);
   //TODO: add all submit_remote functions
+  //PORTING BEGINS
+  void submit_remote_req(struct RemoteRequest *c);
+  //PORTING ENDS
   size_t random_eviction();
   size_t lru_eviction();
 
@@ -287,5 +303,32 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
 
   return 0;
 }
+
+class RemoteS3Request : public Task { //PORT THIS - Functions are implemented in RGW_cache.cc
+  public:
+    RemoteS3Request(RemoteRequest *_req, CephContext *_cct) : Task(), req(_req), cct(_cct) {
+      pthread_mutex_init(&qmtx,0);
+      pthread_cond_init(&wcond, 0);
+    }
+    ~RemoteS3Request() {
+      pthread_mutex_destroy(&qmtx);
+      pthread_cond_destroy(&wcond);
+    }
+    virtual void run();
+    virtual void set_handler(void *handle) {
+      curl_handle = (CURL *)handle;
+    }
+    std::string sign_s3_request(std::string HTTP_Verb, std::string uri, std::string date, std::string YourSecretAccessKeyID, std::string AWSAccessKeyId);
+    std::string get_date();
+  private:
+    int submit_http_get_request_s3(); //very important
+  private:
+    pthread_mutex_t qmtx;
+    pthread_cond_t wcond;
+    RemoteRequest *req;
+    CephContext *cct;
+    CURL *curl_handle;
+
+};  
 
 #endif
