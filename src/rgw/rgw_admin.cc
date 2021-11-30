@@ -6901,14 +6901,27 @@ next:
     formatter->flush(cout);
   }
 
+  RGWBucketInfo bucket_info;
+  rgw_bucket* optional_bucket = nullptr;
   if (opt_cmd == OPT_LC_PROCESS) {
-    int ret = store->process_lc();
+    if ((! bucket_name.empty()) ||
+	(! bucket_id.empty())) {
+      int ret = init_bucket(tenant, bucket_name, bucket_id, bucket_info,
+			    bucket);
+	if (ret < 0) {
+	  cerr << "ERROR: could not init bucket: " << cpp_strerror(-ret)
+	       << std::endl;
+	  return ret;
+	}
+	optional_bucket = &bucket;
+    }
+
+    int ret = store->process_lc(optional_bucket);
     if (ret < 0) {
       cerr << "ERROR: lc processing returned error: " << cpp_strerror(-ret) << std::endl;
       return 1;
     }
   }
-
 
   if (opt_cmd == OPT_LC_RESHARD_FIX) {
     ret = RGWBucketAdminOp::fix_lc_shards(store, bucket_op,f);
