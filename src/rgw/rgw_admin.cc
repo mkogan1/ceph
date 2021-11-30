@@ -7382,7 +7382,7 @@ next:
   }
 
   if (opt_cmd == OPT::LC_PROCESS) {
-    int ret = store->getRados()->process_lc();
+    int ret = store->getRados()->process_lc(bucket_name);
     if (ret < 0) {
       cerr << "ERROR: lc processing returned error: " << cpp_strerror(-ret) << std::endl;
       return 1;
