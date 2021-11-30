@@ -1510,10 +1510,9 @@ public:
 	       RGWObjectCtx *rctx,
                RGWBucketInfo& bucket_info, const rgw_obj& obj, optional_yield y);
 
-  int process_lc();
+  int process_lc(const std::string& bucket_name);
   int list_lc_progress(string& marker, uint32_t max_entries,
 		       vector<rgw::sal::Lifecycle::LCEntry>& progress_map, int& index);
-
   int bucket_check_index(const DoutPrefixProvider *dpp, RGWBucketInfo& bucket_info,
                          map<RGWObjCategory, RGWStorageStats> *existing_stats,
                          map<RGWObjCategory, RGWStorageStats> *calculated_stats);
