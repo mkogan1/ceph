@@ -289,6 +289,7 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
 	//i) A remote request instance
 	//ii) A remote operation in rgw::Aio
 	ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl; 
+	RemoteRequest *c =  new RemoteRequest();
 
       }
     

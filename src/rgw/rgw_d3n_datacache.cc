@@ -22,6 +22,11 @@ namespace efs = std::experimental::filesystem;
 #define dout_subsys ceph_subsys_rgw
 struct RemoteRequest; //For submit_remote_req --Daniel
 
+static const std::string base64_chars =
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+"abcdefghijklmnopqrstuvwxyz"
+"0123456789+/";
+
 using namespace std;
 
 int D3nCacheAioWriteRequest::d3n_prepare_libaio_write_op(bufferlist& bl, unsigned int len, string oid, string cache_location)
@@ -274,6 +279,46 @@ void D3nDataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
 
 //PORTING BEGINS
 
+std::string base64_encode(unsigned char const* bytes_to_encode, unsigned int in_len) {
+  std::string ret;
+  int i = 0;
+  int j = 0;
+  unsigned char char_array_3[3];
+  unsigned char char_array_4[4];
+  while (in_len--) {
+    char_array_3[i++] = *(bytes_to_encode++);
+    if (i == 3) {
+      char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+      char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+      char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+      char_array_4[3] = char_array_3[2] & 0x3f;
+
+      for(i = 0; (i <4) ; i++)
+	ret += base64_chars[char_array_4[i]];
+      i = 0;
+    }
+  }
+
+  if (i)
+  {
+    for(j = i; j < 3; j++)
+      char_array_3[j] = '\0';
+
+    char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+    char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+    char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+    char_array_4[3] = char_array_3[2] & 0x3f;
+
+    for (j = 0; (j < i + 1); j++)
+      ret += base64_chars[char_array_4[j]];
+
+    while((i++ < 3))
+      ret += '=';
+  }
+  return ret;
+}
+
+
 class CacheThreadPool { //PORT THIS
   public:
     CacheThreadPool(int n) {
@@ -331,21 +376,7 @@ string RemoteS3Request::get_date(){
   date = buffer;
   return date;
 }
-/*
-string RemoteS3Request::sign_s3_request(string HTTP_Verb, string uri, string date, string YourSecretAccessKeyID, string AWSAccessKeyId){
-  std::string Content_Type = "application/x-www-form-urlencoded; charset=utf-8";
-  std::string Content_MD5 ="";
-  std::string CanonicalizedResource = uri.c_str();
-  std::string StringToSign = HTTP_Verb + "\n" + Content_MD5 + "\n" + Content_Type + "\n" + date + "\n" +CanonicalizedResource;
-  char key[YourSecretAccessKeyID.length()+1] ;
-  strcpy(key, YourSecretAccessKeyID.c_str());
-  const char * data = StringToSign.c_str();
-  unsigned char* digest;
-  digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*)data, strlen(data), NULL, NULL);
-  std::string signature = base64_encode(digest, 20);
-  return signature;
-}
-*/
+
 int RemoteS3Request::submit_http_get_request_s3(){
   //int begin = req->ofs + req->read_ofs;
   //int end = req->ofs + req->read_ofs + req->read_len - 1;
@@ -447,8 +478,7 @@ string RemoteS3Request::sign_s3_request(string HTTP_Verb, string uri, string dat
   const char * data = StringToSign.c_str();
   unsigned char* digest;
   digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*)data, strlen(data), NULL, NULL);
-  //std::string signature = base64_encode(digest, 20); //What is this? --Daniel
-  std:: string signature = 0; //temp placeholder while I try and figure out what base64_encode is
+  std::string signature = base64_encode(digest, 20); //What is this? --Daniel
   return signature;
 }
 //PORTING ENDS

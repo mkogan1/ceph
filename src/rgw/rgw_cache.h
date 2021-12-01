@@ -18,6 +18,17 @@
 /* PORTING: D4N */
 //Add new header files
 #include "rgw_threadpool.h" //Implement this badboy
+#include <errno.h>
+#include <unistd.h> 
+#include <signal.h> 
+#include <stdlib.h>
+#include <stdio.h>
+#include <iostream>
+#include "include/Context.h"
+#include <aio.h>
+
+class CacheThreadPool;
+
 
 
 enum {
@@ -226,5 +237,6 @@ public:
   void unchain_cache(RGWChainedCache *cache);
   void invalidate_all();
 };
+
 
 #endif
