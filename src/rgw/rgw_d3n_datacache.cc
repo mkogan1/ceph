@@ -179,28 +179,41 @@ void D3nDataCache::d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c)
   }
 
   // EC528 Fall 2021 Mandy Edit:
-  cache_obj cacheObj;
-  cache_block cacheBlock;
-  cache_block *cachePtr = NULL;
-  cachePtr = (cache_block *)malloc(sizeof(cache_block)); // free memory later
-
+  cache_block *cachePtr = new cache_block; // free memory later
   // "Mandy", "myBucket", "obj", NULL, 10, time(0), "eTag", NULL, NULL, NULL, NULL, NULL, NULL, false, false, NULL, 0, false, false
 
-  cacheObj.owner = "Mandy";
-  cacheBlock.c_obj = cacheObj;
-  cacheBlock.offset = 0;
-  cacheBlock.block_id = 1;
-  cacheBlock.size_in_bytes = 20;
-  cacheBlock.etag = "Mandy_etag1";
-  cacheBlock.access_count = 5;
-  cacheBlock.lastAccessTime = 7;
-  cacheBlock.cachedOnRemote = false;
+  cache_obj objMandy;
+  uint64_t offset_temp = 0;
+  uint64_t block_id_temp = 1;
+  uint64_t size_in_bytes_temp = 20;
+  uint64_t access_count_temp = 5;
+  time_t lastAccessTime_temp = 7;
+  bool cachedOnRemote_temp = false;
+
+  cachePtr->c_obj = objMandy;
+  ldout(cct, 5) << "Mandy - cachePtr c_obj: " << cachePtr->c_obj << dendl;
+  cachePtr->offset = offset_temp;
+  ldout(cct, 5) << "Mandy - cachePtr offset: " << cachePtr->offset << dendl;
+  cachePtr->block_id = block_id_temp;
+  ldout(cct, 5) << "Mandy - cachePtr block_id: " << cachePtr->block_id << dendl;
+  cachePtr->size_in_bytes = size_in_bytes_temp;
+  ldout(cct, 5) << "Mandy - cachePtr size_in_bytes: " << cachePtr->size_in_bytes << dendl;
+  cachePtr->etag = "Mandy_etag1";
+  ldout(cct, 5) << "Mandy - cachePtr etag: " << cachePtr->etag << dendl;
+  cachePtr->hosts_list = vector<string>();
+  ldout(cct, 5) << "Mandy - cachePtr hosts_list: " << cachePtr->hosts_list << dendl;
+  cachePtr->access_count = access_count_temp;
+  ldout(cct, 5) << "Mandy - cachePtr access_count: " << cachePtr->access_count << dendl;
+  cachePtr->lastAccessTime = lastAccessTime_temp;
+  ldout(cct, 5) << "Mandy - cachePtr lastAccessTime: " << cachePtr->lastAccessTime << dendl;
+  cachePtr->cachedOnRemote = cachedOnRemote_temp;
+  ldout(cct, 5) << "Mandy - cachePtr cachedOnRemote: " << cachePtr->cachedOnRemote << dendl;
 
   RGWBlockDirectory rgwVar;
   int rgwSetValue = rgwVar.setValue(cachePtr);
+  ldout(cct, 5) << "Mandy: setValue: " << rgwSetValue << dendl;
   int rgwOutput = rgwVar.getValue(cachePtr);
-
-  ldout(cct, 5) << "Mandy: rgwSetValue: " << rgwSetValue << " rgwOutput: " << rgwOutput <<dendl;
+  ldout(cct, 5) << "Mandy: getValue: " << rgwOutput << dendl;
 
   /*
   //  ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;

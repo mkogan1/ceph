@@ -607,6 +607,21 @@ do_rgw_conf() {
         rgw_d3n_l1_local_datacache_enabled=true
         rgw_d3n_l1_datacache_persistent_path=/home/centos/ceph/build/cache_d3n
         rgw_d3n_l1_datacache_size=10737418240
+        rgw_datacache_enabled = true
+        rgw_datacache_path =  /tmp/
+        cache_threadpool_size = 256
+        rgw_cache_size = 2147483648
+        rgw_directory_address = 127.0.0.1
+        rgw_directory_port = 6379
+        rgw_directory_address2 = 127.0.0.1
+        rgw_directory_port2 = 6379
+        rgw_directory_address3 = 127.0.0.1
+        rgw_directory_port3 = 6379
+        rgw_directory_address4 = 127.0.0.1
+        rgw_directory_port4 = 6379
+        remote_cache_addr = 127.0.0.1:8000
+        backend_url = 127.0.0.1:8000
+        aging_interval_in_minutes = 100000000
 EOF
         current_port=$((current_port + 1))
 done

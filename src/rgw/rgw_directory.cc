@@ -249,6 +249,10 @@ string RGWObjectDirectory::buildIndex(cache_obj *ptr){
 }
 
 string RGWBlockDirectory::buildIndex(cache_block *ptr){
+  ldout(cct, 5) << "Mandy - c_obj.bucket_name: " << ptr->c_obj.bucket_name << dendl;
+  ldout(cct, 5) << "Mandy - c_obj.obj_name: " << ptr->c_obj.obj_name << dendl;
+  ldout(cct, 5) << "Mandy - ptr->block_id: " << ptr->block_id << dendl;
+  ldout(cct, 5) << "Mandy - to_string(ptr->block_id): " << to_string(ptr->block_id) << dendl;
   return ptr->c_obj.bucket_name + "_" + ptr->c_obj.obj_name + "_" + to_string(ptr->block_id);
 }
 /*
