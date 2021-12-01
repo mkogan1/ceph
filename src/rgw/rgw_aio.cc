@@ -16,14 +16,14 @@
 #include <type_traits>
 #include "include/rados/librados.hpp"
 #include "librados/librados_asio.h"
-//#include "rgw_d3n_datacache.h" //added for remote_op -Daniel
+#include "rgw_d3n_datacache.h" //added for remote_op -Daniel
 
 #include "rgw_aio.h"
 #include "rgw_d3n_cacherequest.h"
 
 
 struct RemoteRequest; //PORTED
-struct D3nDataCache; //Perhaps this will appease the remoteOp?
+//struct D3nDataCache; //Perhaps this will appease the remoteOp?
 namespace rgw {
 
 

@@ -279,6 +279,14 @@ void D3nDataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
 
 //PORTING BEGINS
 
+static size_t _remote_req_cb(void *ptr, size_t size, size_t nmemb, void* param) {
+  RemoteRequest *req = static_cast<RemoteRequest *>(param);
+//  req->bl->append((char *)ptr, size*nmemb);
+   req->s.append((char *)ptr, size*nmemb);
+  //lsubdout(g_ceph_context, rgw, 1) << __func__ << " data is written "<< " key " << req->key << " size " << size*nmemb  << dendl;
+  return size*nmemb;
+}
+
 std::string base64_encode(unsigned char const* bytes_to_encode, unsigned int in_len) {
   std::string ret;
   int i = 0;
@@ -375,7 +383,7 @@ string RemoteS3Request::get_date(){
   std::strftime(buffer,128,"%a, %d %b %Y %X %Z",gmtm);
   date = buffer;
   return date;
-}
+}   
 
 int RemoteS3Request::submit_http_get_request_s3(){
   //int begin = req->ofs + req->read_ofs;
@@ -418,7 +426,7 @@ int RemoteS3Request::submit_http_get_request_s3(){
     res = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, chunk); //set headers
     curl_easy_setopt(curl_handle, CURLOPT_URL, loc.c_str());
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); //for redirection of the url
-    //curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _remote_req_cb); //COMMENTED OUT FOR PORTING REASONS
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _remote_req_cb); //COMMENTED OUT FOR PORTING REASONS
     curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
 //    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
