@@ -1264,7 +1264,6 @@ class RGWRunBucketSourcesSyncCR : public RGWCoroutine {
   RGWSyncTraceNodeRef tn;
   ceph::real_time* progress;
   std::vector<ceph::real_time> shard_progress;
-  std::vector<ceph::real_time>::iterator cur_shard_progress;
 
   RGWRESTConn *conn{nullptr};
   rgw_zone_id last_zone;
@@ -4726,7 +4725,7 @@ int RGWRunBucketSourcesSyncCR::operate()
       return set_cr_done();
     }
 
-    for (siter = pipes.begin(); siter != pipes.end(); ++siter, ++cur_shard_progress) {
+    for (siter = pipes.begin(); siter != pipes.end(); ++siter) {
       ldpp_dout(sync_env->dpp, 20) << __func__ << "(): sync pipe=" << *siter << dendl;
 
       sync_pair.dest_bucket = siter->target.get_bucket();
