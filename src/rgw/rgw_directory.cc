@@ -245,14 +245,16 @@ void RGWBlockDirectory::findClient(string key, cpp_redis::client *client){
  * based on bucket_name, obj_name, and chunk_id
  */
 string RGWObjectDirectory::buildIndex(cache_obj *ptr){
+  ldout(cct, 5) << "Mandy: in obj directory build index" << dendl;
   return ptr->bucket_name + "_" + ptr->obj_name;
 }
 
 string RGWBlockDirectory::buildIndex(cache_block *ptr){
-  ldout(cct, 5) << "Mandy - c_obj.bucket_name: " << ptr->c_obj.bucket_name << dendl;
-  ldout(cct, 5) << "Mandy - c_obj.obj_name: " << ptr->c_obj.obj_name << dendl;
+  ldout(cct, 5) << "Mandy: in blk directory build index" << dendl;
   ldout(cct, 5) << "Mandy - ptr->block_id: " << ptr->block_id << dendl;
+  ldout(cct, 5) << "Mandy - c_obj.obj_name: " << ptr->c_obj.obj_name << dendl;
   ldout(cct, 5) << "Mandy - to_string(ptr->block_id): " << to_string(ptr->block_id) << dendl;
+  ldout(cct, 5) << "Mandy - c_obj.bucket_name: " << ptr->c_obj.bucket_name << dendl;
   return ptr->c_obj.bucket_name + "_" + ptr->c_obj.obj_name + "_" + to_string(ptr->block_id);
 }
 /*
@@ -657,10 +659,13 @@ int RGWBlockDirectory::setAvgCacheWeight(int64_t weight){
 }
 
 int RGWBlockDirectory::setValue(cache_block *ptr){
+  //ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
 
   //creating the index based on bucket_name, obj_name, and chunk_id
   string key = buildIndex(ptr);
   cpp_redis::client client;
+  //ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
+
   findClient(key, &client);
   if (!(client.is_connected())){
 	return -1;

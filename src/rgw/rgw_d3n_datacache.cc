@@ -179,44 +179,174 @@ void D3nDataCache::d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c)
   }
 
   // EC528 Fall 2021 Mandy Edit:
-  cache_block *cachePtr = new cache_block; // free memory later
-  // "Mandy", "myBucket", "obj", NULL, 10, time(0), "eTag", NULL, NULL, NULL, NULL, NULL, NULL, false, false, NULL, 0, false, false
+  // cache_block *cachePtr = new cache_block; // free memory later
+  // // "Mandy", "myBucket", "obj", NULL, 10, time(0), "eTag", NULL, NULL, NULL, NULL, NULL, NULL, false, false, NULL, 0, false, false
 
-  cache_obj objMandy;
+  // cache_obj objMandy;
+  // uint64_t offset_temp = 0;
+  // uint64_t block_id_temp = 1;
+  // uint64_t size_in_bytes_temp = 20;
+  // uint64_t access_count_temp = 5;
+  // time_t lastAccessTime_temp = 7;
+  // bool cachedOnRemote_temp = false;
+
+  // cachePtr->c_obj = objMandy;
+  // //ldout(cct, 5) << "Mandy - cachePtr c_obj: " << cachePtr->c_obj << dendl;
+  // cachePtr->offset = offset_temp;
+  // // ldout(cct, 5) << "Mandy - cachePtr offset: " << cachePtr->offset << dendl;
+  // cachePtr->block_id = block_id_temp;
+  // // ldout(cct, 5) << "Mandy - cachePtr block_id: " << cachePtr->block_id << dendl;
+  // cachePtr->size_in_bytes = size_in_bytes_temp;
+  // // ldout(cct, 5) << "Mandy - cachePtr size_in_bytes: " << cachePtr->size_in_bytes << dendl;
+  // cachePtr->etag = "Mandy_etag1";
+  // // ldout(cct, 5) << "Mano u dy - cachePtr etag: " << cachePtr->etag << dendl;
+  // cachePtr->hosts_list = vector<string>();
+  // // ldout(cct, 5) << "Mandy - cachePtr hosts_list: " << cachePtr->hosts_list << dendl;
+  // cachePtr->access_count = access_count_temp;
+  // // ldout(cct, 5) << "Mandy - cachePtr access_count: " << cachePtr->access_count << dendl;
+  // cachePtr->lastAccessTime = lastAccessTime_temp;
+  // // ldout(cct, 5) << "Mandy - cachePtr lastAccessTime: " << cachePtr->lastAccessTime << dendl;
+  // cachePtr->cachedOnRemote = cachedOnRemote_temp;
+  // // ldout(cct, 5) << "Mandy - cachePtr cachedOnRemote: " << cachePtr->cachedOnRemote << dendl;
+
+  // RGWBlockDirectory rgwVar;
+  // int rgwSetValue = rgwVar.setValue(cachePtr);
+  // ldout(cct, 5) << "Mandy: setValue: " << rgwSetValue << dendl;
+  // int rgwOutput = rgwVar.getValue(cachePtr);
+  // ldout(cct, 5) << "Mandy: getValue: " << rgwOutput << dendl;
+
+  // mandy comment out 
+  // ldout(cct, 5) << "Mandy start" <<dendl;
+  // uint64_t size_in_bytes_obj_temp = 20;
+  // time_t lastAccessTime_obj_temp = time(NULL);
+  // BackendProtocol backendProtocol_obj_temp = S3;
+  // HomeLocation home_location_obj_temp = CACHE;
+  // time_t aclTimeStamp_obj_temp = time(NULL);
+  // time_t creationTime_obj_temp = time(NULL);
+  // bool dirty_obj_temp = false;
+  // bool intermediate_obj_temp = false;
+  // uint64_t offset_obj_temp = 0;
+  // bool is_remote_req_obj_temp = false;
+  // bool is_remote_req_put_obj_temp = false; 
+
+  // cache_obj* mandyCacheObj;
+  // mandyCacheObj = new cache_obj();
+  // //mandyCacheObj->init(cct);
+  // mandyCacheObj->owner = "Mandy";
+  // ldout(cct, 5) << "mandy owner: " <<  mandyCacheObj->owner << dendl;
+  // mandyCacheObj->bucket_name = "Mandy_owner";
+  // mandyCacheObj->obj_name = "Mandy_obj_name";
+  // mandyCacheObj->size_in_bytes = size_in_bytes_obj_temp;
+  // ldout(cct, 5) << "mandy owner: " <<  mandyCacheObj->size_in_bytes << dendl;
+  // mandyCacheObj->lastAccessTime = mktime(gmtime(&lastAccessTime_obj_temp));
+  // mandyCacheObj->etag = "Mandy_etag";
+  // mandyCacheObj->backendProtocol = backendProtocol_obj_temp;
+  // mandyCacheObj->home_location = home_location_obj_temp;
+  // mandyCacheObj->hosts_list = vector<string>("mandy", "sam"); // double check syntax 
+  // mandyCacheObj->acl = "Mandy_acl";
+  // mandyCacheObj->aclTimeStamp = mktime(gmtime(&aclTimeStamp_obj_temp));
+  // mandyCacheObj->creationTime = mktime(gmtime(&creationTime_obj_temp));
+  // mandyCacheObj->dirty = dirty_obj_temp;
+  // mandyCacheObj->intermediate = intermediate_obj_temp;
+  // mandyCacheObj->mapping_id = "Mandy_mapping_id";
+  // mandyCacheObj->offset = offset_obj_temp;
+  // mandyCacheObj->is_remote_req = is_remote_req_obj_temp;
+  // mandyCacheObj->is_remote_req_put = is_remote_req_put_obj_temp;
+
+  // uint64_t offset_temp = 0;
+  // uint64_t block_id_temp = 1;
+  // uint64_t size_in_bytes_temp = 4;
+  // uint64_t access_count_temp = 5;
+  // time_t lastAccessTime_temp = time(NULL);
+  // bool cachedOnRemote_temp = false;
+
+  // cache_block* mandyCacheBlock;
+  // mandyCacheBlock = new cache_block();
+  // //mandyCacheBlock->init(cct);
+  // mandyCacheBlock->c_obj = *mandyCacheObj;
+  // mandyCacheBlock->offset = offset_temp;
+  // mandyCacheBlock->block_id = block_id_temp;
+  // mandyCacheBlock->size_in_bytes = size_in_bytes_temp;
+  // mandyCacheBlock->etag = "Mandy_etag1";
+  // mandyCacheBlock->hosts_list = vector<string>("mandy", "sam");
+  // mandyCacheBlock->access_count = access_count_temp;
+  // mandyCacheBlock->lastAccessTime = mktime(gmtime(&lastAccessTime_temp));
+  // mandyCacheBlock->cachedOnRemote = cachedOnRemote_temp;
+
+  ldout(cct, 5) << "Mandy start" <<dendl;
+  uint64_t size_in_bytes_obj_temp = 20;
+  time_t lastAccessTime_obj_temp = time(NULL);
+  BackendProtocol backendProtocol_obj_temp = S3;
+  HomeLocation home_location_obj_temp = CACHE;
+  time_t aclTimeStamp_obj_temp = time(NULL);
+  time_t creationTime_obj_temp = time(NULL);
+  bool dirty_obj_temp = false;
+  bool intermediate_obj_temp = false;
+  uint64_t offset_obj_temp = 0;
+  bool is_remote_req_obj_temp = false;
+  bool is_remote_req_put_obj_temp = false; 
+
+  cache_obj mandyCacheObj;
+  //mandyCacheObj->init(cct);
+  mandyCacheObj.owner = "Mandy";
+  ldout(cct, 5) << "mandy owner: " <<  mandyCacheObj.owner << dendl;
+  mandyCacheObj.bucket_name = "Mandy_owner";
+  mandyCacheObj.obj_name = "Mandy_obj_name";
+  mandyCacheObj.size_in_bytes = size_in_bytes_obj_temp;
+  ldout(cct, 5) << "mandy owner: " <<  mandyCacheObj.size_in_bytes << dendl;
+  mandyCacheObj.lastAccessTime = mktime(gmtime(&lastAccessTime_obj_temp));
+  mandyCacheObj.etag = "Mandy_etag";
+  mandyCacheObj.backendProtocol = backendProtocol_obj_temp;
+  mandyCacheObj.home_location = home_location_obj_temp;
+  vector<string> mandyHostList{"mandy", "sam"}; 
+  mandyCacheObj.hosts_list = mandyHostList; // double check syntax 
+  mandyCacheObj.acl = "Mandy_acl";
+  mandyCacheObj.aclTimeStamp = mktime(gmtime(&aclTimeStamp_obj_temp));
+  mandyCacheObj.creationTime = mktime(gmtime(&creationTime_obj_temp));
+  mandyCacheObj.dirty = dirty_obj_temp;
+  mandyCacheObj.intermediate = intermediate_obj_temp;
+  mandyCacheObj.mapping_id = "Mandy_mapping_id";
+  mandyCacheObj.offset = offset_obj_temp;
+  mandyCacheObj.is_remote_req = is_remote_req_obj_temp;
+  mandyCacheObj.is_remote_req_put = is_remote_req_put_obj_temp;
+
   uint64_t offset_temp = 0;
   uint64_t block_id_temp = 1;
-  uint64_t size_in_bytes_temp = 20;
+  uint64_t size_in_bytes_temp = 4;
   uint64_t access_count_temp = 5;
-  time_t lastAccessTime_temp = 7;
+  time_t lastAccessTime_temp = time(NULL);
   bool cachedOnRemote_temp = false;
 
-  cachePtr->c_obj = objMandy;
-  ldout(cct, 5) << "Mandy - cachePtr c_obj: " << cachePtr->c_obj << dendl;
-  cachePtr->offset = offset_temp;
-  ldout(cct, 5) << "Mandy - cachePtr offset: " << cachePtr->offset << dendl;
-  cachePtr->block_id = block_id_temp;
-  ldout(cct, 5) << "Mandy - cachePtr block_id: " << cachePtr->block_id << dendl;
-  cachePtr->size_in_bytes = size_in_bytes_temp;
-  ldout(cct, 5) << "Mandy - cachePtr size_in_bytes: " << cachePtr->size_in_bytes << dendl;
-  cachePtr->etag = "Mandy_etag1";
-  ldout(cct, 5) << "Mandy - cachePtr etag: " << cachePtr->etag << dendl;
-  cachePtr->hosts_list = vector<string>();
-  ldout(cct, 5) << "Mandy - cachePtr hosts_list: " << cachePtr->hosts_list << dendl;
-  cachePtr->access_count = access_count_temp;
-  ldout(cct, 5) << "Mandy - cachePtr access_count: " << cachePtr->access_count << dendl;
-  cachePtr->lastAccessTime = lastAccessTime_temp;
-  ldout(cct, 5) << "Mandy - cachePtr lastAccessTime: " << cachePtr->lastAccessTime << dendl;
-  cachePtr->cachedOnRemote = cachedOnRemote_temp;
-  ldout(cct, 5) << "Mandy - cachePtr cachedOnRemote: " << cachePtr->cachedOnRemote << dendl;
+  cache_block mandyCacheBlock;
+  //mandyCacheBlock->init(cct);
+  mandyCacheBlock.c_obj = mandyCacheObj;
+  mandyCacheBlock.offset = offset_temp;
+  mandyCacheBlock.block_id = block_id_temp;
+  mandyCacheBlock.size_in_bytes = size_in_bytes_temp;
+  mandyCacheBlock.etag = "Mandy_etag1";
+  mandyCacheBlock.hosts_list = mandyHostList;
+  mandyCacheBlock.access_count = access_count_temp;
+  mandyCacheBlock.lastAccessTime = mktime(gmtime(&lastAccessTime_temp));
+  mandyCacheBlock.cachedOnRemote = cachedOnRemote_temp;
 
-  RGWBlockDirectory rgwVar;
-  int rgwSetValue = rgwVar.setValue(cachePtr);
+
+  RGWBlockDirectory* mandyBlkDirectory;
+  mandyBlkDirectory = new RGWBlockDirectory();
+  //mandyBlkDirectory->init(cct); // optional
+  int rgwSetValue = mandyBlkDirectory->setValue(&mandyCacheBlock);
   ldout(cct, 5) << "Mandy: setValue: " << rgwSetValue << dendl;
-  int rgwOutput = rgwVar.getValue(cachePtr);
-  ldout(cct, 5) << "Mandy: getValue: " << rgwOutput << dendl;
+  int rgwGetValue = mandyBlkDirectory->getValue(&mandyCacheBlock);
+  ldout(cct, 5) << "Mandy: getValue: " << rgwGetValue << dendl;
+
+  RGWObjectDirectory* mandyObjDirectory;
+  mandyObjDirectory = new RGWObjectDirectory();
+  int rgwObjSetValue = mandyObjDirectory->setValue(&mandyCacheObj);
+  ldout(cct, 5) << "Mandy: setObjValue: " << rgwObjSetValue << dendl;
+  int rgwObjGetValue = mandyObjDirectory->getValue(&mandyCacheObj);
+  ldout(cct, 5) << "Mandy: getObjValue: " << rgwObjGetValue << dendl;
 
   /*
-  //  ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
+  ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
 
   // call RGWBlockDirectory::setValue
   // https://github.com/ekaynar/ceph-master/blob/datacache/src/rgw/rgw_cache.cc
