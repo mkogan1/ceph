@@ -215,22 +215,30 @@ void RGWObjectDirectory::findClient(string key, cpp_redis::client *client){
 }
 
 void RGWBlockDirectory::findClient(string key, cpp_redis::client *client){
+  ldout(cct, 5) << "Mandy in RGWBlockDirectory::findClient: " << dendl;
   int slot = 0;
   slot = hash_slot(key.c_str(), key.size());
-
+  ldout(cct, 5) << "Mandy in RGWBlockDirectory::findClient slot: " << slot << dendl;
   try {
 	/* if you had four *4* redis masters */
-	if (slot < 4096)
+	if (slot < 4096) {
 	  client->connect(cct->_conf->rgw_directory_address, cct->_conf->rgw_directory_port, nullptr , 0, 5, 1000);
-	else if (slot < 8192)
+	  ldout(cct, 5) << "Mandy in RGWBlockDirectory::findClient client: " << client << dendl;
+	}
+	else if (slot < 8192) {
 	  client->connect(cct->_conf->rgw_directory_address2, cct->_conf->rgw_directory_port2 ,nullptr, 0, 5, 1000);
+	  ldout(cct, 5) << "Mandy in RGWBlockDirectory::findClient client: " << client << dendl;
 	//client = &client2;
-	else if (slot < 12288)
+	}
+	else if (slot < 12288) {
 	  client->connect(cct->_conf->rgw_directory_address3, cct->_conf->rgw_directory_port3,nullptr, 0, 5, 1000);
-	else
+	  ldout(cct, 5) << "Mandy in RGWBlockDirectory::findClient client: " << client << dendl;
+	}
+	else {
 	  client->connect(cct->_conf->rgw_directory_address4, cct->_conf->rgw_directory_port4, nullptr, 0, 5, 1000);
+	  ldout(cct, 5) << "Mandy in RGWBlockDirectory::findClient client: " << client << dendl;
 	//client = &client3;
-
+	}
   }  catch(exception &e) {
 	ldout(cct,10) << __func__ <<"Redis client connected failed with " << e.what()<< dendl;
 
@@ -659,10 +667,10 @@ int RGWBlockDirectory::setAvgCacheWeight(int64_t weight){
 }
 
 int RGWBlockDirectory::setValue(cache_block *ptr){
-  //ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
-
+  ldout(cct, 5) << "Mandy step into RGWBlockDirectory::setValue" << dendl;
   //creating the index based on bucket_name, obj_name, and chunk_id
   string key = buildIndex(ptr);
+  ldout(cct, 5) << "Mandy setValue key: " << key << dendl;
   cpp_redis::client client;
   //ldout(cct, 5) << "D3nDataCache: " << __func__ << "(): oid=" << c->oid << dendl;
 

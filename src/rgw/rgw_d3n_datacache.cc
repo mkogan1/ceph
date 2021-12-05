@@ -286,29 +286,46 @@ void D3nDataCache::d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c)
   bool is_remote_req_obj_temp = false;
   bool is_remote_req_put_obj_temp = false; 
 
+  ldout(cct, 5) << "Mandy before mandyCacheObj" <<dendl;
   cache_obj mandyCacheObj;
   //mandyCacheObj->init(cct);
   mandyCacheObj.owner = "Mandy";
   ldout(cct, 5) << "mandy owner: " <<  mandyCacheObj.owner << dendl;
   mandyCacheObj.bucket_name = "Mandy_owner";
+  ldout(cct, 5) << "mandy bucket_name: " <<  mandyCacheObj.bucket_name << dendl;
   mandyCacheObj.obj_name = "Mandy_obj_name";
+  ldout(cct, 5) << "mandy obj_name: " <<  mandyCacheObj.obj_name << dendl;
   mandyCacheObj.size_in_bytes = size_in_bytes_obj_temp;
-  ldout(cct, 5) << "mandy owner: " <<  mandyCacheObj.size_in_bytes << dendl;
+  ldout(cct, 5) << "mandy size_in_bytes: " <<  mandyCacheObj.size_in_bytes << dendl;
   mandyCacheObj.lastAccessTime = mktime(gmtime(&lastAccessTime_obj_temp));
+  ldout(cct, 5) << "mandy lastAccessTime: " <<  mandyCacheObj.lastAccessTime << dendl;
   mandyCacheObj.etag = "Mandy_etag";
+  ldout(cct, 5) << "mandy etag: " <<  mandyCacheObj.etag << dendl;
   mandyCacheObj.backendProtocol = backendProtocol_obj_temp;
+  ldout(cct, 5) << "mandy backendProtocol: " <<  mandyCacheObj.backendProtocol << dendl;
   mandyCacheObj.home_location = home_location_obj_temp;
+  ldout(cct, 5) << "mandy home_location: " <<  mandyCacheObj.home_location << dendl;
   vector<string> mandyHostList{"mandy", "sam"}; 
   mandyCacheObj.hosts_list = mandyHostList; // double check syntax 
+  ldout(cct, 5) << "mandy hosts_list: " <<  mandyCacheObj.hosts_list << dendl;
   mandyCacheObj.acl = "Mandy_acl";
+  ldout(cct, 5) << "mandy acl: " <<  mandyCacheObj.acl << dendl;
   mandyCacheObj.aclTimeStamp = mktime(gmtime(&aclTimeStamp_obj_temp));
+  ldout(cct, 5) << "mandy aclTimeStamp: " <<  mandyCacheObj.aclTimeStamp << dendl;
   mandyCacheObj.creationTime = mktime(gmtime(&creationTime_obj_temp));
+  ldout(cct, 5) << "mandy creationTime: " <<  mandyCacheObj.creationTime << dendl;
   mandyCacheObj.dirty = dirty_obj_temp;
+  ldout(cct, 5) << "mandy dirty: " <<  mandyCacheObj.dirty << dendl;
   mandyCacheObj.intermediate = intermediate_obj_temp;
+  ldout(cct, 5) << "mandy intermediate: " <<  mandyCacheObj.intermediate << dendl;
   mandyCacheObj.mapping_id = "Mandy_mapping_id";
+  ldout(cct, 5) << "mandy mapping_id: " <<  mandyCacheObj.mapping_id << dendl;
   mandyCacheObj.offset = offset_obj_temp;
+  ldout(cct, 5) << "mandy offset: " <<  mandyCacheObj.offset << dendl;
   mandyCacheObj.is_remote_req = is_remote_req_obj_temp;
+  ldout(cct, 5) << "mandy is_remote_req: " <<  mandyCacheObj.is_remote_req << dendl;
   mandyCacheObj.is_remote_req_put = is_remote_req_put_obj_temp;
+  ldout(cct, 5) << "mandy is_remote_req_put: " <<  mandyCacheObj.is_remote_req_put << dendl;
 
   uint64_t offset_temp = 0;
   uint64_t block_id_temp = 1;
@@ -317,29 +334,43 @@ void D3nDataCache::d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c)
   time_t lastAccessTime_temp = time(NULL);
   bool cachedOnRemote_temp = false;
 
+  ldout(cct, 5) << "Mandy before mandyCacheBlock" <<dendl;
   cache_block mandyCacheBlock;
   //mandyCacheBlock->init(cct);
   mandyCacheBlock.c_obj = mandyCacheObj;
+ // ldout(cct, 5) << "mandy c_obj: " <<  mandyCacheBlock.c_obj << dendl;
   mandyCacheBlock.offset = offset_temp;
+  ldout(cct, 5) << "mandy offset: " <<  mandyCacheBlock.offset << dendl;
   mandyCacheBlock.block_id = block_id_temp;
+  ldout(cct, 5) << "mandy block_id: " <<  mandyCacheBlock.block_id << dendl;
   mandyCacheBlock.size_in_bytes = size_in_bytes_temp;
+  ldout(cct, 5) << "mandy size_in_bytes: " <<  mandyCacheBlock.size_in_bytes << dendl;
   mandyCacheBlock.etag = "Mandy_etag1";
+  ldout(cct, 5) << "mandy etag: " <<  mandyCacheBlock.etag << dendl;
   mandyCacheBlock.hosts_list = mandyHostList;
+  ldout(cct, 5) << "mandy hosts_list: " <<  mandyCacheBlock.hosts_list << dendl;
   mandyCacheBlock.access_count = access_count_temp;
+  ldout(cct, 5) << "mandy access_count: " <<  mandyCacheBlock.access_count << dendl;
   mandyCacheBlock.lastAccessTime = mktime(gmtime(&lastAccessTime_temp));
+  ldout(cct, 5) << "mandy lastAccessTime: " <<  mandyCacheBlock.lastAccessTime << dendl;
   mandyCacheBlock.cachedOnRemote = cachedOnRemote_temp;
+  ldout(cct, 5) << "mandy cachedOnRemote: " <<  mandyCacheBlock.cachedOnRemote << dendl;
 
 
-  RGWBlockDirectory* mandyBlkDirectory;
-  mandyBlkDirectory = new RGWBlockDirectory();
-  //mandyBlkDirectory->init(cct); // optional
+  ldout(cct, 5) << "Mandy before mandyBlkDirectory" <<dendl;
+  RGWBlockDirectory* mandyBlkDirectory = new RGWBlockDirectory();
+  mandyBlkDirectory->init(cct);
+  ldout(cct, 5) << "Mandy before calling set value for blk" << dendl;
   int rgwSetValue = mandyBlkDirectory->setValue(&mandyCacheBlock);
   ldout(cct, 5) << "Mandy: setValue: " << rgwSetValue << dendl;
   int rgwGetValue = mandyBlkDirectory->getValue(&mandyCacheBlock);
   ldout(cct, 5) << "Mandy: getValue: " << rgwGetValue << dendl;
 
+  ldout(cct, 5) << "Mandy before mandyObjDirectory" << dendl;
   RGWObjectDirectory* mandyObjDirectory;
   mandyObjDirectory = new RGWObjectDirectory();
+  mandyObjDirectory->init(cct);
+  ldout(cct, 5) << "Mandy before calling set value for obj" << dendl;
   int rgwObjSetValue = mandyObjDirectory->setValue(&mandyCacheObj);
   ldout(cct, 5) << "Mandy: setObjValue: " << rgwObjSetValue << dendl;
   int rgwObjGetValue = mandyObjDirectory->getValue(&mandyCacheObj);
