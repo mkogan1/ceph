@@ -4726,6 +4726,9 @@ int RGWRunBucketSourcesSyncCR::operate()
       return set_cr_done();
     }
 
+    shard_progress.resize(pipes.size());
+    cur_shard_progress = shard_progress.begin();
+
     for (siter = pipes.begin(); siter != pipes.end(); ++siter, ++cur_shard_progress) {
       ldpp_dout(sync_env->dpp, 20) << __func__ << "(): sync pipe=" << *siter << dendl;
 
@@ -4735,7 +4738,7 @@ int RGWRunBucketSourcesSyncCR::operate()
       ldpp_dout(sync_env->dpp, 20) << __func__ << "(): sync_pair=" << sync_pair << dendl;
 
       yield_spawn_window(sync_bucket_shard_cr(sc, lease_cr, sync_pair,
-                                              gen, tn, nullptr),
+                                              gen, tn, &*cur_shard_progress),
                          BUCKET_SYNC_SPAWN_WINDOW,
                          [&](uint64_t stack_id, int ret) {
                            if (ret < 0) {
