@@ -258,12 +258,7 @@ string RGWObjectDirectory::buildIndex(cache_obj *ptr){
 }
 
 string RGWBlockDirectory::buildIndex(cache_block *ptr){
-  ldout(cct, 5) << "Mandy: in blk directory build index" << dendl;
-  ldout(cct, 5) << "Mandy - ptr->block_id: " << ptr->block_id << dendl;
-  ldout(cct, 5) << "Mandy - c_obj.obj_name: " << ptr->c_obj.obj_name << dendl;
-  ldout(cct, 5) << "Mandy - to_string(ptr->block_id): " << to_string(ptr->block_id) << dendl;
-  ldout(cct, 5) << "Mandy - c_obj.bucket_name: " << ptr->c_obj.bucket_name << dendl;
-  return ptr->c_obj.bucket_name + "_" + ptr->c_obj.obj_name + "_" + to_string(ptr->block_id);
+  return ptr->c_obj.obj_name;
 }
 /*
  * 1 if the key exists.
@@ -667,7 +662,6 @@ int RGWBlockDirectory::setAvgCacheWeight(int64_t weight){
 }
 
 int RGWBlockDirectory::setValue(cache_block *ptr){
-  ldout(cct, 5) << "Mandy step into RGWBlockDirectory::setValue" << dendl;
   //creating the index based on bucket_name, obj_name, and chunk_id
   string key = buildIndex(ptr);
   ldout(cct, 5) << "Mandy setValue key: " << key << dendl;
@@ -676,10 +670,13 @@ int RGWBlockDirectory::setValue(cache_block *ptr){
 
   findClient(key, &client);
   if (!(client.is_connected())){
+  	ldout(cct, 5) << "Mandy setValue client is not connected: " << dendl;
 	return -1;
   }
   string result;
-  string endpoint=cct->_conf->remote_cache_addr;
+  // ALI TODO: add this in and set endpoint correctly
+  //string endpoint=cct->_conf->remote_cache_addr;
+  string endpoint = "127.0.0.1:8000";
   int exist = 0;
   vector<string> keys;
   keys.push_back(key);
@@ -700,15 +697,8 @@ int RGWBlockDirectory::setValue(cache_block *ptr){
 	vector<pair<string, string>> list;
 	//creating a list of key's properties
 	list.push_back(make_pair("key", key));
-	list.push_back(make_pair("owner", ptr->c_obj.owner));
 	list.push_back(make_pair("hosts", endpoint));
 	list.push_back(make_pair("size", to_string(ptr->size_in_bytes)));
-	list.push_back(make_pair("bucket_name", ptr->c_obj.bucket_name));
-	list.push_back(make_pair("obj_name", ptr->c_obj.obj_name));
-	list.push_back(make_pair("block_id", to_string(ptr->block_id)));
-	list.push_back(make_pair("lastAccessTime", to_string(ptr->lastAccessTime)));
-	list.push_back(make_pair("accessCount", "0"));
-	//list.push_back(make_pair("accessCount", to_string(ptr->access_count)));
 	client.hmset(key, list, [&result](cpp_redis::reply &reply){
 		if (!reply.is_null())
 		result = reply.as_string();
@@ -755,11 +745,9 @@ int RGWBlockDirectory::setValue(cache_block *ptr){
 	}
 	vector<pair<string, string>> list;
 	list.push_back(make_pair("hosts", hosts));
-	list.push_back(make_pair("lastAccessTime", to_string(ptr->lastAccessTime)));
 	client.hmset(key, list, [&result](cpp_redis::reply &reply){
 //		result = reply.as_string();
 		});
-	client.hincrby(key, "accessCount", ptr->access_count, [&result](cpp_redis::reply &reply){});
 	client.sync_commit(std::chrono::milliseconds(1000));
 	//client.sync_commit(std::chrono::milliseconds(1000));
 	//client.exec();
