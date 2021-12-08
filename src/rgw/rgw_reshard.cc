@@ -286,6 +286,34 @@ static int remove_old_reshard_instance(RGWRados* store,
 					  info, &info.objv_tracker);
 }
 
+// initialize the new bucket index shard objects
+static int init_target_index(RGWRados* store,
+                             RGWBucketInfo& bucket_info,
+                             const rgw::bucket_index_layout_generation& index)
+{
+  int ret = store->init_bucket_index(bucket_info, index);
+  if (ret < 0) {
+    ldout(store->ctx(), 0) << "ERROR: " << __func__ << " failed to initialize "
+       "target index shard objects: " << cpp_strerror(ret) << dendl;
+    return ret;
+  }
+
+  if (!bucket_info.datasync_flag_enabled()) {
+    // if bucket sync is disabled, disable it on each of the new shards too
+    auto log = rgw::log_layout_from_index(0, index);
+    ret = store->stop_bi_log_entries(bucket_info, log, -1);
+    if (ret < 0) {
+      ldout(store->ctx(), 0) << "ERROR: " << __func__ << " failed to disable "
+          "bucket sync on the target index shard objects: "
+          << cpp_strerror(ret) << dendl;
+      store->clean_bucket_index(bucket_info, index);
+      return ret;
+    }
+  }
+
+  return ret;
+}
+
 // initialize a target index layout, create its bucket index shard objects, and
 // write the target layout to the bucket instance metadata
 static int init_target_layout(RGWRados* store,
@@ -329,11 +357,8 @@ static int init_target_layout(RGWRados* store,
   // update resharding state
   bucket_info.layout.resharding = rgw::BucketReshardState::InProgress;
 
-  // initialize the new bucket index shard objects
-  int ret = store->init_bucket_index(bucket_info, *target);
+  int ret = init_target_index(store, bucket_info, *target);
   if (ret < 0) {
-    ldout(store->ctx(), 0) << "ERROR: " << __func__ << " failed to initialize "
-       " target index shard objects: " << cpp_strerror(ret) << dendl;
     return ret;
   }
 
