@@ -1014,24 +1014,15 @@ int RGWBlockDirectory::getValue(cache_block *ptr){
 
 	string hosts;
 	string size;
-	string bucket_name;
 	string obj_name;
-	string block_id;
-	string access_count;
-	string owner;
 	std::vector<std::string> fields;
 	fields.push_back("key");
 	fields.push_back("hosts");
 	fields.push_back("size");
-	fields.push_back("bucket_name");
-	fields.push_back("obj_name");
-	fields.push_back("block_id");
-	fields.push_back("accessCount");
-	fields.push_back("owner");
 
 	try {
 
-	  client.hmget(key, fields, [&key, &hosts, &size, &bucket_name, &obj_name, &block_id, &access_count, &owner, &key_exist](cpp_redis::reply &reply){
+	  client.hmget(key, fields, [&key, &hosts, &size, &key_exist](cpp_redis::reply &reply){
 		  if (reply.is_array()) {
 			auto arr = reply.as_array();
 			if (!arr[0].is_null()) {
@@ -1039,11 +1030,6 @@ int RGWBlockDirectory::getValue(cache_block *ptr){
 			  key = arr[0].as_string();
 			  hosts = arr[1].as_string();
 			  size = arr[2].as_string();
-			  bucket_name = arr[3].as_string();
-			  obj_name = arr[4].as_string();
-			  block_id  = arr[5].as_string();
-			  access_count = arr[6].as_string();
-			  owner = arr[7].as_string();
 		 }}
 		});
 
@@ -1054,13 +1040,11 @@ int RGWBlockDirectory::getValue(cache_block *ptr){
 	ldout(cct,10) << __func__ << "found the block entry "<< key << " hosts " << hosts << dendl;
 	stringstream sloction(hosts);
 	string tmp;
-	ptr->c_obj.owner = owner;
 
 	//host1_host2_host3_...
 	while(getline(sloction, tmp, '_')){
 	  if (tmp.compare(cct->_conf->remote_cache_addr) != 0){
 		ptr->hosts_list.push_back(tmp);
-		ptr->cachedOnRemote = true;
 		}
 	}
 
@@ -1068,10 +1052,6 @@ int RGWBlockDirectory::getValue(cache_block *ptr){
 	  return -1;
 	
 	ptr->size_in_bytes = stoull(size);
-	ptr->c_obj.bucket_name = bucket_name;
-	ptr->c_obj.obj_name = obj_name;
-	ptr->block_id = stoull(block_id);
-	ptr->access_count = stoull(access_count);
 	}
 	
 	catch(exception &e) {
