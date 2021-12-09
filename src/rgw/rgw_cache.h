@@ -15,6 +15,24 @@
 #include "cls/version/cls_version_types.h"
 #include "rgw_common.h"
 
+/* PORTING: D4N */
+//Add new header files
+#include "rgw_threadpool.h" //Implement this badboy
+#include <errno.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <iostream>
+#include "include/Context.h"
+#include <aio.h>
+
+class CacheThreadPool;
+
+
+
+
+
 enum {
   UPDATE_OBJ,
   INVALIDATE_OBJ,

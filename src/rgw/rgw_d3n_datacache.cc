@@ -1,6 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
+#include "rgw_d3n_cacherequest.h" //For porting remote Op stuff
 #include "rgw_d3n_datacache.h"
 #include "rgw_rest_client.h"
 #include "rgw_auth_s3.h"
@@ -19,6 +20,13 @@ namespace efs = std::experimental::filesystem;
 #endif
 
 #define dout_subsys ceph_subsys_rgw
+struct RemoteRequest; //For submit_remote_req --Daniel
+
+static const std::string base64_chars =
+"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+"abcdefghijklmnopqrstuvwxyz"
+"0123456789+/";
+
 
 using namespace std;
 
@@ -67,6 +75,10 @@ void D3nDataCache::init(CephContext *_cct) {
   free_data_cache_size = cct->_conf->rgw_d3n_l1_datacache_size;
   head = nullptr;
   tail = nullptr;
+  //FOR REMOTE REQUESTS
+  datalake_hit = 0;
+  remote_hit = 0;
+  //PORTING ENDS
   cache_location = cct->_conf->rgw_d3n_l1_datacache_persistent_path;
   blk_dir = new RGWBlockDirectory();
   blk_dir->init(cct);
@@ -285,6 +297,219 @@ void D3nDataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
   free_data_cache_size += freed_size;
   outstanding_write_size += len;
 }
+
+//PORTING BEGINS
+
+static size_t _remote_req_cb(void *ptr, size_t size, size_t nmemb, void* param) {
+  RemoteRequest *req = static_cast<RemoteRequest *>(param);
+//  req->bl->append((char *)ptr, size*nmemb);
+   req->s.append((char *)ptr, size*nmemb);
+  //lsubdout(g_ceph_context, rgw, 1) << __func__ << " data is written "<< " key " << req->key << " size " << size*nmemb  << dendl;
+  return size*nmemb;
+}
+
+std::string base64_encode(unsigned char const* bytes_to_encode, unsigned int in_len) {
+  std::string ret;
+  int i = 0;
+  int j = 0;
+  unsigned char char_array_3[3];
+  unsigned char char_array_4[4];
+  while (in_len--) {
+    char_array_3[i++] = *(bytes_to_encode++);
+    if (i == 3) {
+      char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+      char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+      char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+      char_array_4[3] = char_array_3[2] & 0x3f;
+
+      for(i = 0; (i <4) ; i++)
+       ret += base64_chars[char_array_4[i]];
+      i = 0;
+    }
+  }
+
+  if (i)
+  {
+    for(j = i; j < 3; j++)
+      char_array_3[j] = '\0';
+
+    char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+    char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+    char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+    char_array_4[3] = char_array_3[2] & 0x3f;
+
+    for (j = 0; (j < i + 1); j++)
+      ret += base64_chars[char_array_4[j]];
+
+    while((i++ < 3))
+      ret += '=';
+  }
+  return ret;
+}
+
+class CacheThreadPool { //PORT THIS
+  public:
+    CacheThreadPool(int n) {
+      for (int i=0; i<n; ++i) {
+       threads.push_back(new PoolWorkerThread(workQueue));
+       threads.back()->start();
+      }
+    }
+    ~CacheThreadPool() {
+      finish();
+    }
+
+    void addTask(Task *nt) {
+      workQueue.addTask(nt);
+    }
+
+    void finish() {
+      for (size_t i=0,e=threads.size(); i<e; ++i)
+       workQueue.addTask(NULL);
+      for (size_t i=0,e=threads.size(); i<e; ++i) {
+       threads[i]->join();
+       delete threads[i];
+      }
+      threads.clear();
+    }
+
+  private:
+    std::vector<PoolWorkerThread*> threads;
+    WorkQueue workQueue;
+};
+
+void D3nDataCache::submit_remote_req(RemoteRequest *c){
+  std::string endpoint=cct->_conf->backend_url; //what is the backend_url?
+  d3n_cache_lock.lock();
+
+  ldout(cct, 1) << "submit_remote_req, dest " << c->dest << " endpoint "<< endpoint<< dendl;
+  if ((c->dest).compare(endpoint) == 0) {
+        datalake_hit ++;
+           ldout(cct, 1) << "submit_remote_req, datalake_hit " << datalake_hit<< dendl;
+  } else {
+        remote_hit++;
+           ldout(cct, 1) << "submit_remote_req, remote_hit " <<  remote_hit<< dendl;
+  }
+  d3n_cache_lock.unlock();
+
+  tp->addTask(new RemoteS3Request(c, cct));
+}
+
+string RemoteS3Request::get_date(){
+  time_t now = time(0);
+  tm *gmtm = gmtime(&now);
+  string date;
+  char buffer[128];
+  std::strftime(buffer,128,"%a, %d %b %Y %X %Z",gmtm);
+  date = buffer;
+  return date;
+}
+
+int RemoteS3Request::submit_http_get_request_s3(){
+  //int begin = req->ofs + req->read_ofs;
+  //int end = req->ofs + req->read_ofs + req->read_len - 1;
+  auto start = chrono::steady_clock::now();
+
+  off_t begin = req->ofs;
+  off_t end = req->ofs + req->read_len - 1;
+  std::string range = std::to_string(begin)+ "-"+ std::to_string(end);
+  if (req->dest.compare("")==0)
+       req->dest = cct->_conf->backend_url;
+  //std::string range = std::to_string( (int)req->ofs + (int)(req->read_ofs))+ "-"+ std::to_string( (int)(req->ofs) + (int)(req->read_ofs) + (int)(req->read_len - 1));
+  ldout(cct, 10) << __func__  << " key " << req->key << " range " << range  << " dest "<< req->dest <<dendl;
+
+  CURLcode res;
+  string uri = "/"+ req->path;;
+  //string uri = "/"+req->c_block->c_obj.bucket_name + "/" +req->c_block->c_obj.obj_name;
+  string date = get_date();
+
+  //string AWSAccessKeyId=req->c_block->c_obj.accesskey.id;
+  //string YourSecretAccessKeyID=req->c_block->c_obj.accesskey.key;
+  string AWSAccessKeyId=req->ak;
+  string YourSecretAccessKeyID=req->sk;
+  string signature = sign_s3_request("GET", uri, date, YourSecretAccessKeyID, AWSAccessKeyId);
+  string Authorization = "AWS "+ AWSAccessKeyId +":" + signature;
+  string loc =  req->dest + uri;
+  string auth="Authorization: " + Authorization;
+  string timestamp="Date: " + date;
+  string user_agent="User-Agent: aws-sdk-java/1.7.4 Linux/3.10.0-514.6.1.el7.x86_64 OpenJDK_64-Bit_Server_VM/24.131-b00/1.7.0_131";
+  string content_type="Content-Type: application/x-www-form-urlencoded; charset=utf-8";
+  curl_handle = curl_easy_init();
+  if(curl_handle) {
+    struct curl_slist *chunk = NULL;
+    chunk = curl_slist_append(chunk, auth.c_str());
+    chunk = curl_slist_append(chunk, timestamp.c_str());
+    chunk = curl_slist_append(chunk, user_agent.c_str());
+    chunk = curl_slist_append(chunk, content_type.c_str());
+    chunk = curl_slist_append(chunk, "CACHE_GET_REQ:rgw_datacache");
+    curl_easy_setopt(curl_handle, CURLOPT_RANGE, range.c_str());
+    res = curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, chunk); //set headers
+    curl_easy_setopt(curl_handle, CURLOPT_URL, loc.c_str());
+    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L); //for redirection of the url
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, _remote_req_cb); //COMMENTED OUT FOR PORTING REASONS
+    curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
+//    curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void*)req);
+    res = curl_easy_perform(curl_handle); //run the curl command
+    curl_easy_reset(curl_handle);
+    curl_slist_free_all(chunk);
+    curl_easy_cleanup(curl_handle);
+  }
+  if(res == CURLE_HTTP_RETURNED_ERROR) {
+   ldout(cct,10) << "__func__ " << " CURLE_HTTP_RETURNED_ERROR" <<curl_easy_strerror(res) << " key " << req->key << dendl;
+   return -1;
+  }
+   auto end2 = chrono::steady_clock::now();
+   ldout(cct,10) << __func__  << " done dest " <<req->dest << " milisecond " <<
+   chrono::duration_cast<chrono::microseconds>(end2 - start).count()
+   << dendl;
+  if (res != CURLE_OK) { return -1;}
+  else { return 0; }
+
+}
+
+void RemoteS3Request::run() {
+
+  ldout(cct, 20) << __func__  <<dendl;
+  int max_retries = cct->_conf->max_remote_retries;
+  int r = 0;
+  for (int i=0; i<max_retries; i++ ){
+    if(!(r = submit_http_get_request_s3()) && (req->s.size() == (long unsigned int) req->read_len)){
+       ldout(cct, 0) <<  __func__  << "remote get success"<<req->key << " r-id "<< req->r->id << dendl;
+//       req->func(req);
+        req->finish();
+       return;
+    }
+    if(req->s.size() != (long unsigned int) req->read_len){
+//#if(req->bl->length() != r->read_len){
+       req->s.clear();
+    }
+    req->s.clear();
+    }
+
+    if (r == ECANCELED) {
+    ldout(cct, 0) << "ERROR: " << __func__  << "(): remote s3 request for failed, obj="<<req->key << dendl;
+    req->r->result = -1;
+    req->aio->put(*(req->r));
+    return;
+    }
+}
+
+string RemoteS3Request::sign_s3_request(string HTTP_Verb, string uri, string date, string YourSecretAccessKeyID, string AWSAccessKeyId){
+  std::string Content_Type = "application/x-www-form-urlencoded; charset=utf-8";
+  std::string Content_MD5 ="";
+  std::string CanonicalizedResource = uri.c_str();
+  std::string StringToSign = HTTP_Verb + "\n" + Content_MD5 + "\n" + Content_Type + "\n" + date + "\n" +CanonicalizedResource;
+  char key[YourSecretAccessKeyID.length()+1] ;
+  strcpy(key, YourSecretAccessKeyID.c_str());
+  const char * data = StringToSign.c_str();
+  unsigned char* digest;
+  digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*)data, strlen(data), NULL, NULL);
+  std::string signature = base64_encode(digest, 20); //What is this? --Daniel
+  return signature;
+}
+//PORTING ENDS
 
 bool D3nDataCache::get(const string& oid, const off_t len)
 {

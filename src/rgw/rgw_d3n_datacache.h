@@ -14,11 +14,16 @@
 #include "include/Context.h"
 #include "include/lru.h"
 #include "rgw_d3n_cacherequest.h"
+#include "rgw_threadpool.h" //PORTING THREADPOOL
 #include "rgw_directory.h"
 
 
 /*D3nDataCache*/
 struct D3nDataCache;
+struct RemoteRequest; //For submit_remote_req
+class CacheThreadPool;
+//class RemoteS3Request;
+
 
 
 struct D3nChunkDataInfo : public LRUObject {
@@ -70,6 +75,10 @@ private:
   std::mutex d3n_cache_lock;
   std::mutex d3n_eviction_lock;
 
+  //FOR REMOTE REQUESTS
+  int datalake_hit;
+  int remote_hit;
+  //may require initialization
   CephContext *cct;
   enum class _io_type {
     SYNC_IO = 1,
@@ -85,6 +94,12 @@ private:
   uint64_t outstanding_write_size = 0;
   struct D3nChunkDataInfo* head;
   struct D3nChunkDataInfo* tail;
+  //PORTING THREADPOOL
+  CacheThreadPool *tp;
+  CacheThreadPool *aging_tp;
+  //PORTING ENDS
+
+
 
 private:
   void add_io();
@@ -104,6 +119,11 @@ public:
   int d3n_io_write(bufferlist& bl, unsigned int len, std::string oid);
   int d3n_libaio_create_write_request(bufferlist& bl, unsigned int len, std::string oid);
   void d3n_libaio_write_completion_cb(D3nCacheAioWriteRequest* c);
+  //TODO: add all submit_remote functions
+  //PORTING BEGINS
+  void submit_remote_req(struct RemoteRequest *c);
+  //PORTING ENDS
+
   size_t random_eviction();
   size_t lru_eviction();
 
@@ -251,6 +271,37 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       }
       return r;
     } else {
+      /* PORTING */
+      //Check the directory if it is in a remote cache
+
+      //This is a dummy variable which is supposed to reflect whether the object is in a remote cache
+      //Since the directory functions have not yet been ported, hard-code r to 0
+      r = 0;
+
+      if (r == 0) {
+       ldpp_dout(dpp,20) << "PORTING D4N: object is stored at a remote rgw instance as indicated by the directory" << dendl;
+
+       //To fetch the object from a remote rgw we require 2 things
+       //i) the http destination of the RGW
+       //ii) the path of the object in the corresponding bucket in the remote rgw
+       std::string dest, path;
+
+       dest = "http://" ;
+
+       path = "";
+
+       ldpp_dout(dpp,20) << "PORTING D4N: retreived the dest= " << dest << " of the remote rgw instance and the path=" << path << " of the object" << dendl;
+
+       //Once we get both path and dest, we then require to do a remote request which involves two things
+       //i) A remote request instance
+       //ii) A remote operation in rgw::Aio
+       ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl;
+       RemoteRequest *c =  new RemoteRequest();
+
+      }
+
+      //After fetching from remote cache, write it to local cache
+
       // Write To Cache
       ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): WRITE TO CACHE: oid=" << read_obj.oid << ", obj-ofs=" << obj_ofs << ", read_ofs=" << read_ofs << " len=" << len << dendl;
       auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
@@ -261,5 +312,32 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
 
   return 0;
 }
+
+class RemoteS3Request : public Task { //PORT THIS - Functions are implemented in RGW_cache.cc
+  public:
+    RemoteS3Request(RemoteRequest *_req, CephContext *_cct) : Task(), req(_req), cct(_cct) {
+      pthread_mutex_init(&qmtx,0);
+      pthread_cond_init(&wcond, 0);
+    }
+    ~RemoteS3Request() {
+      pthread_mutex_destroy(&qmtx);
+      pthread_cond_destroy(&wcond);
+    }
+    virtual void run();
+    virtual void set_handler(void *handle) {
+      curl_handle = (CURL *)handle;
+    }
+    std::string sign_s3_request(std::string HTTP_Verb, std::string uri, std::string date, std::string YourSecretAccessKeyID, std::string AWSAccessKeyId);
+    std::string get_date();
+  private:
+    int submit_http_get_request_s3(); //very important
+  private:
+    pthread_mutex_t qmtx;
+    pthread_cond_t wcond;
+    RemoteRequest *req;
+    CephContext *cct;
+    CURL *curl_handle;
+
+};
 
 #endif
