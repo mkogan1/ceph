@@ -17,7 +17,7 @@ s3cmd --access_key=test4 --secret_key=test4 --host=127.0.0.1:8000 put ./20M.dat 
 echo "---------------Put Object Success---------------"
 sleep 5
 s3cmd --access_key=test4 --secret_key=test4 --host=127.0.0.1:8000 get s3://bkt/20M.dat get_obj_cache --force
-echo "---------------Get Object Succes---------------"
+echo "---------------Get Object Success---------------"
 sleep 2
 ./bin/rados ls -p default.rgw.buckets.data > rgwKeys.txt
 echo "---------------Saved to rgwKeys.txt---------------"
