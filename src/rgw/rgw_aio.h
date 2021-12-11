@@ -102,10 +102,11 @@ class Aio {
                             optional_yield y);
   static OpFunc d3n_cache_op(const DoutPrefixProvider *dpp, optional_yield y,
                              off_t read_ofs, off_t read_len, std::string& location);
-  static OpFunc remote_op(librados::ObjectReadOperation&& op, boost::asio::io_context& context, optional_yield y,
+  static OpFunc remote_op(const DoutPrefixProvider *dpp, librados::ObjectReadOperation&& op, optional_yield y,
                              off_t obj_ofs, off_t read_ofs, off_t read_len, std::string dest,
                              RemoteRequest *c, cache_block *c_block, std::string path, D3nDataCache *dc);
-                         //I think we have a second remote_op with "string Location" instead of "string dest"
-};
+                         //I think we have a second remote_op with "string Location" instead of "string dest"                            
+};                       // boost::asio::io_context& context,
+
 
 } // namespace rgw

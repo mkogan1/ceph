@@ -197,6 +197,10 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
   struct get_obj_data* d = static_cast<struct get_obj_data*>(arg);
   std::string oid, key;
 
+  //ldpp_dout(dpp,20) << "PORTING D4N: rgw_cache_list: " << g_conf()->rgw_cache_list << dendl;
+  ldpp_dout(dpp,20) << "PORTING D4N: rgw_port: " << g_conf()->rgw_frontends << dendl;
+
+
   if (is_head_obj) {
     // only when reading from the head object do we need to do the atomic test
     int r = T::append_atomic_test(dpp, astate, op);
@@ -271,32 +275,45 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       }
       return r;
     } else {
-      /* PORTING */
-      //Check the directory if it is in a remote cache
+      /* Porting D4N */
+   //Check the directory if it is in a remote cache
+ 
+    ldpp_dout(dpp,20) << "PORTING D4N: the object key name is: " << astate -> obj.key.name << dendl;
+    //ldpp_dout(dpp,20) << "PORTING D4N: rgw_cache_list: " << g_conf()->rgw_cache_list << dendl;
+ 
+    //add in any other neccessary config values right now - backend URL (leave empty) and max retries (10)
+    std::string port_num = g_conf()->rgw_frontends;
+    if (port_num.find("8000") != std::string::npos) { //Read from remote cache
+      ldpp_dout(dpp,20) << "PORTING D4N: found the rgw with port 8000: " << port_num << dendl;
 
-      //This is a dummy variable which is supposed to reflect whether the object is in a remote cache
-      //Since the directory functions have not yet been ported, hard-code r to 0
-      r = 0;
+      //To fetch the object from a remote rgw we require 2 things
+      //i) the http destination of the RGW
+      //ii) the path of the object in the corresponding bucket in the remote rgw
+      //iii) read_len is fed into the function from the arguments but I don't know where its obtained from beyond that
+      //iv) c_block is similarly just a placeholder until we something working from directory --Daniel
 
-      if (r == 0) {
-       ldpp_dout(dpp,20) << "PORTING D4N: object is stored at a remote rgw instance as indicated by the directory" << dendl;
+      //should be IP for rgw 1 - the one we want the data back to.
+      std::string dest = "127.0.0.1:8001"; //destination is the IP,  path is bktName/ObjName //will come from directory
+      std::string path = "bkt/" + astate -> obj.key.name;
+      cache_block *c_block = new cache_block();
+      c_block->c_obj.obj_name = read_obj.oid;
+      c_block->c_obj.accesskey.id = "key";
+      c_block->c_obj.accesskey.key = "secret key";
+      //RGWBLOCKPOINTER->getValue(c_block);
 
-       //To fetch the object from a remote rgw we require 2 things
-       //i) the http destination of the RGW
-       //ii) the path of the object in the corresponding bucket in the remote rgw
-       std::string dest, path;
+      ldpp_dout(dpp,20) << "PORTING D4N: retreived the dest= " << dest << " of the remote rgw instance and the path=" << path << " of the object" << dendl;
 
-       dest = "http://" ;
+        //Once we get both path and dest, we then require to do a remote request which involves two things
+      //i) A remote request instance
+      //ii) A remote operation in rgw::Aio
+      ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl;
+      RemoteRequest *c =  new RemoteRequest();
+      ldpp_dout(dpp,20) << "PORTING D4N: created a remote get, now calling a remote op." << dendl;
+//     //auto completed = d->aio->get(obj, rgw::Aio::remote_op(dpp, std::move(op), d->yield,
+//                                                                  obj_ofs, read_ofs, len, dest, c,
+//                                                                  c_block, path, d->rgwrados->d3n_data_cache), cost, id);
+    //auto res =  d->flush(std::move(completed));
 
-       path = "";
-
-       ldpp_dout(dpp,20) << "PORTING D4N: retreived the dest= " << dest << " of the remote rgw instance and the path=" << path << " of the object" << dendl;
-
-       //Once we get both path and dest, we then require to do a remote request which involves two things
-       //i) A remote request instance
-       //ii) A remote operation in rgw::Aio
-       ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl;
-       RemoteRequest *c =  new RemoteRequest();
 
       }
 

@@ -13,6 +13,8 @@
 #include "librados.h"
 #include "librados_fwd.hpp"
 #include "rados_types.hpp"
+//#include "rgw/rgw_d3n_cacherequest.h"
+
 
 namespace libradosstriper
 {
@@ -33,6 +35,8 @@ struct ObjListCtx;
 class ObjectOperationImpl;
 struct PlacementGroupImpl;
 struct PoolAsyncCompletionImpl;
+
+class CacheRequest;
 
 typedef struct rados_cluster_stat_t cluster_stat_t;
 typedef struct rados_pool_stat_t pool_stat_t;
@@ -1163,6 +1167,8 @@ inline namespace v14_2_0 {
     int operate(const std::string& oid, ObjectReadOperation *op, bufferlist *pbl, int flags);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op);
     int aio_operate(const std::string& oid, AioCompletion *c, ObjectWriteOperation *op, int flags);
+    int aio_operate(const std::string& oid, AioCompletion *c, CacheRequest *cc, bufferlist *pbl); //datacache
+
     /**
      * Schedule an async write operation with explicit snapshot parameters
      *

@@ -27,7 +27,9 @@
 #include "include/xlist.h"
 #include "osd/osd_types.h"
 #include "osdc/Objecter.h"
+//#include "rgw/rgw_rados.h"
 
+class CacheRequest;
 class RadosClient;
 
 struct librados::IoCtxImpl {
@@ -293,7 +295,9 @@ struct librados::IoCtxImpl {
                                   const std::string &key);
   int application_metadata_list(const std::string& app_name,
                                 std::map<std::string, std::string> *values);
-
+//PORTING BEGINS
+int cache_aio_operate_read(const object_t &oid, AioCompletionImpl *c, CacheRequest* cc, bufferlist *pbl);
+//PORTING ENDS
 };
 
 #endif

@@ -23,6 +23,7 @@
 #include "include/ceph_assert.h"
 #include "common/valgrind.h"
 #include "common/EventTrace.h"
+//#include "rgw/rgw_d3n_datacache.h"
 
 #define dout_subsys ceph_subsys_rados
 #undef dout_prefix
@@ -33,6 +34,8 @@ using std::map;
 using std::unique_lock;
 using std::vector;
 
+
+//class librados::CacheRequest;
 namespace bs = boost::system;
 namespace ca = ceph::async;
 namespace cb = ceph::buffer;
@@ -784,6 +787,31 @@ int librados::IoCtxImpl::aio_operate(const object_t& oid,
 
   return 0;
 }
+
+//PORTING BEGINS
+// datacache  
+int librados::IoCtxImpl::cache_aio_operate_read(const object_t &oid, AioCompletionImpl *c, CacheRequest *cc,  bufferlist *pbl) {
+
+   FUNCTRACE(client->cct);
+   OID_EVENT_TRACE(oid.name.c_str(), "Cache_READ_OP_BEGIN");
+   Context *oncomplete = new C_aio_Complete(c);
+
+#if defined(WITH_EVENTTRACE)
+   ((C_aio_Complete *) oncomplete)->oid = oid;
+#endif
+   c->is_read = true;
+   c->io = this;
+   //cc->onack = oncomplete;
+   //cc->bl = pbl;
+//   c->blp = pbl;
+//   c->pc = cc->lc->pc;
+//   c->blp = &(cc->bl);
+   return 0;
+}
+// datacache
+//PORTING ENDS
+
+
 
 int librados::IoCtxImpl::aio_read(const object_t oid, AioCompletionImpl *c,
 				  bufferlist *pbl, size_t len, uint64_t off,

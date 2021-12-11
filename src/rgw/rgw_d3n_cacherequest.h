@@ -173,11 +173,91 @@ class CacheRequest {
 
 };
 
+struct LocalRequest : public CacheRequest{
+  struct aiocb *paiocb;
+  LocalRequest() :  CacheRequest(), paiocb(NULL) {}
+  ~LocalRequest(){}
+
+  int prepare_op(std::string key_orig,  bufferlist *bl, off_t read_len, off_t ofs, off_t read_ofs, void(*f)(sigval_t), rgw::Aio* aio, rgw::AioResult* r, std::string& location) {
+    this->r = r;	
+    this->aio = aio;
+//    this->bl = bl;
+    this->ofs = ofs;
+    std::string tmp = key_orig;
+	const char x = '/';
+	const char y = '_';
+	std::replace(tmp.begin(), tmp.end(), x, y);
+	this->key = tmp;
+    this->read_len = read_len;
+    this->stat = EINPROGRESS;	
+	std::string loc = location+ "/" + this->key;
+	//cout << "prepare_op  " << loc << "\n";
+    struct aiocb *cb = new struct aiocb;
+    memset(cb, 0, sizeof(struct aiocb));
+    cb->aio_fildes = ::open(loc.c_str(), O_RDONLY);
+    if (cb->aio_fildes < 0) {
+      return -1;
+    }
+    cb->aio_buf = malloc(read_len);
+    cb->aio_nbytes = read_len;
+    cb->aio_offset = read_ofs;
+    cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
+    cb->aio_sigevent.sigev_notify_function = f ;
+    cb->aio_sigevent.sigev_notify_attributes = NULL;
+    cb->aio_sigevent.sigev_value.sival_ptr = this;
+    this->paiocb = cb;
+    return 0;
+  }
+
+   int submit_op(){
+    int ret = 0;
+    if((ret = ::aio_read(this->paiocb)) != 0) {
+          return ret;
+         }
+    return ret;
+  }
+
+  void release (){
+    lock.lock();
+    free((void *)paiocb->aio_buf);
+    paiocb->aio_buf = nullptr;
+    ::close(paiocb->aio_fildes);
+    delete(paiocb);
+    lock.unlock();
+//    delete this;
+  }  
+
+  void cancel_io(){
+    lock.lock();
+    stat = ECANCELED;
+    lock.unlock();
+  }
+
+  int status(){
+    lock.lock();
+    if (stat != EINPROGRESS) {
+      lock.unlock();
+      if (stat == ECANCELED){
+    	//release();
+	  return ECANCELED;
+      }}
+    stat = aio_error(paiocb);
+    lock.unlock();
+    return stat;
+  }
+
+  void finish(){
+    bl->append((char*)paiocb->aio_buf, paiocb->aio_nbytes);
+    onack->complete(0);
+    release();
+  }
+};
+
 typedef   void (*f)( RemoteRequest* func ); //Pointer to a function. Not sure what it does, but it won't work right now
 struct RemoteRequest : public CacheRequest{
   std::string dest;
   void *tp;
-  RGWRESTConn *conn; //Need to find and implement this class. -Daniel
+  RGWRESTConn *conn; 
   std::string path;
   std::string ak;
   std::string sk;
@@ -185,7 +265,7 @@ struct RemoteRequest : public CacheRequest{
   std::string s;
   size_t sizeleft;
   const char *readptr;
-  f func; //Oh, is the typedef not working on line 149? -Daniel
+  f func; 
   cache_block *c_block;
   RemoteRequest() :  CacheRequest(), c_block(nullptr) {}
 
