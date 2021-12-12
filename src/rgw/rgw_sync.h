@@ -287,6 +287,7 @@ public:
     return master_log.read_log_info(dpp, log_info);
   }
   int read_master_log_shards_info(const DoutPrefixProvider *dpp, const std::string& master_period, std::map<int, RGWMetadataLogInfo> *shards_info) {
+    std::cerr << fmt::format("-#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
     return master_log.read_master_log_shards_info(dpp, master_period, shards_info);
   }
   int read_master_log_shards_next(const DoutPrefixProvider *dpp, const std::string& period, std::map<int, std::string> shard_markers, std::map<int, rgw_mdlog_shard_data> *result) {

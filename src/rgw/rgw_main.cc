@@ -330,6 +330,8 @@ int radosgw_Main(int argc, const char **argv)
   rgw_http_client_init(g_ceph_context);
   rgw_kmip_client_init(*new RGWKMIPManagerImpl(g_ceph_context));
   
+  lsubdout(cct, rgw, 0) << "rgw_d3n: client_id=" << g_conf()->name << dendl;
+  lsubdout(cct, rgw, 0) << "rgw_d3n: frontend=" << g_conf()->rgw_frontends << dendl;
   lsubdout(cct, rgw, 1) << "rgw_d3n: rgw_d3n_l1_local_datacache_enabled=" << cct->_conf->rgw_d3n_l1_local_datacache_enabled << dendl;
   if (cct->_conf->rgw_d3n_l1_local_datacache_enabled) {
     lsubdout(cct, rgw, 1) << "rgw_d3n: rgw_d3n_l1_datacache_persistent_path='" << cct->_conf->rgw_d3n_l1_datacache_persistent_path << "'" << dendl;
