@@ -11,7 +11,7 @@
 ### Project Overview
 With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
 
-To access stored data in Ceph, one can achieve this in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, so we will only be working with radosgw. With RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift.
+To access stored data in Ceph, one can achieve this in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, which means that the team will only be working with radosgw. Through an RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift.
 
 The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake.
 
@@ -28,6 +28,10 @@ The goal of this project is to incorporate D4N, an upgrade to the D3N caching ar
 5. Performance testing for different synchronization mechanisms.
 6. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
 7. Integrate testing into Teuthology.
+
+Over the course of the project these goals were revised, largely in order to reduce the scope of the team. Plans to test synchronization, race conditions, and other such complex behavior was dropped as implementation goals narrowed. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. The modified goal for the directory side of the project became the implementation of the directory files and redis installation alongside unit testing of the setValue function for blockDirectory. BlockDirectory is the resevoir for the metadata of the smaller 4 Megabyte chunks Ceph splits larger data objects into. The final minimum goal for the directory was to integrate their work with the backend functions that would be implemented by another portion of the project's teammembers.
+
+The backend portion of the goals narrowed signifigantly due to difficulties with porting, as will be discussed below. The minimum goal decided approximately two thirds of the way through the project became the implementation and testing of the remote cache get operation, which would allow for a rados gateway to search and fetch data from other rados gateway caches on the same cluster. This functionality was also intended to be integrated with the directory in order to provide a dynamic, vertically implemented addition to the Ceph codebase.
 
 ---
 ### Requirements
@@ -58,7 +62,7 @@ Users will access Ceph through the client portion of the program and benefit fro
 	
 The current cloud computing trend is an increase in the use of cache storage. Implementation of D4N will allow for larger caches that place less pressure on oversubscribed cloud networks. Furthermore, D4N is intended to improve the positioning of data in caches closer to the physical access point, saving on network bandwidth. For a program such as Ceph that is designed to scale nearly infinitely, it is key that the growing distance between clients and servers is addressed.
 
-These are all high level, conceptual benefits to the complete integration of the D4N architeture with Ceph. The accomplishments of this team serve as a baseline to accelerate the integration by more skilled members of the Ceph community. In particular, the merging of the REDIS directory was an extremely time consuming process due to the large number of files that needed to be added.
+These are all high level, conceptual benefits to the complete integration of the D4N architeture with Ceph. The accomplishments of this team serve as a baseline to accelerate the integration by more skilled members of the Ceph community. In particular, the merging of the Redis directory was an extremely time consuming process due to the large number of files that needed to be modified in order to throughly implement the new directory files and redis integration.
 
 ---
 ### High-Level Design
@@ -76,7 +80,7 @@ The project's initial base goal was to implement the directory functionality fro
 
 Accomplishing this goal would have lead into the next set of objectives for the team, which was to implement read and write functionality using the D4N style directory. Implementing these two additional features with the get function is what we considered to be full completion of the project. Overall, the limited scope of our project is due to our intended goal of producing a foundation for later teams to fully integrate D4N into the upstream code. Producing solid, testable code with good practices in mind is more important than implementing as many portions of D4N as possible.
 
-Approximately 75% of the way through the project in Sprint 4 it was recognised that both the implementation of the directory and the basic remote get operation were far more complex than expected. Both teams chose to ignore any potential strech goals such as the remote write functionality. The directory team focused on only getting the D4N directory to compile with D3N, with the intention of hard coding values later for testing. Similarly, the backend team decided with mentor support to focus exclusively on getting a remote cache get operation completed, using their own set of hardcoded values to negate the need for the directory.
+Approximately two thirds of the way through the semester it was recognised that both the implementation of the directory and the basic remote get operation were far more complex than expected. Both teams chose to ignore any potential strech goals such as the remote write functionality. The directory team focused on only getting the D4N directory to compile with D3N, with the intention of hard coding values later for testing. Similarly, the backend team decided with mentor support to focus exclusively on getting a remote cache get operation completed, using their own set of hardcoded values to negate the need for the directory.
 	
 Ultimately the team as a whole saw mixed success, with a definitive failure to meet the minimum viable product. The directory team was the most successful, and was [[SOMEONE ON THE DIRECTORY TEAM EXPLAIN HOW WELL YOU DID HERE]]
 
@@ -159,8 +163,10 @@ Another batch of tools and skills learned for this project was the usage of debu
 
 ### Future for the Project
 The most promising path forward for this project is the continued integration of the D4N style directory. Implementing the full setValue function for the objectDirectory is the most immediate next step, which should not prove to be a serious challenge considering the successful implementation of blockDirectory's setValue function. The next step would likely be implementing the getValue functions for both block and object metadata, and beyond that the rest of the directory's functionality should be implementable using the foundations set in this project.
-The future of the backend implentation is less clear. While the longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N, it is unclear if the work from this project will be part of that. The implemented code for the backend get call to a remote rgw cache is nonfunctional, and would require additional cleanup from another team. Considering the already considerable challenge of understanding a functioning branch of Ceph
 
+The future of the backend implentation is less clear. The longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N. The progress made over this project towards these goals is mixed. The implemented code for the backend get call to a remote rgw cache is complete from D4N, but nonfunctional. It would require additional cleanup from another team. Some object implementations done during this project, such as the RemoteRequest structure, will be be beneficial for future teams in completing the remote cache get operation and the myriad of other backend remote operations that serve as the benefits of D4N.
+
+We believe that the work completed in this project is overall a benefit to the larger Ceph community, and we are proud to have helped contribute to an opensource project, a first for many of the members of the team.
 
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
