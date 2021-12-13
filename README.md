@@ -5,6 +5,7 @@
 ##### **Demo 2 Video Link:** https://drive.google.com/file/d/1zKDpXfYASGvzWEACVdQuIBRUEwI-7-e-/view?usp=sharing
 ##### **Demo 3 Video Link:** https://drive.google.com/file/d/1NHp9ZXcn3JnY5Y3MF-aR02Azp3Jncu15/view?usp=sharing
 ##### **Demo 4 Video Link:** https://drive.google.com/file/d/1KU6O83Lgywgxp9eTMnjkICGFwyoUqH21/view?usp=sharing
+##### **Demo 5 Video Link:** https://drive.google.com/file/d/1I4-euIcDG7HwzjdCYVZP6ByjGJuRb2hM/view?usp=sharing
 
 ---
 ### Project Overview
@@ -36,7 +37,7 @@ This project requires three separate Virtual Machines (VMs). These machines have
 
 - VM One serves as a gateway and is less powerful than its fellow computers. It will run with 4 cores, 8 gigabytes of RAM, and a 64 gigabyte disk.
 
-- VMs Two and Three act as the Ceph cluster that the team will be modifying. Each VM will have 16 cores, 32 gigabytes of RAM, and 250 gigabyte disk, along with their own floating IP addresses. All three machines will be accessed through an OpenStack Terminal.
+- VMs Two and Three act as the Ceph cluster that the team will be modifying. Each VM will have 16 cores, 32 gigabytes of RAM, and 250 gigabyte disk, along with their own floating IP addresses. All three machines will be accessed through an OpenStack Terminal. As the project progressed, the third VM was modified in a way as to be nearly unusable with the python scripts the directory team was using. It was deemed easier to create a new VM than attempt to fix the current one. This VM was using the allotted resources of the one it replaced, however.
 
 <p align="center">
 	<img src="./images/LAPTOP.png" width="35%" />
@@ -57,6 +58,8 @@ Users will access Ceph through the client portion of the program and benefit fro
 	
 The current cloud computing trend is an increase in the use of cache storage. Implementation of D4N will allow for larger caches that place less pressure on oversubscribed cloud networks. Furthermore, D4N is intended to improve the positioning of data in caches closer to the physical access point, saving on network bandwidth. For a program such as Ceph that is designed to scale nearly infinitely, it is key that the growing distance between clients and servers is addressed.
 
+These are all high level, conceptual benefits to the complete integration of the D4N architeture with Ceph. The accomplishments of this team serve as a baseline to accelerate the integration by more skilled members of the Ceph community. In particular, the merging of the REDIS directory was an extremely time consuming process due to the large number of files that needed to be added.
+
 ---
 ### High-Level Design
 Both D4N and D3N implementations in Ceph make heavy use of SSD or VRAM-based caching. The key limitation of D3N that this project addresses is the inability to access caches that are not part of the local computing cluster.
@@ -68,10 +71,14 @@ In our project, the four students will be split into two groups of two students.
 As noted above, D4N is already functioning on a non-upstream variant of Ceph. Since the project’s initial creation, Ceph has seen significant refactoring of classes, abstractions, and pathways. It will be up to each team to retool either the introduced D4N code or the base Ceph code to address these issues.
 
 ---
-### Acceptance Criteria
-The project's base goal is to implement the directory functionality from the D4N research code into our upstream Ceph cluster without signifigantly altering the existing upstream abstractions. We consider our most absolute basic goal to be implenting a 'get' function in D3N that utilizes the directory to find data stored across our Ceph network. Upon getting a get request from the client, the RGW should be able to first search its own local cache, and then query the directory in order to find if the object in remote caches, before finally searching the backend data storage.
+### Acceptance Criteria and Accomplished Tasks
+The project's initial base goal was to implement the directory functionality from the D4N research code into our upstream Ceph cluster without signifigantly altering the existing upstream abstractions. We considered our most absolute basic goal to be implenting a 'get' function in D3N that utilizes the directory to find data stored across our Ceph network. Upon getting a get request from the client, the RGW should be able to first search its own local cache, and then query the directory in order to find if the object in remote caches, before finally searching the backend data storage.
 
-Accomplishing this goal will lead into the next set of objectives for the team, which is to implement read and write functionality using the D4N style directory. Implementing these two additional features with the get function is what we consider to be full completion of the project. Overall, the limited scope of our project is due to our intended goal of producing a foundation for later teams to fully integrate D4N into the upstream code. Producing solid, testable code with good practices in mind is more important than implementing as many portions of D4N as possible.
+Accomplishing this goal would have lead into the next set of objectives for the team, which was to implement read and write functionality using the D4N style directory. Implementing these two additional features with the get function is what we considered to be full completion of the project. Overall, the limited scope of our project is due to our intended goal of producing a foundation for later teams to fully integrate D4N into the upstream code. Producing solid, testable code with good practices in mind is more important than implementing as many portions of D4N as possible.
+
+Approximately 75% of the way through the project in Sprint 4 it was recognised that both the implementation of the directory and the basic remote get operation were far more complex than expected. Both teams chose to ignore any potential strech goals such as the remote write functionality. The directory team focused on only getting the D4N directory to compile with D3N, with the intention of hard coding values later for testing. Similarly, the backend team decided with mentor support to focus exclusively on getting a remote cache get operation completed, using their own set of hardcoded values to negate the need for the directory.
+	
+Ultimately the team as a whole saw mixed success, with a definitive failure to meet the minimum viable product. The directory team was the most successful, and was [[SOMEONE ON THE DIRECTORY TEAM EXPLAIN HOW WELL YOU DID HERE]]
 
 ---
 ### Sprint Breakdowns
@@ -110,10 +117,51 @@ Accomplishing this goal will lead into the next set of objectives for the team, 
 | GDB debugging | The back end team learned how to use GDB to follow Ceph functions during their execution, which provided them with a deeper understanding of the relationships between the functions underlying D3N and D4N. |
 | Understand D4N setup | This user story was mostly completed in sprint 3, but it was added to sprint 4 for us to fully finish. The teams familiarized themselves with the D4N environment and started keeping logs of any errors that resulted from attempting to build Ceph. |
 | Resolve directory D4N porting issues | This user story included looking through the D4N files and comparing it with the analogous D3N files to add proper configurations and definitions to the upstreamed Ceph code that D4N relies on. In particular, the files rgw.yaml.in and rgw_common.h were altered and doing so allowed the radosgw binary to be built. Additionally, D4N was determined to be fully functional in VM2. |
-| Make and build | The back end team is waiting on the directory team to make the ninja vstart command fully functional, as this would mean D4N has been added to Ceph. The former can then start working on I/O directing and the latter can begin testing the D4N functionalities to ensure they are present in Ceph in the next sprint. Currently, this task is still in progress. However, one of our mentors is dedicated to meeting with us and finally fixing these errors before the next sprint. |
+| Make and build | The back end team is waiting on the directory team to make the ninja vstart command fully functional, as this would mean D4N has been added to Ceph. The former can then start working on I/O directing and the latter can begin testing the D4N functionalities to ensure they are present in Ceph in the next sprint. This task wasn't finished in this sprint, so it was ported over to the next one. |
 | Back end | The tasks under this user story were not completed due to the corresponding team discussing their progress with the professors and being advised to reconsider how they will achieve their MVP. Instead, the goal has been changed to rethinking the path the back end team will take to move forward. |
 
+#### Sprint 5 (November 28 to December 15)
+
+| User Stories | Description |
+| ----------- | ----------- |
+| Debugging directory functionality | After porting the D4N directory functionality to upstream Ceph and adding hardcoded values to the D3N libaio write callback function, we ran into errors when attempting to get an object that was put in a bucket we made. S3 was refusing to connect, and so our mentors advised us to use GDB to look through the stack. We saw that there was a segmentation fault and it was due to our attempts to log the hardcoded values to ensure consistency. After figuring this out, our mentors provided us with next steps that allowed us to solve this issue. |
+| Compilation error (continued) | This is a continuation of the previous user story with more detailed tasks that follow the process of setting up D4N and attempting to use the directory. After finishing these first two user stories, our mentors were additionally able to build off our work to dynamically update directory values rather than relying on the hardcoded values we were manually testing the directory functionality with. |
+| Directory unit testing | To finish this sprint, the directory team must write unit tests that look for relevant object and block metadata in the directory and ensures it matches the actual metadata of the original objects and blocks. |
+| Testing of D4N in upstream Ceph | After writing the unit tests using boto3, the directory team will use a shell script utilizing S3cmd to executing them. |
+| Set up demo environment | The back end team set up a multi-RGW Ceph cluster to demonstrate the new get functionality for demo 5. |
+| Porting submit get request logic | This task includes merging the back end and directory team's work and ensuring all the functionalities of D3N and D4N are kept. This user story is in process, as we are still ironing out the details of how to achieve this. |
+| Hardcode get request values | This user story was created by the back end team to test their work. The tasks included hardcoding cache block and object data and modifying the RGW yaml file, which is still in progress. |
+
 ---
+
+#### Lessons Learned
+Failure is an excellent teacher, and this project was hampered by set backs and failures. For many members of the team, this was the first time working with a very large codebase, and a very poorly commented one at that. The first hurdle, which took well over 4 weeks in total, was setting up the enviroment for Ceph. None of the team had worked on VM's either, so we were taught by our mentors how to modify our own machine's configs to ssh in the VM, how to download Ceph onto the VM's, and how to boot it up. Then, we had to learn the commands relevant to Ceph and how to quickly and efficently use the bash terminal, which was a new experience for at least one member of the team. Using the terminal well turned out to be a vitally important skill for the backend team when it came to porting, as will be discussed later. In addition, this was the first major use of git for at least one team member.
+
+Git deserves its own moment of elaboration. It's an extremely useful tool that has a steep learning curve at first, which led to a large amount of consternation on the team. At one point in Sprint 4 the .git file was deleted on VM1, leading to about 4 days of wasted time. The reason for this deletion was an attempt by one teammember to get their pushes and commits to function properly, having never before used git in a meaningful way. After that event the whole team was more dedicated to proper git usage and managed to deal with the vast majority of issues that arose with the tool in an efficent manner. Usage of the git log and commits was vital to porting code between VM1 and VM2 as well as reverting of catastropic coding mistake.
+
+Another batch of tools and skills learned for this project was the usage of debugging tools. The primary ones used for this project were GDB and Ceph's internally implemented log. Often times debugging is a simple process of placing printout statements throughout the code and figuring out which ones don't get reached, but that is an invalid strategy for a program as large as Ceph. Utilizing the log of Ceph is similar to printing out statements to the terminal, but required the usage of more ornate systems and was only really helpful when the statements were coupled with a relevant variable.
+
+	
+	This is just on the backend side
+	1) GDB
+	2) Logging
+	3) git
+	3) Porting code and parsing through
+	4) iterative steps of improvement
+	5) Terminal usage
+	6) understanding project goals
+	7) large program flow
+	8) Reanalyzing tasks after setbacks
+---
+#### Limitations of the Project
+
+---
+
+### Future for the Project
+The most promising path forward for this project is the continued integration of the D4N style directory. Implementing the full setValue function for the objectDirectory is the most immediate next step, which should not prove to be a serious challenge considering the successful implementation of blockDirectory's setValue function. The next step would likely be implementing the getValue functions for both block and object metadata, and beyond that the rest of the directory's functionality should be implementable using the foundations set in this project.
+The future of the backend implentation is less clear. While the longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N, it is unclear if the work from this project will be part of that. The implemented code for the backend get call to a remote rgw cache is nonfunctional, and would require additional cleanup from another team. Considering the already considerable challenge of understanding a functioning branch of Ceph
+
+
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
 2. CS6620-S21. “CS6620-S21/D4N-s3select-Caching.” GitHub, https://github.com/CS6620-S21/D4N-S3Select-Caching.
