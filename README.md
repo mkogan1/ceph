@@ -148,10 +148,10 @@ Accomplishing this goal will lead into the next set of objectives for the team, 
 	8) Reanalyzing tasks after setbacks
 #### Limitations of the Project
 
----
+
 #### Future for the Project
 	The future of this project is uncertain. While the integration of the directory was a major step in the addition of D4N's benefits to Ceph, the lack of a usable product presented by the team still leaves a large amount of work for any future teams in continuing the integration. The team has concerns that the partially implemented remote get operation may be a dead end and overall improperly ported over from the D4N variant of Ceph. Without this operation functioning, even with a usable directory testing any improvements would be difficult. [[MUST DISCUSS WITH MENTORS ON MONDAY WHERE THEY SEE THIS GOING]]
----
+
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
 2. CS6620-S21. “CS6620-S21/D4N-s3select-Caching.” GitHub, https://github.com/CS6620-S21/D4N-S3Select-Caching.
