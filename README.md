@@ -72,9 +72,13 @@ As noted above, D4N is already functioning on a non-upstream variant of Ceph. Si
 
 ---
 ### Acceptance Criteria and Accomplished Tasks
-The project's base goal is to implement the directory functionality from the D4N research code into our upstream Ceph cluster without signifigantly altering the existing upstream abstractions. We consider our most absolute basic goal to be implenting a 'get' function in D3N that utilizes the directory to find data stored across our Ceph network. Upon getting a get request from the client, the RGW should be able to first search its own local cache, and then query the directory in order to find if the object in remote caches, before finally searching the backend data storage.
+The project's initial base goal was to implement the directory functionality from the D4N research code into our upstream Ceph cluster without signifigantly altering the existing upstream abstractions. We considered our most absolute basic goal to be implenting a 'get' function in D3N that utilizes the directory to find data stored across our Ceph network. Upon getting a get request from the client, the RGW should be able to first search its own local cache, and then query the directory in order to find if the object in remote caches, before finally searching the backend data storage.
 
-Accomplishing this goal will lead into the next set of objectives for the team, which is to implement read and write functionality using the D4N style directory. Implementing these two additional features with the get function is what we consider to be full completion of the project. Overall, the limited scope of our project is due to our intended goal of producing a foundation for later teams to fully integrate D4N into the upstream code. Producing solid, testable code with good practices in mind is more important than implementing as many portions of D4N as possible.
+Accomplishing this goal would have lead into the next set of objectives for the team, which was to implement read and write functionality using the D4N style directory. Implementing these two additional features with the get function is what we considered to be full completion of the project. Overall, the limited scope of our project is due to our intended goal of producing a foundation for later teams to fully integrate D4N into the upstream code. Producing solid, testable code with good practices in mind is more important than implementing as many portions of D4N as possible.
+
+	Approximately 75% of the way through the project in Sprint 4 it was recognised that both the implementation of the directory and the basic remote get operation were far more complex than expected. Both teams chose to ignore any potential strech goals such as the remote write functionality. The directory team focused on only getting the D4N directory to compile with D3N, with the intention of hard coding values later for testing. Similarly, the backend team decided with mentor support to focus exclusively on getting a remote cache get operation completed, using their own set of hardcoded values to negate the need for the directory.
+	
+	Ultimately the team as a whole saw mixed success, with a definitive failure to meet the minimum viable product. The directory team was the most successful, and was [[SOMEONE ON THE DIRECTORY TEAM EXPLAIN HOW WELL YOU DID HERE]]
 
 ---
 ### Sprint Breakdowns
@@ -146,12 +150,13 @@ Accomplishing this goal will lead into the next set of objectives for the team, 
 	6) understanding project goals
 	7) large program flow
 	8) Reanalyzing tasks after setbacks
+---
 #### Limitations of the Project
 
-
+---
 #### Future for the Project
 	The future of this project is uncertain. While the integration of the directory was a major step in the addition of D4N's benefits to Ceph, the lack of a usable product presented by the team still leaves a large amount of work for any future teams in continuing the integration. The team has concerns that the partially implemented remote get operation may be a dead end and overall improperly ported over from the D4N variant of Ceph. Without this operation functioning, even with a usable directory testing any improvements would be difficult. [[MUST DISCUSS WITH MENTORS ON MONDAY WHERE THEY SEE THIS GOING]]
-
+---
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
 2. CS6620-S21. “CS6620-S21/D4N-s3select-Caching.” GitHub, https://github.com/CS6620-S21/D4N-S3Select-Caching.
