@@ -309,19 +309,24 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl;
       RemoteRequest *c =  new RemoteRequest();
       ldpp_dout(dpp,20) << "PORTING D4N: created a remote get, now calling a remote op." << dendl;
-//     //auto completed = d->aio->get(obj, rgw::Aio::remote_op(dpp, std::move(op), d->yield,
-//                                                                  obj_ofs, read_ofs, len, dest, c,
-//                                                                  c_block, path, d->rgwrados->d3n_data_cache), cost, id);
-    //auto res =  d->flush(std::move(completed));
+     auto completed = d->aio->get(obj, rgw::Aio::remote_op(dpp, std::move(op), d->yield,
+                                                                  obj_ofs, read_ofs, len, dest, c,
+                                                                  c_block, path, d->rgwrados->d3n_data_cache), cost, id);
+      ldpp_dout(dpp,20) << "PORTING D4N: Returned from remote_op and completed=" << dendl;
+
+      auto res =  d->flush(std::move(completed));
+      ldpp_dout(dpp,20) << __func__   << "datacache HIT Error: failed to drain/flush" << res << dendl;
+      return res;
 
 
       }
 
       //After fetching from remote cache, write it to local cache
-
+      ldpp_dout(dpp,20) << "PORTING D4N: Data Fetched from remote Cache - writing to own Cache" << dendl;
       // Write To Cache
       ldpp_dout(dpp, 20) << "D3nDataCache: " << __func__ << "(): WRITE TO CACHE: oid=" << read_obj.oid << ", obj-ofs=" << obj_ofs << ", read_ofs=" << read_ofs << " len=" << len << dendl;
       auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
+      ldpp_dout(dpp,20) << "PORTING D4N: Returned from writing to local read cache and completed=" << dendl;
       return d->flush(std::move(completed));
     }
   }

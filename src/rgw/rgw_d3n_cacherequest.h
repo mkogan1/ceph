@@ -179,6 +179,8 @@ struct LocalRequest : public CacheRequest{
   ~LocalRequest(){}
 
   int prepare_op(std::string key_orig,  bufferlist *bl, off_t read_len, off_t ofs, off_t read_ofs, void(*f)(sigval_t), rgw::Aio* aio, rgw::AioResult* r, std::string& location) {
+    //ldout(cct, 1) << "D4N: inside prepare_op of cacherequest.h " << dendl;
+
     this->r = r;	
     this->aio = aio;
 //    this->bl = bl;

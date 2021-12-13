@@ -360,6 +360,7 @@ class CacheThreadPool { //PORT THIS
     }
 
     void addTask(Task *nt) {
+      //ldout(cct, 1) << "D4N: Task added " <<  dendl;
       workQueue.addTask(nt);
     }
 
@@ -381,7 +382,7 @@ class CacheThreadPool { //PORT THIS
 void D3nDataCache::submit_remote_req(RemoteRequest *c){
   // ALI TODO get this working properly
   //std::string endpoint=cct->_conf->backend_url; //what is the backend_url?
-  std::string endpoint= "http://backendurl:0001";
+  std::string endpoint= cct->_conf->backend_url;
   d3n_cache_lock.lock();
 
   ldout(cct, 1) << "submit_remote_req, dest " << c->dest << " endpoint "<< endpoint<< dendl;
@@ -394,7 +395,11 @@ void D3nDataCache::submit_remote_req(RemoteRequest *c){
   }
   d3n_cache_lock.unlock();
 
+  ldout(cct, 1) << "submit_remote_req, adding task " <<  dendl;
+
   tp->addTask(new RemoteS3Request(c, cct));
+  ldout(cct, 1) << "submit_remote_req, task added " << dendl;
+
 }
 
 string RemoteS3Request::get_date(){
@@ -418,7 +423,7 @@ int RemoteS3Request::submit_http_get_request_s3(){
   if (req->dest.compare("")==0)
 	// ALI TODO get this working properly
        //req->dest = cct->_conf->backend_url;
-       req->dest = "http://backendurl:0001";
+       req->dest = cct->_conf->backend_url;
   //std::string range = std::to_string( (int)req->ofs + (int)(req->read_ofs))+ "-"+ std::to_string( (int)(req->ofs) + (int)(req->read_ofs) + (int)(req->read_len - 1));
   ldout(cct, 10) << __func__  << " key " << req->key << " range " << range  << " dest "<< req->dest <<dendl;
 
@@ -477,8 +482,8 @@ void RemoteS3Request::run() {
 
   ldout(cct, 20) << __func__  <<dendl;
   // ALI TODO get this working properly
-  //int max_retries = cct->_conf->max_remote_retries;
-  int max_retries = 5;
+  int max_retries = cct->_conf->max_remote_retries;
+  //int max_retries = 5;
   int r = 0;
   for (int i=0; i<max_retries; i++ ){
     if(!(r = submit_http_get_request_s3()) && (req->s.size() == (long unsigned int) req->read_len)){

@@ -20,7 +20,7 @@
 
 #include "acconfig.h"
 
-#include <spawn/spawn.hpp>
+#include <spawn/include/spawn/spawn.hpp>
 
 // use explicit executor types instead of the type-erased boost::asio::executor.
 // coroutines wrap the default io_context executor with a strand executor

@@ -8,6 +8,8 @@ int RemoteRequest::prepare_op(std::string key,  bufferlist *bl, off_t read_len, 
                               std::string dest, rgw::Aio* aio, rgw::AioResult* r, cache_block *c_block, 
                               std::string path, void(*func)(RemoteRequest*)){
 
+  //ldout(cct, 1) << "inside prepare_op of cacherequest.cc " << dendl;
+
   this->r = r;
   this->aio = aio;
 //  this->bl = bl;

@@ -23,7 +23,7 @@
 #include "include/ceph_assert.h"
 #include "common/valgrind.h"
 #include "common/EventTrace.h"
-//#include "rgw/rgw_d3n_datacache.h"
+#include "rgw/rgw_d3n_cacherequest.h"
 
 #define dout_subsys ceph_subsys_rados
 #undef dout_prefix
@@ -801,11 +801,11 @@ int librados::IoCtxImpl::cache_aio_operate_read(const object_t &oid, AioCompleti
 #endif
    c->is_read = true;
    c->io = this;
-   //cc->onack = oncomplete;
-   //cc->bl = pbl;
-//   c->blp = pbl;
-//   c->pc = cc->lc->pc;
-//   c->blp = &(cc->bl);
+    cc->onack = oncomplete;
+    cc->bl = pbl;
+    // c->blp = pbl;
+    // c->pc = cc->lc->pc;
+    // c->blp = &(cc->bl);
    return 0;
 }
 // datacache

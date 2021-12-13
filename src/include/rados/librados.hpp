@@ -15,6 +15,8 @@
 #include "rados_types.hpp"
 //#include "rgw/rgw_d3n_cacherequest.h"
 
+class CacheRequest;
+
 
 namespace libradosstriper
 {
@@ -36,7 +38,6 @@ class ObjectOperationImpl;
 struct PlacementGroupImpl;
 struct PoolAsyncCompletionImpl;
 
-class CacheRequest;
 
 typedef struct rados_cluster_stat_t cluster_stat_t;
 typedef struct rados_pool_stat_t pool_stat_t;

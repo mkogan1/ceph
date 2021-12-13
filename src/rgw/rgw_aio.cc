@@ -125,7 +125,12 @@ template <typename Op>
 Aio::OpFunc remote_aio_abstract(const DoutPrefixProvider *dpp, Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, //REMOTE_AIO_ABSTRACT 1
                                 std::string dest,  RemoteRequest *c, boost::asio::io_context& context,
                                 spawn::yield_context yield, cache_block *c_block, std::string path, D3nDataCache *dc) {
-  return [dpp, op = std::move(op), obj_ofs, read_ofs, read_len, dest, c, &context, yield, c_block, path, dc] (Aio* aio, AioResult& r) mutable{
+  ldpp_dout(dpp,20) << "PORTING D4N: Beginning remote_aio_abstract TYPE 1 before move(op)" << dendl;
+  ldpp_dout(dpp,20) << "PORTING D4N: Beginning remote_aio_abstract TYPE 1 before move(op) path=" << path << dendl;
+  ldpp_dout(dpp,20) << "PORTING D4N: Beginning remote_aio_abstract TYPE 1 before move(op) dest=" << dest << dendl;
+
+
+  return [op = std::move(op), obj_ofs, read_ofs, read_len, dest, c, &context, yield, c_block, path, dc] (Aio* aio, AioResult& r) mutable{
 
       /*          auto& ref = r.obj.get_ref(); //This stuff was commented out by the original designers -Daniel
     auto cs = new(&r.user_data) remote_state(aio, r);
@@ -134,7 +139,7 @@ Aio::OpFunc remote_aio_abstract(const DoutPrefixProvider *dpp, Op&& op, off_t ob
     dc->submit_remote_req(cs->c);
 
 */
-   ldpp_dout(dpp,20) << "PORTING D4N: Beginning remote_aio_abstract TYPE 1" << dendl;
+   //ldpp_dout(dpp,20) << "PORTING D4N: Beginning remote_aio_abstract TYPE 1" << dendl;
 
   using namespace boost::asio;
   async_completion<spawn::yield_context, void()> init(yield);
@@ -142,17 +147,18 @@ Aio::OpFunc remote_aio_abstract(const DoutPrefixProvider *dpp, Op&& op, off_t ob
   auto& ref = r.obj.get_ref();
   RemoteRequest* cc = new RemoteRequest();
 
-  ldpp_dout(dpp,20) << "PORTING D4N: associated_executor created, as well as a new RemoteRequest" << dendl;
+  //ldpp_dout(dpp,20) << "PORTING D4N: associated_executor created, as well as a new RemoteRequest" << dendl;
 
   cc->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, dest, aio, &r, c_block, path, remote_aio_cb);
 
-  //librados::async_operate(context, ref.pool.ioctx(), ref.obj.oid, &op, cc,
-  //                           bind_executor(ex, Handler{aio, r}));
+  librados::async_operate(context, ref.pool.ioctx(), ref.obj.oid, &op, cc,
+                          bind_executor(ex, Handler{aio, r}));
    //DataCache *ab = static_cast<DataCache *>(dc); 
    dc->submit_remote_req(cc);
 
-   ldpp_dout(dpp,20) << "PORTING D4N: Submit_remote_req has been called and returned" << dendl;
+   //ldpp_dout(dpp,20) << "PORTING D4N: Submit_remote_req has been called and returned" << dendl;
   };
+  ldpp_dout(dpp,20) << "PORTING D4N: Submit_remote_req has been called and returned" << dendl;
 }
 
 
@@ -164,13 +170,13 @@ Aio::OpFunc remote_aio_abstract(const DoutPrefixProvider *dpp, Op&& op, optional
   static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
   static_assert(!std::is_lvalue_reference_v<Op>);
   static_assert(!std::is_const_v<Op>);
-  //#ifdef HAVE_BOOST_CONTEXT //Kriegers going to hate me for this but I want to see what happens if we force this
+ // #ifdef HAVE_BOOST_CONTEXT //Kriegers going to hate me for this but I want to see what happens if we force this
   //ANS: it breaks
    ldpp_dout(dpp,20) << "PORTING D4N: End of remote_aio_abstract TYPE 2 - HAVE_BOOST_CONTEXT" << dendl;
   return remote_aio_abstract(dpp, std::forward<Op>(op),obj_ofs, read_ofs, read_len, dest, c,  y.get_io_context(), y.get_yield_context(),c_block , path, dc);
   //#endif
 
- return 0; //temporary
+ //return 0; //temporary
 }
 //PORTING ENDS
 
