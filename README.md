@@ -29,6 +29,11 @@ The goal of this project is to incorporate D4N, an upgrade to the D3N caching ar
 6. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
 7. Integrate testing into Teuthology.
 
+Over the course of the project these goals were revised, largely in order to reduce the scope of the team. Plans to test synchronization, race conditions, and other such complex behavior was dropped as implementation goals narrowed. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. The modified goal for the directory side of the project became the implementation of the directory files and redis installation alongside unit testing of the setValue function for blockDirectory. BlockDirectory is the resevoir for the metadata of the smaller 4 Megabyte chunks Ceph splits larger data objects into. The final minimum goal for the directory was to integrate their work with the backend functions that would be implemented by another portion of the project's teammembers.
+
+The backend portion of the goals narrowed signifigantly due to difficulties with
+
+
 ---
 ### Requirements
 Virtual Machines will be used rather than containers because the latter require more overhead. Additionally, utilizing containers creates unnecessary complications in comparison to the more optimal environment that VMs offer for the purpose of this project. Finally, deploying this system on an OCT is possible but difficult to set up. Working on a VM is analogous to working on a regular host, resulting in this final environment setup.
