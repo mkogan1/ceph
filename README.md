@@ -156,9 +156,12 @@ Another batch of tools and skills learned for this project was the usage of debu
 #### Limitations of the Project
 
 ---
+
 ### Future for the Project
-	The future of this project is uncertain. While the integration of the directory was a major step in the addition of D4N's benefits to Ceph, the lack of a usable product presented by the team still leaves a large amount of work for any future teams in continuing the integration. The team has concerns that the partially implemented remote get operation may be a dead end and overall improperly ported over from the D4N variant of Ceph. Without this operation functioning, even with a usable directory testing any improvements would be difficult. [[MUST DISCUSS WITH MENTORS ON MONDAY WHERE THEY SEE THIS GOING]]
----
+The most promising path forward for this project is the continued integration of the D4N style directory. Implementing the full setValue function for the objectDirectory is the most immediate next step, which should not prove to be a serious challenge considering the successful implementation of blockDirectory's setValue function. The next step would likely be implementing the getValue functions for both block and object metadata, and beyond that the rest of the directory's functionality should be implementable using the foundations set in this project.
+The future of the backend implentation is less clear. While the longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N, it is unclear if the work from this project will be part of that. The implemented code for the backend get call to a remote rgw cache is nonfunctional, and would require additional cleanup from another team. Considering the already considerable challenge of understanding a functioning branch of Ceph
+
+
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
 2. CS6620-S21. “CS6620-S21/D4N-s3select-Caching.” GitHub, https://github.com/CS6620-S21/D4N-S3Select-Caching.
