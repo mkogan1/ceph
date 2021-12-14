@@ -15,17 +15,17 @@
 2. Add the following to your .ssh config file:
 
 Host gateway<br />
-&nbsp;Hostname 128.31.26.122<br />
-&nbsp;User centos<br />
-&nbsp;ForwardAgent yes<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Hostname 128.31.26.122<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;User centos<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ForwardAgent yes<br />
 	
-&nbsp;#Port 22<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;#Port 22<br />
 
 Host Ceph2<br />
-&nbsp;Hostname 192.168.0.106<br />
-&nbsp;User centos<br />
-&nbsp;ForwardAgent yes<br />
-&nbsp;ProxyCommand ssh gateway -A -Y -W %h:%p<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Hostname 192.168.0.106<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;User centos<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ForwardAgent yes<br />
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ProxyCommand ssh gateway -A -Y -W %h:%p<br />
 
 3. 
 
