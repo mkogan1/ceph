@@ -12,7 +12,7 @@
 ### How to Run the Code
 #### Set Up
 1. Add the following to your .ssh config file:
-...
+
 Host gateway<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Hostname 128.31.26.122<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;User centos<br />
@@ -25,7 +25,7 @@ Host Ceph2<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;User centos<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ForwardAgent yes<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ProxyCommand ssh gateway -A -Y -W %h:%p<br />
-...
+
 2. Ensure your public SSH key has been added to the Ceph2 VM.
 3. SSH into Ceph2 through a terminal.
 
