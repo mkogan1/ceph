@@ -1,14 +1,8 @@
 # Accelerating Ceph Cloud Storage with D4N
-##### **Team members:** Daniel Paganelli, Khai Evdaev, Mandy Yao, Samarah Uriarte
-##### **Mentors:** Ali Maredia, Amin Mosayyebzadeh, Mark Kogan, Matt Benjamin, Emine Ugur Kaynar
-##### **Demo 1 Video Link:** https://drive.google.com/file/d/1gHP5dZ80w4Xn2DuMSbVdR6eSDQE3XQXG/view?usp=sharing
-##### **Demo 2 Video Link:** https://drive.google.com/file/d/1zKDpXfYASGvzWEACVdQuIBRUEwI-7-e-/view?usp=sharing
-##### **Demo 3 Video Link:** https://drive.google.com/file/d/1NHp9ZXcn3JnY5Y3MF-aR02Azp3Jncu15/view?usp=sharing
-##### **Demo 4 Video Link:** https://drive.google.com/file/d/1KU6O83Lgywgxp9eTMnjkICGFwyoUqH21/view?usp=sharing
-##### **Demo 5 Video Link:** https://drive.google.com/file/d/1I4-euIcDG7HwzjdCYVZP6ByjGJuRb2hM/view?usp=sharing
+#### **Team members:** Daniel Paganelli, Khai Evdaev, Mandy Yao, Samarah Uriarte
+#### **Mentors:** Ali Maredia, Amin Mosayyebzadeh, Mark Kogan, Matt Benjamin, Emine Ugur Kaynar
 
 ---
-
 ### How to Run the Code
 #### Set Up
 1. Add the following to your .ssh config file:
@@ -51,6 +45,7 @@
 	../src/stop.sh
 10. Exit your SSH session.
 
+---
 ### Project Overview
 With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
 
@@ -130,6 +125,44 @@ Ultimately the team as a whole saw mixed success, with a definitive failure to m
 The Backend team saw less direct success. The entire function stack required for remote get operations from a remote RGW was implemented in the upstream Ceph get function. However, we were unable to debug the function by the end of the project, leaving us without an end to end product. In addition, late discussions with the mentors found that some of the implemented code did not adhere to upstream Ceph's refactored namespaces, which means that the existing backend code does require more than just debugging before it can be considered an acomplishing of the minimum viable product. We consider our Acceptance Criteria not met, though we and our mentors believe we made signifigant progress in spite of that.
 
 ---
+### Lessons Learned
+Failure is an excellent teacher, and this project was hampered by set backs and failures. For many members of the team, this was the first time working with a very large codebase, and a very poorly commented one at that. The first hurdle, which took well over 4 weeks in total, was setting up the enviroment for Ceph. None of the team had worked on VM's either, so we were taught by our mentors how to modify our own machine's configs to ssh in the VM, how to download Ceph onto the VM's, and how to boot it up. Then, we had to learn the commands relevant to Ceph and how to quickly and efficently use the bash terminal, which was a new experience for at least one member of the team. Using the terminal well turned out to be a vitally important skill for the backend team when it came to porting, as will be discussed later. In addition, this was the first major use of git for at least one team member.
+
+Git deserves its own moment of elaboration. It's an extremely useful tool that has a steep learning curve at first, which led to a large amount of consternation on the team. At one point in Sprint 4 the .git file was deleted on VM1, leading to about 4 days of wasted time. The reason for this deletion was an attempt by one teammember to get their pushes and commits to function properly, having never before used git in a meaningful way. After that event the whole team was more dedicated to proper git usage and managed to deal with the vast majority of issues that arose with the tool in an efficent manner. Usage of the git log and commits was vital to porting code between VM1 and VM2 as well as reverting of catastropic coding mistake.
+
+Another batch of tools and skills learned for this project was the usage of debugging tools. The primary ones used for this project were GDB and Ceph's internally implemented log. Often times debugging is a simple process of placing printout statements throughout the code and figuring out which ones don't get reached, but that is an invalid strategy for a program as large as Ceph. Utilizing the log of Ceph is similar to printing out statements to the terminal, but required the usage of more ornate systems and was only really helpful when the statements were coupled with a relevant variable.
+
+	
+	This is just on the backend side
+	1) GDB
+	2) Logging
+	3) git
+	3) Porting code and parsing through
+	4) iterative steps of improvement
+	5) Terminal usage
+	6) understanding project goals
+	7) large program flow
+	8) Reanalyzing tasks after setbacks
+---
+### Limitations of the Project
+
+---
+
+### Future for the Project
+The most promising path forward for this project is the continued integration of the D4N style directory. Implementing the full setValue function for the objectDirectory is the most immediate next step, which should not prove to be a serious challenge considering the successful implementation of blockDirectory's setValue function. The next step would likely be implementing the getValue functions for both block and object metadata, and beyond that the rest of the directory's functionality should be implementable using the foundations set in this project.
+
+The longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N. The progress made over this project towards these goals is mixed, as the implemented code for the backend get call to a remote rgw cache is complete from D4N, but nonfunctional. It will require additional cleanup to both function at all and to fit closer into the upstream Ceph dataflow for requests. Both the teammembers and the mentors for the project have expressed interest in continuing the project in order to see this part of the D4N implementation through.
+
+Overall, we believe that the work completed in this project is overall a benefit to the larger Ceph community, and we are proud to have helped contribute to an opensource project, a first for many of the members of the team. Though no official plans exist yet, it is likely that the team will continue the project past the end of the Fall 2021 Semester.
+
+---
+### Demos
+##### **Demo 1 Video Link:** https://drive.google.com/file/d/1gHP5dZ80w4Xn2DuMSbVdR6eSDQE3XQXG/view?usp=sharing
+##### **Demo 2 Video Link:** https://drive.google.com/file/d/1zKDpXfYASGvzWEACVdQuIBRUEwI-7-e-/view?usp=sharing
+##### **Demo 3 Video Link:** https://drive.google.com/file/d/1NHp9ZXcn3JnY5Y3MF-aR02Azp3Jncu15/view?usp=sharing
+##### **Demo 4 Video Link:** https://drive.google.com/file/d/1KU6O83Lgywgxp9eTMnjkICGFwyoUqH21/view?usp=sharing
+##### **Demo 5 Video Link:** https://drive.google.com/file/d/1I4-euIcDG7HwzjdCYVZP6ByjGJuRb2hM/view?usp=sharing
+---
 ### Sprint Breakdowns
 #### Sprint 1 (September 27 to October 10)
 | User Stories | Description |
@@ -182,37 +215,6 @@ The Backend team saw less direct success. The entire function stack required for
 | Hardcode get request values | This user story was created by the back end team to test their work. The tasks included hardcoding cache block and object data and modifying the RGW yaml file, which is still in progress. |
 
 ---
-
-#### Lessons Learned
-Failure is an excellent teacher, and this project was hampered by set backs and failures. For many members of the team, this was the first time working with a very large codebase, and a very poorly commented one at that. The first hurdle, which took well over 4 weeks in total, was setting up the enviroment for Ceph. None of the team had worked on VM's either, so we were taught by our mentors how to modify our own machine's configs to ssh in the VM, how to download Ceph onto the VM's, and how to boot it up. Then, we had to learn the commands relevant to Ceph and how to quickly and efficently use the bash terminal, which was a new experience for at least one member of the team. Using the terminal well turned out to be a vitally important skill for the backend team when it came to porting, as will be discussed later. In addition, this was the first major use of git for at least one team member.
-
-Git deserves its own moment of elaboration. It's an extremely useful tool that has a steep learning curve at first, which led to a large amount of consternation on the team. At one point in Sprint 4 the .git file was deleted on VM1, leading to about 4 days of wasted time. The reason for this deletion was an attempt by one teammember to get their pushes and commits to function properly, having never before used git in a meaningful way. After that event the whole team was more dedicated to proper git usage and managed to deal with the vast majority of issues that arose with the tool in an efficent manner. Usage of the git log and commits was vital to porting code between VM1 and VM2 as well as reverting of catastropic coding mistake.
-
-Another batch of tools and skills learned for this project was the usage of debugging tools. The primary ones used for this project were GDB and Ceph's internally implemented log. Often times debugging is a simple process of placing printout statements throughout the code and figuring out which ones don't get reached, but that is an invalid strategy for a program as large as Ceph. Utilizing the log of Ceph is similar to printing out statements to the terminal, but required the usage of more ornate systems and was only really helpful when the statements were coupled with a relevant variable.
-
-	
-	This is just on the backend side
-	1) GDB
-	2) Logging
-	3) git
-	3) Porting code and parsing through
-	4) iterative steps of improvement
-	5) Terminal usage
-	6) understanding project goals
-	7) large program flow
-	8) Reanalyzing tasks after setbacks
----
-#### Limitations of the Project
-
----
-
-### Future for the Project
-The most promising path forward for this project is the continued integration of the D4N style directory. Implementing the full setValue function for the objectDirectory is the most immediate next step, which should not prove to be a serious challenge considering the successful implementation of blockDirectory's setValue function. The next step would likely be implementing the getValue functions for both block and object metadata, and beyond that the rest of the directory's functionality should be implementable using the foundations set in this project.
-
-The longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N. The progress made over this project towards these goals is mixed, as the implemented code for the backend get call to a remote rgw cache is complete from D4N, but nonfunctional. It will require additional cleanup to both function at all and to fit closer into the upstream Ceph dataflow for requests. Both the teammembers and the mentors for the project have expressed interest in continuing the project in order to see this part of the D4N implementation through.
-
-Overall, we believe that the work completed in this project is overall a benefit to the larger Ceph community, and we are proud to have helped contribute to an opensource project, a first for many of the members of the team. Though no official plans exist yet, it is likely that the team will continue the project past the end of the Fall 2021 Semester.
-
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
 2. CS6620-S21. “CS6620-S21/D4N-s3select-Caching.” GitHub, https://github.com/CS6620-S21/D4N-S3Select-Caching.
