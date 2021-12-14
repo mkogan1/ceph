@@ -11,8 +11,41 @@
 
 ### How to Run the Code
 #### Set Up
-#### Configuration
-#### Steps
+1. Add the following to your .ssh config file:
+<!-- -->
+
+	Host gateway
+		Hostname 128.31.26.122
+		User centos
+		ForwardAgent yes
+	
+		#Port 22
+
+	Host Ceph2
+		Hostname 192.168.0.106
+		User centos
+		ForwardAgent yes
+		ProxyCommand ssh gateway -A -Y -W %h:%p
+
+2. Ensure your public SSH key has been added to the Ceph2 VM.
+3. SSH into Ceph2 through a terminal.
+
+#### Program Execution and Testing
+4. Navigate to the /home/centos/ceph/build/ directory.
+5. Run the full_script.sh script. This script will kill any currently running Ceph clusters, build a new one, follow the D4N caching and directory process, and save all the directory keys, as well as the RGW bucket keys, into two separate files for testing.<br />
+<!-- -->
+
+	./full_script.sh
+6. Run the unit testing program.<br />
+<!-- -->
+
+	./unitTest
+7. Ensure the output confirms the keys match.
+8. Kill the Ceph cluster by running the stop.sh script.<br />
+<!-- -->
+    
+	../src/stop.sh
+9. Exit your SSH session.
 
 ### Project Overview
 With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
@@ -88,7 +121,9 @@ Accomplishing this goal would have lead into the next set of objectives for the 
 
 Approximately two thirds of the way through the semester it was recognised that both the implementation of the directory and the basic remote get operation were far more complex than expected. Both teams chose to ignore any potential strech goals such as the remote write functionality. The directory team focused on only getting the D4N directory to compile with D3N, with the intention of hard coding values later for testing. Similarly, the backend team decided with mentor support to focus exclusively on getting a remote cache get operation completed, using their own set of hardcoded values to negate the need for the directory.
 	
-Ultimately the team as a whole saw mixed success, with a definitive failure to meet the minimum viable product. The directory team was the most successful, and was [[SOMEONE ON THE DIRECTORY TEAM EXPLAIN HOW WELL YOU DID HERE]]
+Ultimately the team as a whole saw mixed success, with a definitive failure to meet the minimum viable product. The directory team was the most successful, and was able to compile ceph with the D4N directory and connect it to a functional redis key value storage. Additionally, the setValue function for cache block objects was implemented and underwent preliminary testing. The directory team did not have enough time to implement the more complex distributed system tests that were part of the initial goal, but we consider the work done by the directory to have achieved their revised goals.
+
+The Backend team saw less direct success. The entire function stack required for remote get operations from a remote RGW was implemented in the upstream Ceph get function. However, we were unable to debug the function by the end of the project, leaving us without an end to end product. In addition, late discussions with the mentors found that some of the implemented code did not adhere to upstream Ceph's refactored namespaces, which means that the existing backend code does require more than just debugging before it can be considered an acomplishing of the minimum viable product. We consider our Acceptance Criteria not met, though we and our mentors believe we made signifigant progress in spite of that.
 
 ---
 ### Sprint Breakdowns
@@ -170,9 +205,9 @@ Another batch of tools and skills learned for this project was the usage of debu
 ### Future for the Project
 The most promising path forward for this project is the continued integration of the D4N style directory. Implementing the full setValue function for the objectDirectory is the most immediate next step, which should not prove to be a serious challenge considering the successful implementation of blockDirectory's setValue function. The next step would likely be implementing the getValue functions for both block and object metadata, and beyond that the rest of the directory's functionality should be implementable using the foundations set in this project.
 
-The future of the backend implentation is less clear. The longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N. The progress made over this project towards these goals is mixed. The implemented code for the backend get call to a remote rgw cache is complete from D4N, but nonfunctional. It would require additional cleanup from another team. Some object implementations done during this project, such as the RemoteRequest structure, will be be beneficial for future teams in completing the remote cache get operation and the myriad of other backend remote operations that serve as the benefits of D4N.
+The longterm goals of implenting get, read, and write functions for the write back cache, remote backends, and remote rgw caches are the ideal goal of D4N. The progress made over this project towards these goals is mixed, as the implemented code for the backend get call to a remote rgw cache is complete from D4N, but nonfunctional. It will require additional cleanup to both function at all and to fit closer into the upstream Ceph dataflow for requests. Both the teammembers and the mentors for the project have expressed interest in continuing the project in order to see this part of the D4N implementation through.
 
-We believe that the work completed in this project is overall a benefit to the larger Ceph community, and we are proud to have helped contribute to an opensource project, a first for many of the members of the team.
+Overall, we believe that the work completed in this project is overall a benefit to the larger Ceph community, and we are proud to have helped contribute to an opensource project, a first for many of the members of the team. Though no official plans exist yet, it is likely that the team will continue the project past the end of the Fall 2021 Semester.
 
 ### Resources
 1. Batra, Aman. “D4N S3 Select Caching and the Addition of Arrow Columnar Format.” YouTube, YouTube, 7 Aug. 2021, https://www.youtube.com/watch?v=X4-s978FCtM.
