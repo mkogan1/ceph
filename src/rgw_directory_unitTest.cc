@@ -15,7 +15,6 @@ int main () {
     metaKeys.open ("metaKeys.txt");
 
     int numOfBlocks = 1;
-    bool match = true;
 
     if (rgwKeys.is_open() && metaKeys.is_open()) {
 
@@ -31,14 +30,12 @@ int main () {
         while (rgwKeys >> line1 && metaKeys >> line2) {
             if (line1 != line2) {
                 cout << "Fail: The keys do not match on line " << numOfBlocks << "." << endl;
-                match = false;
                 exit(1);
             }
             numOfBlocks++;
         }
-
-        if (match)
-            cout << "Success: The keys match." << endl;
+        
+        cout << "Success: The keys match." << endl;
     
        /* Check the object size if it matches the number of blocks */
         if (ceil(size/(double)4) == numOfBlocks) 
