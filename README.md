@@ -14,14 +14,14 @@
 1. Add the following to your .ssh config file:
 <!-- -->
 
-	Host gateway<br />
+	Host gateway
 		Hostname 128.31.26.122
 		User centos
 		ForwardAgent yes
 	
 		#Port 22
 
-	Host Ceph2<br />
+	Host Ceph2
 		Hostname 192.168.0.106
 		User centos
 		ForwardAgent yes
