@@ -11,6 +11,22 @@
 
 ### How to Run the Code
 #### Set Up
+1. Ensure your public SSH key has been added to the Ceph2 VM.
+2. Add the following to your .ssh config file:
+<p style="text-align: center;">
+Host gateway
+        Hostname 128.31.26.122
+        User centos
+        ForwardAgent yes
+
+        #Port 22
+Host Ceph2
+        Hostname 192.168.0.106
+        User centos
+        ForwardAgent yes
+        ProxyCommand ssh gateway -A -Y -W %h:%p
+</p>
+
 #### Configuration
 #### Steps
 
