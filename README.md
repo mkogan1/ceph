@@ -40,7 +40,7 @@
 <!-- -->
 
 	g++ -o unitTest rgw_directory_unitTest.cc
-8. Run the unit testing executable.<br />
+8. Run the unit test executable.<br />
 <!-- -->
 
 	./unitTest
