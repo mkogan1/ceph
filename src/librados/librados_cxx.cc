@@ -1542,6 +1542,7 @@ int librados::IoCtx::operate(const std::string& oid, librados::ObjectReadOperati
   return io_ctx_impl->operate_read(obj, &o->impl->o, pbl);
 }
 
+/* D4N Porting */
 /* datacache */
 int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c, CacheRequest *cc, bufferlist *pbl) {
   if (!cc) return -EINVAL;
@@ -1549,7 +1550,7 @@ int librados::IoCtx::aio_operate(const std::string& oid, AioCompletion *c, Cache
   return io_ctx_impl->cache_aio_operate_read(obj, c->pc, cc, pbl);
 }
 /* datacache */
-
+//Porting ends
 int librados::IoCtx::operate(const std::string& oid, librados::ObjectReadOperation *o, bufferlist *pbl, int flags)
 {
   object_t obj(oid);

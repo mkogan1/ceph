@@ -209,7 +209,7 @@ auto async_notify(ExecutionContext& ctx, IoCtx& io, const std::string& oid,
   return init.result.get();
 }
 
-// PORTING BEGINS
+/* D4N Porting */
 /*datacache*/
 
 /// Calls IoCtx::aio_operate() and arranges for the AioCompletion to call a
@@ -235,7 +235,7 @@ auto async_operate(ExecutionContext& ctx, IoCtx& io, const std::string& oid,
   return init.result.get();
 }
 
-//PORTING ENDS
+// Porting ends
 
 } // namespace librados
 

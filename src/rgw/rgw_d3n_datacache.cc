@@ -380,8 +380,6 @@ class CacheThreadPool { //PORT THIS
 };
 
 void D3nDataCache::submit_remote_req(RemoteRequest *c){
-  // ALI TODO get this working properly
-  //std::string endpoint=cct->_conf->backend_url; //what is the backend_url?
   std::string endpoint= cct->_conf->backend_url;
   d3n_cache_lock.lock();
 
@@ -481,7 +479,6 @@ int RemoteS3Request::submit_http_get_request_s3(){
 void RemoteS3Request::run() {
 
   ldout(cct, 20) << __func__  <<dendl;
-  // ALI TODO get this working properly
   int max_retries = cct->_conf->max_remote_retries;
   //int max_retries = 5;
   int r = 0;
@@ -517,7 +514,7 @@ string RemoteS3Request::sign_s3_request(string HTTP_Verb, string uri, string dat
   const char * data = StringToSign.c_str();
   unsigned char* digest;
   digest = HMAC(EVP_sha1(), key, strlen(key), (unsigned char*)data, strlen(data), NULL, NULL);
-  std::string signature = base64_encode(digest, 20); //What is this? --Daniel
+  std::string signature = base64_encode(digest, 20);
   return signature;
 }
 //PORTING ENDS

@@ -14,15 +14,17 @@
 #include "include/Context.h"
 #include "include/lru.h"
 #include "rgw_d3n_cacherequest.h"
-#include "rgw_threadpool.h" //PORTING THREADPOOL
+#include "rgw_threadpool.h" //D4N port
 #include "rgw_directory.h"
 
 
 /*D3nDataCache*/
 struct D3nDataCache;
-struct RemoteRequest; //For submit_remote_req
+
+/*D4N port*/
+struct RemoteRequest; 
 class CacheThreadPool;
-//class RemoteS3Request;
+
 
 
 
@@ -275,41 +277,28 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       }
       return r;
     } else {
-      /* Porting D4N */
+  /* Porting D4N */
    //Check the directory if it is in a remote cache
- 
-    ldpp_dout(dpp,20) << "PORTING D4N: the object key name is: " << astate -> obj.key.name << dendl;
-    //ldpp_dout(dpp,20) << "PORTING D4N: rgw_cache_list: " << g_conf()->rgw_cache_list << dendl;
- 
-    //add in any other neccessary config values right now - backend URL (leave empty) and max retries (10)
-    std::string port_num = g_conf()->rgw_frontends;
-    if (port_num.find("8000") != std::string::npos) { //Read from remote cache
+  ldpp_dout(dpp,20) << "PORTING D4N: the object key name is: " << astate -> obj.key.name << dendl;
+
+  std::string port_num = g_conf()->rgw_frontends;
+    if (port_num.find("8000") != std::string::npos) { //Hardcode to read to remote
+
       ldpp_dout(dpp,20) << "PORTING D4N: found the rgw with port 8000: " << port_num << dendl;
 
-      //To fetch the object from a remote rgw we require 2 things
-      //i) the http destination of the RGW
-      //ii) the path of the object in the corresponding bucket in the remote rgw
-      //iii) read_len is fed into the function from the arguments but I don't know where its obtained from beyond that
-      //iv) c_block is similarly just a placeholder until we something working from directory --Daniel
-
-      //should be IP for rgw 1 - the one we want the data back to.
-      std::string dest = "127.0.0.1:8001"; //destination is the IP,  path is bktName/ObjName //will come from directory
+      std::string dest = "127.0.0.1:8001";
       std::string path = "bkt/" + astate -> obj.key.name;
-      cache_block *c_block = new cache_block();
+      cache_block *c_block = new cache_block(); //Placeholder until function obtains value from arguments
       c_block->c_obj.obj_name = read_obj.oid;
       c_block->c_obj.accesskey.id = "key";
       c_block->c_obj.accesskey.key = "secret key";
-      //RGWBLOCKPOINTER->getValue(c_block);
 
       ldpp_dout(dpp,20) << "PORTING D4N: retreived the dest= " << dest << " of the remote rgw instance and the path=" << path << " of the object" << dendl;
-
-        //Once we get both path and dest, we then require to do a remote request which involves two things
-      //i) A remote request instance
-      //ii) A remote operation in rgw::Aio
       ldpp_dout(dpp,20) << "PORTING D4N: performing a remote get" << dendl;
+
       RemoteRequest *c =  new RemoteRequest();
       ldpp_dout(dpp,20) << "PORTING D4N: created a remote get, now calling a remote op." << dendl;
-     auto completed = d->aio->get(obj, rgw::Aio::remote_op(dpp, std::move(op), d->yield,
+      auto completed = d->aio->get(obj, rgw::Aio::remote_op(dpp, std::move(op), d->yield,
                                                                   obj_ofs, read_ofs, len, dest, c,
                                                                   c_block, path, d->rgwrados->d3n_data_cache), cost, id);
       ldpp_dout(dpp,20) << "PORTING D4N: Returned from remote_op and completed=" << dendl;
@@ -317,8 +306,6 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
       auto res =  d->flush(std::move(completed));
       ldpp_dout(dpp,20) << __func__   << "datacache HIT Error: failed to drain/flush" << res << dendl;
       return res;
-
-
       }
 
       //After fetching from remote cache, write it to local cache
@@ -335,7 +322,7 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const DoutPrefixProvider *dpp, const 
   return 0;
 }
 
-class RemoteS3Request : public Task { //PORT THIS - Functions are implemented in RGW_cache.cc
+class RemoteS3Request : public Task {
   public:
     RemoteS3Request(RemoteRequest *_req, CephContext *_cct) : Task(), req(_req), cct(_cct) {
       pthread_mutex_init(&qmtx,0);
@@ -352,7 +339,7 @@ class RemoteS3Request : public Task { //PORT THIS - Functions are implemented in
     std::string sign_s3_request(std::string HTTP_Verb, std::string uri, std::string date, std::string YourSecretAccessKeyID, std::string AWSAccessKeyId);
     std::string get_date();
   private:
-    int submit_http_get_request_s3(); //very important
+    int submit_http_get_request_s3();
   private:
     pthread_mutex_t qmtx;
     pthread_cond_t wcond;

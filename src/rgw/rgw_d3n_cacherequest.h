@@ -148,7 +148,7 @@ struct D3nL1CacheRequest {
 
 };
 
-//PORTING BEGINS -Daniel
+/* D4N porting */
 class CacheRequest {
   public:
 
@@ -179,8 +179,6 @@ struct LocalRequest : public CacheRequest{
   ~LocalRequest(){}
 
   int prepare_op(std::string key_orig,  bufferlist *bl, off_t read_len, off_t ofs, off_t read_ofs, void(*f)(sigval_t), rgw::Aio* aio, rgw::AioResult* r, std::string& location) {
-    //ldout(cct, 1) << "D4N: inside prepare_op of cacherequest.h " << dendl;
-
     this->r = r;	
     this->aio = aio;
 //    this->bl = bl;
@@ -255,7 +253,7 @@ struct LocalRequest : public CacheRequest{
   }
 };
 
-typedef   void (*f)( RemoteRequest* func ); //Pointer to a function. Not sure what it does, but it won't work right now
+typedef   void (*f)( RemoteRequest* func );
 struct RemoteRequest : public CacheRequest{
   std::string dest;
   void *tp;
@@ -301,7 +299,7 @@ struct RemoteRequest : public CacheRequest{
   }
 
 };
-//PORTING ENDS
+//Porting Ends
 
 
 

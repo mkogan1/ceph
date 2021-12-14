@@ -788,7 +788,7 @@ int librados::IoCtxImpl::aio_operate(const object_t& oid,
   return 0;
 }
 
-//PORTING BEGINS
+/* D4N Porting */
 // datacache  
 int librados::IoCtxImpl::cache_aio_operate_read(const object_t &oid, AioCompletionImpl *c, CacheRequest *cc,  bufferlist *pbl) {
 
@@ -809,7 +809,7 @@ int librados::IoCtxImpl::cache_aio_operate_read(const object_t &oid, AioCompleti
    return 0;
 }
 // datacache
-//PORTING ENDS
+//Porting Ends
 
 
 
