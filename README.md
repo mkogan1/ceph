@@ -36,16 +36,20 @@
 <!-- -->
 
 	./full_script.sh
-6. Run the unit testing program.<br />
+6. Compile the unit test C++ program.
+<!-- -->
+
+	g++ -o unitTest rgw_directory_unitTest.cc
+8. Run the unit testing executable.<br />
 <!-- -->
 
 	./unitTest
-7. Ensure the output confirms the keys match.
-8. Kill the Ceph cluster by running the stop.sh script.<br />
+8. Ensure the output confirms the keys match.
+9. Kill the Ceph cluster by running the stop.sh script.<br />
 <!-- -->
     
 	../src/stop.sh
-9. Exit your SSH session.
+10. Exit your SSH session.
 
 ### Project Overview
 With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
