@@ -11,8 +11,7 @@
 
 ### How to Run the Code
 #### Set Up
-1. Ensure your public SSH key has been added to the Ceph2 VM.
-2. Add the following to your .ssh config file:
+1. Add the following to your .ssh config file:
 
 Host gateway<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Hostname 128.31.26.122<br />
@@ -27,7 +26,19 @@ Host Ceph2<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ForwardAgent yes<br />
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ProxyCommand ssh gateway -A -Y -W %h:%p<br />
 
-3. 
+2. Ensure your public SSH key has been added to the Ceph2 VM.
+3. SSH into Ceph2 through a terminal.
+
+#### Program Execution and Testing
+4. Navigate to the /home/centos/ceph/build/ directory.
+5. Run the full_script.sh script. This script will kill any currently running Ceph clusters, build a new one, follow the D4N caching and directory process, and save all the directory keys, as well as the RGW bucket keys, into two separate files for testing.
+# ./full_script.sh
+6. Run 
+# ./
+7. Ensure the output confirms the keys match.
+8. Kill the Ceph cluster by running the stop.sh script.
+# ../src/stop.sh
+9. Exit your SSH session.
 
 #### Configuration
 #### Steps
