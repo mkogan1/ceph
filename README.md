@@ -44,7 +44,10 @@
     
 	../src/stop.sh
 10. Exit your SSH session.
-
+---
+### Files Modified
+#### Directory
+#### Back-End
 ---
 ### Project Overview
 With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
