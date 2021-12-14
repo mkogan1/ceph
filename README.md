@@ -32,12 +32,12 @@ Host Ceph2<br />
 #### Program Execution and Testing
 4. Navigate to the /home/centos/ceph/build/ directory.
 5. Run the full_script.sh script. This script will kill any currently running Ceph clusters, build a new one, follow the D4N caching and directory process, and save all the directory keys, as well as the RGW bucket keys, into two separate files for testing.<br />
-	./full_script.sh
+    ./full_script.sh
 6. Run<br />
-	./
+    ./
 7. Ensure the output confirms the keys match.
 8. Kill the Ceph cluster by running the stop.sh script.<br />
-	../src/stop.sh
+    ../src/stop.sh
 9. Exit your SSH session.
 
 #### Configuration
