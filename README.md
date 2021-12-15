@@ -90,17 +90,22 @@
 - ceph/src/librados/librados_cxx.cc
 ---
 ### Project Overview
-With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information. It is one of the most popular open source distributed storage system. 
+**Ceph** is a decentralized open-source distributed storage system that emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information. It is one of the most popular open source distributed storage system. With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. 
 
-To access stored data in Ceph, one can achieve this in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, which means that the team will only be working with radosgw. Through an RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift.
+The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake. In simpler terms, it utilizes a local read cache to store commonly accessed objects/files. 
 
-The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake.
+To actually access stored data in Ceph, one can achieve it in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, which means that the team will only be working with radosgw. Through an RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift. In more simpler terms, Amazon S3 has 3 fundamental functions that a client can use to communicated with an RGW: 
+- mb: to make a bucket, which is a directory in S3 language
+- put: to upload/put a file/object into a bucket
+- get: to retreive a file/object from a bucket
 
-This project intends to build a functioning prototype of Ceph with an improved caching system: D4N. Compared to D3N, D4N introduces a write-back cache and a distributed directory that allows the program to have an accurate and efficient method of locating cached data on both a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
+Part of the appeal of an RGW is the ease of use for the user and that was a key design choice by Ceph developers in using Amazon S3.
+
+**Note**: bucket is an equivalent of a directory and object is the equivalent of a file in Linux type file system.
 
 ---
 ### Goals
-The goal of this project is to incorporate D4N, an upgrade to the D3N caching architecture, in Ceph’s RADOS gateway (RGW), integrate it into the upstream open source repositories and make it available to the greater Ceph community. More specifically, this project aims to expand D4N to a global stage and synchronize D4N agents or servers into a single entity which will make the hybrid model accessible. Through a collaboration between researchers at BU, NEU and Red Hat, D4N with modified RGW servers can be distributed around the datacenter, allowing data to be cached in solid state storage (SSDs) near computer clusters to reduce load on the data center network and improve performance. This project attempts but not limited to the following:
+This project intends to port over some of the key functionalities of D4N into the upstreamed version of Ceph. Compared to D3N, D4N introduces a write-back cache and a distributed directory that allows the program to have an accurate and efficient method of locating cached data on both a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
 
 ## Initial Goals
 1. Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
