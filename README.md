@@ -22,7 +22,15 @@
 		ProxyCommand ssh gateway -A -Y -W %h:%p
 
 2. Ensure your public SSH key has been added to the Ceph2 VM.
+<!-- -->
+
+	vi ./.ssh/authorized_keys # add your public SSH key in here within gateway and ceph, or ask the team to add you
+
 3. SSH into Ceph2 through a terminal.
+<!-- -->
+
+	ssh gateway # in first terminal
+	ssh Ceph2 # in second terminal
 
 #### Program Execution and Testing
 4. Navigate to the /home/centos/ceph/build/ directory.
@@ -45,6 +53,17 @@
 	../src/stop.sh
 10. Exit your SSH session.
 ---
+
+#### Steps to compile build if you made changes to code in ceph/src/
+1. Compile src files and create build directory within ceph
+<!-- -->
+
+	./do_cmake.sh -DWITH_CPP_REDIS=ON -DWITH_PYTHON2=OFF -DWITH_PYTHON3=3.6
+2. Run vstart within /ceph/build/ directory
+<!-- -->
+
+	ninja vstart
+
 ### Files Modified
 #### Directory
 #### Back-End
