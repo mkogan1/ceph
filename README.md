@@ -86,29 +86,36 @@
 - ceph/src/librados/librados_cxx.cc
 ---
 ### Project Overview
-With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
+**Ceph** is a decentralized open-source distributed storage system that emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information. It is one of the most popular open source distributed storage system. With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. 
 
-To access stored data in Ceph, one can achieve this in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, which means that the team will only be working with radosgw. Through an RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift.
+The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake. In simpler terms, it utilizes a local read cache to store commonly accessed objects/files. However, there exists a superior caching architecture **D4N** which build upon key features of **D3N** to improve the efficiecy of Ceph. Porting some of **D4N** is the heart and goal of this project.
 
-The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake.
+To actually access stored data in Ceph, one can achieve it in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, which means that the team will only be working with radosgw. Through an RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift. In more simpler terms, Amazon S3 has 3 fundamental functions that a client can use to communicated with an RGW: 
+- mb: to make a bucket, which is a directory in S3 language
+- put: to upload/put a file/object into a bucket
+- get: to retreive a file/object from a bucket
 
-This project intends to build a functioning prototype of Ceph with an improved caching system: D4N. Compared to D3N, D4N introduces a Write Back cache and a Distributed Directory that allows the program to have an accurate and efficient method of locating cached data on either a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
+Part of the appeal of an RGW is the ease of use for the user and that was a key design choice by Ceph developers in using Amazon S3.
+
+**Note**: bucket is an equivalent of a directory and object is the equivalent of a file in Linux type file system.
 
 ---
 ### Goals
-The goal of this project is to incorporate D4N, an upgrade to the D3N caching architecture, in Ceph’s RADOS gateway (RGW), integrate it into the upstream open-source repositories, and make it available to the greater Ceph community. More specifically, this project aims to expand D4N to a global stage and synchronize D4N agents or servers into a single entity which will make the hybrid model accessible. Through a collaboration between researchers at BU, NEU, and Red Hat, D4N, with modified RGW servers, can be distributed around the datacenter, allowing data to be cached in solid state storage (SSDs) near computer clusters to reduce load on the data center network and improve performance. This project attempts but is not limited to the following:
+This project intended to port over some of the key functionalities of D4N into the upstreamed version of Ceph. Compared to D3N, D4N introduces a write-back cache and a distributed directory that allows the program to have an accurate and efficient method of locating cached data on both a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
 
 ##### Initial Goals
-1. Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
-2. Work with Red Hat and the research team to select components of D4N and rebase them on master.
-3. Developing a set of unit tests for each of those components. 
+- Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
+- Work with Red Hat and the research team to select components of D4N and rebase them on master.
+- Developing a set of unit tests for each of those components. 
 ##### Initial Goals That the Team Decided Were Out of Reach 
-4. Develop documentation and run reviews for newly introduced APIs.
-6. Performance testing for different synchronization mechanisms.
-7. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
-8. Integrate testing into Teuthology.
+- Develop documentation and run reviews for newly introduced APIs.
+- Performance testing for different synchronization mechanisms.
+- Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
+- Integrate testing into Teuthology.
 
-Over the course of the project, these goals were revised, largely to reduce the scope of the team. Plans to test synchronization, race conditions, and other such complex behavior was dropped as implementation goals narrowed. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. The modified goal for the directory side of the project became the integration of the directory files and Redis installation alongside unit testing of the setValue() function for the block directory. The block Directory is the reservoir for the metadata of the smaller 4 Megabyte chunks Ceph splits larger data objects into. The final minimum goal for the directory was to integrate their work with the back end functions that would be established by another portion of the project's team members.
+Over the course of the project these goals were revised, largely because they were not precise enough and also to reduce the scope of the project into something more feasible. Plans to test synchronization, race conditions, and other such complex behavior was dropped as implementation goals narrowed. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. 
+
+The modified goal for the directory side of the project became the integration of the directory files and Redis installation alongside unit testing of the setValue() function for the block directory. The block Directory is the reservoir for the metadata of the smaller 4 Megabyte chunks Ceph splits larger data objects into. The final minimum goal for the directory was to integrate their work with the back end functions that would be established by another portion of the project's team members.
 
 The back end portion of the goals narrowed significantly due to difficulties with porting, as will be discussed below. The minimum goal decided approximately two thirds of the way through the project became the implementation and testing of the remote cache get operation, which would allow for a rados gateway to search and fetch data from other rados gateway caches on the same cluster. This functionality was also intended to be integrated with the directory to provide a dynamic, vertically incorporated addition to the Ceph codebase.
 
@@ -147,13 +154,17 @@ These are all high level, conceptual benefits to the complete integration of the
 ### High-Level Design
 Both D4N and D3N implementations in Ceph make heavy use of SSD or VRAM-based caching. The key limitation of D3N that this project addresses is the inability to access caches that are not part of the local computing cluster.
 
-D4N solves this problem by introducing a directory (a Redis key store) that uses consistent value hashing to place important data in both a network cluster’s local cache and other neighboring caches. Upon a request for a data object’s location from a client, the RGW will access the directory for the data’s key and metadata, searching first through the local cache and then any nearby caches for the data. If these are all misses, then the program will access the primary data lake.
+D4N solves this problem by introducing a directory (a Redis key store) that uses consistent value hashing to place important data in both a network cluster’s local cache and other neighboring caches. Upon a request for a data object’s location from a client, the RGW will access the directory for the data’s key and metadata (e.g. IP address), searching first through the local read cache, then remote read caches for the data, then the write-back cache. If these are all misses, then the program will access the primary data lake.
 
-In our project, the four students will be split into two groups of two students. One team will focus on the implementation of the directory in our D3N Ceph cluster. The other group will work in parallel on the I/O side to ensure that cluster RGW’s can properly interact with nonlocal caches, the directory, and the data lake.
+Note that D4N also introduces a two-fold cluster division: performance and capacity. Performance represent the SSDs to act as caches. Capacity acts purely as a datalake to store all the objects/files. Enforcing/porting this division was not part of the scope of this project. However, it is important to bear it in mind.
+
+In our project, the four students were be split into two groups of two students. One team focused on the implementation of the directory in the D3N Ceph cluster. The other group, the back-end team, worked in parallel on the I/O side to ensure that cluster RGW’s can properly interact with nonlocal caches to perform a remote read request from a remote RGWs read-cache. 
+
+The figure below summarizes the ways that a get flow in D4N is different from D3N. The back-end team worked on implementing a remote read request, i.e., the arrows that point to other read caches.
 
 
 <p align="center">
-	<img src="./images/d4n_d3n.jpg" width="35%" />
+	<img src="./images/d4n_d3n.jpg" width="50%" />
 </p>
 <p align="center">
 	<strong>Figure 1.</strong> Get file flow with D3N and D4N. Note the additions of D4N
