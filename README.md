@@ -54,12 +54,12 @@
 10. Exit your SSH session.
 ---
 
-#### Steps to compile build if you made changes to code in ceph/src/
+#### Steps to Compile Build (if You Made Changes to the Ceph Source Code)
 1. Compile src files and create build directory within ceph
 <!-- -->
 
 	./do_cmake.sh -DWITH_CPP_REDIS=ON -DWITH_PYTHON2=OFF -DWITH_PYTHON3=3.6
-2. Run vstart within /ceph/build/ directory
+2. Run the following within the /home/centos/ceph/build/ directory:
 <!-- -->
 
 	ninja vstart
