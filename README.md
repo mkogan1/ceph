@@ -102,13 +102,15 @@ This project intends to build a functioning prototype of Ceph with an improved c
 ### Goals
 The goal of this project is to incorporate D4N, an upgrade to the D3N caching architecture, in Ceph’s RADOS gateway (RGW), integrate it into the upstream open source repositories and make it available to the greater Ceph community. More specifically, this project aims to expand D4N to a global stage and synchronize D4N agents or servers into a single entity which will make the hybrid model accessible. Through a collaboration between researchers at BU, NEU and Red Hat, D4N with modified RGW servers can be distributed around the datacenter, allowing data to be cached in solid state storage (SSDs) near computer clusters to reduce load on the data center network and improve performance. This project attempts but not limited to the following:
 
+## Initial Goals
 1. Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
 2. Work with Red Hat and the research team to select components of D4N and rebase them on master.
 3. Developing a set of unit tests for each of those components. 
+# Initial Goals that the team decided were out of reach 
 4. Develop documentation and run reviews for newly introduced APIs.
-5. Performance testing for different synchronization mechanisms.
-6. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
-7. Integrate testing into Teuthology.
+6. Performance testing for different synchronization mechanisms.
+7. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
+8. Integrate testing into Teuthology.
 
 Over the course of the project these goals were revised, largely in order to reduce the scope of the team. Plans to test synchronization, race conditions, and other such complex behavior was dropped as implementation goals narrowed. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. The modified goal for the directory side of the project became the implementation of the directory files and redis installation alongside unit testing of the setValue function for blockDirectory. BlockDirectory is the resevoir for the metadata of the smaller 4 Megabyte chunks Ceph splits larger data objects into. The final minimum goal for the directory was to integrate their work with the backend functions that would be implemented by another portion of the project's teammembers.
 
