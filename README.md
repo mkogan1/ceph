@@ -102,11 +102,11 @@ This project intends to build a functioning prototype of Ceph with an improved c
 ### Goals
 The goal of this project is to incorporate D4N, an upgrade to the D3N caching architecture, in Ceph’s RADOS gateway (RGW), integrate it into the upstream open source repositories and make it available to the greater Ceph community. More specifically, this project aims to expand D4N to a global stage and synchronize D4N agents or servers into a single entity which will make the hybrid model accessible. Through a collaboration between researchers at BU, NEU and Red Hat, D4N with modified RGW servers can be distributed around the datacenter, allowing data to be cached in solid state storage (SSDs) near computer clusters to reduce load on the data center network and improve performance. This project attempts but not limited to the following:
 
-##### Initial Goals
+## Initial Goals
 1. Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
 2. Work with Red Hat and the research team to select components of D4N and rebase them on master.
 3. Developing a set of unit tests for each of those components. 
-##### Initial Goals that the team decided were out of reach 
+# Initial Goals that the team decided were out of reach 
 4. Develop documentation and run reviews for newly introduced APIs.
 6. Performance testing for different synchronization mechanisms.
 7. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
@@ -151,7 +151,9 @@ These are all high level, conceptual benefits to the complete integration of the
 ### High-Level Design
 Both D4N and D3N implementations in Ceph make heavy use of SSD or VRAM-based caching. The key limitation of D3N that this project addresses is the inability to access caches that are not part of the local computing cluster.
 
-D4N solves this problem by introducing a directory (a Redis key store) that uses consistent value hashing to place important data in both a network cluster’s local cache and other neighboring caches. Upon a request for a data object’s location from a client, the RGW will access the directory for the data’s key and metadata, searching first through the local cache and then any nearby caches for the data. If these are all misses, then the program will access the primary data lake.
+D4N solves this problem by introducing a directory (a Redis key store) that uses consistent value hashing to place important data in both a network cluster’s local cache and other neighboring caches. Upon a request for a data object’s location from a client, the RGW will access the directory for the data’s key and metadata (e.g. IP address), searching first through the local read cache, then remote read caches for the data, then the write-back cache. If these are all misses, then the program will access the primary data lake.
+
+Note that D4N introduces a two-fold cluster division: performance and capacity. Performance represent the SSDs to act as caches. Capacity acts purely as a datalake to store all the objects/files. Enforcing/porting this division was not part of the scope of this project. However, it is important to bear it in mind.
 
 In our project, the four students will be split into two groups of two students. One team will focus on the implementation of the directory in our D3N Ceph cluster. The other group will work in parallel on the I/O side to ensure that cluster RGW’s can properly interact with nonlocal caches, the directory, and the data lake.
 
