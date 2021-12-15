@@ -153,7 +153,7 @@ In our project, the four students will be split into two groups of two students.
 
 
 <p align="center">
-	<img src="./images/d4n_d3n.png" width="35%" />
+	<img src="./images/d4n_d3n.jpg" width="35%" />
 </p>
 <p align="center">
 	<strong>Figure 1.</strong> Get file flow with D3N and D4N. Note the additions of D4N
