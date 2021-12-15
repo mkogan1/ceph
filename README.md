@@ -156,8 +156,6 @@ Both D4N and D3N implementations in Ceph make heavy use of SSD or VRAM-based cac
 
 D4N solves this problem by introducing a directory (a Redis key store) that uses consistent value hashing to place important data in both a network cluster’s local cache and other neighboring caches. Upon a request for a data object’s location from a client, the RGW will access the directory for the data’s key and metadata (e.g. IP address), searching first through the local read cache, then remote read caches for the data, then the write-back cache. If these are all misses, then the program will access the primary data lake.
 
-Note that D4N also introduces a two-fold cluster division: performance and capacity. Performance represent the SSDs to act as caches. Capacity acts purely as a datalake to store all the objects/files. Enforcing/porting this division was not part of the scope of this project. However, it is important to bear it in mind.
-
 In our project, the four students were be split into two groups of two students. One team focused on the implementation of the directory in the D3N Ceph cluster. The other group, the back-end team, worked in parallel on the I/O side to ensure that cluster RGW’s can properly interact with nonlocal caches to perform a remote read request from a remote RGWs read-cache. 
 
 The figure below summarizes the ways that a get flow in D4N is different from D3N. The back-end team worked on implementing a remote read request, i.e., the arrows that point to other read caches.
@@ -170,7 +168,7 @@ The figure below summarizes the ways that a get flow in D4N is different from D3
 	<strong>Figure 1.</strong> Get file flow with D3N and D4N. Note the additions of D4N
 </p>
 
-As noted above, D4N is already functioning on a non-upstream variant of Ceph. Since the project’s initial creation, Ceph has seen significant refactoring of classes, abstractions, and pathways. It will be up to each team to retool either the introduced D4N code or the base Ceph code to address these issues.
+Note that D4N also introduces a two-fold cluster division: performance and capacity. Performance represent the SSDs to act as caches. Capacity acts purely as a datalake to store all the objects/files. Enforcing/porting this division was not part of the scope of this project. However, it is important to bear it in mind.
 
 ---
 ### Acceptance Criteria and Accomplished Tasks
