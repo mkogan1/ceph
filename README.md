@@ -92,7 +92,7 @@ To access stored data in Ceph, one can achieve this in three ways: **radosgw (RG
 
 The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake.
 
-This project intends to build a functioning prototype of Ceph with an improved caching system: D4N. Compared to D3N, D4N introduces a Write Back cache and a Distributed Directory that allows the program to have an accurate and efficient method of locating cached data on both a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
+This project intends to build a functioning prototype of Ceph with an improved caching system: D4N. Compared to D3N, D4N introduces a Write Back cache and a Distributed Directory that allows the program to have an accurate and efficient method of locating cached data on either a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
 
 ---
 ### Goals
@@ -102,7 +102,7 @@ The goal of this project is to incorporate D4N, an upgrade to the D3N caching ar
 1. Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
 2. Work with Red Hat and the research team to select components of D4N and rebase them on master.
 3. Developing a set of unit tests for each of those components. 
-##### Initial Goals that the team decided were out of reach 
+##### Initial Goals That the Team Decided Were Out of Reach 
 4. Develop documentation and run reviews for newly introduced APIs.
 6. Performance testing for different synchronization mechanisms.
 7. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
@@ -141,7 +141,7 @@ Users will access Ceph through the client portion of the program and benefit fro
 	
 The current cloud computing trend is an increase in the use of cache storage. Implementation of D4N will allow for larger caches that place less pressure on oversubscribed cloud networks. Furthermore, D4N is intended to improve the positioning of data in caches closer to the physical access point, saving on network bandwidth. For a program such as Ceph that is designed to scale nearly infinitely, it is key that the growing distance between clients and servers is addressed.
 
-These are all high level, conceptual benefits to the complete integration of the D4N architeture with Ceph. The accomplishments of this team serve as a baseline to accelerate the integration by more skilled members of the Ceph community. In particular, the merging of the Redis directory was an extremely time consuming process due to the large number of files that needed to be modified in order to throughly implement the new directory files and redis integration.
+These are all high level, conceptual benefits to the complete integration of the D4N architecture with Ceph. The accomplishments of this team serve as a baseline to accelerate the integration by more skilled members of the Ceph community. In particular, the merging of the Redis directory was an extremely time-consuming process due to the large number of files that needed to be modified in order to thoroughly implement the new directory files and Redis integration.
 
 ---
 ### High-Level Design
