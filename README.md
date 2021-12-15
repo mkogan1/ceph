@@ -121,13 +121,13 @@ The back end portion of the goals narrowed significantly due to difficulties wit
 
 ---
 ### Requirements
-Virtual Machines will be used rather than containers because the latter require more overhead. Additionally, utilizing containers creates unnecessary complications in comparison to the more optimal environment that VMs offer for the purpose of this project. Finally, deploying this system on an OCT is possible but difficult to set up. Working on a VM is analogous to working on a regular host, resulting in this final environment setup.
+Virtual Machines were used rather than containers because the latter require more overhead. Additionally, utilizing containers creates unnecessary complications in comparison to the more optimal environment that VMs offer for the purpose of this project. Finally, deploying this system on an OCT is possible but difficult to set up. Working on a VM is analogous to working on a regular host, resulting in this final environment setup.
 
-This project requires three separate Virtual Machines (VMs). These machines have the following specifications:
+This project required three separate Virtual Machines (VMs). These machines had the following specifications:
 
-- VM One serves as a gateway and is less powerful than its fellow computers. It will run with 4 cores, 8 gigabytes of RAM, and a 64 gigabyte disk.
+- VM One serves as a gateway and less powerful than its fellow computers. It ran with 4 cores, 8 gigabytes of RAM, and a 64 gigabyte disk and very importantly, had a floating-ip, which meant it could be accessed through the open net.
 
-- VMs Two and Three act as the Ceph cluster that the team will be modifying. Each VM will have 16 cores, 32 gigabytes of RAM, and 250 gigabyte disk, along with their own floating IP addresses. All three machines will be accessed through an OpenStack Terminal. As the project progressed, the third VM was modified in a way as to be nearly unusable with the python scripts the directory team was using. It was deemed easier to create a new VM than attempt to fix the current one. This VM was using the allotted resources of the one it replaced, however.
+- VMs Two and Three acted as the Ceph cluster that the teams were modifying. Each VM had 16 cores, 32 gigabytes of RAM, and 250 gigabyte disk. These machines did not have a floating-ip. All three machines were accessed through an OpenStack Terminal. As the project progressed, the third VM was modified in a way as to be nearly unusable with the python scripts the directory team was using. It was deemed easier to create a new VM than attempt to fix the current one. This VM was using the allotted resources of the one it replaced, however.
 
 <p align="center">
 	<img src="./images/LAPTOP.png" width="35%" />
@@ -136,9 +136,9 @@ This project requires three separate Virtual Machines (VMs). These machines have
 	<strong>Figure 1.</strong> Three VMs should be set up in total, with one acting as a gateway and the other two running the Ceph cluster.
 </p>
 
-SSDs are not necessary because system performance and development is not being tested. Instead, the local hard disk will be used to emulate the SSD and play with the network. More simply, a large file is mounted like a block device so the OSD emulates it like a hard drive and the process is automatic after the Ceph build repository is cloned and the Ceph cluster is created.
+SSDs are not necessary because system performance and development was not being tested. Instead, the local hard disk was used to emulate the SSD and play with the network.
 
-Furthermore, the team will use the current Ceph source code as a target to modify the D4N code. The D4N source code is vital to the project and has its own repository. The team’s repository for modifications, improvements, and general work is available here.
+Furthermore, the team used the current Ceph source code as a target to modify the D4N code. The D4N source code is vital to the project and has its own repository. The team’s repository for modifications, improvements, and general work is available here.
 
 ---
 ### Business Value
@@ -164,7 +164,7 @@ The figure below summarizes the ways that a get flow in D4N is different from D3
 
 
 <p align="center">
-	<img src="./images/d4n_d3n.jpg" width="50%" />
+	<img src="./images/d4n_d3n.jpg" width="80%" />
 </p>
 <p align="center">
 	<strong>Figure 1.</strong> Get file flow with D3N and D4N. Note the additions of D4N
