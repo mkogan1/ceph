@@ -67,15 +67,27 @@
 ### Files Modified
 #### Directory
 - ceph/src/common/options/rgw.yaml.in
-- ceph/src/rgw/CMakeLists.txt
 - ceph/src/rgw/rgw_common.h
 - ceph/src/rgw/rgw_d3n_datacache.cc
+- ceph/src/rgw/CMakeLists.txt
 - ceph/src/rgw/rgw_directory.cc (ported)
 - ceph/src/rgw/rgw_directory.h (ported)
 - ceph/src/rgw_directory_unitTest.cc
 - ceph/src/vstart.sh
-- ceph/src/full_script.sh (also in ceph/build)
 #### Back-End
+- ceph/src/rgw/rgw_d3n_datacache.h
+- ceph/src/rgw/rgw_d3n_datacache.cc
+- ceph/src/rgw/rgw_aio.h
+- ceph/src/rgw/rgw_aio.cc
+- ceph/src/rgw/rgw_d3n_cacherequest.h
+- ceph/src/rgw/rgw_d3n_cacherequest.cc
+- ceph/src/rgw/rgw_threadpool.h
+- ceph/src/rgw/rgw_cache.h
+- ceph/src/common/options/rgw.yaml.in
+- ceph/src/librados/IoCtxImpl.h
+- ceph/src/librados/IoCtxImpl.cc
+- ceph/src/librados/librados_asio.h
+- ceph/src/librados/librados_cxx.cc
 ---
 ### Project Overview
 With data volumes growing exponentially, a highly scalable storage that preserves and records digital content for ongoing or future company operations is a paramount solution to any successful business. Red Hat Ceph, an open-source software that facilitates distributed object, block, and file storage, emerged as a massively scalable storage solution for modern data pipelines to store and streamline important digital information.
@@ -176,13 +188,6 @@ Another batch of tools and skills learned for this project was the usage of debu
 	8) Reanalyzing tasks after setbacks
 ---
 ### Limitations of the Project
-A few of the challenges that arose during the project are worth noting. The first is the sheer difficulty with working with such a large body of code. It took an hour for the directory team to recompile their code after nearly any modification, and the size and complexity of the code meant that each improvement required many small changes. Additionally, the VM and Ceph environment set up took the team two sprints, due to a mix of the sheer complexity of all the various set up phases and the novice nature of the team.
-
-
-This project was the first time that many of the team members had ever dealt with such a large body of code, and Ceph lacks commenting in the overwhelming majority of its files. Especially on the backend, the team spent a great deal of time trying to study the code, limiting the time to actually port it. At the same time, once we had ported the code we still lacked much of the understanding of the software to efficiently debug. If we were to take another look at this project, the team agrees that more hands on testing of the functioning upstream and D4N code prior to porting would have helped us understand how to merge the two code bases, rather than the more abstract studying we did.
-
-
-The final logistical challenge of the project was communication among the team and mentors. Our mentors were superbly knowledgeable about the task and Ceph, but also specialised, and for the most part each mentor knew the intricacies of upstream Ceph or D4N, but not both. It was difficult to schedule times where the entire team and mentors could meet, which led to some confusion on goals and differences in functionality. Our team began to communicate better by the end of the project with large group emails, but we could have done better from the start on keeping everyone on the same page.
 
 ---
 
