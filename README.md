@@ -54,12 +54,12 @@
 10. Exit your SSH session.
 ---
 
-#### Steps to Compile Build (If You Made Changes to the Ceph Source Code)
+#### Steps to compile build if you made changes to code in ceph/src/
 1. Compile src files and create build directory within ceph
 <!-- -->
 
 	./do_cmake.sh -DWITH_CPP_REDIS=ON -DWITH_PYTHON2=OFF -DWITH_PYTHON3=3.6
-2. Run the following within the /home/centos/ceph/build/ directory:
+2. Run vstart within /ceph/build/ directory
 <!-- -->
 
 	ninja vstart
@@ -94,6 +94,8 @@
 
 The current version of Ceph is paired with Datacenter-Data-Delivery Network (D3N), a multi-layer cache infrastructure for data centers. Its goal is to speed up performance of big data analytics by caching commonly accessed data on computing clusters connected to a larger data lake. In simpler terms, it utilizes a local read cache to store commonly accessed objects/files. 
 
+However, there exists a superior caching architecture **D4N** which build upon key features of **D3N** to improve the efficiecy of Ceph. Porting **D4N** is at the heart of this project.
+
 To actually access stored data in Ceph, one can achieve it in three ways: **radosgw (RGW)**, librados, and RADOS block device (RBD). Our project focuses on Ceph's object storage, which means that the team will only be working with radosgw. Through an RGW, data can be accessed using an HTTP server with the Ceph Object Gateway daemon, which provides interfaces compatible with Amazon S3 and OpenStack Swift. In more simpler terms, Amazon S3 has 3 fundamental functions that a client can use to communicated with an RGW: 
 - mb: to make a bucket, which is a directory in S3 language
 - put: to upload/put a file/object into a bucket
@@ -104,18 +106,18 @@ Part of the appeal of an RGW is the ease of use for the user and that was a key 
 **Note**: bucket is an equivalent of a directory and object is the equivalent of a file in Linux type file system.
 
 ---
-### Goals
+# Goals
 This project intends to port over some of the key functionalities of D4N into the upstreamed version of Ceph. Compared to D3N, D4N introduces a write-back cache and a distributed directory that allows the program to have an accurate and efficient method of locating cached data on both a cluster’s local cache or on nearby caches based on locality. D4N functions on an old research branch of Ceph, and this project is an attempt to create a Ceph Cluster with the beneficial functionality of D4N incorporated into the modern code base. The team will upstream blocks of D4N code, primarily the directory functionality, into D3N and modify the functions, classes, and pathways to properly implement the directory.
 
 ## Initial Goals
-1. Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
-2. Work with Red Hat and the research team to select components of D4N and rebase them on master.
-3. Developing a set of unit tests for each of those components. 
-# Initial Goals that the team decided were out of reach 
-4. Develop documentation and run reviews for newly introduced APIs.
-6. Performance testing for different synchronization mechanisms.
-7. Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
-8. Integrate testing into Teuthology.
+- Make D4N start up in vstart.sh, which is also the orchestration system in the developer workflow that is being followed.
+- Work with Red Hat and the research team to select components of D4N and rebase them on master.
+- Developing a set of unit tests for each of those components. 
+## Initial Goals that the team decided were out of reach 
+- Develop documentation and run reviews for newly introduced APIs.
+- Performance testing for different synchronization mechanisms.
+- Develop testing methodology to raise race conditions of complex distributed systems, e.g., write back while the object is being deleted - develop new interfaces to make race conditions deterministic.
+- Integrate testing into Teuthology.
 
 Over the course of the project these goals were revised, largely in order to reduce the scope of the team. Plans to test synchronization, race conditions, and other such complex behavior was dropped as implementation goals narrowed. Instead, the team focused on the first 3 goals, as Ceph proved to be a fearsome codebase to grapple with. The modified goal for the directory side of the project became the implementation of the directory files and redis installation alongside unit testing of the setValue function for blockDirectory. BlockDirectory is the resevoir for the metadata of the smaller 4 Megabyte chunks Ceph splits larger data objects into. The final minimum goal for the directory was to integrate their work with the backend functions that would be implemented by another portion of the project's teammembers.
 
