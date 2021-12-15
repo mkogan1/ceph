@@ -205,6 +205,7 @@ Overall, we believe that the work completed in this project is overall a benefit
 ##### **Demo 3 Video Link:** https://drive.google.com/file/d/1NHp9ZXcn3JnY5Y3MF-aR02Azp3Jncu15/view?usp=sharing
 ##### **Demo 4 Video Link:** https://drive.google.com/file/d/1KU6O83Lgywgxp9eTMnjkICGFwyoUqH21/view?usp=sharing
 ##### **Demo 5 Video Link:** https://drive.google.com/file/d/1I4-euIcDG7HwzjdCYVZP6ByjGJuRb2hM/view?usp=sharing
+##### **Final Video Link:** https://drive.google.com/file/d/1rhcgfiU-IUKM47MQRwPc2DkO7Ep4fX3Q/view?usp=sharing
 ---
 ### Sprint Breakdowns
 #### Sprint 1 (September 27 to October 10)
@@ -251,11 +252,11 @@ Overall, we believe that the work completed in this project is overall a benefit
 | ----------- | ----------- |
 | Debugging directory functionality | After porting the D4N directory functionality to upstream Ceph and adding hardcoded values to the D3N libaio write callback function, we ran into errors when attempting to get an object that was put in a bucket we made. S3 was refusing to connect, and so our mentors advised us to use GDB to look through the stack. We saw that there was a segmentation fault and it was due to our attempts to log the hardcoded values to ensure consistency. After figuring this out, our mentors provided us with next steps that allowed us to solve this issue. |
 | Compilation error (continued) | This is a continuation of the previous user story with more detailed tasks that follow the process of setting up D4N and attempting to use the directory. After finishing these first two user stories, our mentors were additionally able to build off our work to dynamically update directory values rather than relying on the hardcoded values we were manually testing the directory functionality with. |
-| Directory unit testing | To finish this sprint, the directory team must write unit tests that look for relevant object and block metadata in the directory and ensures it matches the actual metadata of the original objects and blocks. |
-| Testing of D4N in upstream Ceph | After writing the unit tests using boto3, the directory team will use a shell script utilizing S3cmd to executing them. |
+| Directory unit testing | The directory team wrote a C++ program to unit test the dynamic values that the directory function was upgraded to incorporate. This program opens two text files that contains the RGW bucket keys and the metadata available in the directory, ensuring the entries match and the block number correctly corresponds to the object size. |
+| Testing of D4N in upstream Ceph | After writing the unit test, the directory team added code to create the separate key files that are to be compared and to execute it in a shell script. |
 | Set up demo environment | The back end team set up a multi-RGW Ceph cluster to demonstrate the new get functionality for demo 5. |
-| Porting submit get request logic | This task includes merging the back end and directory team's work and ensuring all the functionalities of D3N and D4N are kept. This user story is in process, as we are still ironing out the details of how to achieve this. |
-| Hardcode get request values | This user story was created by the back end team to test their work. The tasks included hardcoding cache block and object data and modifying the RGW yaml file, which is still in progress. |
+| Porting submit get request logic | This task includes merging the back end and directory team's work and ensuring all the functionalities of D3N and D4N are kept. This user story was completed and although the back end team was unable to implement all desired features of D4N, the merged code compiles and successfully runs the directory process. |
+| Hardcode get request values | This user story was created by the back end team to test their work. The tasks included hardcoding cache block and object data and modifying the RGW yaml file, which was completed. However, the goal for this user story went unfinished due to various difficulties that the team did not have time to fix. |
 
 ---
 ### Resources
