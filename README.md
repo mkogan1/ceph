@@ -5,7 +5,8 @@
 ---
 ### How to Run the Code
 #### Set Up
-1. Add the following to your .ssh config file:
+1. Ensure your public SSH key has been added to the Ceph2 VM.
+2. Add the following to your .ssh config file:
 <!-- -->
 
 	Host gateway
@@ -20,11 +21,6 @@
 		User centos
 		ForwardAgent yes
 		ProxyCommand ssh gateway -A -Y -W %h:%p
-
-2. Ensure your public SSH key has been added to the Ceph2 VM.
-<!-- -->
-
-	vi ./.ssh/authorized_keys # add your public SSH key in here within gateway and ceph, or ask the team to add you
 
 3. SSH into Ceph2 through a terminal.
 <!-- -->
