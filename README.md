@@ -74,6 +74,7 @@
 - ceph/src/rgw/rgw_directory.h (ported)
 - ceph/src/rgw_directory_unitTest.cc
 - ceph/src/vstart.sh
+- ceph/src/full_script.sh (also in ceph/build)
 #### Back-End
 ---
 ### Project Overview
