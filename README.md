@@ -151,6 +151,14 @@ D4N solves this problem by introducing a directory (a Redis key store) that uses
 
 In our project, the four students will be split into two groups of two students. One team will focus on the implementation of the directory in our D3N Ceph cluster. The other group will work in parallel on the I/O side to ensure that cluster RGW’s can properly interact with nonlocal caches, the directory, and the data lake.
 
+
+<p align="center">
+	<img src="./images/d4n_d3n.png" width="35%" />
+</p>
+<p align="center">
+	<strong>Figure 1.</strong> Get file flow with D3N and D4N. Note the additions of D4N
+</p>
+
 As noted above, D4N is already functioning on a non-upstream variant of Ceph. Since the project’s initial creation, Ceph has seen significant refactoring of classes, abstractions, and pathways. It will be up to each team to retool either the introduced D4N code or the base Ceph code to address these issues.
 
 ---
