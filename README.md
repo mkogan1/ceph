@@ -70,7 +70,7 @@
 - ceph/src/rgw/rgw_directory.h (ported)
 - ceph/src/rgw_directory_unitTest.cc
 - ceph/src/vstart.sh
-#### Back-End
+#### Back End
 - ceph/src/rgw/rgw_d3n_datacache.h
 - ceph/src/rgw/rgw_d3n_datacache.cc
 - ceph/src/rgw/rgw_aio.h
