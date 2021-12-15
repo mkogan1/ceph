@@ -206,6 +206,7 @@ So far, these are all technical lessons, which, while important, can be learned 
 - Ceph is a distributed cloud storage system that runs on cloud
 - Amazon S3 is an http based object storage service that runs on cloud
 - The actual environment that we ssh'ed into were part of MOC (the cloud)
+
 Reading about cloud is one thing, working on it is completely different. All the members of the team came out with a better understanding and a more superior experience with the cloud as a result of working on this project.
 
 ---
