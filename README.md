@@ -66,6 +66,14 @@
 
 ### Files Modified
 #### Directory
+- ceph/src/common/options/rgw.yaml.in
+- ceph/src/rgw/rgw_common.h
+- ceph/src/rgw/rgw_d3n_datacache.cc
+- ceph/src/rgw/CMakeLists.txt
+- ceph/src/rgw/rgw_directory.cc (ported)
+- ceph/src/rgw/rgw_directory.h (ported)
+- ceph/src/rgw_directory_unitTest.cc
+- ceph/src/vstart.sh
 #### Back-End
 ---
 ### Project Overview
