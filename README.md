@@ -54,7 +54,7 @@
 10. Exit your SSH session.
 ---
 
-#### Steps to Compile Build (if You Made Changes to the Ceph Source Code)
+#### Steps to Compile Build (If You Made Changes to the Ceph Source Code)
 1. Compile src files and create build directory within ceph
 <!-- -->
 
