@@ -510,3 +510,29 @@ spec:
     assert spec.virtual_ip == "192.168.20.1/24"
     assert spec.frontend_port == 8080
     assert spec.monitor_port == 8081
+
+
+@pytest.mark.parametrize("y, error_match", [
+    ("""
+service_type: snmp-gateway
+service_name: snmp-gateway
+placement:
+  count: 1
+spec:
+  credentials:
+    snmp_v3_auth_password: mypassword
+    snmp_v3_auth_username: myuser
+    snmp_v3_priv_password: mysecret
+  port: 9464
+  engine_id: 8000c53f0000000000
+  privacy_protocol: WEIRD
+  snmp_destination: 192.168.122.1:162
+  auth_protocol: BIZARRE
+  snmp_version: V3
+""", "auth_protocol unsupported. Must be one of MD5, SHA"),
+    ])
+def test_service_spec_validation_error(y, error_match):
+    data = yaml.safe_load(y)
+    with pytest.raises(SpecValidationError) as err:
+        specObj = ServiceSpec.from_json(data)
+    assert err.match(error_match)
