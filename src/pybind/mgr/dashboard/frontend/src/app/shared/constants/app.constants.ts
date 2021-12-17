@@ -10,6 +10,7 @@ export class AppConstants {
     'Licensed under Creative Commons Attribution Share Alike 3.0 (CC-BY-SA-3.0)';
   public static readonly copyright =
     'Copyright(c) ' + environment.year + ' Red Hat Inc. and contributors.';
+  public static readonly cephLogo = 'assets/Logo-RedHat-Hat-Color-RGB.png';
 }
 
 export enum URLVerbs {

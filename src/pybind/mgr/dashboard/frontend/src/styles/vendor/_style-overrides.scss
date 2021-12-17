@@ -815,8 +815,7 @@ ngb-datepicker {
 }
 
 .popover-body,
-.select-menu-item,
-.text-center {
+.select-menu-item{
   font-size: 0.8rem !important;
 }
 
@@ -905,5 +904,32 @@ h3 {
 .row {
   h4 {
     font-size: 1rem !important;
+  }
+}
+
+// cluster expansion wizard
+cd-create-cluster {
+  .blank-page {
+    margin-top: -10rem;
+  }
+
+  .img-fluid {
+    max-width: 30%;
+    padding-bottom: 1rem;
+  }
+
+  h3 {
+    @extend .pf-c-title, .pf-m-lg;
+  }
+
+  .offset-md-2 {
+    margin-left: 25%;
+    padding-top: 0.8rem;
+  }
+}
+
+cd-modal {
+  .modal-title {
+    font-size: 1.2rem;
   }
 }
