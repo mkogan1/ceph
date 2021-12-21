@@ -113,6 +113,22 @@ static RGWObjCategory main_category = RGWObjCategory::Main;
 const std::string MP_META_SUFFIX = ".meta";
 
 
+inline uint32_t rgw_bucket_shard_index(const rgw_obj_key& obj_key,
+				       int num_shards) {
+  std::string sharding_key;
+  if (obj_key.ns == RGW_OBJ_NS_MULTIPART) {
+    RGWMPObj mp;
+    mp.from_meta(obj_key.name);
+    sharding_key = mp.get_key();
+  } else {
+    sharding_key = obj_key.name;
+  }
+
+  uint32_t sid = ceph_str_hash_linux(sharding_key.c_str(), sharding_key.size());
+  uint32_t sid2 = sid ^ ((sid & 0xFF) << 24);
+  return rgw_shards_mod(sid2, num_shards);
+}
+
 static bool rgw_get_obj_data_pool(const RGWZoneGroup& zonegroup, const RGWZoneParams& zone_params,
                                   const rgw_placement_rule& head_placement_rule,
                                   const rgw_obj& obj, rgw_pool *pool)
@@ -9813,33 +9829,48 @@ int RGWRados::cls_obj_usage_log_clear(string& oid)
 }
 
 
-int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info, list<rgw_obj_index_key>& oid_list)
+int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info,
+				     const std::list<rgw_obj_index_key>& entry_key_list)
 {
+  const uint32_t num_shards = bucket_info.num_shards;
+
   librados::IoCtx index_ctx;
-  string dir_oid;
-
   uint8_t suggest_flag = (svc.zone->get_zone().log_data ? CEPH_RGW_DIR_SUGGEST_LOG_OP : 0);
+  std::map<int, std::string> index_oids;
 
-  int r = open_bucket_index(bucket_info, index_ctx, dir_oid);
-  if (r < 0)
+  int r = open_bucket_index(bucket_info, index_ctx, index_oids);
+  if (r < 0) {
     return r;
+  }
 
-  bufferlist updates;
+  // needed so objclass won't skip req
+  constexpr uint64_t highest_epoch = uint64_t(-1);
 
-  for (auto iter = oid_list.begin(); iter != oid_list.end(); ++iter) {
+  // split up removals by shard
+  std::map<int, bufferlist> sharded_updates;
+  for (const auto& entry_key : entry_key_list) {
+    const rgw_obj_key obj_key(entry_key);
+    const uint32_t shard = rgw_bucket_shard_index(obj_key, num_shards);
+    bufferlist& updates = sharded_updates[shard];
+
     rgw_bucket_dir_entry entry;
-    entry.key = *iter;
-    dout(2) << "RGWRados::remove_objs_from_index bucket=" << bucket_info.bucket << " obj=" << entry.key.name << ":" << entry.key.instance << dendl;
-    entry.ver.epoch = (uint64_t)-1; // ULLONG_MAX, needed to that objclass doesn't skip out request
+    entry.key = entry_key;
+    entry.ver.epoch = highest_epoch;
+
+    dout(5) << __func__ << "bucket=" << bucket_info.bucket <<
+      " shard=" << shard <<
+      " obj=" << entry.key.name << ":" << entry.key.instance << dendl;
+
     updates.append(CEPH_RGW_REMOVE | suggest_flag);
     encode(entry, updates);
   }
 
-  bufferlist out;
-
-  r = index_ctx.exec(dir_oid, RGW_CLASS, RGW_DIR_SUGGEST_CHANGES, updates, out);
-
-  return r;
+  // this operation ignores shards for which there's not an update, so
+  // we can send the complete list of bucket index shard oids
+  return CLSRGWIssueBucketBIDirSuggest(index_ctx,
+				       index_oids,
+				       sharded_updates,
+				       cct->_conf->rgw_bucket_index_max_aio)();
 }
 
 int RGWRados::check_disk_state(librados::IoCtx io_ctx,

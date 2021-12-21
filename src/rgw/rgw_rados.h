@@ -93,6 +93,9 @@ static inline uint32_t rgw_bucket_shard_index(const std::string& key,
   return rgw_shards_mod(sid2, num_shards);
 }
 
+inline uint32_t rgw_bucket_shard_index(const rgw_obj_key& obj_key,
+				       int num_shards);
+
 static inline int rgw_shards_max()
 {
   return RGW_SHARDS_PRIME_1;
@@ -2356,7 +2359,8 @@ public:
                          map<RGWObjCategory, RGWStorageStats> *calculated_stats);
   int bucket_rebuild_index(RGWBucketInfo& bucket_info);
   int bucket_set_reshard(const RGWBucketInfo& bucket_info, const cls_rgw_bucket_instance_entry& entry);
-  int remove_objs_from_index(RGWBucketInfo& bucket_info, list<rgw_obj_index_key>& oid_list);
+  int remove_objs_from_index(RGWBucketInfo& bucket_info,
+			     const std::list<rgw_obj_index_key>& oid_list);
   int move_rados_obj(librados::IoCtx& src_ioctx,
 		     const string& src_oid, const string& src_locator,
 	             librados::IoCtx& dst_ioctx,
