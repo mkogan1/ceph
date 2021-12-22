@@ -6547,7 +6547,6 @@ next:
   }
 
   if (opt_cmd == OPT_RESHARD_LIST) {
-    list<cls_rgw_reshard_entry> entries;
     int ret;
     int count = 0;
     if (max_entries < 0) {
@@ -6562,19 +6561,20 @@ next:
     formatter->open_array_section("reshard");
     for (int i = 0; i < num_logshards; i++) {
       bool is_truncated = true;
-      string marker;
+      std::string marker;
       do {
-        entries.clear();
+	std::list<cls_rgw_reshard_entry> entries;
         ret = reshard.list(i, marker, max_entries, entries, &is_truncated);
         if (ret < 0) {
           cerr << "Error listing resharding buckets: " << cpp_strerror(-ret) << std::endl;
           return ret;
         }
-        for (auto iter=entries.begin(); iter != entries.end(); ++iter) {
-          cls_rgw_reshard_entry& entry = *iter;
+        for (const auto& entry : entries) {
           encode_json("entry", entry, formatter);
-          entry.get_key(&marker);
         }
+	if (is_truncated) {
+	  entries.crbegin()->get_key(&marker); // last entry's key becomes marker
+	}
         count += entries.size();
         formatter->flush(cout);
       } while (is_truncated && count < max_entries);
@@ -6586,6 +6586,7 @@ next:
 
     formatter->close_section();
     formatter->flush(cout);
+
     return 0;
   }
 
