@@ -1318,8 +1318,8 @@ static int bucket_stats(rgw::sal::RGWRadosStore *store,
                         const DoutPrefixProvider *dpp)
 {
   RGWBucketInfo bucket_info;
-  map<RGWObjCategory, RGWStorageStats> stats;
-  map<string, bufferlist> attrs;
+  std::map<RGWObjCategory, RGWStorageStats> stats;
+  std::map<std::string, bufferlist> attrs;
 
   real_time mtime;
   int r = store->getRados()->get_bucket_info(store->svc(),
@@ -1331,10 +1331,26 @@ static int bucket_stats(rgw::sal::RGWRadosStore *store,
 
   rgw_bucket& bucket = bucket_info.bucket;
 
-  string bucket_ver, master_ver;
-  string max_marker;
+  if (bucket_info.layout.current_index.layout.type ==
+      rgw::BucketIndexType::Indexless) {
+    cerr << "error, indexless buckets do not maintain stats; bucket=" <<
+      bucket.name << std::endl;
+    return -EINVAL;
+  }
+
+  if (bucket_info.layout.logs.empty()) {
+    // this check may be redundant with the previous check of
+    // layout.type; calling back() on an empty vector produces
+    // undefined behavior
+    cerr << "error, layout log list is empty; bucket=" << bucket.name <<
+      std::endl;
+    return -EINVAL;
+  }
   const auto& latest_log = bucket_info.layout.logs.back();
   const auto& index = log_to_index_layout(latest_log);
+
+  std::string bucket_ver, master_ver;
+  std::string max_marker;
   auto ret = store->getRados()->get_bucket_stats(dpp, bucket_info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
   if (ret < 0) {
     cerr << "error getting bucket stats bucket=" << bucket.name << " ret=" << ret << std::endl;
