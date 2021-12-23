@@ -1330,33 +1330,46 @@ static int bucket_stats(rgw::sal::RGWRadosStore *store,
     return r;
   }
 
-  rgw_bucket& bucket = bucket_info.bucket;
+  if (bucket_info.layout.current_index.layout.type ==
+      rgw::BucketIndexType::Indexless) {
+    cerr << "error, indexless buckets do not maintain stats; bucket=" <<
+      bucket_name << std::endl;
+    return -EINVAL;
+  }
 
-  string bucket_ver, master_ver;
-  string max_marker;
+  if (bucket_info.layout.logs.empty()) {
+    // this check may be redundant with the previous check of
+    // layout.type; calling back() on an empty vector produces
+    // undefined behavior
+    cerr << "error, layout log list is empty; bucket=" << bucket_name <<
+      std::endl;
+    return -EINVAL;
+  }
   const auto& latest_log = bucket_info.layout.logs.back();
   const auto& index = log_to_index_layout(latest_log);
-  int ret = store->getRados()->get_bucket_stats(dpp, bucket_info, index, RGW_NO_SHARD,
-						&bucket_ver, &master_ver, stats,
-						&max_marker);
-  if (ret < 0) {
-    cerr << "error getting bucket stats bucket=" << bucket.name << " ret=" << ret << std::endl;
-    return ret;
+  std::string bucket_ver, master_ver;
+  std::string max_marker;
+  r = store->getRados()->get_bucket_stats(dpp, bucket_info, index, RGW_NO_SHARD,
+					  &bucket_ver, &master_ver, stats,
+					  &max_marker);
+  if (r < 0) {
+    cerr << "error getting bucket stats bucket=" << bucket_name << " r=" << r << std::endl;
+    return r;
   }
 
   utime_t ut(mtime);
   utime_t ctime_ut(bucket_info.creation_time);
 
   formatter->open_object_section("stats");
-  formatter->dump_string("bucket", bucket.name);
+  formatter->dump_string("bucket", bucket_info.bucket.name);
   formatter->dump_int("num_shards",
 		      bucket_info.layout.current_index.layout.normal.num_shards);
-  formatter->dump_string("tenant", bucket.tenant);
+  formatter->dump_string("tenant", bucket_info.bucket.tenant);
   formatter->dump_string("zonegroup", bucket_info.zonegroup);
   formatter->dump_string("placement_rule", bucket_info.placement_rule.to_str());
-  ::encode_json("explicit_placement", bucket.explicit_placement, formatter);
-  formatter->dump_string("id", bucket.bucket_id);
-  formatter->dump_string("marker", bucket.marker);
+  ::encode_json("explicit_placement", bucket_info.bucket.explicit_placement, formatter);
+  formatter->dump_string("id", bucket_info.bucket.bucket_id);
+  formatter->dump_string("marker", bucket_info.bucket.marker);
   formatter->dump_stream("index_type") << bucket_info.layout.current_index.layout.type;
   ::encode_json("owner", bucket_info.owner, formatter);
   formatter->dump_string("ver", bucket_ver);
