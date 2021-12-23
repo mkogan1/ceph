@@ -1726,19 +1726,26 @@ int RGWBucketAdminOp::remove_object(RGWRados *store, RGWBucketAdminOpState& op_s
 static int bucket_stats(RGWRados *store, const std::string& tenant_name, const std::string& bucket_name, Formatter *formatter)
 {
   RGWBucketInfo bucket_info;
-  map<RGWObjCategory, RGWStorageStats> stats;
-  map<string, bufferlist> attrs;
+  std::map<RGWObjCategory, RGWStorageStats> stats;
+  std::map<std::string, bufferlist> attrs;
 
   real_time mtime;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, &mtime, &attrs);
-  if (r < 0)
+  if (r < 0) {
     return r;
+  }
 
   rgw_bucket& bucket = bucket_info.bucket;
 
-  string bucket_ver, master_ver;
-  string max_marker;
+  if (bucket_info.index_type == RGWBIType_Indexless) {
+    cerr << "error, indexless buckets do not maintain stats; bucket=" <<
+      bucket.name << std::endl;
+    return -EINVAL;
+  }
+
+  std::string bucket_ver, master_ver;
+  std::string max_marker;
   int ret = store->get_bucket_stats(bucket_info, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
   if (ret < 0) {
     cerr << "error getting bucket stats bucket=" << bucket.name << " ret=" << ret << std::endl;
