@@ -1772,21 +1772,38 @@ int RGWBucketAdminOp::remove_object(RGWRados *store, RGWBucketAdminOpState& op_s
 static int bucket_stats(RGWRados *store, const std::string& tenant_name, const std::string& bucket_name, Formatter *formatter)
 {
   RGWBucketInfo bucket_info;
-  map<RGWObjCategory, RGWStorageStats> stats;
-  map<string, bufferlist> attrs;
+  std::map<RGWObjCategory, RGWStorageStats> stats;
+  std::map<std::string, bufferlist> attrs;
 
   real_time mtime;
   auto obj_ctx = store->svc.sysobj->init_obj_ctx();
   int r = store->get_bucket_info(obj_ctx, tenant_name, bucket_name, bucket_info, &mtime, &attrs);
-  if (r < 0)
+  if (r < 0) {
     return r;
+  }
 
   rgw_bucket& bucket = bucket_info.bucket;
 
-  string bucket_ver, master_ver;
-  string max_marker;
+  if (bucket_info.layout.current_index.layout.type ==
+      rgw::BucketIndexType::Indexless) {
+    cerr << "error, indexless buckets do not maintain stats; bucket=" <<
+      bucket.name << std::endl;
+    return -EINVAL;
+  }
+
+  if (bucket_info.layout.logs.empty()) {
+    // this check may be redundant with the previous check of
+    // layout.type; calling back() on an empty vector produces
+    // undefined behavior
+    cerr << "error, layout log list is empty; bucket=" << bucket.name <<
+      std::endl;
+    return -EINVAL;
+  }
   const auto& latest_log = bucket_info.layout.logs.back();
   const auto& index = log_to_index_layout(latest_log);
+
+  std::string bucket_ver, master_ver;
+  std::string max_marker;
   int ret = store->get_bucket_stats(bucket_info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
   if (ret < 0) {
     cerr << "error getting bucket stats bucket=" << bucket.name << " ret=" << ret << std::endl;
