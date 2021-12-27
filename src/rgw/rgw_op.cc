@@ -4949,7 +4949,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
     /* admin request overrides permission checks */
     if (!s->auth.identity->is_admin_of(src_acl.get_owner().get_id())) {
       if (src_policy) {
-        ARN obj_arn(s->src_object->get_obj());
+        ARN obj_arn(src_object->get_obj());
 	auto e = src_policy->eval(s->env, *s->auth.identity,
 				  src_object->get_instance().empty() ?
 				  rgw::IAM::s3GetObject :
