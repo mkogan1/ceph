@@ -5256,7 +5256,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
         auto e = Effect::Pass;
         rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
         if (src_policy) {
-          ARN obj_arn(s->src_object->get_obj());
+          ARN obj_arn(src_object->get_obj());
 	        e = src_policy->eval(s->env, *s->auth.identity,
             src_object->get_instance().empty() ?
             rgw::IAM::s3GetObject :
