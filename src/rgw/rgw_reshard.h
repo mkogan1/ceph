@@ -109,7 +109,8 @@ public:
 
   static int clear_resharding(const DoutPrefixProvider *dpp,
 			      rgw::sal::RGWRadosStore* store,
-			      RGWBucketInfo& bucket_info);
+			      RGWBucketInfo& bucket_info,
+			      std::map<std::string, bufferlist>& bucket_attrs);
 
   static uint32_t get_max_prime_shards() {
     return *std::crbegin(reshard_primes);
