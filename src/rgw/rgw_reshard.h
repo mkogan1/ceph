@@ -67,6 +67,7 @@ class RGWBucketReshard {
  private:
   RGWRados *store;
   RGWBucketInfo bucket_info;
+  std::map<std::string, bufferlist> bucket_attrs;
 
   RGWBucketReshardLock reshard_lock;
   RGWBucketReshardLock* outer_reshard_lock;
@@ -87,6 +88,7 @@ public:
   // manage
   RGWBucketReshard(RGWRados *_store,
 		   const RGWBucketInfo& _bucket_info,
+		   const std::map<std::string, bufferlist>& _bucket_attrs,
 		   RGWBucketReshardLock* _outer_reshard_lock);
   int execute(int num_shards, const ReshardFaultInjector& f,
               int max_op_entries,

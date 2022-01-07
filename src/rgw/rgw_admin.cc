@@ -6817,7 +6817,7 @@ next:
   if (opt_cmd == OPT_BUCKET_RESHARD) {
     rgw_bucket bucket;
     RGWBucketInfo bucket_info;
-    map<string, bufferlist> attrs;
+    map<string, bufferlist> bucket_attrs;
 
     int ret = check_reshard_bucket_params(store,
 					  bucket_name,
@@ -6828,7 +6828,7 @@ next:
 					  yes_i_really_mean_it,
 					  bucket,
 					  bucket_info,
-					  attrs);
+					  bucket_attrs);
     if (ret < 0) {
       return ret;
     }
@@ -6844,7 +6844,7 @@ next:
       return -EINVAL;
     }
 
-    RGWBucketReshard br(store, bucket_info, nullptr /* no callback */);
+    RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr /* no callback */);
 
 #define DEFAULT_RESHARD_MAX_ENTRIES 1000
     if (max_entries < 1) {
@@ -6865,7 +6865,7 @@ next:
   if (opt_cmd == OPT_RESHARD_ADD) {
     rgw_bucket bucket;
     RGWBucketInfo bucket_info;
-    map<string, bufferlist> attrs;
+    map<string, bufferlist> bucket_attrs;
 
     int ret = check_reshard_bucket_params(store,
 					  bucket_name,
@@ -6876,7 +6876,7 @@ next:
 					  yes_i_really_mean_it,
 					  bucket,
 					  bucket_info,
-					  attrs);
+					  bucket_attrs);
     if (ret < 0) {
       return ret;
     }
@@ -6946,14 +6946,14 @@ next:
 
     rgw_bucket bucket;
     RGWBucketInfo bucket_info;
-    map<string, bufferlist> attrs;
-    ret = init_bucket(tenant, bucket_name, bucket_id, bucket_info, bucket, &attrs);
+    std::map<std::string, bufferlist> bucket_attrs;
+    ret = init_bucket(tenant, bucket_name, bucket_id, bucket_info, bucket, &bucket_attrs);
     if (ret < 0) {
       cerr << "ERROR: could not init bucket: " << cpp_strerror(-ret) << std::endl;
       return -ret;
     }
 
-    RGWBucketReshard br(store, bucket_info, nullptr /* no callback */);
+    RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr /* no callback */);
     list<cls_rgw_bucket_instance_entry> status;
     int r = br.get_status(&status);
     if (r < 0) {
@@ -6983,10 +6983,10 @@ next:
 
     rgw_bucket bucket;
     RGWBucketInfo bucket_info;
-    map<string, bufferlist> attrs;
+    map<string, bufferlist> bucket_attrs;
     bool bucket_initable = true;
     ret = init_bucket(tenant, bucket_name, bucket_id, bucket_info, bucket,
-                      &attrs);
+                      &bucket_attrs);
     if (ret < 0) {
       if (yes_i_really_mean_it) {
         bucket_initable = false;
@@ -7002,7 +7002,7 @@ next:
 
     if (bucket_initable) {
       // we did not encounter an error, so let's work with the bucket
-      RGWBucketReshard br(store, bucket_info, nullptr /* no callback */);
+      RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr /* no callback */);
       int ret = br.cancel();
       if (ret < 0) {
         if (ret == -EBUSY) {
