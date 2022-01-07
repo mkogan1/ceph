@@ -384,6 +384,7 @@ static int init_target_layout(RGWRados* store,
 // it from the bucket instance metadata
 static int revert_target_layout(RGWRados* store,
                                 RGWBucketInfo& bucket_info,
+				std::map<std::string, bufferlist>& bucket_attrs,
                                 const ReshardFaultInjector& fault)
 {
   auto& layout = bucket_info.layout;
@@ -404,7 +405,7 @@ static int revert_target_layout(RGWRados* store,
   if (ret = fault.check("revert_target_layout");
       ret == 0) { // no fault injected, revert the bucket instance metadata
     ret = store->put_bucket_instance_info(bucket_info, false,
-					  real_time(), nullptr);
+					  real_time(), &bucket_attrs);
   }
 
   if (ret < 0) {
@@ -438,7 +439,7 @@ static int init_reshard(RGWRados* store,
     ldout(store->ctx(), 0) << "ERROR: " << __func__ << " failed to pause "
         "writes to the current index: " << cpp_strerror(ret) << dendl;
     // clean up the target layout (ignore errors)
-    revert_target_layout(store, bucket_info, fault);
+    revert_target_layout(store, bucket_info, bucket_attrs, fault);
     return ret;
   }
   return 0;
@@ -446,6 +447,7 @@ static int init_reshard(RGWRados* store,
 
 static int cancel_reshard(RGWRados* store,
                           RGWBucketInfo& bucket_info,
+			  std::map<std::string, bufferlist>& bucket_attrs,
                           const ReshardFaultInjector& fault)
 {
   // unblock writes to the current index shard objects
@@ -458,7 +460,7 @@ static int cancel_reshard(RGWRados* store,
   }
 
   if (bucket_info.layout.target_index) {
-    return revert_target_layout(store, bucket_info, fault);
+    return revert_target_layout(store, bucket_info, bucket_attrs, fault);
   }
   // there is nothing to revert
   return 0;
@@ -539,10 +541,11 @@ static int commit_reshard(RGWRados* store,
 } // commit_reshard
 
 int RGWBucketReshard::clear_resharding(RGWRados* store,
-                                       RGWBucketInfo& bucket_info)
+                                       RGWBucketInfo& bucket_info,
+				       std::map<std::string, bufferlist>& bucket_attrs)
 {
   constexpr ReshardFaultInjector no_fault;
-  return cancel_reshard(store, bucket_info, no_fault);
+  return cancel_reshard(store, bucket_info, bucket_attrs, no_fault);
 }
 
 int RGWBucketReshard::cancel()
@@ -556,7 +559,7 @@ int RGWBucketReshard::cancel()
     ldout(store->ctx(), -1) << "ERROR: bucket is not resharding" << dendl;
     ret = -EINVAL;
   } else {
-    ret = clear_resharding(store, bucket_info);
+    ret = clear_resharding(store, bucket_info, bucket_attrs);
   }
 
   reshard_lock.unlock();
@@ -842,7 +845,7 @@ int RGWBucketReshard::execute(int num_shards,
   }
 
   if (ret < 0) {
-    cancel_reshard(store, bucket_info, fault);
+    cancel_reshard(store, bucket_info, bucket_attrs, fault);
 
     ldout(store->ctx(), 1) << __func__ << " INFO: reshard of bucket \""
         << bucket_info.bucket.name << "\" canceled due to errors" << dendl;

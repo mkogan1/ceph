@@ -7490,14 +7490,18 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
   int ret = 0;
   cls_rgw_bucket_instance_entry entry;
 
+  // gets loaded by fetch_new_bucket_info; can be used by
+  // clear_resharding
+  std::map<std::string, bufferlist> bucket_attrs;
+
   // since we want to run this recovery code from two distinct places,
   // let's just put it in a lambda so we can easily re-use; if the
   // lambda successfully fetches a new bucket id, it sets
   // new_bucket_id and returns 0, otherwise it returns a negative
   // error code
   auto fetch_new_bucket_info =
-    [this, &bucket_info](const std::string& log_tag) -> int {
-      int ret = try_refresh_bucket_info(bucket_info, nullptr);
+    [this, &bucket_info, &bucket_attrs](const std::string& log_tag) -> int {
+      int ret = try_refresh_bucket_info(bucket_info, nullptr, &bucket_attrs);
       if (ret < 0) {
 	ldout(cct, 0) << __func__ <<
 	  " ERROR: failed to refresh bucket info after reshard at " <<
@@ -7551,7 +7555,9 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
 	ldout(cct, 10) << __func__ <<
 	  " INFO: was able to take reshard lock for bucket " <<
 	  bucket_id << dendl;
-        // the reshard may have finished, so call clear_resharding() with its current bucket info
+        // the reshard may have finished, so call clear_resharding()
+        // with its current bucket info; ALSO this will load
+        // bucket_attrs for call to clear_resharding below
         ret = fetch_new_bucket_info("trying_to_clear_resharding");
         if (ret < 0) {
 	  reshard_lock.unlock();
@@ -7560,7 +7566,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
 	    bucket_id << dendl;
           continue; // try again
         }
-	ret = RGWBucketReshard::clear_resharding(this, bucket_info);
+	ret = RGWBucketReshard::clear_resharding(this, bucket_info, bucket_attrs);
 	if (ret < 0) {
 	  reshard_lock.unlock();
 	  ldout(cct, 0) << __func__ <<
