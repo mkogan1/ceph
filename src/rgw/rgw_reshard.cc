@@ -247,8 +247,9 @@ public:
 
 RGWBucketReshard::RGWBucketReshard(rgw::sal::RGWRadosStore *_store,
 				   const RGWBucketInfo& _bucket_info,
+				   const std::map<std::string, bufferlist>& _bucket_attrs,
 				   RGWBucketReshardLock* _outer_reshard_lock) :
-  store(_store), bucket_info(_bucket_info),
+  store(_store), bucket_info(_bucket_info), bucket_attrs(_bucket_attrs),
   reshard_lock(store, bucket_info, true),
   outer_reshard_lock(_outer_reshard_lock)
 { }
@@ -325,6 +326,7 @@ static int init_target_index(rgw::sal::RGWRadosStore* store,
 static int init_target_layout(const DoutPrefixProvider* dpp,
 			      rgw::sal::RGWRadosStore* store,
                               RGWBucketInfo& bucket_info,
+			      std::map<std::string, bufferlist>& bucket_attrs,
                               const ReshardFaultInjector& fault,
                               uint32_t new_num_shards)
 {
@@ -372,7 +374,7 @@ static int init_target_layout(const DoutPrefixProvider* dpp,
   if (ret = fault.check("set_target_layout");
       ret == 0) { // no fault injected, write the bucket instance metadata
     ret = store->getRados()->put_bucket_instance_info(bucket_info, false,
-                                                      real_time(), nullptr, dpp);
+                                                      real_time(), &bucket_attrs, dpp);
   }
 
   if (ret < 0) {
@@ -426,10 +428,11 @@ static int revert_target_layout(const DoutPrefixProvider* dpp,
 static int init_reshard(const DoutPrefixProvider* dpp,
 			rgw::sal::RGWRadosStore* store,
                         RGWBucketInfo& bucket_info,
+			std::map<std::string, bufferlist>& bucket_attrs,
                         const ReshardFaultInjector& fault,
                         uint32_t new_num_shards)
 {
-  int ret = init_target_layout(dpp, store, bucket_info, fault, new_num_shards);
+  int ret = init_target_layout(dpp, store, bucket_info, bucket_attrs, fault, new_num_shards);
   if (ret < 0) {
     return ret;
   }
@@ -474,6 +477,7 @@ static int cancel_reshard(const DoutPrefixProvider* dpp,
 static int commit_reshard(const DoutPrefixProvider* dpp,
 			  rgw::sal::RGWRadosStore* store,
                           RGWBucketInfo& bucket_info,
+			  std::map<std::string, bufferlist>& bucket_attrs,
                           const ReshardFaultInjector& fault)
 {
   auto& layout = bucket_info.layout;
@@ -507,7 +511,10 @@ static int commit_reshard(const DoutPrefixProvider* dpp,
 
   int ret = fault.check("commit_target_layout");
   if (ret == 0) { // no fault injected, write the bucket instance metadata
-    ret = store->getRados()->put_bucket_instance_info(bucket_info, false, real_time(), nullptr, dpp);
+    ret =
+      store->getRados()->put_bucket_instance_info(bucket_info, false,
+						  real_time(),
+						  &bucket_attrs, dpp);
   }
 
   if (ret < 0) {
@@ -818,7 +825,7 @@ int RGWBucketReshard::execute(int num_shards,
   }
 
   // prepare the target index and add its layout the bucket info
-  ret = init_reshard(dpp, store, bucket_info, fault, num_shards);
+  ret = init_reshard(dpp, store, bucket_info, bucket_attrs, fault, num_shards);
   if (ret < 0) {
     return ret;
   }
@@ -838,7 +845,7 @@ int RGWBucketReshard::execute(int num_shards,
     return ret;
   }
 
-  ret = commit_reshard(dpp, store, bucket_info, fault);
+  ret = commit_reshard(dpp, store, bucket_info, bucket_attrs, fault);
   if (ret < 0) {
     return ret;
   }
@@ -1054,11 +1061,13 @@ int RGWReshard::process_entry(const cls_rgw_reshard_entry& entry,
 
   rgw_bucket bucket;
   RGWBucketInfo bucket_info;
+  std::map<std::string, bufferlist> bucket_attrs;
 
   int ret = store->getRados()->get_bucket_info(store->svc(),
                                                entry.tenant, entry.bucket_name,
                                                bucket_info, nullptr,
-                                               null_yield, nullptr);
+                                               null_yield, nullptr,
+					       &bucket_attrs);
   if (ret < 0 || bucket_info.bucket.bucket_id != entry.bucket_id) {
     if (ret < 0) {
       ldout(store->ctx(), 0) <<  __func__ <<
@@ -1100,7 +1109,7 @@ int RGWReshard::process_entry(const cls_rgw_reshard_entry& entry,
     return remove(dpp, entry);
   }
 
-  RGWBucketReshard br(store, bucket_info, nullptr);
+  RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr);
 
   ReshardFaultInjector f; // no fault injected
   ret = br.execute(entry.new_num_shards, f, max_entries, dpp,
