@@ -3787,6 +3787,10 @@ RGWOp *RGWHandler_REST_Bucket_S3::op_delete()
     return new RGWDelBucketMetaSearch_ObjStore_S3;
   }
 
+  if (s->info.args.exists("publicAccessBlock")) {
+    return nullptr;
+  }
+
   return new RGWDeleteBucket_ObjStore_S3;
 }
 
