@@ -1557,6 +1557,9 @@ struct RGWBucketInfo {
   bool mfa_enabled() const { return (versioning_status() & BUCKET_MFA_ENABLED) != 0; }
   bool datasync_flag_enabled() const { return (flags & BUCKET_DATASYNC_DISABLED) == 0; }
   bool obj_lock_enabled() const { return (flags & BUCKET_OBJ_LOCK_ENABLED) != 0; }
+  bool is_indexless() const {
+    return index_type == RGWBIType_Indexless;
+  }
 
   bool has_swift_versioning() const {
     /* A bucket may be versioned through one mechanism only. */
