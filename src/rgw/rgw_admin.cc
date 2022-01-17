@@ -6032,7 +6032,9 @@ int main(int argc, const char **argv)
     }
 
     if (bucket_name.empty()) {
-      ret = lister.run();
+      // yes_i_really_mean_it means continue with listing even if
+      // there are indexless buckets
+      ret = lister.run(yes_i_really_mean_it);
     } else {
       ret = lister.run(bucket_name);
     }
