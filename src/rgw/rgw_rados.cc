@@ -9104,6 +9104,11 @@ int RGWRados::cls_obj_usage_log_clear(const DoutPrefixProvider *dpp, string& oid
 
 int RGWRados::remove_objs_from_index(const DoutPrefixProvider *dpp, RGWBucketInfo& bucket_info, list<rgw_obj_index_key>& oid_list)
 {
+  const auto& current_index = bucket_info.get_current_index();
+  if (is_layout_indexless(current_index)) {
+    return -EINVAL;
+  }
+
   RGWSI_RADOS::Pool index_pool;
   string dir_oid;
 
