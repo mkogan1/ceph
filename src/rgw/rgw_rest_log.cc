@@ -415,6 +415,12 @@ void RGWOp_BILog_List::execute() {
   }
 
   const auto& logs = bucket_info.layout.logs;
+  if (logs.empty()) {
+    ldpp_dout(s, 5) << "ERROR: bucket=" << bucket_name << " has no log layouts" << dendl;
+    op_ret = -ENOENT;
+    return;
+  }
+
   auto log = std::prev(logs.end());
   if (gen) {
     log = std::find_if(logs.begin(), logs.end(), rgw::matches_gen(*gen));
@@ -536,9 +542,15 @@ void RGWOp_BILog_Info::execute() {
       return;
     }
   }
+  const auto& logs = bucket_info.layout.logs;
+  if (logs.empty()) {
+    ldpp_dout(s, 5) << "ERROR: bucket=" << bucket_name << " has no log layouts" << dendl;
+    op_ret = -ENOENT;
+    return;
+  }
+
   map<RGWObjCategory, RGWStorageStats> stats;
-  const auto& latest_log = bucket_info.layout.logs.back();
-  const auto& index = log_to_index_layout(latest_log);
+  const auto& index = log_to_index_layout(logs.back());
 
   int ret =  store->get_bucket_stats(bucket_info, index, shard_id, &bucket_ver, &master_ver, stats, &max_marker, &syncstopped);
   if (ret < 0 && ret != -ENOENT) {
@@ -546,8 +558,8 @@ void RGWOp_BILog_Info::execute() {
     return;
   }
 
-  oldest_gen = bucket_info.layout.logs.front().gen;
-  latest_gen = latest_log.gen;
+  oldest_gen = logs.front().gen;
+  latest_gen = logs.back().gen;
 }
 
 void RGWOp_BILog_Info::send_response() {

@@ -1068,6 +1068,21 @@ int RGWRados::get_max_chunk_size(const rgw_placement_rule& placement_rule, const
   return get_max_chunk_size(pool, max_chunk_size, palignment);
 }
 
+void add_datalog_entry(CephContext* cct,
+                       RGWDataChangesLog* datalog,
+                       const RGWBucketInfo& bucket_info,
+                       uint32_t shard_id)
+{
+  const auto& logs = bucket_info.layout.logs;
+  if (logs.empty()) {
+    return;
+  }
+  int r = datalog->add_entry(bucket_info, logs.back(), shard_id);
+  if (r < 0) {
+    ldout(cct, -1) << "ERROR: failed writing data log" << dendl;
+  } // datalog error is not fatal
+}
+
 class RGWIndexCompletionManager;
 
 struct complete_op_data {
@@ -1160,12 +1175,7 @@ int RGWIndexCompletionThread::process()
       /* ignoring error, can't do anything about it */
       continue;
     }
-    r = store->data_log->add_entry(bucket_info,
-				   bucket_info.layout.logs.back(),
-				   bs.shard_id);
-    if (r < 0) {
-      lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
-    }
+    add_datalog_entry(cct, store->data_log, bucket_info, bs.shard_id);
   }
 
   return 0;
@@ -5891,13 +5901,8 @@ int RGWRados::Object::Delete::delete_obj()
       return r;
     }
 
-    r = store->data_log->add_entry(target->bucket_info,
-				   target->bucket_info.layout.logs.back(),
-				   bs->shard_id);
-    if (r < 0) {
-      lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
-      return r;
-    }
+    add_datalog_entry(store->ctx(), store->data_log,
+                      target->bucket_info, bs->shard_id);
 
     return 0;
   }
@@ -6955,12 +6960,8 @@ int RGWRados::Bucket::UpdateIndex::complete(int64_t poolid, uint64_t epoch,
 
   ret = store->cls_obj_complete_add(*bs, obj, optag, poolid, epoch, ent, category, remove_objs, bilog_flags, zones_trace);
 
-  int r = store->data_log->add_entry(target->bucket_info,
-				     target->bucket_info.layout.logs.back(),
-				     bs->shard_id);
-  if (r < 0) {
-    lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
-  }
+  add_datalog_entry(store->ctx(), store->data_log,
+                    target->bucket_info, bs->shard_id);
 
   return ret;
 }
@@ -6983,12 +6984,8 @@ int RGWRados::Bucket::UpdateIndex::complete_del(int64_t poolid, uint64_t epoch,
 
   ret = store->cls_obj_complete_del(*bs, optag, poolid, epoch, obj, removed_mtime, remove_objs, bilog_flags, zones_trace);
 
-  int r = store->data_log->add_entry(target->bucket_info,
-				     target->bucket_info.layout.logs.back(),
-				     bs->shard_id);
-  if (r < 0) {
-    lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
-  }
+  add_datalog_entry(store->ctx(), store->data_log,
+                    target->bucket_info, bs->shard_id);
 
   return ret;
 }
@@ -7011,12 +7008,8 @@ int RGWRados::Bucket::UpdateIndex::cancel(list<rgw_obj_index_key> *remove_objs)
    * for following the specific bucket shard log. Otherwise they end up staying behind, and users
    * have no way to tell that they're all caught up
    */
-  int r = store->data_log->add_entry(target->bucket_info,
-				     target->bucket_info.layout.logs.back(),
-				     bs->shard_id);
-  if (r < 0) {
-    lderr(store->ctx()) << "ERROR: failed writing data log" << dendl;
-  }
+  add_datalog_entry(store->ctx(), store->data_log,
+                    target->bucket_info, bs->shard_id);
 
   return ret;
 }
@@ -7654,12 +7647,7 @@ int RGWRados::bucket_index_link_olh(RGWBucketInfo& bucket_info, RGWObjState& olh
     return r;
   }
 
-  r = data_log->add_entry(bucket_info,
-			  bucket_info.layout.logs.back(),
-			  bs.shard_id);
-  if (r < 0) {
-    ldout(cct, 0) << "ERROR: failed writing data log" << dendl;
-  }
+  add_datalog_entry(cct, data_log, bucket_info, bs.shard_id);
 
   return 0;
 }
@@ -11323,34 +11311,33 @@ int RGWRados::handle_overwrite(const RGWBucketInfo& info,
   bool new_sync_enabled = info.datasync_flag_enabled();
   bool old_sync_enabled = orig_info.datasync_flag_enabled();
 
-  if (old_sync_enabled != new_sync_enabled) {
-    int shards_num = rgw::current_num_shards(info.layout);
-    int shard_id = info.layout.current_index.layout.normal.num_shards ? 0 : -1;
-    const auto& log_layout = info.layout.logs.back();
+  if (old_sync_enabled == new_sync_enabled) {
+    return 0; // datasync flag didn't change
+  }
+  if (info.layout.logs.empty()) {
+    return 0; // no bilog
+  }
+  const auto& bilog = info.layout.logs.back();
+  if (bilog.layout.type != rgw::BucketLogType::InIndex) {
+    return -ENOTSUP;
+  }
+  const int shards_num = rgw::num_shards(bilog.layout.in_index);
 
-    if (!new_sync_enabled) {
-      ret = stop_bi_log_entries(info, log_layout, -1);
-      if (ret < 0) {
-	lderr(cct) << "ERROR: failed writing bilog" << dendl;
-	return ret;
-      }
-    } else {
-      ret = resync_bi_log_entries(info, log_layout, -1);
-      if (ret < 0) {
-	lderr(cct) << "ERROR: failed writing bilog" << dendl;
-	return ret;
-      }
-    }
+  if (!new_sync_enabled) {
+    ret = stop_bi_log_entries(info, bilog, -1);
+  } else {
+    ret = resync_bi_log_entries(info, bilog, -1);
+  }
+  if (ret < 0) {
+    ldout(cct, -1) << "ERROR: failed writing bilog (bucket=" << info.bucket << "); ret=" << ret << dendl;
+    return ret;
+  }
 
-    for (int i = 0; i < shards_num; ++i, ++shard_id) {
-      ret = data_log->add_entry(info,
-				info.layout.logs.back(),
-				shard_id);
-      if (ret < 0) {
-	lderr(cct) << "ERROR: failed writing data log" << dendl;
-	return ret;
-      }
-    }
+  for (int i = 0; i < shards_num; ++i) {
+    ret = data_log->add_entry(info, bilog, i);
+    if (ret < 0) {
+      ldout(cct, -1) << "ERROR: failed writing data log (info.bucket=" << info.bucket << ", shard_id=" << i << ")" << dendl;
+    } // datalog error is not fatal
   }
   return ret;
 }
