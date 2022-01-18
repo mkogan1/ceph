@@ -10018,10 +10018,10 @@ int RGWRados::cls_obj_usage_log_clear(string& oid)
 int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info,
 				     const std::list<rgw_obj_index_key>& entry_key_list)
 {
-  const auto& latest_log = bucket_info.layout.logs.back();
-  const rgw::bucket_index_layout_generation& current_index =
-    rgw::log_to_index_layout(latest_log);
-
+  const auto& current_index = bucket_info.get_current_index();
+  if (is_layout_indexless(current_index)) {
+    return 0;
+  }
   const uint32_t num_shards = current_index.layout.normal.num_shards;
 
   librados::IoCtx index_ctx;

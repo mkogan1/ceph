@@ -1786,14 +1786,13 @@ static int bucket_stats(RGWRados *store, const std::string& tenant_name, const s
   }
 
   rgw_bucket& bucket = bucket_info.bucket;
-
-  if (bucket_info.is_indexless()) {
+  const auto& index = bucket_info.get_current_index();
+  if (is_layout_indexless(index)) {
     cerr << "error, indexless buckets do not maintain stats; bucket=" <<
       bucket.name << std::endl;
     return -EINVAL;
   }
 
-  const auto& index = bucket_info.get_current_index();
   std::string bucket_ver, master_ver;
   std::string max_marker;
   int ret = store->get_bucket_stats(bucket_info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, &max_marker);
@@ -1886,7 +1885,6 @@ int RGWBucketAdminOp::limit_check(RGWRados *store,
 
       for (const auto& iter : m_buckets) {
 	auto& bucket = iter.second.bucket;
-	uint32_t num_shards = 1;
 	uint64_t num_objects = 0;
 
 	/* need info for num_shards */
@@ -1902,11 +1900,14 @@ int RGWBucketAdminOp::limit_check(RGWRados *store,
 	if (ret < 0)
 	  continue;
 
+	const auto& index = info.get_current_index();
+	if (is_layout_indexless(index)) {
+	  continue; // indexless buckets don't have stats
+	}
+
 	/* need stats for num_entries */
 	string bucket_ver, master_ver;
 	std::map<RGWObjCategory, RGWStorageStats> stats;
-	const auto& latest_log = info.layout.logs.back();
-	const auto& index = rgw::log_to_index_layout(latest_log);
 	ret = store->get_bucket_stats(info, index, RGW_NO_SHARD, &bucket_ver,
 				      &master_ver, stats, nullptr);
 
@@ -1917,7 +1918,7 @@ int RGWBucketAdminOp::limit_check(RGWRados *store,
 	  num_objects += s.second.num_objects;
 	}
 
-	num_shards = info.layout.current_index.layout.normal.num_shards;
+	const uint32_t num_shards = rgw::num_shards(index.layout.normal);
 	uint64_t objs_per_shard =
 	  (num_shards) ? num_objects/num_shards : num_objects;
 	{
