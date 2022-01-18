@@ -9010,6 +9010,11 @@ int RGWRados::remove_objs_from_index(const DoutPrefixProvider *dpp,
     " entry_key_list.size()=" << entry_key_list.size() << dendl_bitx;
   ldout_bitx(bitx, cct, 20) << "BACKTRACE: " << __func__ << ": " << BackTrace(0) << dendl_bitx;
 
+  const auto& current_index = bucket_info.get_current_index();
+  if (is_layout_indexless(current_index)) {
+    return -EINVAL;
+  }
+
   RGWSI_RADOS::Pool index_pool;
   std::map<int, std::string> index_oids;
   const auto num_shards = bucket_info.layout.current_index.layout.normal.num_shards;

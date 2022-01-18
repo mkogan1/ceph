@@ -274,8 +274,11 @@ int BucketAsyncRefreshHandler::init_fetch()
 
   ldpp_dout(&dp, 20) << "initiating async quota refresh for bucket=" << bucket << dendl;
 
-  const auto& latest_log = bucket_info.layout.logs.back();
-  const auto& index = log_to_index_layout(latest_log);
+
+  const auto& index = bucket_info.get_current_index();
+  if (is_layout_indexless(index)) {
+    return 0;
+  }
   r = store->getRados()->get_bucket_stats_async(&dp, bucket_info, index, RGW_NO_SHARD, this);
   if (r < 0) {
     ldpp_dout(&dp, 0) << "could not get bucket info for bucket=" << bucket.name << dendl;
@@ -345,11 +348,15 @@ int RGWBucketStatsCache::fetch_stats_from_storage(const rgw_user& user, const rg
     return r;
   }
 
+  stats = RGWStorageStats();
+
+  const auto& index = bucket_info.get_current_index();
+  if (is_layout_indexless(index)) {
+    return 0;
+  }
+
   string bucket_ver;
   string master_ver;
-
-  const auto& latest_log = bucket_info.layout.logs.back();
-  const auto& index = log_to_index_layout(latest_log);
 
   map<RGWObjCategory, RGWStorageStats> bucket_stats;
   r = store->getRados()->get_bucket_stats(dpp, bucket_info, index, RGW_NO_SHARD, &bucket_ver,
@@ -359,8 +366,6 @@ int RGWBucketStatsCache::fetch_stats_from_storage(const rgw_user& user, const rg
                            << bucket.name << dendl;
     return r;
   }
-
-  stats = RGWStorageStats();
 
   for (const auto& pair : bucket_stats) {
     const RGWStorageStats& s = pair.second;
