@@ -898,10 +898,16 @@ public:
   }
   int process() override {
     list<RGWCoroutinesStack*> stacks;
+    auto metatrimcr = create_meta_log_trim_cr(this, store, &http,
+					      cct->_conf->rgw_md_log_max_shards,
+					      trim_interval);
+    if (!metatrimcr) {
+      ldpp_dout(this, -1) << "Bailing out of trim thread!" << dendl;
+      return -EINVAL;
+    }
     auto meta = new RGWCoroutinesStack(store->ctx(), &crs);
-    meta->call(create_meta_log_trim_cr(this, store, &http,
-                                       cct->_conf->rgw_md_log_max_shards,
-                                       trim_interval));
+    meta->call(metatrimcr);
+
     stacks.push_back(meta);
 
     auto data = new RGWCoroutinesStack(store->ctx(), &crs);
