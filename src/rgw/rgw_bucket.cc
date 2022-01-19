@@ -1033,39 +1033,12 @@ int RGWBucket::sync(RGWBucketAdminOpState& op_state, map<string, bufferlist> *at
     bucket_info.flags |= BUCKET_DATASYNC_DISABLED;
   }
 
+  // when writing this metadata, RGWSI_BucketIndex_RADOS::handle_overwrite()
+  // will write the corresponding datalog and bilog entries
   int r = store->getRados()->put_bucket_instance_info(bucket_info, false, real_time(), attrs, dpp);
   if (r < 0) {
     set_err_msg(err_msg, "ERROR: failed writing bucket instance info:" + cpp_strerror(-r));
     return r;
-  }
-
-  int shards_num = bucket_info.layout.current_index.layout.normal.num_shards? bucket_info.layout.current_index.layout.normal.num_shards : 1;
-  int shard_id = bucket_info.layout.current_index.layout.normal.num_shards? 0 : -1;
-  const auto& log_layout = bucket_info.layout.logs.back();
-
-  if (!sync) {
-    r = static_cast<rgw::sal::RGWRadosStore*>(store)->svc()->bilog_rados->log_stop(dpp, bucket_info, log_layout, -1);
-    if (r < 0) {
-      set_err_msg(err_msg, "ERROR: failed writing stop bilog:" + cpp_strerror(-r));
-      return r;
-    }
-  } else {
-    r = static_cast<rgw::sal::RGWRadosStore*>(store)->svc()->bilog_rados->log_start(dpp, bucket_info, log_layout, -1);
-    if (r < 0) {
-      set_err_msg(err_msg, "ERROR: failed writing resync bilog:" + cpp_strerror(-r));
-      return r;
-    }
-  }
-
-  for (int i = 0; i < shards_num; ++i, ++shard_id) {
-    r = static_cast<rgw::sal::RGWRadosStore*>(store)
-      ->svc()->datalog_rados->add_entry(dpp, bucket_info,
-					bucket_info.layout.logs.back(),
-					shard_id);
-    if (r < 0) {
-      set_err_msg(err_msg, "ERROR: failed writing data log:" + cpp_strerror(-r));
-      return r;
-    }
   }
 
   return 0;
