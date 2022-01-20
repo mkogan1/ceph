@@ -7570,6 +7570,16 @@ std::vector<Option> get_rgw_options() {
     .set_default("")
 #endif
     .set_description("Directory where luarocks install packages from allowlist"),
+
+   Option("rgw_pending_bucket_index_op_expiration", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+   .set_default(120)
+   .set_description("Number of seconds a pending operation can remain in "
+		    "bucket index shard.")
+   .set_long_description("Number of seconds a pending operation can remain "
+			 "in bucket index shard before it expires. Used for "
+			 "transactional bucket index operations, and if the "
+			 "operation does not complete in this time period, "
+			 "the operation will be dropped."),
   });
 }
 

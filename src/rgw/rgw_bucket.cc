@@ -56,7 +56,8 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
-#define BUCKET_TAG_TIMEOUT 30
+// seconds for timeout during RGWBucket::check_object_index
+constexpr uint64_t BUCKET_TAG_QUICK_TIMEOUT = 30;
 
 // default number of entries to list with each bucket listing call
 // (use marker to bridge between calls)
@@ -948,7 +949,8 @@ int RGWBucket::check_object_index(const DoutPrefixProvider *dpp,
     return -EINVAL;
   }
 
-  store->getRados()->cls_obj_set_bucket_tag_timeout(dpp, bucket_info, BUCKET_TAG_TIMEOUT);
+  // use a quicker/shorter tag timeout during this process
+  store->getRados()->cls_obj_set_bucket_tag_timeout(dpp, bucket_info, BUCKET_TAG_QUICK_TIMEOUT);
 
   string prefix;
   string empty_delimiter;
@@ -987,6 +989,7 @@ int RGWBucket::check_object_index(const DoutPrefixProvider *dpp,
 
   formatter->close_section();
 
+  // restore normal tag timeout for bucket
   store->getRados()->cls_obj_set_bucket_tag_timeout(dpp, bucket_info, 0);
 
   return 0;
