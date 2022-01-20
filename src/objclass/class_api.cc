@@ -733,6 +733,12 @@ int8_t cls_get_required_osd_release(cls_method_context_t hctx)
   return ctx->pg->get_osdmap()->require_osd_release;
 }
 
+const ConfigProxy& cls_get_config(cls_method_context_t hctx)
+{
+  PrimaryLogPG::OpContext *ctx = *(PrimaryLogPG::OpContext **)hctx;
+  return ctx->pg->get_cct()->_conf;
+}
+
 void cls_cxx_subop_version(cls_method_context_t hctx, string *s)
 {
   if (!s)
