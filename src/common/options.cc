@@ -7510,6 +7510,12 @@ std::vector<Option> get_rgw_options() {
 			 "transactional bucket index operations, and if the "
 			 "operation does not complete in this time period, "
 			 "the operation will be dropped."),
+
+   Option("rgw_bucket_index_transaction_instrumentation", Option::TYPE_BOOL, Option::LEVEL_DEV)
+   .set_default(false)
+   .set_description("Turns on extra instrumentation surrounding bucket index "
+		    "transactions"),
+
   });
 }
 
