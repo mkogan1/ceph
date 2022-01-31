@@ -15,6 +15,7 @@
 
 #include <boost/algorithm/string.hpp>
 #include "rgw_bucket_layout.h"
+#include "common/BackTrace.h"
 
 namespace rgw {
 
@@ -330,6 +331,17 @@ void decode_json_obj(BucketReshardState& s, JSONObj *obj)
 // BucketLayout
 void encode(const BucketLayout& l, bufferlist& bl, uint64_t f)
 {
+  if (!is_layout_indexless(l.current_index) &&
+      l.current_index.gen > 1 &&
+      l.logs.empty()) {
+    std::cerr << "Attempt to encode invalid layout!" << std::endl;
+    ceph::BackTrace bt(0);
+    std::cerr << bt << std::endl;
+    std::cerr << "This is an EXPECTED and DESIRED crash. We are using it to "
+	      << "find the origin of invalid data." << std::endl;
+    abort();
+  }
+
   ENCODE_START(2, 1, bl);
   encode(l.resharding, bl);
   encode(l.current_index, bl);
