@@ -793,8 +793,7 @@ int RGWBucketReshard::get_status(list<cls_rgw_bucket_instance_entry> *status)
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
 
-  const auto& latest_log = bucket_info.layout.logs.back();
-  const auto& index = rgw::log_to_index_layout(latest_log);
+  const auto& index = bucket_info.get_current_index();
   int r = store->open_bucket_index(bucket_info, index_ctx, index, bucket_objs);
   if (r < 0) {
     return r;

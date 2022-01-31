@@ -737,8 +737,7 @@ int rgw_remove_bucket(RGWRados *store, rgw_bucket& bucket, bool delete_children)
   if (ret < 0)
     return ret;
 
-  const auto& latest_log = info.layout.logs.back();
-  const auto& index = rgw::log_to_index_layout(latest_log);
+  const auto& index = info.get_current_index();
   ret = store->get_bucket_stats(info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
   if (ret < 0)
     return ret;
@@ -846,8 +845,7 @@ int rgw_remove_bucket_bypass_gc(RGWRados *store, rgw_bucket& bucket,
   if (ret < 0)
     return ret;
 
-  const auto& latest_log = info.layout.logs.back();
-  const auto& index = rgw::log_to_index_layout(latest_log);
+  const auto& index = info.get_current_index();
   ret = store->get_bucket_stats(info, index, RGW_NO_SHARD, &bucket_ver, &master_ver, stats, NULL);
   if (ret < 0)
     return ret;
@@ -1490,8 +1488,7 @@ int RGWBucket::check_object_index(RGWBucketAdminOpState& op_state,
     RGWRados::ent_map_t result;
     result.reserve(1000);
 
-    const auto& latest_log = bucket_info.layout.logs.back();
-    const auto& index = rgw::log_to_index_layout(latest_log);
+    const auto& index = bucket_info.get_current_index();
     int r = store->cls_bucket_list_ordered(bucket_info, index, RGW_NO_SHARD,
 					   marker, prefix,
 					   listing_max_entries, true,
