@@ -165,6 +165,9 @@ int RGWRESTConn::put_obj_send_init(rgw::sal::Object* obj, const rgw_http_param_p
   RGWRESTStreamS3PutObj *wr = new RGWRESTStreamS3PutObj(cct, "PUT", url, NULL, &params, api_name, host_style);
   wr->send_init(obj);
   *req = wr;
+
+  std::cerr << fmt::format("***#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
+
   return 0;
 }
 
@@ -181,6 +184,9 @@ int RGWRESTConn::put_obj_async_init(const DoutPrefixProvider *dpp, const rgw_use
   populate_params(params, &uid, self_zone_group);
   RGWRESTStreamS3PutObj *wr = new RGWRESTStreamS3PutObj(cct, "PUT", url, NULL, &params, api_name, host_style);
   wr->put_obj_init(dpp, key, obj, attrs);
+
+  std::cerr << fmt::format("***#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
+
   *req = wr;
   return 0;
 }
@@ -264,6 +270,7 @@ int RGWRESTConn::get_obj(const DoutPrefixProvider *dpp, const rgw::sal::Object* 
     const string& instance = obj->get_instance();
     params.push_back(param_pair_t("versionId", instance));
   }
+  std::cerr << fmt::format("***#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
   if (in_params.get_op) {
     *req = new RGWRESTStreamReadRequest(cct, url, in_params.cb, NULL, &params, api_name, host_style);
   } else {
@@ -360,7 +367,18 @@ int RGWRESTConn::get_resource(const DoutPrefixProvider *dpp,
 
   RGWStreamIntoBufferlist cb(bl);
 
+  std::cerr << fmt::format(">>#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
   RGWRESTStreamReadRequest req(cct, url, &cb, NULL, &params, api_name, host_style);
+  //MK-SSL
+  if (!g_conf()->rgw_sync_ssl_cacert.empty()) {
+    req.set_ca_path(g_conf()->rgw_sync_ssl_cacert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientcert.empty()) {
+    req.set_client_cert(g_conf()->rgw_sync_ssl_clientcert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientkey.empty()) {
+    req.set_client_key(g_conf()->rgw_sync_ssl_clientkey);
+  }
 
   map<string, string> headers;
   if (extra_headers) {
@@ -443,6 +461,18 @@ void RGWRESTReadResource::init_common(param_vec_t *extra_headers)
     headers.insert(extra_headers->begin(), extra_headers->end());
   }
 
+  std::cerr << fmt::format("***#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
+  //MK-SSL
+  if (!g_conf()->rgw_sync_ssl_cacert.empty()) {
+    req.set_ca_path(g_conf()->rgw_sync_ssl_cacert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientcert.empty()) {
+    req.set_client_cert(g_conf()->rgw_sync_ssl_clientcert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientkey.empty()) {
+    req.set_client_key(g_conf()->rgw_sync_ssl_clientkey);
+  }
+
   req.set_params(&params);
 }
 
@@ -502,6 +532,15 @@ void RGWRESTSendResource::init_common(param_vec_t *extra_headers)
   }
 
   req.set_params(&params);
+  // if (!g_conf()->rgw_sync_ssl_cacert.empty()) {
+  //   req.set_ca_path(g_conf()->rgw_sync_ssl_cacert);
+  // }
+  // if (!g_conf()->rgw_sync_ssl_clientcert.empty()) {
+  //   req.set_client_cert(g_conf()->rgw_sync_ssl_clientcert);
+  // }
+  // if (!g_conf()->rgw_sync_ssl_clientkey.empty()) {
+  //   req.set_client_key(g_conf()->rgw_sync_ssl_clientkey);
+  // }
 }
 
 int RGWRESTSendResource::send(const DoutPrefixProvider *dpp, bufferlist& outbl, optional_yield y)

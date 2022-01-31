@@ -245,6 +245,7 @@ int RGWRemoteMetaLog::read_log_info(const DoutPrefixProvider *dpp, rgw_mdlog_inf
                                   { NULL, NULL } };
 
   int ret = conn->get_json_resource(dpp, "/admin/log", pairs, null_yield, *log_info);
+  std::cerr << fmt::format("--#MK# {} #{} | {}(): conn->get_json_resource() ret={}\n", __FILE__, __LINE__, __func__, ret);
   if (ret < 0) {
     ldpp_dout(dpp, 0) << "ERROR: failed to fetch mdlog info" << dendl;
     return ret;
@@ -262,11 +263,14 @@ int RGWRemoteMetaLog::read_master_log_shards_info(const DoutPrefixProvider *dpp,
   }
 
   rgw_mdlog_info log_info;
+  std::cerr << fmt::format("=#MK# {} #{} | {}(): read_log_info() ->\n", __FILE__, __LINE__, __func__);
   int ret = read_log_info(dpp, &log_info);
+  std::cerr << fmt::format("=#MK# {} #{} | {}(): read_log_info() <- ret={}\n", __FILE__, __LINE__, __func__, ret);
   if (ret < 0) {
     return ret;
   }
 
+  std::cerr << fmt::format("=#MK# {} #{} | {}():\n", __FILE__, __LINE__, __func__);
   return run(dpp, new RGWReadRemoteMDLogInfoCR(&sync_env, master_period, log_info.num_shards, shards_info));
 }
 

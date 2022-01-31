@@ -27,4 +27,5 @@ if [ "$RGW_VALGRIND" = "yes" ] && [ "$command" = "radosgw" ]; then
     sleep 10
 else
     $CEPH_BIN/$command -c $CEPH_CONF_PATH/ceph.conf "$@"
+    #$command -c $CEPH_CONF_PATH/ceph.conf "$@"
 fi

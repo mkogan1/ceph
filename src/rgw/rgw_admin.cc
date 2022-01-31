@@ -1830,8 +1830,20 @@ static int send_to_url(const string& url,
 
   param_vec_t params;
   RGWRESTSimpleRequest req(g_ceph_context, info.method, url, NULL, &params, opt_region);
+  //MK-SSL //MK XXX
+  if (!g_conf()->rgw_sync_ssl_cacert.empty()) {
+    req.set_ca_path(g_conf()->rgw_sync_ssl_cacert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientcert.empty()) {
+    req.set_client_cert(g_conf()->rgw_sync_ssl_clientcert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientkey.empty()) {
+    req.set_client_key(g_conf()->rgw_sync_ssl_clientkey);
+  }
 
   bufferlist response;
+  std::cerr << fmt::format("#MK# {} #{} | {}(): req={}, rgw_sync_ssl_cacert={}\n", __FILE__, __LINE__, __func__ , req.to_str(), g_conf()->rgw_sync_ssl_cacert);
+  //std::cerr << "#MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): req=" << req.to_str() << std::endl;
   int ret = req.forward_request(dpp(), key, info, MAX_REST_RESPONSE, &in_data, &response, null_yield);
 
   int parse_ret = parser.parse(response.c_str(), response.length());
@@ -2108,7 +2120,9 @@ static void get_md_sync_status(list<string>& status)
 {
   RGWMetaSyncStatusManager sync(static_cast<rgw::sal::RadosStore*>(store), static_cast<rgw::sal::RadosStore*>(store)->svc()->rados->get_async_processor());
 
+  std::cerr << fmt::format("#MK# {} #{} | {}(): sync.init() ->\n", __FILE__, __LINE__, __func__);
   int ret = sync.init(dpp());
+  std::cerr << fmt::format("#MK# {} #{} | {}(): sync.init() <- ret={}\n", __FILE__, __LINE__, __func__, ret);
   if (ret < 0) {
     status.push_back(string("failed to retrieve sync info: sync.init() failed: ") + cpp_strerror(-ret));
     return;
@@ -2116,6 +2130,7 @@ static void get_md_sync_status(list<string>& status)
 
   rgw_meta_sync_status sync_status;
   ret = sync.read_sync_status(dpp(), &sync_status);
+  std::cerr << fmt::format("#MK# {} #{} | {}(): sync.read_sync_status() <- ret={}\n", __FILE__, __LINE__, __func__, ret);
   if (ret < 0) {
     status.push_back(string("failed to read sync status: ") + cpp_strerror(-ret));
     return;
@@ -2175,6 +2190,8 @@ static void get_md_sync_status(list<string>& status)
   string master_period = static_cast<rgw::sal::RadosStore*>(store)->svc()->zone->get_current_period_id();
 
   ret = sync.read_master_log_shards_info(dpp(), master_period, &master_shards_info);
+  //^^^ XXX
+  std::cerr << fmt::format("#MK# {} #{} | {}():  sync.read_master_log_shards_info() <- ret={}\n", __FILE__, __LINE__, __func__, ret);
   if (ret < 0) {
     status.push_back(string("failed to fetch master sync status: ") + cpp_strerror(-ret));
     return;
@@ -4910,8 +4927,12 @@ int main(int argc, const char **argv)
 
         bufferlist bl;
         JSONParser p;
+        std::cerr << ">>> #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): url=" << std::quoted(url) << ", client_id=" << g_conf()->name.to_str() << std::endl;
+        //std::cerr << fmt::format("#MK# {} #{} | {}(): url={}\n", __FILE__, __LINE__, __func__ , url);
+        //fmt::print(stderr, "XXX> #MK# {} #{} | {}(): url={}, thread id=0x{:X}, client_id={}\n", __FILE__, __LINE__, __func__ , url, std::hash<std::thread::id>{}(std::this_thread::get_id())), client_id;
         int ret = send_to_url(url, opt_region, access_key, secret_key, info, bl, p);
         if (ret < 0) {
+          std::cerr << fmt::format("#MK# {} #{} | {}(): ret={}\n", __FILE__, __LINE__, __func__ , ret);
           cerr << "request failed: " << cpp_strerror(-ret) << std::endl;
           if (ret == -EACCES) {
             cerr << "If the realm has been changed on the master zone, the "
@@ -4920,6 +4941,7 @@ int main(int argc, const char **argv)
           }
           return -ret;
         }
+        std::cerr << fmt::format("#MK# {} #{} | {}(): ret={}\n", __FILE__, __LINE__, __func__ , ret);
         RGWRealm realm;
         realm.init(dpp(), g_ceph_context, static_cast<rgw::sal::RadosStore*>(store)->svc()->sysobj, null_yield, false);
         try {

@@ -1046,6 +1046,29 @@ options:
   see_also:
   - rgw_keystone_verify_ssl
   with_legacy: true
+
+# multi-site radosgw-admin client SSL certificates configurations
+- name: rgw_sync_ssl_cacert
+  type: str
+  level: advanced
+  desc: Path for custom ca certificate for accessing vault server
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_sync_ssl_clientcert
+  type: str
+  level: advanced
+  desc: Path for custom client certificate for accessing vault server
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_sync_ssl_clientkey
+  type: str
+  level: advanced
+  desc: Path for private key required for client cert
+  services:
+  - rgw
+  with_legacy: true
 # The following are tunables for caches of RGW NFS (and other file
 # client) objects.
 #

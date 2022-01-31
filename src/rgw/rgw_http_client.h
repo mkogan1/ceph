@@ -180,14 +180,17 @@ public:
   }
 
   void set_ca_path(const std::string& _ca_path) {
+    std::cerr << ">>  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): XXX _ca_path=" << _ca_path << std::endl;
     ca_path = _ca_path;
   }
 
   void set_client_cert(const std::string& _client_cert) {
+    std::cerr << ">>  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): _ca_path=" << _client_cert << std::endl;
     client_cert = _client_cert;
   }
 
   void set_client_key(const std::string& _client_key) {
+    std::cerr << ">>  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): _ca_path=" << _client_key << std::endl;
     client_key = _client_key;
   }
 };

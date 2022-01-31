@@ -407,6 +407,7 @@ int RGWRESTSimpleRequest::forward_request(const DoutPrefixProvider *dpp, RGWAcce
 
   string params_str;
   get_params_str(info.args.get_params(), params_str);
+  std::cerr << fmt::format("#MK# {} #{} | {}(): params_str={}\n", __FILE__, __LINE__, __func__ , params_str);
 
   string new_url = url;
   string& resource = new_info.request_uri;
@@ -431,6 +432,7 @@ int RGWRESTSimpleRequest::forward_request(const DoutPrefixProvider *dpp, RGWAcce
   method = new_info.method;
   url = new_url;
 
+  std::cerr << fmt::format("#MK# {} #{} | {}(): precess -> url={}\n", __FILE__, __LINE__, __func__ , url);
   int r = process(y);
   if (r < 0){
     if (r == -EINVAL){

@@ -612,16 +612,37 @@ int RGWHTTPClient::init_request(rgw_http_req_data *_req_data)
   if (h) {
     curl_easy_setopt(easy_handle, CURLOPT_HTTPHEADER, (void *)h);
   }
+  std::cerr << "  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): verify_ssl=" << verify_ssl << std::endl;
   if (!verify_ssl) {
+    std::cerr << fmt::format("  #MK# {} #{} | {}(): if (!verify_ssl) \n", __FILE__, __LINE__, __func__);
     curl_easy_setopt(easy_handle, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(easy_handle, CURLOPT_SSL_VERIFYHOST, 0L);
     dout(20) << "ssl verification is set to off" << dendl;
   } else {
+    dout(20) << "ssl verification is set to on" << dendl;
+    std::cerr << fmt::format("  #MK# {} #{} | {}(): verify_ssl=true\n", __FILE__, __LINE__, __func__);
+    std::cerr << "  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): NOTE: ca_path.empty()=" << ca_path.empty() << std::endl;
     if (!ca_path.empty()) {
+      //vvv XXX - self signed cert
       curl_easy_setopt(easy_handle, CURLOPT_CAINFO, ca_path.c_str());
+      //vvv XXX
       dout(20) << "using custom ca cert "<< ca_path.c_str() << " for ssl" << dendl;
+      std::cerr << "  OK:  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): ca_path=" << ca_path << std::endl;
+    } else {
+      //curl_easy_setopt(easy_handle, CURLOPT_CAINFO, "./cert.pem");
+      // RGWFrontendConfig* conf;
+      // auto& config = conf->get_config_map();
+      // std::optional<string> cert = conf->get_val("ssl_certificate");
+      // if (cert) {
+      //   // only initialize the ssl context if it's going to be used
+      //   std::cerr << "  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): cert=" << cert << std::endl;
+      //   dout(20) << "  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): cert=" << cert << dendl;
+      //   curl_easy_setopt(easy_handle, CURLOPT_CAINFO, "./cert.pem");
+      // }
     }
+    std::cerr << "  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): client_cert.empty()=" << client_cert.empty() << std::endl;
     if (!client_cert.empty()) {
+      std::cerr << "  #MK# " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): client_key.empty()=" << client_key.empty() << std::endl;
       if (!client_key.empty()) {
 	curl_easy_setopt(easy_handle, CURLOPT_SSLCERT, client_cert.c_str());
 	curl_easy_setopt(easy_handle, CURLOPT_SSLKEY, client_key.c_str());
@@ -1338,6 +1359,17 @@ int RGWHTTP::send(RGWHTTPClient *req) {
 int RGWHTTP::process(RGWHTTPClient *req, optional_yield y) {
   if (!req) {
     return 0;
+  }
+  std::cerr << fmt::format("  #MK# {} #{} | {}(): send -> req={}, rgw_sync_ssl_cacert={}\n", __FILE__, __LINE__, __func__ , req->to_str(), g_conf()->rgw_sync_ssl_cacert);
+  //MK-SSL
+  if (!g_conf()->rgw_sync_ssl_cacert.empty()) {
+    req->set_ca_path(g_conf()->rgw_sync_ssl_cacert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientcert.empty()) {
+    req->set_client_cert(g_conf()->rgw_sync_ssl_clientcert);
+  }
+  if (!g_conf()->rgw_sync_ssl_clientkey.empty()) {
+    req->set_client_key(g_conf()->rgw_sync_ssl_clientkey);
   }
   int r = send(req);
   if (r < 0) {
