@@ -720,7 +720,7 @@ int BucketTrimInstanceCR::operate()
 	yield call(new RGWPutBucketInstanceInfoCR(
 		     store->get_async_rados(),
 		     store, clean_info->first, false, {},
-		     nullptr));
+		     no_change_attrs()));
 
 	// Raced, try again.
 	if (retcode == -ECANCELED) {
