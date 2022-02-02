@@ -116,6 +116,11 @@ int rgw_parse_list_of_flags(struct rgw_name_to_flag *mapping,
   return 0;
 }
 
+map<string, bufferlist>* no_change_attrs() {
+  static map<string, bufferlist> no_change;
+  return &no_change;
+}
+
 int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& oid, bufferlist& data, bool exclusive,
                        RGWObjVersionTracker *objv_tracker, real_time set_mtime, map<string, bufferlist> *pattrs)
 {
@@ -128,22 +133,40 @@ int rgw_put_system_obj(RGWRados *rgwstore, const rgw_pool& pool, const string& o
 
   auto obj_ctx = rgwstore->svc.sysobj->init_obj_ctx();
   auto sysobj = obj_ctx.get_obj(obj);
-  int ret = sysobj.wop()
-                  .set_objv_tracker(objv_tracker)
-                  .set_exclusive(exclusive)
-                  .set_mtime(set_mtime)
-                  .set_attrs(*pattrs)
-                  .write(data);
+  int ret;
+
+  if (pattrs != no_change_attrs()) {
+    ret = sysobj.wop()
+      .set_objv_tracker(objv_tracker)
+      .set_exclusive(exclusive)
+      .set_mtime(set_mtime)
+      .set_attrs(*pattrs)
+      .write(data);
+  } else {
+    ret = sysobj.wop()
+      .set_objv_tracker(objv_tracker)
+      .set_exclusive(exclusive)
+      .set_mtime(set_mtime)
+      .write_data(data);
+  }
 
   if (ret == -ENOENT) {
     ret = rgwstore->create_pool(pool);
     if (ret >= 0) {
-      ret = sysobj.wop()
-                  .set_objv_tracker(objv_tracker)
-                  .set_exclusive(exclusive)
-                  .set_mtime(set_mtime)
-                  .set_attrs(*pattrs)
-                  .write(data);
+      if (pattrs != no_change_attrs()) {
+	ret = sysobj.wop()
+	  .set_objv_tracker(objv_tracker)
+	  .set_exclusive(exclusive)
+	  .set_mtime(set_mtime)
+	  .set_attrs(*pattrs)
+	  .write(data);
+      } else {
+	ret = sysobj.wop()
+	  .set_objv_tracker(objv_tracker)
+	  .set_exclusive(exclusive)
+	  .set_mtime(set_mtime)
+	  .write_data(data);
+      }
     }
   }
 

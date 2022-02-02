@@ -225,4 +225,6 @@ void rgw_complete_aio_completion(librados::AioCompletion* c, int r);
 void rgw_fix_etag(CephContext *cct, bufferlist& etagbl);
 void rgw_fix_etag(CephContext *cct, string& etag);
 
+std::map<std::string, ceph::buffer::list>* no_change_attrs();
+
 #endif
