@@ -679,10 +679,7 @@ RGWRadosBILogTrimCR::RGWRadosBILogTrimCR(
   : RGWSimpleCoroutine(store->ctx()), bucket_info(bucket_info),
     shard_id(shard_id), generation(generation), bs(store->getRados()),
     start_marker(BucketIndexShardsManager::get_shard_marker(start_marker)),
-    end_marker(BucketIndexShardsManager::get_shard_marker(end_marker))
-{
-  bs.init(dpp, bucket_info, bucket_info.layout.current_index, shard_id);
-}
+    end_marker(BucketIndexShardsManager::get_shard_marker(end_marker)) {}
 
 int RGWRadosBILogTrimCR::send_request(const DoutPrefixProvider *dpp)
 {
