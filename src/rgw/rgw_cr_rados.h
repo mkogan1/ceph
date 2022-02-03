@@ -921,6 +921,7 @@ public:
 };
 
 class RGWPutBucketInstanceInfoCR : public RGWSimpleCoroutine {
+  static constexpr auto dout_subsys = ceph_subsys_rgw;
   RGWAsyncRadosProcessor *async_rados;
   RGWRados* store;
   RGWBucketInfo& bucket_info;
@@ -940,7 +941,20 @@ public:
 			     std::map<std::string, ceph::bufferlist>* attrs)
     : RGWSimpleCoroutine(store->ctx()), async_rados(async_rados), store(store),
       bucket_info(bucket_info), exclusive(exclusive),
-      mtime(mtime), attrs(attrs) {}
+      mtime(mtime), attrs(attrs) {
+    if (const auto& l = bucket_info.layout;
+	!is_layout_indexless(l.current_index) &&
+	l.current_index.gen > 1 &&
+	l.logs.empty()) {
+      ldout(store->ctx(), -1) << "Attempt to write invalid layout!" << dendl;
+      ceph::BackTrace bt(0);
+      ldout(store->ctx(), -1) << bt << dendl;
+      ldout(store->ctx(), -1)
+	<< "This is an EXPECTED and DESIRED crash. We are using it to "
+	<< "find the origin of invalid data." << dendl;
+      abort();
+    }
+  }
   ~RGWPutBucketInstanceInfoCR() override {
     request_cleanup();
   }
