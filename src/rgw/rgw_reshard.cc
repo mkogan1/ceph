@@ -458,9 +458,18 @@ static int cancel_reshard(rgw::sal::RGWRadosStore* store,
                           const ReshardFaultInjector& fault,
                           const DoutPrefixProvider *dpp)
 {
+  static constexpr auto max_retries = 10;
   // unblock writes to the current index shard objects
-  int ret = set_resharding_status(dpp, static_cast<rgw::sal::RGWRadosStore*>(store), bucket_info,
-                                  cls_rgw_reshard_status::NOT_RESHARDING);
+  int ret = 0;
+  int tries = 0;
+  do {
+    ret = set_resharding_status(dpp, static_cast<rgw::sal::RGWRadosStore*>(store), bucket_info,
+				cls_rgw_reshard_status::NOT_RESHARDING);
+    ++tries;
+    ldpp_dout(dpp, 1) << "WARNING: " << __func__
+		      << " set_resharding_status got -ECANCELED. Retrying."
+		      << dendl;
+  } while (ret == -ECANCELED && tries < max_retries);
   if (ret < 0) {
     ldpp_dout(dpp, 1) << "WARNING: " << __func__ << " failed to unblock "
         "writes to current index objects: " << cpp_strerror(ret) << dendl;
@@ -468,7 +477,15 @@ static int cancel_reshard(rgw::sal::RGWRadosStore* store,
   }
 
   if (bucket_info.layout.target_index) {
-    return revert_target_layout(store, bucket_info, bucket_attrs, fault, dpp);
+    tries = 0;
+    do {
+      ret = revert_target_layout(store, bucket_info, bucket_attrs, fault, dpp);
+      ++tries;
+      ldpp_dout(dpp, 1) << "WARNING: " << __func__
+			<< " revert_target_layout got -ECANCELED. Retrying."
+			<< dendl;
+    } while (ret == -ECANCELED && tries < max_retries);
+    return ret;
   }
   // there is nothing to revert
   return 0;
@@ -480,6 +497,7 @@ static int commit_reshard(rgw::sal::RGWRadosStore* store,
                           const ReshardFaultInjector& fault,
                           const DoutPrefixProvider *dpp)
 {
+  static constexpr auto max_retries = 10;
   auto& layout = bucket_info.layout;
   auto prev = layout; // make a copy for cleanup
   const auto next_log_gen = layout.logs.empty() ? 1 :
@@ -512,10 +530,14 @@ static int commit_reshard(rgw::sal::RGWRadosStore* store,
 
   int ret = fault.check("commit_target_layout");
   if (ret == 0) { // no fault injected, write the bucket instance metadata
-    ret =
-      store->getRados()->put_bucket_instance_info(bucket_info, false,
-						  real_time(),
-						  &bucket_attrs, dpp);
+    int tries = 0;
+    do {
+      ret =
+	store->getRados()->put_bucket_instance_info(bucket_info, false,
+						    real_time(),
+						    &bucket_attrs, dpp);
+      ++tries;
+    } while (ret == -ECANCELED && tries < max_retries);
   }
 
   if (ret < 0) {
@@ -525,8 +547,16 @@ static int commit_reshard(rgw::sal::RGWRadosStore* store,
     bucket_info.layout = std::move(prev); // restore in-memory layout
 
     // unblock writes to the current index shard objects
-    int ret2 = set_resharding_status(dpp, store, bucket_info,
-                                     cls_rgw_reshard_status::NOT_RESHARDING);
+    int tries = 0;
+    int ret2 = 0;
+    do {
+      ret2 = set_resharding_status(dpp, store, bucket_info,
+				   cls_rgw_reshard_status::NOT_RESHARDING);
+      ++tries;
+      ldpp_dout(dpp, 1) << "WARNING: " << __func__
+			<< " set_resharding_status got -ECANCELED. Retrying."
+			<< dendl;
+    } while (ret2 == -ECANCELED && tries < max_retries);
     if (ret2 < 0) {
       ldpp_dout(dpp, 1) << "WARNING: " << __func__ << " failed to unblock "
           "writes to current index objects: " << cpp_strerror(ret2) << dendl;
