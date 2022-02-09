@@ -6870,7 +6870,7 @@ next:
       return ENOTSUP;
     }
     if (!RGWBucketReshard::can_reshard(bucket_info, zone_svc) &&
-	!yes_i_really_mean_it) {
+        !yes_i_really_mean_it) {
       std::cerr << "Bucket '" << bucket.name << "' already has too many "
           "log generations (" << bucket_info.layout.logs.size() << ") "
           "from previous reshards that peer zones haven't finished syncing. "
