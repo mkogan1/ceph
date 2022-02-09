@@ -6863,6 +6863,12 @@ next:
     }
 
     auto zone_svc = store->svc.zone;
+    if (!zone_svc->can_reshard()) {
+      const auto& zonegroup = zone_svc->get_zonegroup();
+      std::cerr << "The zonegroup '" << zonegroup.get_name() << "' does not "
+          "have the resharding feature enabled." << std::endl;
+      return ENOTSUP;
+    }
     if (!RGWBucketReshard::can_reshard(bucket_info, zone_svc) &&
 	!yes_i_really_mean_it) {
       std::cerr << "Bucket '" << bucket.name << "' already has too many "
@@ -6870,7 +6876,7 @@ next:
           "from previous reshards that peer zones haven't finished syncing. "
           "Resharding is not recommended until the old generations sync, but "
           "you can force a reshard with --yes-i-really-mean-it." << std::endl;
-      return -EINVAL;
+      return EINVAL;
     }
 
     RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr /* no callback */);
