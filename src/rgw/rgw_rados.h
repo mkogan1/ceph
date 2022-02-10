@@ -4,6 +4,7 @@
 #ifndef CEPH_RGWRADOS_H
 #define CEPH_RGWRADOS_H
 
+#include <iostream>
 #include <functional>
 #include <iomanip>
 #include <boost/container/flat_map.hpp>
@@ -1498,6 +1499,13 @@ public:
     int init(const rgw_bucket& _bucket, int sid, RGWBucketInfo* out);
     int init(const RGWBucketInfo& bucket_info, const rgw_obj& obj);
     int init(const RGWBucketInfo& bucket_info, int sid);
+
+    friend std::ostream& operator<<(std::ostream& out, const BucketShard& bs) {
+      out << "BucketShard:{ bucket=" << bs.bucket <<
+	", shard_id=" << bs.shard_id <<
+	", bucket_ojb=" << bs.bucket_obj << "}";
+      return out;
+    }
   };
 
   class Object {
