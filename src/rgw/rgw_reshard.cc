@@ -323,7 +323,7 @@ static int init_target_index(rgw::sal::RGWRadosStore* store,
 static int init_target_layout(rgw::sal::RGWRadosStore* store,
                               RGWBucketInfo& bucket_info,
 			      std::map<std::string, bufferlist>& bucket_attrs,
-                              const ReshardFaultInjector& fault,
+                              ReshardFaultInjector& fault,
                               uint32_t new_num_shards,
                               const DoutPrefixProvider* dpp)
 {
@@ -389,7 +389,7 @@ static int init_target_layout(rgw::sal::RGWRadosStore* store,
 static int revert_target_layout(rgw::sal::RGWRadosStore* store,
                                 RGWBucketInfo& bucket_info,
 				std::map<std::string, bufferlist>& bucket_attrs,
-                                const ReshardFaultInjector& fault,
+                                ReshardFaultInjector& fault,
                                 const DoutPrefixProvider* dpp)
 {
   auto& layout = bucket_info.layout;
@@ -427,7 +427,7 @@ static int revert_target_layout(rgw::sal::RGWRadosStore* store,
 static int init_reshard(rgw::sal::RGWRadosStore* store,
                         RGWBucketInfo& bucket_info,
 			std::map<std::string, bufferlist>& bucket_attrs,
-                        const ReshardFaultInjector& fault,
+                        ReshardFaultInjector& fault,
                         uint32_t new_num_shards,
                         const DoutPrefixProvider *dpp)
 {
@@ -455,7 +455,7 @@ static int init_reshard(rgw::sal::RGWRadosStore* store,
 static int cancel_reshard(rgw::sal::RGWRadosStore* store,
                           RGWBucketInfo& bucket_info,
 			  std::map<std::string, bufferlist>& bucket_attrs,
-                          const ReshardFaultInjector& fault,
+                          ReshardFaultInjector& fault,
                           const DoutPrefixProvider *dpp)
 {
   static constexpr auto max_retries = 10;
@@ -486,7 +486,7 @@ static int cancel_reshard(rgw::sal::RGWRadosStore* store,
 static int commit_reshard(rgw::sal::RGWRadosStore* store,
                           RGWBucketInfo& bucket_info,
 			  std::map<std::string, bufferlist>& bucket_attrs,
-                          const ReshardFaultInjector& fault,
+                          ReshardFaultInjector& fault,
                           const DoutPrefixProvider *dpp)
 {
   static constexpr auto max_retries = 10;
@@ -577,7 +577,7 @@ int RGWBucketReshard::clear_resharding(rgw::sal::RGWRadosStore* store,
 				       std::map<std::string, bufferlist>& bucket_attrs,
                                        const DoutPrefixProvider* dpp)
 {
-  constexpr ReshardFaultInjector no_fault;
+  ReshardFaultInjector no_fault;
   return cancel_reshard(store, bucket_info, bucket_attrs, no_fault, dpp);
 }
 
@@ -823,7 +823,7 @@ int RGWBucketReshard::get_status(const DoutPrefixProvider *dpp, list<cls_rgw_buc
 }
 
 int RGWBucketReshard::execute(int num_shards,
-                              const ReshardFaultInjector& fault,
+                              ReshardFaultInjector& fault,
                               int max_op_entries,
                               const DoutPrefixProvider *dpp,
                               bool verbose, ostream *out,
