@@ -20,6 +20,7 @@
 #include "common/errno.h"
 #include "common/Formatter.h"
 #include "common/Throttle.h"
+#include "common/BackTrace.h"
 
 #include "rgw_rados.h"
 #include "rgw_zone.h"
@@ -98,6 +99,12 @@ using namespace librados;
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rgw
 
+#define ldout_bitx(_bitx, _ctx, _level, _out) \
+  if(_bitx) { \
+    ldout(_ctx, 0) << "BITX: " << _out << dendl; \
+  } else { \
+    ldout(_ctx, _level) << _out << dendl; \
+  }
 
 static string shadow_ns = "shadow";
 static string dir_oid_prefix = ".dir.";
@@ -1132,11 +1139,22 @@ int RGWIndexCompletionThread::process()
 
     r = store->guard_reshard(&bs, c->obj, bucket_info,
 			     [&](RGWRados::BucketShard *bs) -> int {
+			       const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+			       ldout_bitx(bitx, cct, 10,
+					  "ENTERING " << __func__ << ": bucket-shard=" << bs <<
+					  " obj=" << c->obj << " tag=" << c->tag <<
+					  " op=" << c->op << ", remove_objs=" << c->remove_objs);
+			       ldout_bitx(bitx, cct, 25,
+					  "BACKTRACE: " << __func__ << ": " << BackTrace(1));
+
 			       librados::ObjectWriteOperation o;
 			       cls_rgw_guard_bucket_resharding(o, -ERR_BUSY_RESHARDING);
 			       cls_rgw_bucket_complete_op(o, c->op, c->tag, c->ver, c->key, c->dir_meta, &c->remove_objs,
 							  c->log_op, c->bilog_op, &c->zones_trace);
-			       return bs->index_ctx.operate(bs->bucket_obj, &o);
+			       int ret = bs->index_ctx.operate(bs->bucket_obj, &o);
+			       ldout_bitx(bitx, cct, 20,
+					  "EXITING " << __func__ << ": ret=" << ret);
+			       return ret;
                              });
     if (r < 0) {
       ldout(cct, 0) << "ERROR: " << __func__ << "(): bucket index completion failed, obj=" << c->obj << " r=" << r << dendl;
@@ -9293,6 +9311,12 @@ bool RGWRados::process_expire_objects()
 int RGWRados::cls_obj_prepare_op(BucketShard& bs, RGWModifyOp op, string& tag,
                                  rgw_obj& obj, uint16_t bilog_flags, rgw_zone_set *_zones_trace)
 {
+  const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+  ldout_bitx(bitx, cct, 10,
+	     "ENTERING " << __func__ << ": bucket-shard=" << bs << " obj=" << obj << " tag=" << tag << " op=" << op);
+  ldout_bitx(bitx, cct, 25,
+	     "BACKTRACE: " << __func__ << ": " << BackTrace(1));
+
   rgw_zone_set zones_trace;
   if (_zones_trace) {
     zones_trace = *_zones_trace;
@@ -9303,7 +9327,10 @@ int RGWRados::cls_obj_prepare_op(BucketShard& bs, RGWModifyOp op, string& tag,
   cls_rgw_obj_key key(obj.key.get_index_key_name(), obj.key.instance);
   cls_rgw_guard_bucket_resharding(o, -ERR_BUSY_RESHARDING);
   cls_rgw_bucket_prepare_op(o, op, tag, key, obj.key.get_loc(), svc.zone->get_zone().log_data, bilog_flags, zones_trace);
-  return bs.index_ctx.operate(bs.bucket_obj, &o);
+  int ret = bs.index_ctx.operate(bs.bucket_obj, &o);
+  ldout_bitx(bitx, cct, 20,
+	     "EXITING " << __func__ << ": ret=" << ret);
+  return ret;
 }
 
 int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModifyOp op, string& tag,
@@ -9311,6 +9338,14 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
                                   rgw_bucket_dir_entry& ent, RGWObjCategory category,
 				  list<rgw_obj_index_key> *remove_objs, uint16_t bilog_flags, rgw_zone_set *_zones_trace)
 {
+  const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+  ldout_bitx(bitx, cct, 10,
+	     "ENTERING " << __func__ << ": bucket-shard=" << bs <<
+	     " obj=" << obj << " tag=" << tag << " op=" << op <<
+	     ", remove_objs=" << (remove_objs ? *remove_objs : std::list<rgw_obj_index_key>()));
+  ldout_bitx(bitx, cct, 25,
+	     "BACKTRACE: " << __func__ << ": " << BackTrace(1));
+
   ObjectWriteOperation o;
   rgw_bucket_dir_entry_meta dir_meta;
   dir_meta = ent.meta;
@@ -9335,6 +9370,9 @@ int RGWRados::cls_obj_complete_op(BucketShard& bs, const rgw_obj& obj, RGWModify
   librados::AioCompletion *completion = arg->rados_completion;
   int ret = bs.index_ctx.aio_operate(bs.bucket_obj, arg->rados_completion, &o);
   completion->release(); /* can't reference arg here, as it might have already been released */
+
+  ldout_bitx(bitx, cct, 20,
+	     "EXITING " << __func__ << ": ret=" << ret);
   return ret;
 }
 
@@ -9428,18 +9466,22 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
 				      rgw_obj_index_key *last_entry,
 				      bool (*force_check_filter)(const string& name))
 {
+  const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+
   /* expansion_factor allows the number of entries to read to grow
    * exponentially; this is used when earlier reads are producing too
    * few results, perhaps due to filtering or to a series of
    * namespaced entries */
 
-  ldout(cct, 10) << "RGWRados::" << __func__ << ": " << bucket_info.bucket <<
-    " start_after=\"" << start_after.name <<
-    "[" << start_after.instance <<
-    "]\", prefix=\"" << prefix <<
-    "\" num_entries=" << num_entries <<
-    ", list_versions=" << list_versions <<
-    ", expansion_factor=" << expansion_factor << dendl;
+  ldout_bitx(bitx, cct, 10,
+	     "ENTERING " << __func__ << ": " << bucket_info.bucket <<
+	     " start_after=\"" << start_after <<
+	     "\", prefix=\"" << prefix <<
+	     "\" num_entries=" << num_entries <<
+	     ", list_versions=" << list_versions <<
+	     ", expansion_factor=" << expansion_factor);
+  ldout_bitx(bitx, cct, 25,
+	     "BACKTRACE: " << __func__ << ": " << BackTrace(1));
 
   m.clear();
 
@@ -9529,6 +9571,10 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
        * well. */
       librados::IoCtx sub_ctx;
       sub_ctx.dup(index_ctx);
+      ldout_bitx(bitx, cct, 20,
+		 "INFO: " << __func__ <<
+		 ": calling check_disk_state bucket=" << bucket_info.bucket <<
+		 " entry=" << dirent.key);
       r = check_disk_state(sub_ctx, bucket_info, dirent, dirent,
 			   updates[vnames[pos]]);
       if (r < 0 && r != -ENOENT) {
@@ -9568,6 +9614,10 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
       cls_rgw_suggest_changes(o, miter.second);
       // we don't care if we lose suggested updates, send them off blindly
       AioCompletion *c = librados::Rados::aio_create_completion(NULL, NULL, NULL);
+
+      ldout_bitx(bitx, cct, 10,
+		 "INFO: " << __func__ <<
+		 ": doing dir_suggest on " << miter.first);
       index_ctx.aio_operate(miter.first, c, &o);
       c->release();
     }
@@ -9601,6 +9651,8 @@ int RGWRados::cls_bucket_list_ordered(RGWBucketInfo& bucket_info,
       ": returning, last_entry NOT SET" << dendl;
   }
 
+  ldout_bitx(bitx, cct, 20,
+	     "EXITING " << __func__);
   return 0;
 }
 
@@ -9614,10 +9666,18 @@ int RGWRados::cls_bucket_list_unordered(RGWBucketInfo& bucket_info,
 					std::vector<rgw_bucket_dir_entry>& ent_list,
 					bool *is_truncated,
 					rgw_obj_index_key *last_entry,
-					bool (*force_check_filter)(const string& name)) {
-  ldout(cct, 10) << "cls_bucket_list_unordered " << bucket_info.bucket <<
-    " start " << start.name << "[" << start.instance <<
-    "] num_entries " << num_entries << dendl;
+					bool (*force_check_filter)(const string& name))
+{
+  const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+
+  ldout_bitx(bitx, cct, 10,
+	     "ENTERING " << __func__ << ": " << bucket_info.bucket <<
+	     " start_after=\"" << start <<
+	     "\", prefix=\"" << prefix <<
+	     "\", num_entries=" << num_entries <<
+	     ", list_versions=" << list_versions);
+  ldout_bitx(bitx, cct, 25,
+	     "BACKTRACE: " << __func__ << ": " << BackTrace(1));
 
   ent_list.clear();
   static MultipartMetaFilter multipart_meta_filter;
@@ -9702,6 +9762,10 @@ int RGWRados::cls_bucket_list_unordered(RGWBucketInfo& bucket_info,
 	 * and if the tags are old we need to do cleanup as well. */
 	librados::IoCtx sub_ctx;
 	sub_ctx.dup(index_ctx);
+	ldout_bitx(bitx, cct, 20,
+		   "INFO: " << __func__ <<
+		   ": calling check_disk_state bucket=" << bucket_info.bucket <<
+		   " entry=" << dirent.key);
 	r = check_disk_state(sub_ctx, bucket_info, dirent, dirent, updates[oid]);
 	if (r < 0 && r != -ENOENT) {
 	  return r;
@@ -9747,6 +9811,10 @@ check_updates:
       cls_rgw_suggest_changes(o, miter->second);
       // we don't care if we lose suggested updates, send them off blindly
       AioCompletion *c = librados::Rados::aio_create_completion(NULL, NULL, NULL);
+
+      ldout_bitx(bitx, cct, 10,
+		 "INFO: " << __func__ <<
+		 ": doing dir_suggest on " << miter->first);
       index_ctx.aio_operate(miter->first, c, &o);
       c->release();
     }
@@ -9756,6 +9824,8 @@ check_updates:
     *last_entry = last_added_entry;
   }
 
+  ldout_bitx(bitx, cct, 20,
+	     "EXITING " << __func__);
   return 0;
 } // RGWRados::cls_bucket_list_unordered
 
@@ -9834,6 +9904,13 @@ int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info,
 				     const std::list<rgw_obj_index_key>& entry_key_list)
 {
   const uint32_t num_shards = bucket_info.num_shards;
+  const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+  ldout_bitx(bitx, cct, 10,
+	     "ENTERING " << __func__ << ": bucket=" << bucket_info.bucket <<
+	     " entry_key_list.size()=" << entry_key_list.size());
+  ldout_bitx(bitx, cct, 25,
+	     "BACKTRACE: " << __func__ << ": " << BackTrace(1));
+
 
   librados::IoCtx index_ctx;
   uint8_t suggest_flag = (svc.zone->get_zone().log_data ? CEPH_RGW_DIR_SUGGEST_LOG_OP : 0);
@@ -9858,21 +9935,32 @@ int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info,
     entry.key = entry_key;
     entry.ver.epoch = highest_epoch;
 
-    dout(5) << __func__ << "bucket=" << bucket_info.bucket <<
-      " shard=" << shard <<
-      " obj=" << entry.key.name << ":" << entry.key.instance << dendl;
+    ldout_bitx(bitx, cct, 5,
+	       "INFO: " << __func__ <<
+	       ": encoding removal of bucket=" << bucket_info.bucket <<
+	       " shard=" << shard <<
+	       " entry=" << entry.key << " in updates");
 
     updates.append(CEPH_RGW_REMOVE | suggest_flag);
     encode(entry, updates);
   }
 
+  ldout_bitx(bitx, cct, 10,
+	     "INFO: " << __func__ <<
+	     ": calling dir_suggest on bucket=" << bucket_info.bucket << ", " <<
+	     sharded_updates.size() << " of " << index_oids.size() << " shards");
   // this operation ignores shards for which there's not an update, so
   // we can send the complete list of bucket index shard oids
-  return CLSRGWIssueBucketBIDirSuggest(index_ctx,
-				       index_oids,
-				       sharded_updates,
-				       cct->_conf->rgw_bucket_index_max_aio)();
+  r = CLSRGWIssueBucketBIDirSuggest(index_ctx,
+				    index_oids,
+				    sharded_updates,
+				    cct->_conf->rgw_bucket_index_max_aio)();
+
+  ldout_bitx(bitx, cct, 20,
+	     "EXITING " << __func__ << " and returning " << r);
+  return r;
 }
+
 
 int RGWRados::check_disk_state(librados::IoCtx io_ctx,
                                const RGWBucketInfo& bucket_info,
@@ -9880,6 +9968,11 @@ int RGWRados::check_disk_state(librados::IoCtx io_ctx,
                                rgw_bucket_dir_entry& object,
                                bufferlist& suggested_updates)
 {
+  const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
+  ldout_bitx(bitx, cct, 10,
+	     "ENTERING " << __func__ << " bucket=" <<
+	     bucket_info.bucket << " dir_entry=" << list_state.key);
+
   const rgw_bucket& bucket = bucket_info.bucket;
   uint8_t suggest_flag = (svc.zone->get_zone().log_data ? CEPH_RGW_DIR_SUGGEST_LOG_OP : 0);
 
@@ -9904,9 +9997,13 @@ int RGWRados::check_disk_state(librados::IoCtx io_ctx,
 
   list_state.pending_map.clear(); // we don't need this and it inflates size
   if (!astate->exists) {
+    ldout_bitx(bitx, cct, 10,
+	       "INFO: " << __func__ << ": disk state exists");
       /* object doesn't exist right now -- hopefully because it's
        * marked as !exists and got deleted */
     if (list_state.exists) {
+      ldout_bitx(bitx, cct, 10,
+		 "INFO: " << __func__ << ": index list state exists");
       /* FIXME: what should happen now? Work out if there are any
        * non-bad ways this could happen (there probably are, but annoying
        * to handle!) */
@@ -9914,6 +10011,9 @@ int RGWRados::check_disk_state(librados::IoCtx io_ctx,
     // encode a suggested removal of that key
     list_state.ver.epoch = io_ctx.get_last_version();
     list_state.ver.pool = io_ctx.get_id();
+    ldout_bitx(bitx, cct, 10,
+	       "INFO: " << __func__ << ": encoding remove of " <<
+	       list_state.key << " on suggested_updates");
     cls_rgw_encode_suggestion(CEPH_RGW_REMOVE, list_state, suggested_updates);
     return -ENOENT;
   }
@@ -9951,10 +10051,12 @@ int RGWRados::check_disk_state(librados::IoCtx io_ctx,
       rgw_raw_obj_to_obj(manifest.get_obj().bucket, raw_loc, &loc);
 
       if (loc.key.ns == RGW_OBJ_NS_MULTIPART) {
-	dout(10) << "check_disk_state(): removing manifest part from index: " << loc << dendl;
+	ldout_bitx(bitx, cct, 10,
+		   "INFO: " << __func__ << ": removing manifest part from index loc=" << loc);
 	r = delete_obj_index(loc, astate->mtime);
 	if (r < 0) {
-	  dout(0) << "WARNING: delete_obj_index() returned r=" << r << dendl;
+	  ldout_bitx(bitx, cct, 0,
+		     "WARNING: " << __func__ << ": delete_obj_index returned r=" << r);
 	}
       }
     }
@@ -9980,9 +10082,14 @@ int RGWRados::check_disk_state(librados::IoCtx io_ctx,
   list_state.meta.owner_display_name = owner.get_display_name();
 
   list_state.exists = true;
+  ldout_bitx(bitx, cct, 10,
+	     "INFO: " << __func__ <<
+	     ": encoding update of " << list_state.key << " on suggested_updates");
   cls_rgw_encode_suggestion(CEPH_RGW_UPDATE | suggest_flag, list_state, suggested_updates);
+
+  ldout_bitx(bitx, cct, 20, "EXITING " << __func__);
   return 0;
-}
+} // RGWRados::check_disk_state
 
 int RGWRados::cls_bucket_head(const RGWBucketInfo& bucket_info, int shard_id, vector<rgw_bucket_dir_header>& headers, map<int, string> *bucket_instance_ids)
 {
