@@ -1827,7 +1827,7 @@ public:
         bs_initialized = false;
       }
 
-      int guard_reshard(BucketShard **pbs, std::function<int(BucketShard *)> call);
+      int guard_reshard(const rgw_obj& obj_instance, BucketShard **pbs, std::function<int(BucketShard *)> call);
     public:
 
       UpdateIndex(RGWRados::Bucket *_target, const rgw_obj& _obj) : target(_target), obj(_obj),
@@ -2163,6 +2163,7 @@ public:
 		    RGWBucketInfo& bucket_info,
 		    std::function<int(BucketShard *)> call);
   int block_while_resharding(RGWRados::BucketShard *bs,
+                             const rgw_obj& obj_instance,
 			     RGWBucketInfo& bucket_info,
                              optional_yield y);
 
