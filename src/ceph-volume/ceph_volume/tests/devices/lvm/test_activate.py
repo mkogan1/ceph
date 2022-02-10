@@ -202,6 +202,7 @@ class TestActivate(object):
         assert fake_start_osd.calls != []
 
     def test_bluestore_no_systemd(self, is_root, monkeypatch, capture):
+        monkeypatch.setattr('ceph_volume.configuration.load', lambda: None)
         fake_enable = Capture()
         fake_start_osd = Capture()
         monkeypatch.setattr('ceph_volume.util.system.path_is_mounted', lambda *a, **kw: True)
@@ -224,6 +225,7 @@ class TestActivate(object):
         assert fake_start_osd.calls == []
 
     def test_bluestore_systemd(self, is_root, monkeypatch, capture):
+        monkeypatch.setattr('ceph_volume.configuration.load', lambda: None)
         fake_enable = Capture()
         fake_start_osd = Capture()
         monkeypatch.setattr('ceph_volume.util.system.path_is_mounted', lambda *a, **kw: True)
@@ -247,6 +249,7 @@ class TestActivate(object):
         assert fake_start_osd.calls != []
 
     def test_bluestore_no_systemd_autodetect(self, is_root, monkeypatch, capture):
+        monkeypatch.setattr('ceph_volume.configuration.load', lambda: None)
         fake_enable = Capture()
         fake_start_osd = Capture()
         monkeypatch.setattr('ceph_volume.util.system.path_is_mounted', lambda *a, **kw: True)
@@ -270,6 +273,7 @@ class TestActivate(object):
         assert fake_start_osd.calls == []
 
     def test_bluestore_systemd_autodetect(self, is_root, monkeypatch, capture):
+        monkeypatch.setattr('ceph_volume.configuration.load', lambda: None)
         fake_enable = Capture()
         fake_start_osd = Capture()
         monkeypatch.setattr('ceph_volume.util.system.path_is_mounted',
