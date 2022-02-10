@@ -6858,7 +6858,7 @@ int RGWRados::Object::Read::range_to_ofs(uint64_t obj_size, int64_t &ofs, int64_
   return 0;
 }
 
-int RGWRados::Bucket::UpdateIndex::guard_reshard(BucketShard **pbs, std::function<int(BucketShard *)> call)
+int RGWRados::Bucket::UpdateIndex::guard_reshard(const rgw_obj& obj_instance, BucketShard **pbs, std::function<int(BucketShard *)> call)
 {
   RGWRados *store = target->get_store();
   BucketShard *bs;
@@ -6876,7 +6876,7 @@ int RGWRados::Bucket::UpdateIndex::guard_reshard(BucketShard **pbs, std::functio
       break;
     }
     ldout(store->ctx(), 0) << "NOTICE: resharding operation on bucket index detected, blocking" << dendl;
-    r = store->block_while_resharding(bs, target->bucket_info, null_yield);
+    r = store->block_while_resharding(bs, obj_instance, target->bucket_info, null_yield);
     if (r == -ERR_BUSY_RESHARDING) {
       continue;
     }
@@ -6914,7 +6914,7 @@ int RGWRados::Bucket::UpdateIndex::prepare(RGWModifyOp op, const string *write_t
     }
   }
 
-  int r = guard_reshard(nullptr, [&](BucketShard *bs) -> int {
+  int r = guard_reshard(obj, nullptr, [&](BucketShard *bs) -> int {
 				   return store->cls_obj_prepare_op(*bs, op, optag, obj, bilog_flags, zones_trace);
 				 });
 
@@ -7010,7 +7010,7 @@ int RGWRados::Bucket::UpdateIndex::cancel(list<rgw_obj_index_key> *remove_objs)
   RGWRados *store = target->get_store();
   BucketShard *bs;
 
-  int ret = guard_reshard(&bs, [&](BucketShard *bs) -> int {
+  int ret = guard_reshard(obj, &bs, [&](BucketShard *bs) -> int {
 				 return store->cls_obj_complete_cancel(*bs, optag, obj, remove_objs, bilog_flags, zones_trace);
 			       });
 
@@ -7491,7 +7491,7 @@ int RGWRados::guard_reshard(BucketShard *bs,
       break;
     }
     ldout(cct, 0) << "NOTICE: resharding operation on bucket index detected, blocking" << dendl;
-    r = block_while_resharding(bs, bucket_info, null_yield);
+    r = block_while_resharding(bs, obj_instance, bucket_info, null_yield);
     if (r == -ERR_BUSY_RESHARDING) {
       continue;
     }
@@ -7510,6 +7510,7 @@ int RGWRados::guard_reshard(BucketShard *bs,
 }
 
 int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
+                                     const rgw_obj& obj_instance,
                                      RGWBucketInfo& bucket_info,
                                      optional_yield y)
 {
@@ -7526,11 +7527,20 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
   // new_bucket_id and returns 0, otherwise it returns a negative
   // error code
   auto fetch_new_bucket_info =
-    [this, &bucket_info, &bucket_attrs](const std::string& log_tag) -> int {
-      int ret = try_refresh_bucket_info(bucket_info, nullptr, &bucket_attrs);
+    [this, bs, &obj_instance, &bucket_info, &bucket_attrs](const std::string& log_tag) -> int {
+      auto obj_ctx = svc.sysobj->init_obj_ctx();
+      int ret = get_bucket_info(obj_ctx, bs->bucket.tenant, bs->bucket.name,
+				bucket_info, nullptr, &bucket_attrs);
       if (ret < 0) {
 	ldout(cct, 0) << __func__ <<
 	  " ERROR: failed to refresh bucket info after reshard at " <<
+	  log_tag << ": " << cpp_strerror(-ret) << dendl;
+	return ret;
+      }
+      ret = bs->init(bucket_info, obj_instance);
+      if (ret < 0) {
+	ldout(cct, 0) << __func__ <<
+	  " ERROR: failed to refresh bucket shard generation after reshard at " <<
 	  log_tag << ": " << cpp_strerror(-ret) << dendl;
 	return ret;
       }
