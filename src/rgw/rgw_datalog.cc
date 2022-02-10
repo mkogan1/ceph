@@ -637,10 +637,12 @@ int RGWDataChangesLog::add_entry(const RGWBucketInfo& bucket_info,
 		 << " cur_expiration=" << status->cur_expiration << dendl;
 
   if (now < status->cur_expiration) {
+    ldout(cct, 20) << "RGWDataChangesLog::add_entry() entry added within the data log window. bucket.name="
+      << bucket.name << " shard_id=" << shard_id << dendl;
     /* no need to send, recently completed */
-    sl.unlock();
-    register_renew(bs, gen);
-    return 0;
+    //sl.unlock();
+    //register_renew(bs, gen);
+    //return 0;
   }
 
   RefCountedCond* cond;
