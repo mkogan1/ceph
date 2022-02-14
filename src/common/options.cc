@@ -7516,6 +7516,9 @@ std::vector<Option> get_rgw_options() {
    .set_description("Turns on extra instrumentation surrounding bucket index "
 		    "transactions"),
 
+   Option("rgwlc_auto_session_clear", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+   .set_default(true)
+   .set_description("Automatically clear stale lifecycle sessions (i.e., after 2 idle processing cycles)"),
   });
 }
 
