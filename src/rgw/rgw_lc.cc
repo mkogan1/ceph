@@ -263,30 +263,6 @@ void RGWLC::finalize()
   delete[] obj_names;
 }
 
-bool RGWLC::if_already_run_today(time_t start_date)
-{
-  struct tm bdt;
-  time_t begin_of_day;
-  utime_t now = ceph_clock_now();
-  localtime_r(&start_date, &bdt);
-
-  if (cct->_conf->rgw_lc_debug_interval > 0) {
-    if (now - start_date < cct->_conf->rgw_lc_debug_interval)
-      return true;
-    else
-      return false;
-  }
-
-  bdt.tm_hour = 0;
-  bdt.tm_min = 0;
-  bdt.tm_sec = 0;
-  begin_of_day = mktime(&bdt);
-  if (now - begin_of_day < 24*60*60)
-    return true;
-  else
-    return false;
-}
-
 static inline std::ostream& operator<<(std::ostream &os, cls_rgw_lc_entry& ent) {
   os << "<ent: bucket=";
   os << ent.bucket;
@@ -1810,101 +1786,125 @@ int RGWLC::process_bucket(int index, int max_lock_secs, LCWorker* worker,
 int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 		   bool once = false)
 {
-  dout(5) << "RGWLC::process(): ENTER: "
+  int ret{0};
+  const auto& lc_shard = obj_names[index];
+
+  cls_rgw_lc_obj_head head;
+  cls_rgw_lc_entry entry, next_entry; //string = bucket_name:bucket_id, start_time, int = LC_BUCKET_STATUS
+
+  ldpp_dout(this, 5) << "RGWLC::process(): ENTER: "
 	  << "index: " << index << " worker ix: " << worker->ix
 	  << dendl;
 
   rados::cls::lock::Lock l(lc_index_lock_name);
+
   do {
     utime_t now = ceph_clock_now();
-    //string = bucket_name:bucket_id, start_time, int = LC_BUCKET_STATUS
-    cls_rgw_lc_entry entry;
-    if (max_lock_secs <= 0)
-      return -EAGAIN;
 
-    utime_t time(max_lock_secs, 0);
-    l.set_duration(time);
-
-    int ret = l.lock_exclusive(&store->lc_pool_ctx, obj_names[index]);
+    ret = l.lock_exclusive(&store->lc_pool_ctx, lc_shard);
     if (ret == -EBUSY || ret == -EEXIST) {
       /* already locked by another lc processor */
       ldpp_dout(this, 0) << "RGWLC::process() failed to acquire lock on "
-          << obj_names[index] << ", sleep 5, try again" << dendl;
+          << lc_shard << ", sleep 5, try again" << dendl;
       sleep(5);
       continue; // XXXX really retry forever?
     }
-    if (ret < 0)
+    if (ret < 0) {
       return 0;
+    }
 
-    cls_rgw_lc_obj_head head;
-    ret = cls_rgw_lc_get_head(store->lc_pool_ctx, obj_names[index], head);
+    /* preamble: find an inital bucket/marker */
+    ret = cls_rgw_lc_get_head(store->lc_pool_ctx, lc_shard, head);
     if (ret < 0) {
       ldpp_dout(this, 0) << "RGWLC::process() failed to get obj head "
-          << obj_names[index] << ", ret=" << ret << dendl;
+          << lc_shard << ", ret=" << ret << dendl;
       goto exit;
     }
 
-    if (! (cct->_conf->rgw_lc_lock_max_time == 9969)) {
-      ret = cls_rgw_lc_get_entry(store->lc_pool_ctx, obj_names[index],
-				 head.marker, entry);
-      if (ret >= 0) {
-	if (entry.status == lc_processing) {
-	  if (expired_session(entry.start_time)) {
-	    dout(5) << "RGWLC::process(): STALE lc session found for: " << entry
-		    << " index: " << index << " worker ix: " << worker->ix
-		    << " (clearing)"
-		    << dendl;
-	  } else {
-	    dout(5) << "RGWLC::process(): ACTIVE entry: " << entry
-		    << " index: " << index << " worker ix: " << worker->ix
-		  << dendl;
-	    goto exit;
-	  }
-	}
-      }
-    }
-
-    if(!if_already_run_today(head.start_date)) {
-      head.start_date = now;
-      head.marker.clear();
-      ret = bucket_lc_prepare(index, worker);
+    /* if there is nothing at head, try to reinitialize head.marker with the
+     * entry in the queue */
+    if (head.marker.empty()) {
+      vector<cls_rgw_lc_entry> entries;
+      int ret = cls_rgw_lc_list(store->lc_pool_ctx, lc_shard, head.marker, 1, entries);
       if (ret < 0) {
-      ldpp_dout(this, 0) << "RGWLC::process() failed to update lc object "
-			 << obj_names[index]
-			 << ", ret=" << ret
+	ldpp_dout(this, 0) << "RGWLC::process() sal_lc->list_entries(lc_shard, head.marker, 1, "
+			   << "entries) returned error ret==" << ret << dendl;
+	goto exit;
+      }
+      entry = entries.front();
+      head.marker = entry.bucket;
+      head.start_date = now;
+    } else {
+      ldpp_dout(this, 0) << "RGWLC::process() head.marker !empty() at START for shard=="
+			 << lc_shard << " head last stored at "
+			 << rgw_to_asctime(utime_t(time_t(head.start_date), 0))
 			 << dendl;
-      goto exit;
+
+      /* fetches the entry pointed to by head.bucket */
+      ret = cls_rgw_lc_get_entry(store->lc_pool_ctx, lc_shard, head.marker, entry);
+
+      if (ret < 0) {
+	ldpp_dout(this, 0) << "RGWLC::process() sal_lc->get_entry(lc_shard, head.marker, entry) "
+			   << "returned error ret==" << ret << dendl;
+	goto exit;
       }
     }
 
-    ret = cls_rgw_lc_get_next_entry(store->lc_pool_ctx, obj_names[index], head.marker, entry);
-    if (ret < 0) {
-      ldpp_dout(this, 0) << "RGWLC::process() failed to get obj entry "
-          << obj_names[index] << dendl;
+    if (! entry.bucket.empty()) {
+      if (entry.status == lc_processing) {
+        if (expired_session(entry.start_time)) {
+          ldpp_dout(this, 5)
+              << "RGWLC::process(): STALE lc session found for: " << entry
+              << " index: " << index << " worker ix: " << worker->ix
+              << " (clearing)" << dendl;
+        } else {
+          ldpp_dout(this, 5)
+              << "RGWLC::process(): ACTIVE entry: " << entry
+              << " index: " << index << " worker ix: " << worker->ix << dendl;
+          goto exit;
+        }
+      }
+    } else {
+      ldpp_dout(this, 0) << "RGWLC::process() entry.bucket.empty() == true at START 1"
+			 << " (this is impossible, but stop now)"
+                         << dendl;
       goto exit;
     }
 
-    /* termination condition (eof) */
-    if (entry.bucket.empty())
-      goto exit;
-
+    /* When there are no more entries to process, entry will be
+     * equivalent to an empty marker and so the following resets the
+     * processing for the shard automatically when processing is
+     * finished for the shard */
     ldpp_dout(this, 5) << "RGWLC::process(): START entry 1: " << entry
 	    << " index: " << index << " worker ix: " << worker->ix
 	    << dendl;
 
     entry.status = lc_processing;
-    ret = cls_rgw_lc_set_entry(store->lc_pool_ctx, obj_names[index], entry);
+    entry.start_time = now;
+
+    ret = cls_rgw_lc_set_entry(store->lc_pool_ctx, lc_shard, entry);
     if (ret < 0) {
       ldpp_dout(this, 0) << "RGWLC::process() failed to set obj entry "
-	      << obj_names[index] << entry.bucket << entry.status << dendl;
+	      << lc_shard << entry.bucket << entry.status << dendl;
       goto exit;
     }
 
-    head.marker = entry.bucket;
-    ret = cls_rgw_lc_put_head(store->lc_pool_ctx, obj_names[index],  head);
+    //ret = sal_lc->get_next_entry(lc_shard, entry.bucket, next_entry);
+    ret = cls_rgw_lc_get_next_entry(store->lc_pool_ctx, lc_shard, entry.bucket, next_entry);
+    if (ret < 0) {
+      ldpp_dout(this, 0) << "RGWLC::process() failed to get obj entry "
+          << lc_shard << dendl;
+      goto exit;
+    }
+
+    /* save the next position */
+    head.marker = next_entry.bucket;
+    head.start_date = now;
+
+    ret = cls_rgw_lc_put_head(store->lc_pool_ctx, lc_shard,  head);
     if (ret < 0) {
       ldpp_dout(this, 0) << "RGWLC::process() failed to put head "
-			 << obj_names[index]
+			 << lc_shard
 	      << dendl;
       goto exit;
     }
@@ -1916,12 +1916,29 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     l.unlock(&store->lc_pool_ctx, obj_names[index]);
     ret = bucket_lc_process(entry.bucket, worker, thread_stop_at());
     bucket_lc_post(index, max_lock_secs, entry, ret, worker);
-  } while(1 && !once);
+
+    /* done with this shard */
+    if (head.marker.empty()) {
+      ldpp_dout(this, 5) <<
+	"RGWLC::process() cycle finished lc_shard="
+			 << lc_shard
+			 << dendl;
+      ret = cls_rgw_lc_put_head(store->lc_pool_ctx, lc_shard, head);
+
+      
+      if (ret < 0) {
+	ldpp_dout(this, 0) << "RGWLC::process() failed to put head "
+			   << lc_shard
+			   << dendl;
+      }
+      goto exit;
+    }
+  } while(1 && !once && !going_down());
 
   return 0;
 
 exit:
-  l.unlock(&store->lc_pool_ctx, obj_names[index]);
+  l.unlock(&store->lc_pool_ctx, lc_shard);
   return 0;
 }
 
