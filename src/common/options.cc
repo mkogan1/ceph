@@ -7563,6 +7563,10 @@ std::vector<Option> get_rgw_options() {
    Option("rgwlc_auto_session_clear", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
    .set_default(true)
    .set_description("Automatically clear stale lifecycle sessions (i.e., after 2 idle processing cycles)"),
+
+   Option("rgwlc_skip_bucket_step", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+   .set_default(false)
+   .set_description("Conditionally skip the processing (but not the scheduling) of bucket lifecycle"),
   });
 }
 
