@@ -7,6 +7,7 @@
 #include "objclass/objclass.h"
 #include "osd/PrimaryLogPG.h"
 #include "osd/osd_types.h"
+#include "osd/osd_internal_types.h"
 
 #include "osd/ClassHandler.h"
 
@@ -737,6 +738,12 @@ const ConfigProxy& cls_get_config(cls_method_context_t hctx)
 {
   PrimaryLogPG::OpContext *ctx = *(PrimaryLogPG::OpContext **)hctx;
   return ctx->pg->get_cct()->_conf;
+}
+
+const object_info_t& cls_get_object_info(cls_method_context_t hctx)
+{
+  PrimaryLogPG::OpContext *ctx = *(PrimaryLogPG::OpContext **)hctx;
+  return ctx->obs->oi;
 }
 
 void cls_cxx_subop_version(cls_method_context_t hctx, string *s)
