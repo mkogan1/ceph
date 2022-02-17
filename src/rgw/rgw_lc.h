@@ -519,10 +519,9 @@ public:
 		     const std::string& bucket_entry_marker, bool once);
   bool expired_session(time_t started);
   time_t thread_stop_at();
-  int list_lc_progress(string& marker, uint32_t max_entries,
-		       vector<rgw::sal::Lifecycle::LCEntry>&, int& index);
-  int bucket_lc_prepare(int index, LCWorker* worker);
-  int bucket_lc_process(string& shard_id, LCWorker* worker, time_t stop_at,
+  int list_lc_progress(std::string& marker, uint32_t max_entries,
+		       std::vector<rgw::sal::Lifecycle::LCEntry>&, int& index);
+  int bucket_lc_process(std::string& shard_id, LCWorker* worker, time_t stop_at,
 			bool once);
   int bucket_lc_post(int index, int max_lock_sec,
 		     rgw::sal::Lifecycle::LCEntry& entry, int& result, LCWorker* worker);
