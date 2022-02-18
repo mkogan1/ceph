@@ -1160,6 +1160,7 @@ struct cls_rgw_lc_entry {
   std::string bucket;
   uint64_t start_time; // if in_progress
   uint32_t status;
+  std::string oid; // XXX do NOT serialize; NOT to be upstreamed
 
   cls_rgw_lc_entry()
     : start_time(0), status(0) {}
