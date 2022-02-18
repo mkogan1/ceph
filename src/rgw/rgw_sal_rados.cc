@@ -1256,7 +1256,8 @@ int RadosLifecycle::list_entries(const string& oid, const string& marker,
     return ret;
 
   for (auto& entry : cls_entries) {
-    entries.push_back(LCEntry(entry.bucket, entry.start_time, entry.status));
+    entries.push_back(LCEntry(entry.bucket, oid, entry.start_time,
+			      entry.status));
   }
 
   return ret;
