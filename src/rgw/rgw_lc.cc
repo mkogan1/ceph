@@ -1577,19 +1577,24 @@ int RGWLC::list_lc_progress(string& marker, uint32_t max_entries,
 {
   progress_map.clear();
   for(; index < max_objs; index++, marker="") {
+    const auto& lc_shard = obj_names[index];
     vector<cls_rgw_lc_entry> entries;
     int ret =
-      cls_rgw_lc_list(store->lc_pool_ctx, obj_names[index], marker,
+      cls_rgw_lc_list(store->lc_pool_ctx, lc_shard, marker,
 		      max_entries, entries);
     if (ret < 0) {
       if (ret == -ENOENT) {
         ldpp_dout(this, 10) << __func__ << "() ignoring unfound lc object="
-                             << obj_names[index] << dendl;
+                             << lc_shard << dendl;
         continue;
       } else {
         return ret;
       }
     }
+
+    /* fixup entries to include lc shard */
+    std::for_each(entries.begin(), entries.end(), [&](auto& elt){ elt.oid = lc_shard; });
+
     progress_map.reserve(progress_map.size() + entries.size());
     progress_map.insert(progress_map.end(), entries.begin(), entries.end());
 
