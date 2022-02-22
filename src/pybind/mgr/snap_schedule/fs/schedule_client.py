@@ -163,10 +163,15 @@ class SnapSchedClient(CephfsClient):
         dbinfo = None
         self.conn_lock.acquire()
         if fs not in self.sqlite_connections:
+            poolid = self.get_metadata_pool(fs)
+            assert poolid, f'fs "{fs}" not found'
             db = sqlite3.connect(':memory:', check_same_thread=False)
+            db.execute('PRAGMA FOREIGN_KEYS = 1')
+            db.execute('PRAGMA PAGE_SIZE = 65536')
+            db.execute('PRAGMA CACHE_SIZE = 256')
+            db.row_factory = sqlite3.Row
+            # check for legacy dump store
             with db:
-                db.row_factory = sqlite3.Row
-                db.execute("PRAGMA FOREIGN_KEYS = 1")
                 pool = self.get_metadata_pool(fs)
                 with open_ioctx(self, pool) as ioctx:
                     try:
