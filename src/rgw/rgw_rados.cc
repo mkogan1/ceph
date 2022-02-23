@@ -1120,7 +1120,7 @@ class RGWIndexCompletionThread : public RGWRadosThread {
   RGWRados *store;
 
   uint64_t interval_msec() override {
-    return 0;
+    return 5000; // check every 5 seconds
   }
 
   list<complete_op_data *> completions;
