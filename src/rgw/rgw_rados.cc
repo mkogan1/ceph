@@ -1116,125 +1116,63 @@ struct complete_op_data {
   }
 };
 
-class RGWIndexCompletionThread : public RGWRadosThread {
-  RGWRados *store;
-
-  uint64_t interval_msec() override {
-    return 5000; // check every 5 seconds
-  }
-
-  list<complete_op_data *> completions;
-
-  Mutex completions_lock;
-public:
-  RGWIndexCompletionThread(RGWRados *_store)
-    : RGWRadosThread(_store, "index-complete"), store(_store), completions_lock("RGWIndexCompletionThread::completions_lock") {}
-
-  int process() override;
-
-  void add_completion(complete_op_data *completion) {
-    {
-      Mutex::Locker l(completions_lock);
-      completions.push_back(completion);
-    }
-
-    signal();
-  }
-};
-
-int RGWIndexCompletionThread::process()
-{
-  list<complete_op_data *> comps;
-
-  {
-    Mutex::Locker l(completions_lock);
-    completions.swap(comps);
-  }
-
-  for (auto c : comps) {
-    std::unique_ptr<complete_op_data> up{c};
-
-    if (going_down()) {
-      continue;
-    }
-    ldout(store->ctx(), 20) << __func__ << "(): handling completion for key=" << c->key << dendl;
-
-    RGWRados::BucketShard bs(store);
-    RGWBucketInfo bucket_info;
-
-    int r = bs.init(c->obj.bucket, c->obj, &bucket_info);
-    if (r < 0) {
-      ldout(cct, 0) << "ERROR: " << __func__ << "(): failed to initialize BucketShard, obj=" << c->obj << " r=" << r << dendl;
-      /* not much to do */
-      continue;
-    }
-
-    r = store->guard_reshard(&bs, c->obj, bucket_info,
-			     [&](RGWRados::BucketShard *bs) -> int {
-			       const bool bitx = cct->_conf->rgw_bucket_index_transaction_instrumentation;
-			       ldout_bitx(bitx, cct, 10,
-					  "ENTERING " << __func__ << ": bucket-shard=" << bs <<
-					  " obj=" << c->obj << " tag=" << c->tag <<
-					  " op=" << c->op << ", remove_objs=" << c->remove_objs);
-			       ldout_bitx(bitx, cct, 25,
-					  "BACKTRACE: " << __func__ << ": " << BackTrace(1));
-
-			       librados::ObjectWriteOperation o;
-			       cls_rgw_guard_bucket_resharding(o, -ERR_BUSY_RESHARDING);
-			       cls_rgw_bucket_complete_op(o, c->op, c->tag, c->ver, c->key, c->dir_meta, &c->remove_objs,
-							  c->log_op, c->bilog_op, &c->zones_trace);
-			       int ret = bs->index_ctx.operate(bs->bucket_obj, &o);
-			       ldout_bitx(bitx, cct, 20,
-					  "EXITING " << __func__ << ": ret=" << ret);
-			       return ret;
-                             });
-    if (r < 0) {
-      ldout(cct, 0) << "ERROR: " << __func__ << "(): bucket index completion failed, obj=" << c->obj << " r=" << r << dendl;
-      /* ignoring error, can't do anything about it */
-      continue;
-    }
-    add_datalog_entry(cct, store->data_log, bucket_info, bs.shard_id);
-  }
-
-  return 0;
-}
-
 class RGWIndexCompletionManager {
-  RGWRados *store{nullptr};
-  vector<Mutex *> locks;
-  vector<set<complete_op_data *> > completions;
+  RGWRados* const store;
+  const int num_shards;
+  ceph::containers::tiny_vector<ceph::mutex> locks;
+  std::vector<set<complete_op_data*>> completions;
+  std::vector<complete_op_data*> retry_completions;
 
-  RGWIndexCompletionThread *completion_thread{nullptr};
+  std::thread retry_thread;
+  std::condition_variable cond;
+  std::mutex retry_completions_lock;
 
-  int num_shards;
+  bool _stop{false};
 
   std::atomic<int> cur_shard {0};
 
-
-public:
-  RGWIndexCompletionManager(RGWRados *_store) : store(_store) {
-    num_shards = store->ctx()->_conf->rgw_thread_pool_size;
-
-    for (int i = 0; i < num_shards; i++) {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "RGWIndexCompletionManager::lock::%d", i);
-      locks.push_back(new Mutex(buf));
+  void process();
+  
+  void add_completion(complete_op_data *completion);
+  
+  void stop() {
+    if (retry_thread.joinable()) {
+      _stop = true;
+      cond.notify_all();
+      retry_thread.join();
     }
 
-    completions.resize(num_shards);
-  }
-  ~RGWIndexCompletionManager() {
-    stop();
-
-    for (auto l : locks) {
-      delete l;
+    for (int i = 0; i < num_shards; ++i) {
+      std::lock_guard l{locks[i]};
+      for (auto c : completions[i]) {
+        c->stop();
+      }
     }
+    completions.clear();
   }
-
+  
   int next_shard() {
     int result = cur_shard % num_shards;
     cur_shard++;
     return result;
+  }
+
+public:
+  RGWIndexCompletionManager(RGWRados *_store) :
+    store(_store),
+    num_shards(store->ctx()->_conf->rgw_thread_pool_size),
+    locks{ceph::make_lock_container<ceph::mutex>(
+      num_shards,
+      [](const size_t i) {
+        return ceph::make_mutex("RGWIndexCompletionManager::lock::" +
+				std::to_string(i));
+      })},
+    completions(num_shards),
+    retry_thread(&RGWIndexCompletionManager::process, this)
+    {}
+
+  ~RGWIndexCompletionManager() {
+    stop();
   }
 
   void create_completion(const rgw_obj& obj,
@@ -1246,37 +1184,18 @@ public:
                          uint16_t bilog_op,
                          rgw_zone_set *zones_trace,
                          complete_op_data **result);
+
   bool handle_completion(completion_t cb, complete_op_data *arg);
 
-  int start() {
-    completion_thread = new RGWIndexCompletionThread(store);
-    int ret = completion_thread->init();
-    if (ret < 0) {
-      return ret;
-    }
-    completion_thread->start();
-    return 0;
-  }
-  void stop() {
-    if (completion_thread) {
-      completion_thread->stop();
-      delete completion_thread;
-    }
-
-    for (int i = 0; i < num_shards; ++i) {
-      Mutex::Locker l(*locks[i]);
-      for (auto c : completions[i]) {
-        c->stop();
-      }
-    }
-    completions.clear();
+  CephContext* ctx() {
+    return store->ctx();
   }
 };
 
 static void obj_complete_cb(completion_t cb, void *arg)
 {
-  complete_op_data *completion = (complete_op_data *)arg;
-  completion->lock.Lock();
+  complete_op_data *completion = reinterpret_cast<complete_op_data*>(arg);
+  completion->lock.lock();
   if (completion->stopped) {
     completion->lock.Unlock(); /* can drop lock, no one else is referencing us */
     delete completion;
@@ -1289,6 +1208,65 @@ static void obj_complete_cb(completion_t cb, void *arg)
   }
 }
 
+void RGWIndexCompletionManager::process()
+{
+  DoutPrefix dpp(store->ctx(), dout_subsys, "rgw index completion thread: ");
+  while(!_stop) {
+    std::vector<complete_op_data*> comps;
+
+    {
+      std::unique_lock l{retry_completions_lock};
+      cond.wait(l, [this](){return _stop || !retry_completions.empty();});
+      if (_stop) {
+        return;
+      }
+      retry_completions.swap(comps);
+    }
+
+    for (auto c : comps) {
+      std::unique_ptr<complete_op_data> up{c};
+
+      ldpp_dout(&dpp, 20) << __func__ << "(): handling completion for key=" << c->key << dendl;
+
+      RGWRados::BucketShard bs(store);
+      RGWBucketInfo bucket_info;
+
+      int r = bs.init(c->obj.bucket, c->obj, &bucket_info);
+      if (r < 0) {
+        ldpp_dout(&dpp, 0) << "ERROR: " << __func__ << "(): failed to initialize BucketShard, obj=" << c->obj << " r=" << r << dendl;
+        /* not much to do */
+        continue;
+      }
+
+      r = store->guard_reshard(&bs, c->obj, bucket_info,
+			     [&](RGWRados::BucketShard *bs) -> int {
+			       const bool bitx = ctx()->_conf->rgw_bucket_index_transaction_instrumentation;
+			       ldout_bitx(bitx, ctx(), 10,
+					  "ENTERING " << __func__ << ": bucket-shard=" << bs <<
+					  " obj=" << c->obj << " tag=" << c->tag <<
+					  " op=" << c->op << ", remove_objs=" << c->remove_objs);
+			       ldout_bitx(bitx, ctx(), 25,
+					  "BACKTRACE: " << __func__ << ": " << BackTrace(1));
+
+			       librados::ObjectWriteOperation o;
+			       cls_rgw_guard_bucket_resharding(o, -ERR_BUSY_RESHARDING);
+			       cls_rgw_bucket_complete_op(o, c->op, c->tag, c->ver, c->key, c->dir_meta, &c->remove_objs,
+							  c->log_op, c->bilog_op, &c->zones_trace);
+			       int ret = bs->index_ctx.operate(bs->bucket_obj, &o);
+			       ldout_bitx(bitx, ctx(), 20,
+					  "EXITING " << __func__ << ": ret=" << ret);
+			       return ret;
+                             });
+      if (r < 0) {
+        ldpp_dout(&dpp, 0) << "ERROR: " << __func__ << "(): bucket index completion failed, obj=" << c->obj << " r=" << r << dendl;
+        /* ignoring error, can't do anything about it */
+        continue;
+      }
+
+      add_datalog_entry(ctx(), store->data_log, bucket_info, bs.shard_id);
+    }
+  }
+}
 
 void RGWIndexCompletionManager::create_completion(const rgw_obj& obj,
                                                   RGWModifyOp op, string& tag,
@@ -1331,20 +1309,30 @@ void RGWIndexCompletionManager::create_completion(const rgw_obj& obj,
 
   entry->rados_completion = librados::Rados::aio_create_completion(entry, NULL, obj_complete_cb);
 
-  Mutex::Locker l(*locks[shard_id]);
-  completions[shard_id].insert(entry);
+  std::lock_guard l{locks[shard_id]};
+  const auto ok = completions[shard_id].insert(entry).second;
+  ceph_assert(ok);
+}
+
+void RGWIndexCompletionManager::add_completion(complete_op_data *completion) {
+  {
+    std::lock_guard l{retry_completions_lock};
+    retry_completions.push_back(completion);
+  }
+  cond.notify_all();
 }
 
 bool RGWIndexCompletionManager::handle_completion(completion_t cb, complete_op_data *arg)
 {
   int shard_id = arg->manager_shard_id;
   {
-    Mutex::Locker l(*locks[shard_id]);
+    std::lock_guard l(locks[shard_id]);
 
     auto& comps = completions[shard_id];
 
     auto iter = comps.find(arg);
     if (iter == comps.end()) {
+      ldout(arg->manager->ctx(), 0) << __func__ << "(): cannot find completion for obj=" << arg->key << dendl;
       return true;
     }
 
@@ -1353,9 +1341,13 @@ bool RGWIndexCompletionManager::handle_completion(completion_t cb, complete_op_d
 
   int r = rados_aio_get_return_value(cb);
   if (r != -ERR_BUSY_RESHARDING) {
+    ldout(arg->manager->ctx(), 20) << __func__ << "(): completion " << 
+      (r == 0 ? "ok" : "failed with " + to_string(r)) << 
+      " for obj=" << arg->key << dendl;
     return true;
   }
-  completion_thread->add_completion(arg);
+  add_completion(arg);
+  ldout(arg->manager->ctx(), 20) << __func__ << "(): async completion added for obj=" << arg->key << dendl;
   return false;
 }
 
@@ -1730,10 +1722,6 @@ int RGWRados::init_complete()
   }
 
   index_completion_manager = new RGWIndexCompletionManager(this);
-  ret = index_completion_manager->start();
-  if (ret < 0) {
-    return ret;
-  }
   ret = rgw::notify::init(cct, this);
   if (ret < 0 ) {
     ldout(cct, 1) << "ERROR: failed to initialize notification manager" << dendl;
@@ -6873,27 +6861,34 @@ int RGWRados::Bucket::UpdateIndex::guard_reshard(const rgw_obj& obj_instance, Bu
   for (int i = 0; i < NUM_RESHARD_RETRIES; ++i) {
     int ret = get_bucket_shard(&bs);
     if (ret < 0) {
-      ldout(store->ctx(), 5) << "failed to get BucketShard object: ret=" << ret << dendl;
+      ldout(store->ctx(), 0) << "ERROR: failed to get BucketShard object. obj=" << 
+        obj_instance.key << ". ret=" << ret << dendl;
       return ret;
     }
     r = call(bs);
     if (r != -ERR_BUSY_RESHARDING) {
       break;
     }
-    ldout(store->ctx(), 0) << "NOTICE: resharding operation on bucket index detected, blocking" << dendl;
+    ldout(store->ctx(), 0) << "NOTICE: resharding operation on bucket index detected, blocking. obj=" << 
+      obj_instance.key << dendl;
     r = store->block_while_resharding(bs, obj_instance, target->bucket_info, null_yield);
     if (r == -ERR_BUSY_RESHARDING) {
+      ldout(store->ctx(), 0) << "ERROR: block_while_resharding() still busy. obj=" << dendl;
       continue;
     }
     if (r < 0) {
+      ldout(store->ctx(), 0) << "ERROR: block_while_resharding() failed. obj=" << 
+        obj_instance.key << ". ret=" << r << dendl;
       return r;
     }
-    ldout(store->ctx(), 20) << "reshard completion identified" << dendl;
+    ldout(store->ctx(), 20) << "reshard completion identified. obj=" << obj_instance.key << dendl;
     i = 0; /* resharding is finished, make sure we can retry */
     invalidate_bs();
   } // for loop
 
   if (r < 0) {
+    ldout(store->ctx(), 0) << "ERROR: bucket shard callback failed. obj=" << 
+      obj_instance.key << ". ret=" << r << dendl;
     return r;
   }
 
