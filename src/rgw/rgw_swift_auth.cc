@@ -417,7 +417,7 @@ ExternalTokenEngine::authenticate(const DoutPrefixProvider* dpp,
   char url_buf[auth_url.size() + 1 + token.length() + 1];
   sprintf(url_buf, "%s/%s", auth_url.c_str(), token.c_str());
 
-  RGWHTTPHeadersCollector validator(cct, "GET", url_buf, { "X-Auth-Groups", "X-Auth-Ttl" });
+  RGWHTTPHeadersCollector validator(cct, "GET", url_buf, { "X-Auth-Groups", "X-Auth-Ttl" }, __PRETTY_FUNCTION__);
 
   ldpp_dout(dpp, 10) << "rgw_swift_validate_token url=" << url_buf << dendl;
 

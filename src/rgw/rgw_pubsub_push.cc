@@ -63,7 +63,7 @@ private:
         const std::string& endpoint,
         ack_level_t _ack_level,
         bool verify_ssl) :
-      RGWPostHTTPData(_sync_env->cct, "POST", endpoint, &read_bl, verify_ssl),
+      RGWPostHTTPData(_sync_env->cct, "POST", endpoint, &read_bl, verify_ssl, "PubSubPost"),
       RGWSimpleCoroutine(_sync_env->cct), 
       sync_env(_sync_env),
       ack_level (_ack_level) {
@@ -137,7 +137,7 @@ public:
 
   int send_to_completion_async(CephContext* cct, const rgw_pubsub_s3_event& event, optional_yield y) override {
     bufferlist read_bl;
-    RGWPostHTTPData request(cct, "POST", endpoint, &read_bl, verify_ssl);
+    RGWPostHTTPData request(cct, "POST", endpoint, &read_bl, verify_ssl, "PubSubSendToCompletion");
     const auto post_data = json_format_pubsub_event(event);
     request.set_post_data(post_data);
     request.set_send_length(post_data.length());

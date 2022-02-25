@@ -272,7 +272,7 @@ protected:
     concat_url(secret_url, std::string(infix));
     concat_url(secret_url, std::string(key_id));
 
-    RGWHTTPTransceiver secret_req(cct, method, secret_url, &secret_bl);
+    RGWHTTPTransceiver secret_req(cct, method, secret_url, &secret_bl, "ValutSecretEngine");
 
     if (postdata.length()) {
       secret_req.set_post_data(postdata);
@@ -925,7 +925,7 @@ static int request_key_from_barbican(CephContext *cct,
   concat_url(secret_url, std::string(key_id));
 
   bufferlist secret_bl;
-  RGWHTTPTransceiver secret_req(cct, "GET", secret_url, &secret_bl);
+  RGWHTTPTransceiver secret_req(cct, "GET", secret_url, &secret_bl, __func__);
   secret_req.append_header("Accept", "application/octet-stream");
   secret_req.append_header("X-Auth-Token", barbican_token);
 
