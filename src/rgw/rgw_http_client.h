@@ -21,6 +21,8 @@ void rgw_http_client_cleanup();
 struct rgw_http_req_data;
 class RGWHTTPManager;
 
+const std::string& get_stamp(const rgw_http_req_data* req);
+
 class RGWIOIDProvider
 {
   std::atomic<int64_t> max = {0};
@@ -154,19 +156,19 @@ public:
   static constexpr int HTTPCLIENT_IO_CONTROL = 0x4;
 
   virtual ~RGWHTTPClient();
-  const string stamp =
-    (method + ":" + url + ":" +
-     to_string(real_clock::now().time_since_epoch().count()));
+  const string stamp;
   explicit RGWHTTPClient(CephContext *cct,
                          const string& _method,
-                         const string& _url)
+                         const string& _url,
+			 std::string stamp)
     : has_send_len(false),
       http_status(HTTP_STATUS_NOSTATUS),
       req_data(nullptr),
       verify_ssl(cct->_conf->rgw_verify_ssl),
       cct(cct),
       method(_method),
-      url(_url) {
+      url(_url),
+      stamp(std::move(stamp)) {
   }
 
   void append_header(const string& name, const string& val) {
@@ -251,8 +253,9 @@ public:
   RGWHTTPHeadersCollector(CephContext * const cct,
                           const string& method,
                           const string& url,
-                          const header_spec_t &relevant_headers)
-    : RGWHTTPClient(cct, method, url),
+                          const header_spec_t &relevant_headers,
+			  string stamp)
+    : RGWHTTPClient(cct, method, url, std::move(stamp)),
       relevant_headers(relevant_headers) {
   }
 
@@ -284,8 +287,9 @@ public:
                      const string& method,
                      const string& url,
                      bufferlist * const read_bl,
+		     string stamp,
                      const header_spec_t intercept_headers = {})
-    : RGWHTTPHeadersCollector(cct, method, url, intercept_headers),
+    : RGWHTTPHeadersCollector(cct, method, url, intercept_headers, std::move(stamp)),
       read_bl(read_bl),
       post_data_index(0) {
   }
@@ -295,8 +299,9 @@ public:
                      const string& url,
                      bufferlist * const read_bl,
                      const bool verify_ssl,
+		     string stamp,
                      const header_spec_t intercept_headers = {})
-    : RGWHTTPHeadersCollector(cct, method, url, intercept_headers),
+    : RGWHTTPHeadersCollector(cct, method, url, intercept_headers, std::move(stamp)),
       read_bl(read_bl),
       post_data_index(0) {
     set_verify_ssl(verify_ssl);

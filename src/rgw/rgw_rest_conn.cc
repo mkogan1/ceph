@@ -106,7 +106,11 @@ int RGWRESTConn::forward(const rgw_user& uid, req_info& info, obj_version *objv,
     snprintf(buf, sizeof(buf), "%lld", (long long)objv->ver);
     params.push_back(param_pair_t(RGW_SYS_PARAM_PREFIX "ver", buf));
   }
-  RGWRESTSimpleRequest req(cct, info.method, url, NULL, &params);
+  RGWRESTSimpleRequest req(
+    cct, info.method, url, NULL, &params,
+    (string(info.method) + "_" +
+     to_string(real_clock::now().time_since_epoch().count()) + "_" +
+     url));
   return req.forward_request(key, info, max_response, inbl, outbl);
 }
 
@@ -131,7 +135,11 @@ int RGWRESTConn::put_obj_send_init(rgw_obj& obj, const rgw_http_param_pair *extr
     append_param_list(params, extra_params);
   }
 
-  RGWRESTStreamS3PutObj *wr = new RGWRESTStreamS3PutObj(cct, "PUT", url, NULL, &params, host_style);
+  RGWRESTStreamS3PutObj *wr = new RGWRESTStreamS3PutObj(
+    cct, "PUT", url, NULL, &params,
+    ("PUT"s + "_" + to_string(real_clock::now().time_since_epoch().count()) +
+     "_" + url),
+    host_style);
   wr->send_init(obj);
   *req = wr;
   return 0;
@@ -148,7 +156,12 @@ int RGWRESTConn::put_obj_async(const rgw_user& uid, rgw_obj& obj, uint64_t obj_s
 
   param_vec_t params;
   populate_params(params, &uid, self_zone_group);
-  RGWRESTStreamS3PutObj *wr = new RGWRESTStreamS3PutObj(cct, "PUT", url, NULL, &params, host_style);
+  RGWRESTStreamS3PutObj *wr = new RGWRESTStreamS3PutObj(
+    cct, "PUT", url, NULL, &params,
+    ("PUT"s + "_" +
+     to_string(real_clock::now().time_since_epoch().count()) + "_" +
+     url),
+    host_style);
   ret = wr->put_obj_init(key, obj, obj_size, attrs, send);
   if (ret < 0) {
     delete wr;
@@ -237,9 +250,18 @@ int RGWRESTConn::get_obj(const rgw_obj& obj, const get_obj_params& in_params, bo
     params.push_back(param_pair_t("versionId", instance));
   }
   if (in_params.get_op) {
-    *req = new RGWRESTStreamReadRequest(cct, url, in_params.cb, NULL, &params, host_style);
+    *req = new RGWRESTStreamReadRequest(
+      cct, url, in_params.cb, NULL, &params,
+      ("GET"s + "_" +
+       to_string(real_clock::now().time_since_epoch().count()) + "_" +
+       url),
+      host_style);
   } else {
-    *req = new RGWRESTStreamHeadRequest(cct, url, in_params.cb, NULL, &params);
+    *req = new RGWRESTStreamHeadRequest(
+      cct, url, in_params.cb, NULL, &params,
+      ("GET"s + "_" +
+       to_string(real_clock::now().time_since_epoch().count()) + "_" +
+       url));
   }
   map<string, string> extra_headers;
   if (in_params.info) {
@@ -329,7 +351,10 @@ int RGWRESTConn::get_resource(const string& resource,
 
   RGWStreamIntoBufferlist cb(bl);
 
-  RGWRESTStreamReadRequest req(cct, url, &cb, NULL, &params, host_style);
+  RGWRESTStreamReadRequest req(
+    cct, url, &cb, NULL, &params,
+    ("GET"s + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + url),
+    host_style);
 
   map<string, string> headers;
   if (extra_headers) {
@@ -352,7 +377,8 @@ RGWRESTReadResource::RGWRESTReadResource(RGWRESTConn *_conn,
                                          RGWHTTPManager *_mgr)
   : cct(_conn->get_ctx()), conn(_conn), resource(_resource),
     params(make_param_list(pp)), cb(bl), mgr(_mgr),
-    req(cct, conn->get_url(), &cb, NULL, NULL)
+    req(cct, conn->get_url(), &cb, NULL, NULL,
+	("GET"s + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + conn->get_url() + "/" + resource))
 {
   init_common(extra_headers);
 }
@@ -363,7 +389,8 @@ RGWRESTReadResource::RGWRESTReadResource(RGWRESTConn *_conn,
 					 param_vec_t *extra_headers,
                                          RGWHTTPManager *_mgr)
   : cct(_conn->get_ctx()), conn(_conn), resource(_resource), params(_params),
-    cb(bl), mgr(_mgr), req(cct, conn->get_url(), &cb, NULL, NULL)
+    cb(bl), mgr(_mgr), req(cct, conn->get_url(), &cb, NULL, NULL,
+			   ("GET"s + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + conn->get_url() + "/" + resource))
 {
   init_common(extra_headers);
 }
@@ -409,7 +436,9 @@ RGWRESTSendResource::RGWRESTSendResource(RGWRESTConn *_conn,
                                          RGWHTTPManager *_mgr)
   : cct(_conn->get_ctx()), conn(_conn), method(_method), resource(_resource),
     params(make_param_list(pp)), cb(bl), mgr(_mgr),
-    req(cct, method.c_str(), conn->get_url(), &cb, NULL, NULL, _conn->get_host_style())
+    req(cct, method.c_str(), conn->get_url(), &cb, NULL, NULL,
+	(method + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + conn->get_url() + "/" + resource),
+	_conn->get_host_style())
 {
   init_common(extra_headers);
 }
@@ -421,7 +450,9 @@ RGWRESTSendResource::RGWRESTSendResource(RGWRESTConn *_conn,
 					 param_vec_t *extra_headers,
                                          RGWHTTPManager *_mgr)
   : cct(_conn->get_ctx()), conn(_conn), method(_method), resource(_resource), params(params),
-    cb(bl), mgr(_mgr), req(cct, method.c_str(), conn->get_url(), &cb, NULL, NULL, _conn->get_host_style())
+    cb(bl), mgr(_mgr), req(cct, method.c_str(), conn->get_url(), &cb, NULL, NULL,
+			   (method + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + conn->get_url() + "/" + resource),
+			   _conn->get_host_style())
 {
   init_common(extra_headers);
 }

@@ -132,6 +132,10 @@ struct rgw_http_req_data : public RefCountedObject {
   CURL *get_easy_handle() const;
 };
 
+const std::string& get_stamp(const rgw_http_req_data* req) {
+  return req->client->stamp;
+}
+
 struct RGWCurlHandle {
   int uses;
   mono_time lastuse;

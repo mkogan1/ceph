@@ -25,7 +25,7 @@ int rgw_opa_authorize(RGWOp *& op,
 
   int ret;
   bufferlist bl;
-  RGWHTTPTransceiver req(s->cct, "POST", opa_url.c_str(), &bl);
+  RGWHTTPTransceiver req(s->cct, "POST", opa_url.c_str(), &bl, __PRETTY_FUNCTION__);
 
   /* set required headers for OPA request */
   req.append_header("X-Auth-Token", opa_token);

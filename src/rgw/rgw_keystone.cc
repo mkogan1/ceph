@@ -578,7 +578,7 @@ int TokenCache::RevokeThread::check_revoked()
   std::string token;
 
   bufferlist bl;
-  RGWGetRevokedTokens req(cct, "GET", "", &bl);
+  RGWGetRevokedTokens req(cct, "GET", "", &bl, "check_revoked");
 
   if (rgw::keystone::Service::get_admin_token(cct, *cache, config, token) < 0) {
     return -EINVAL;

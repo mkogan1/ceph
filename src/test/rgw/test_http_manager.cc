@@ -43,7 +43,7 @@ TEST(HTTPManager, ReadTruncated)
   }};
   const auto url = std::string{"http://127.0.0.1:"} + std::to_string(acceptor.local_endpoint().port());
 
-  RGWHTTPClient client{g_ceph_context, "GET", url};
+  RGWHTTPClient client{g_ceph_context, "GET", url, __PRETTY_FUNCTION__};
   EXPECT_EQ(-EAGAIN, RGWHTTP::process(&client));
 
   server.join();
@@ -69,7 +69,7 @@ TEST(HTTPManager, SignalThread)
   constexpr size_t num_requests = max_requests + 1;
 
   for (size_t i = 0; i < num_requests; i++) {
-    RGWHTTPClient client{cct, "PUT", "http://127.0.0.1:80"};
+    RGWHTTPClient client{cct, "PUT", "http://127.0.0.1:80", __PRETTY_FUNCTION__};
     http.add_request(&client);
   }
 }

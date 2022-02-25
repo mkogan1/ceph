@@ -106,7 +106,7 @@ protected:
     concat_url(secret_url, cct->_conf->rgw_crypt_vault_prefix);
     concat_url(secret_url, std::string(key_id));
 
-    RGWHTTPTransceiver secret_req(cct, "GET", secret_url, &secret_bl);
+    RGWHTTPTransceiver secret_req(cct, "GET", secret_url, &secret_bl, "ValutSecretEngine");
 
     if (!vault_token.empty()){
       secret_req.append_header("X-Vault-Token", vault_token);
@@ -328,7 +328,7 @@ static int request_key_from_barbican(CephContext *cct,
   concat_url(secret_url, std::string(key_id));
 
   bufferlist secret_bl;
-  RGWHTTPTransceiver secret_req(cct, "GET", secret_url, &secret_bl);
+  RGWHTTPTransceiver secret_req(cct, "GET", secret_url, &secret_bl, __func__);
   secret_req.append_header("Accept", "application/octet-stream");
   secret_req.append_header("X-Auth-Token", barbican_token);
 

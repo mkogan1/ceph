@@ -308,7 +308,7 @@ WebTokenEngine::get_jwks_url(const string& iss, const DoutPrefixProvider *dpp) c
   string jwks_url;
   string openidc_wellknown_url = iss + "/.well-known/openid-configuration";
   bufferlist openidc_resp;
-  RGWHTTPTransceiver openidc_req(cct, "GET", openidc_wellknown_url, &openidc_resp);
+  RGWHTTPTransceiver openidc_req(cct, "GET", openidc_wellknown_url, &openidc_resp, "get_jwks_url");
 
   //Headers
   openidc_req.append_header("Content-Type", "application/x-www-form-urlencoded");
@@ -340,7 +340,7 @@ vector<string>
 WebTokenEngine::get_x5c_certs_from_x5u_url(const DoutPrefixProvider* dpp, const string& x5u_url) const
 {
   bufferlist x5u_resp;
-  RGWHTTPTransceiver x5u_req(cct, "GET", x5u_url, &x5u_resp);
+  RGWHTTPTransceiver x5u_req(cct, "GET", x5u_url, &x5u_resp, "get_x5c_certs");
   //Headers
   x5u_req.append_header("Content-Type", "application/x-www-form-urlencoded");
 
@@ -522,7 +522,7 @@ WebTokenEngine::validate_signature(const DoutPrefixProvider* dpp, const jwt::dec
     }
     // Get certificate
     bufferlist jwks_resp;
-    RGWHTTPTransceiver jwks_req(cct, "GET", jwks_url, &jwks_resp);
+    RGWHTTPTransceiver jwks_req(cct, "GET", jwks_url, &jwks_resp, "validate_signature");
     //Headers
     jwks_req.append_header("Content-Type", "application/x-www-form-urlencoded");
 
