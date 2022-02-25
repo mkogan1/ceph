@@ -154,6 +154,9 @@ public:
   static constexpr int HTTPCLIENT_IO_CONTROL = 0x4;
 
   virtual ~RGWHTTPClient();
+  const string stamp =
+    (method + ":" + url + ":" +
+     to_string(real_clock::now().time_since_epoch().count()));
   explicit RGWHTTPClient(CephContext *cct,
                          const string& _method,
                          const string& _url)
