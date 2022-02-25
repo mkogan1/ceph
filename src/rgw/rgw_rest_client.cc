@@ -29,7 +29,7 @@ int RGWHTTPSimpleRequest::handle_header(const string& name, const string& val)
     string err;
     long len = strict_strtol(val.c_str(), 10, &err);
     if (!err.empty()) {
-      ldout(cct, 0) << "ERROR: failed converting content length (" << val << ") to int " << dendl;
+      ldout(cct, 0) << "ERROR: " << stamp << ": failed converting content length (" << val << ") to int " << dendl;
       return -EINVAL;
     }
 
@@ -47,7 +47,7 @@ int RGWHTTPSimpleRequest::receive_header(void *ptr, size_t len)
 
   char *s = (char *)ptr, *end = (char *)ptr + len;
   char *p = line;
-  ldout(cct, 10) << "receive_http_header" << dendl;
+  ldout(cct, 10) << stamp << ": receive_http_header" << dendl;
 
   while (s != end) {
     if (*s == '\r') {
@@ -56,7 +56,7 @@ int RGWHTTPSimpleRequest::receive_header(void *ptr, size_t len)
     }
     if (*s == '\n') {
       *p = '\0';
-      ldout(cct, 10) << "received header:" << line << dendl;
+      ldout(cct, 10) << stamp << ": received header:" << line << dendl;
       // TODO: fill whatever data required here
       char *l = line;
       char *tok = strsep(&l, " \t:");
@@ -152,7 +152,7 @@ int RGWRESTSimpleRequest::execute(const DoutPrefixProvider *dpp, RGWAccessKey& k
 
   string auth_hdr = "AWS " + key.id + ":" + digest;
 
-  ldpp_dout(dpp, 15) << "generated auth header: " << auth_hdr << dendl;
+  ldpp_dout(dpp, 15) << stamp << ": generated auth header: " << auth_hdr << dendl;
 
   headers.push_back(pair<string, string>("AUTHORIZATION", auth_hdr));
   int r = process(y);
@@ -295,7 +295,7 @@ int RGWRESTSimpleRequest::forward_request(const DoutPrefixProvider *dpp, RGWAcce
   }
   int ret = sign_request(dpp, cct, key, new_env, new_info);
   if (ret < 0) {
-    ldpp_dout(dpp, 0) << "ERROR: failed to sign request" << dendl;
+    ldpp_dout(dpp, 0) << "ERROR: " << stamp << ": failed to sign request" << dendl;
     return ret;
   }
 
@@ -561,7 +561,7 @@ int RGWRESTGenerateHTTPHeaders::sign(const DoutPrefixProvider *dpp, RGWAccessKey
 {
   int ret = sign_request(dpp, cct, key, *new_env, *new_info);
   if (ret < 0) {
-    ldpp_dout(dpp, 0) << "ERROR: failed to sign request" << dendl;
+    ldpp_dout(dpp, 0) << "ERROR: failed to sign request: " << method << "/" << url << "/" << resource << dendl;
     return ret;
   }
 
@@ -842,7 +842,7 @@ int RGWRESTStreamRWRequest::complete_request(optional_yield y,
       string err;
       *psize = strict_strtoll(size_str.c_str(), 10, &err);
       if (!err.empty()) {
-        ldout(cct, 0) << "ERROR: failed parsing embedded metadata object size (" << size_str << ") to int " << dendl;
+        ldout(cct, 0) << "ERROR: " << stamp << ": failed parsing embedded metadata object size (" << size_str << ") to int " << dendl;
         return -EIO;
       }
     }
@@ -881,7 +881,7 @@ int RGWHTTPStreamRWRequest::handle_header(const string& name, const string& val)
     string err;
     long len = strict_strtol(val.c_str(), 10, &err);
     if (!err.empty()) {
-      ldout(cct, 0) << "ERROR: failed converting embedded metadata len (" << val << ") to int " << dendl;
+      ldout(cct, 0) << "ERROR: " << stamp << ": failed converting embedded metadata len (" << val << ") to int " << dendl;
       return -EINVAL;
     }
 
