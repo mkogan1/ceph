@@ -156,7 +156,7 @@ int RGWStreamReadHTTPResourceCRF::read(bufferlist *out, uint64_t max_size, bool 
         req->get_out_headers(&attrs);
         int ret = decode_rest_obj(attrs, extra_data);
         if (ret < 0) {
-          ldout(cct, 0) << "ERROR: " << __func__ << " decode_rest_obj() returned ret=" << ret << dendl;
+          ldout(cct, 0) << "ERROR: " << req->stamp << ": " <<  __func__ << " decode_rest_obj() returned ret=" << ret << dendl;
           return ret;
         }
         got_extra_data = true;
@@ -286,15 +286,15 @@ int RGWStreamSpliceCR::operate() {
         }
 
         if (retcode < 0) {
-          ldout(cct, 20) << __func__ << ": in_crf->read() retcode=" << retcode << dendl;
+          ldout(cct, 20) << in_crf->stamp() << ": " << __func__ << ": in_crf->read() retcode=" << retcode << dendl;
           return set_cr_error(ret);
         }
       } while (need_retry);
 
-      ldout(cct, 20) << "read " << bl.length() << " bytes" << dendl;
+      ldout(cct, 20) << in_crf->stamp() << "read " << bl.length() << " bytes" << dendl;
 
       if (!in_crf->has_attrs()) {
-        assert (bl.length() == 0);
+        assert(bl.length() == 0);
         continue;
       }
 
