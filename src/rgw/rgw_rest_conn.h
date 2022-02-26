@@ -255,6 +255,7 @@ public:
 };
 
 class RGWRESTReadResource : public RefCountedObject, public RGWIOProvider {
+  static constexpr auto dout_subsys = ceph_subsys_rgw;
   CephContext *cct;
   RGWRESTConn *conn;
   string resource;
@@ -316,6 +317,10 @@ public:
     }
 
     if (req.get_status() < 0) {
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		     << "Got status:" << req.get_status() << dendl;
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		     << "Got error body:" << bl << dendl;
       return req.get_status();
     }
     *pbl = bl;
@@ -327,6 +332,10 @@ public:
 
   template <class T>
   int fetch(const DoutPrefixProvider *dpp, T *dest, optional_yield y);
+
+  const string& stamp() const {
+    return req.stamp;
+  }
 };
 
 
@@ -335,6 +344,10 @@ int RGWRESTReadResource::decode_resource(T *dest)
 {
   int ret = req.get_status();
   if (ret < 0) {
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		   << "Got status:" << req.get_status() << dendl;
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		   << "Got error body:" << bl << dendl;
     return ret;
   }
   ret = parse_decode_json(*dest, bl);

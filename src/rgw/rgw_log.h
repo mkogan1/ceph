@@ -10,8 +10,6 @@
 #include <vector>
 #include <fstream>
 
-#define dout_subsys ceph_subsys_rgw
-
 class RGWRados;
 
 struct rgw_log_entry {
@@ -162,6 +160,7 @@ public:
 };
 
 class OpsLogFile : public JsonOpsLogSink, public Thread, public DoutPrefixProvider {
+  static constexpr auto dout_subsys = ceph_subsys_rgw;
   CephContext* cct;
   ceph::mutex log_mutex = ceph::make_mutex("OpsLogFile_log");
   ceph::mutex flush_mutex = ceph::make_mutex("OpsLogFile_flush");

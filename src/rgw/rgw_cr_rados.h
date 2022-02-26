@@ -17,8 +17,6 @@
 #include "services/svc_sys_obj.h"
 #include "services/svc_bucket.h"
 
-#define dout_subsys ceph_subsys_rgw
-
 class RGWAsyncRadosRequest : public RefCountedObject {
   RGWCoroutine *caller;
   RGWAioCompletionNotifier *notifier;

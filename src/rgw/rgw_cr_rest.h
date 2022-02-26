@@ -77,7 +77,7 @@ public:
 
     int ret = op->aio_read(dpp);
     if (ret < 0) {
-      log_error() << "failed to send http operation: " << op->to_str()
+      log_error() << op->stamp() << ": failed to send http operation: " << op->to_str()
           << " ret=" << ret << std::endl;
       op->put();
       return ret;
@@ -99,7 +99,7 @@ public:
 
     auto op = std::move(http_op); // release ref on return
     if (ret < 0) {
-      error_stream << "http operation failed: " << op->to_str()
+      error_stream << op->stamp() << ": http operation failed: " << op->to_str()
                    << " status=" << op->get_http_status() << std::endl;
       op->put();
       return ret;
@@ -506,6 +506,10 @@ public:
     range.is_set = true;
     range.ofs = ofs;
     range.size = size;
+  }
+
+  const string& stamp() const {
+    return req->stamp;
   }
 };
 
