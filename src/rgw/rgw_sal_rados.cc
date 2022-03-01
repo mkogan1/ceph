@@ -1281,6 +1281,7 @@ int RadosLifecycle::get_head(const string& oid, LCHead& head)
 
   head.marker = cls_head.marker;
   head.start_date = cls_head.start_date;
+  head.shard_rollover_date = cls_head.shard_rollover_date;
 
   return ret;
 }
@@ -1291,6 +1292,7 @@ int RadosLifecycle::put_head(const string& oid, const LCHead& head)
 
   cls_head.marker = head.marker;
   cls_head.start_date = head.start_date;
+  cls_head.shard_rollover_date = head.shard_rollover_date;
 
   return cls_rgw_lc_put_head(*store->getRados()->get_lc_pool_ctx(), oid, cls_head);
 }
