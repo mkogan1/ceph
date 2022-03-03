@@ -2593,7 +2593,8 @@ int RGWRados::Bucket::List::list_objects_ordered(
     ent_map_t ent_map;
     ent_map.reserve(read_ahead);
 
-    const auto& index = target->get_bucket_info().get_current_index();
+    const auto& latest_log = target->get_bucket_info().layout.logs.back();
+    const auto& index = rgw::log_to_index_layout(latest_log);
     int r = store->cls_bucket_list_ordered(target->get_bucket_info(),
 					   index,
 					   shard_id,
@@ -2818,7 +2819,8 @@ int RGWRados::Bucket::List::list_objects_unordered(int64_t max_p,
     std::vector<rgw_bucket_dir_entry> ent_list;
     ent_list.reserve(read_ahead);
 
-    const auto& index = target->get_bucket_info().get_current_index();
+    const auto& latest_log = target->get_bucket_info().layout.logs.back();
+    const auto& index = rgw::log_to_index_layout(latest_log);
     int r = store->cls_bucket_list_unordered(target->get_bucket_info(),
 					     index,
 					     shard_id,
@@ -5354,7 +5356,8 @@ int RGWRados::check_bucket_empty(RGWBucketInfo& bucket_info)
     std::vector<rgw_bucket_dir_entry> ent_list;
     ent_list.reserve(NUM_ENTRIES);
 
-    const auto& index = bucket_info.get_current_index();
+    const auto& latest_log = bucket_info.layout.logs.back();
+    const auto& index = rgw::log_to_index_layout(latest_log);
     int r = cls_bucket_list_unordered(bucket_info,
 				      index,
 				      RGW_NO_SHARD,
@@ -5392,7 +5395,8 @@ int RGWRados::delete_bucket(RGWBucketInfo& bucket_info, RGWObjVersionTracker& ob
   const rgw_bucket& bucket = bucket_info.bucket;
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
-  const auto& index = bucket_info.get_current_index();
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
   int r = open_bucket_index(bucket_info, index_ctx, index, bucket_objs);
   if (r < 0)
     return r;
@@ -5729,7 +5733,8 @@ int RGWRados::bucket_check_index(RGWBucketInfo& bucket_info,
   map<int, string> oids;
   map<int, struct rgw_cls_check_index_ret> bucket_objs_ret;
 
-  const auto& index = bucket_info.get_current_index();
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
   int ret = open_bucket_index(bucket_info, index_ctx, index, oids, bucket_objs_ret);
   if (ret < 0) {
       return ret;
@@ -5755,7 +5760,8 @@ int RGWRados::bucket_rebuild_index(RGWBucketInfo& bucket_info)
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
 
-  const auto& index = bucket_info.get_current_index();
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
   int r = open_bucket_index(bucket_info, index_ctx, index, bucket_objs);
   if (r < 0) {
     return r;
@@ -5769,7 +5775,8 @@ int RGWRados::bucket_set_reshard(const RGWBucketInfo& bucket_info, const cls_rgw
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
 
-  const auto& index = bucket_info.get_current_index();
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
   int r = open_bucket_index(bucket_info, index_ctx, index, bucket_objs);
   if (r < 0) {
     return r;
@@ -9588,7 +9595,8 @@ int RGWRados::cls_obj_set_bucket_tag_timeout(RGWBucketInfo& bucket_info,
 {
   librados::IoCtx index_ctx;
   map<int, string> bucket_objs;
-  const auto& index = bucket_info.get_current_index();
+  const auto& latest_log = bucket_info.layout.logs.back();
+  const auto& index = rgw::log_to_index_layout(latest_log);
   int r = open_bucket_index(bucket_info, index_ctx, index, bucket_objs);
   if (r < 0)
     return r;
