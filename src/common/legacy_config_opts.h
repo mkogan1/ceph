@@ -1590,3 +1590,4 @@ OPTION(rgw_pending_bucket_index_op_expiration, OPT_U64) // number seconds b-i tr
 OPTION(rgw_bucket_index_transaction_instrumentation, OPT_BOOL) // extra instrumentation for b-i transaction
 OPTION(rgwlc_auto_session_clear, OPT_BOOL) // Clear stale lc sessions? (default true)
 OPTION(rgwlc_skip_bucket_step, OPT_BOOL) // Optionally skip of lc entries (but log operations on the work list, i.e., for debugging)
+OPTION(rgw_inject_admin_log_get_error_probability, OPT_DOUBLE) // range [0, 1]

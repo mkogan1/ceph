@@ -7667,7 +7667,7 @@ std::vector<Option> get_rgw_options() {
    Option("rgw_keystone_accepted_reader_roles", Option::TYPE_STR, Option::LEVEL_ADVANCED)
    .set_default("")
    .set_description("List of roles that can only be used for reads (Keystone)"),
-      
+
    Option("rgwlc_auto_session_clear", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
    .set_default(true)
    .set_description("Automatically clear stale lifecycle sessions (i.e., after 2 idle processing cycles)"),
@@ -7675,6 +7675,20 @@ std::vector<Option> get_rgw_options() {
    Option("rgwlc_skip_bucket_step", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
    .set_default(false)
    .set_description("Conditionally skip the processing (but not the scheduling) of bucket lifecycle"),
+
+   Option("rgw_inject_admin_log_get_error_probability", Option::TYPE_FLOAT,
+	   Option::LEVEL_DEV)
+   .set_default(0)
+   .add_tag("fault injection")
+   .add_tag("testing")
+   .add_service("rgw")
+   .set_min_max(0.0, 1.0)
+   .set_description("Likelihood of failure on admin log get")
+   .set_long_description("This is the probability that RGW will return an "
+			 "error when getting admin logs. Please "
+			 "do not set it in a production cluster, as it"
+			 "actively causes failures. Set this to a floating "
+			 "point value between 0 and 1."),
 
   });
 }
