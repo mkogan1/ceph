@@ -364,6 +364,13 @@ void RGWOp_BILog_List::execute() {
   RGWBucketInfo bucket_info;
   unsigned max_entries;
 
+  bool error_injection = s->cct->_conf->rgw_inject_admin_log_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_admin_log_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    http_ret = -ERR_REQUEST_TIME_SKEWED;
+    return;
+  }
   if (bucket_name.empty() && bucket_instance.empty()) {
     dout(5) << "ERROR: neither bucket nor bucket instance specified" << dendl;
     http_ret = -EINVAL;
@@ -455,6 +462,13 @@ void RGWOp_BILog_Info::execute() {
          bucket_instance = s->info.args.get("bucket-instance");
   RGWBucketInfo bucket_info;
 
+  bool error_injection = s->cct->_conf->rgw_inject_admin_log_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_admin_log_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    http_ret = -ERR_REQUEST_TIME_SKEWED;
+    return;
+  }
   if (bucket_name.empty() && bucket_instance.empty()) {
     dout(5) << "ERROR: neither bucket nor bucket instance specified" << dendl;
     http_ret = -EINVAL;
@@ -557,6 +571,14 @@ void RGWOp_DATALog_List::execute() {
            err;
   unsigned shard_id, max_entries = LOG_CLASS_LIST_MAX_ENTRIES;
 
+  bool error_injection = s->cct->_conf->rgw_inject_admin_log_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_admin_log_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    http_ret = -ERR_REQUEST_TIME_SKEWED;
+    return;
+  }
+
   if (s->info.args.exists("start-time") ||
       s->info.args.exists("end-time")) {
     dout(5) << "start-time and end-time are no longer accepted" << dendl;
@@ -622,6 +644,13 @@ void RGWOp_DATALog_List::send_response() {
 
 
 void RGWOp_DATALog_Info::execute() {
+  bool error_injection = s->cct->_conf->rgw_inject_admin_log_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_admin_log_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    http_ret = -ERR_REQUEST_TIME_SKEWED;
+    return;
+  }
   num_objects = s->cct->_conf->rgw_data_log_num_shards;
   http_ret = 0;
 }
@@ -642,6 +671,13 @@ void RGWOp_DATALog_ShardInfo::execute() {
   string err;
 
   unsigned shard_id = (unsigned)strict_strtol(shard.c_str(), 10, &err);
+  bool error_injection = s->cct->_conf->rgw_inject_admin_log_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_admin_log_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    http_ret = -ERR_REQUEST_TIME_SKEWED;
+    return;
+  }
   if (!err.empty()) {
     dout(5) << "Error parsing shard_id " << shard << dendl;
     http_ret = -EINVAL;
