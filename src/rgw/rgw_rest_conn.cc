@@ -355,6 +355,7 @@ int RGWRESTConn::get_resource(const string& resource,
     cct, url, &cb, NULL, &params,
     ("GET"s + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + url),
     host_style);
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": created" << dendl;
 
   map<string, string> headers;
   if (extra_headers) {
@@ -362,11 +363,13 @@ int RGWRESTConn::get_resource(const string& resource,
   }
 
   ret = req.send_request(&key, headers, resource, mgr, send_data);
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": sent" << dendl;
   if (ret < 0) {
-    ldout(cct, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
+    ldout(cct, 5) << __PRETTY_FUNCTION__ << req.stamp << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;
   }
 
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": completing" << dendl;
   return req.complete_request();
 }
 
