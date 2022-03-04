@@ -212,12 +212,14 @@ public:
         string p = "/admin/log/";
 
         http_op = new RGWRESTReadResource(sync_env->conn, p, pairs, NULL, sync_env->http_manager);
+	ldout(sync_env->cct, 20) << __PRETTY_FUNCTION__ << ": created RGWRestReadresource: " << http_op->stamp() << dendl;
 
-        init_new_io(http_op);
+	init_new_io(http_op);
 
         int ret = http_op->aio_read();
         if (ret < 0) {
-          ldout(sync_env->cct, 0) << "ERROR: failed to read from " << p << dendl;
+          ldout(sync_env->cct, 0) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+				  << "ERROR: failed to read from " << p << dendl;
           log_error() << "failed to send http operation: " << http_op->to_str() << " ret=" << ret << std::endl;
           return set_cr_error(ret);
         }
@@ -226,7 +228,11 @@ public:
       }
       yield {
         int ret = http_op->wait(shard_info);
-        if (ret < 0) {
+	ldout(sync_env->cct, 20) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+				 << "waiting…" << dendl;
+	if (ret < 0) {
+	  ldout(sync_env->cct, 20) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+				   << "ERROR: wait returned " << ret << dendl;
           return set_cr_error(ret);
         }
         return set_cr_done();
@@ -293,6 +299,8 @@ public:
         string p = "/admin/log/";
 
         http_op = new RGWRESTReadResource(sync_env->conn, p, pairs, NULL, sync_env->http_manager);
+	ldout(sync_env->cct, 20) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+				 << ": created" << dendl;
 
         init_new_io(http_op);
 
@@ -301,7 +309,8 @@ public:
         }
         int ret = http_op->aio_read();
         if (ret < 0) {
-          ldout(sync_env->cct, 0) << "ERROR: failed to read from " << p << dendl;
+          ldout(sync_env->cct, 0) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+				  << ": ERROR: failed to read from " << p << dendl;
           log_error() << "failed to send http operation: " << http_op->to_str() << " ret=" << ret << std::endl;
           if (sync_env->counters) {
             sync_env->counters->inc(sync_counters::l_poll_err);
@@ -315,6 +324,8 @@ public:
         timer.reset();
         int ret = http_op->wait(&response);
         if (ret < 0) {
+	  ldout(sync_env->cct, 0) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+				  << ": ERROR: http_op->wait returned " << ret << dendl;
           if (sync_env->counters && ret != -ENOENT) {
             sync_env->counters->inc(sync_counters::l_poll_err);
           }
@@ -395,11 +406,14 @@ public:
     string p = "/admin/log/";
 
     http_op = new RGWRESTReadResource(conn, p, pairs, NULL, sync_env->http_manager);
+    ldout(sync_env->cct, 20) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+			     << ": created" << dendl;
     init_new_io(http_op);
 
     int ret = http_op->aio_read();
     if (ret < 0) {
-      ldout(store->ctx(), 0) << "ERROR: failed to read from " << p << dendl;
+      ldout(store->ctx(), 0) << __PRETTY_FUNCTION__ << ": " << http_op->stamp()
+			     << ": ERROR: failed to read from " << p << dendl;
       log_error() << "failed to send http operation: " << http_op->to_str() << " ret=" << ret << std::endl;
       http_op->put();
       return ret;
@@ -410,9 +424,12 @@ public:
 
   int request_complete() override {
     int ret = http_op->wait(result);
+    auto stamp = http_op->stamp();
     http_op->put();
     if (ret < 0 && ret != -ENOENT) {
-      ldout(sync_env->store->ctx(), 0) << "ERROR: failed to list remote datalog shard, ret=" << ret << dendl;
+      ldout(sync_env->store->ctx(), 0)
+	<< __PRETTY_FUNCTION__ << ": " << stamp
+	<< ": ERROR: failed to list remote datalog shard, ret=" << ret << dendl;
       return ret;
     }
     return 0;

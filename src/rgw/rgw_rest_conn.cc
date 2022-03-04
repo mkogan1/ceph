@@ -334,7 +334,9 @@ int RGWRESTConn::get_resource(const string& resource,
 		     map<string, string> *extra_headers,
 		     bufferlist& bl,
                      bufferlist *send_data,
-		     RGWHTTPManager *mgr)
+		     RGWHTTPManager *mgr,
+		     long *http_status,
+		     string *stamp)
 {
   string url;
   int ret = get_url(url);
@@ -370,7 +372,14 @@ int RGWRESTConn::get_resource(const string& resource,
   }
 
   ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": completing" << dendl;
-  return req.complete_request();
+  ret = req.complete_request();
+  if (http_status) {
+    *http_status = req.get_http_status();
+  }
+  if (stamp) {
+    *stamp = req.stamp;
+  }
+  return ret;
 }
 
 RGWRESTReadResource::RGWRESTReadResource(RGWRESTConn *_conn,

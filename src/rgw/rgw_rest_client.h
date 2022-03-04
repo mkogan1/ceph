@@ -104,7 +104,9 @@ private:
   Mutex write_lock;
   ReceiveCB *cb{nullptr};
   RGWWriteDrainCB *write_drain_cb{nullptr};
+public:
   bufferlist outbl;
+private:
   bufferlist in_data;
   size_t chunk_ofs{0};
   size_t ofs{0};
