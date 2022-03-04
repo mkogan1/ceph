@@ -333,7 +333,9 @@ int RGWRESTConn::get_resource(const DoutPrefixProvider *dpp,
 		     bufferlist& bl,
                      bufferlist *send_data,
 		     RGWHTTPManager *mgr,
-		     optional_yield y)
+		     optional_yield y,
+		     long *http_status,
+		     string *stamp)
 {
   string url;
   int ret = get_url(url);
@@ -369,7 +371,14 @@ int RGWRESTConn::get_resource(const DoutPrefixProvider *dpp,
   }
 
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": completing" << dendl;
-  return req.complete_request(y);
+  ret = req.complete_request(y);
+  if (http_status) {
+    *http_status = req.get_http_status();
+  }
+  if (stamp) {
+    *stamp = req.stamp;
+  }
+  return ret;
 }
 
 RGWRESTReadResource::RGWRESTReadResource(RGWRESTConn *_conn,

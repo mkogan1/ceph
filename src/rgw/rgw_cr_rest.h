@@ -24,6 +24,7 @@ struct rgw_rest_obj {
 };
 
 class RGWReadRawRESTResourceCR : public RGWSimpleCoroutine {
+  static constexpr auto dout_subsys = ceph_subsys_rgw;
   bufferlist *result;
  protected:
   RGWRESTConn *conn;
@@ -99,6 +100,17 @@ public:
 
     auto op = std::move(http_op); // release ref on return
     if (ret < 0) {
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << op->stamp() << ": Operation " << op->to_str()
+		     << " Got status: " << op->get_http_status() << dendl;
+      if (cct->_conf->subsys.get_log_level(ceph_subsys_rgw) >= 20) {
+	std::string body;
+	auto bi = result->begin();
+	bi.copy(result->length(), body);
+	ldout(cct, 20) << __PRETTY_FUNCTION__ << op->stamp() << ": Operation " << op->to_str()
+		       << " Got error body: " << body << dendl;
+      }
+
+
       error_stream << op->stamp() << ": http operation failed: " << op->to_str()
                    << " status=" << op->get_http_status() << std::endl;
       op->put();

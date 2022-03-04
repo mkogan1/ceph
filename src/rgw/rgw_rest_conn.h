@@ -165,7 +165,9 @@ public:
                    bufferlist& bl,
                    bufferlist *send_data,
                    RGWHTTPManager *mgr,
-                   optional_yield y);
+                   optional_yield y,
+		   long *http_status = nullptr,
+		   string *stamp = nullptr);
 
   template <class T>
   int get_json_resource(const DoutPrefixProvider *dpp, const string& resource, param_vec_t *params,
@@ -215,9 +217,21 @@ template<class T>
 int RGWRESTConn::get_json_resource(const DoutPrefixProvider *dpp, const string& resource, param_vec_t *params,
                                    bufferlist *in_data, optional_yield y, T& t)
 {
+  static constexpr auto dout_subsys = ceph_subsys_rgw;
   bufferlist bl;
-  int ret = get_resource(dpp, resource, params, nullptr, bl, in_data, nullptr, y);
+  long http_status = 0;
+  std::string stamp;
+  int ret = get_resource(dpp, resource, params, nullptr, bl, in_data, nullptr, y, &http_status, &stamp);
   if (ret < 0) {
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp << ": "
+		   << "Got status: " << http_status << dendl;
+    if (cct->_conf->subsys.get_log_level(ceph_subsys_rgw) >= 20) {
+      std::string body;
+      auto bi = bl.begin();
+      bi.copy(bl.length(), body);
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << stamp << ": "
+		     << " Got error body: " << body << dendl;
+    }
     return ret;
   }
 
@@ -311,6 +325,8 @@ public:
   }
 
   int wait(bufferlist *pbl, optional_yield y) {
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		   << "WAITING!" << dendl;
     int ret = req.wait(y);
     if (ret < 0) {
       return ret;
@@ -319,10 +335,17 @@ public:
     if (req.get_status() < 0) {
       ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
 		     << "Got status:" << req.get_status() << dendl;
-      ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
-		     << "Got error body:" << bl << dendl;
+      if (cct->_conf->subsys.get_log_level(ceph_subsys_rgw) >= 20) {
+	std::string body;
+	auto bi = bl.begin();
+	bi.copy(bl.length(), body);
+	ldout(cct, 20) << __PRETTY_FUNCTION__ << stamp() << ": "
+		       << " Got error body: " << body << dendl;
+      }
       return req.get_status();
     }
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		   << "STATUS GOT!" << dendl;
     *pbl = bl;
     return 0;
   }
@@ -342,12 +365,19 @@ public:
 template <class T>
 int RGWRESTReadResource::decode_resource(T *dest)
 {
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
+		 << "GETTING!" << dendl;
   int ret = req.get_status();
   if (ret < 0) {
     ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
 		   << "Got status:" << req.get_status() << dendl;
-    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp() << ": "
-		   << "Got error body:" << bl << dendl;
+    if (cct->_conf->subsys.get_log_level(ceph_subsys_rgw) >= 20) {
+      std::string body;
+      auto bi = bl.begin();
+      bi.copy(bl.length(), body);
+      ldout(cct, 20) << __PRETTY_FUNCTION__ << stamp() << ": "
+		     << "Got error body: " << body << dendl;
+    }
     return ret;
   }
   ret = parse_decode_json(*dest, bl);
