@@ -813,8 +813,10 @@ int RGWRESTStreamRWRequest::complete_request(optional_yield y,
                                              map<string, string> *pattrs,
                                              map<string, string> *pheaders)
 {
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << stamp << ": waiting" << dendl;
   int ret = wait(y);
   if (ret < 0) {
+    ldout(cct, 0) << __PRETTY_FUNCTION__ << ":" << stamp << ": wait failed with ret=" << ret << dendl;
     return ret;
   }
 
@@ -823,6 +825,7 @@ int RGWRESTStreamRWRequest::complete_request(optional_yield y,
   if (etag) {
     set_str_from_headers(out_headers, "ETAG", *etag);
   }
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << stamp << ": got status=" << status << dendl;
   if (status >= 0) {
     if (mtime) {
       string mtime_str;

@@ -354,6 +354,7 @@ int RGWRESTConn::get_resource(const DoutPrefixProvider *dpp,
     cct, url, &cb, NULL, &params,
     ("GET"s + "_" + to_string(real_clock::now().time_since_epoch().count()) + "_" + url),
     host_style);
+  ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": created" << dendl;
 
   map<string, string> headers;
   if (extra_headers) {
@@ -361,11 +362,13 @@ int RGWRESTConn::get_resource(const DoutPrefixProvider *dpp,
   }
 
   ret = req.send_request(dpp, &key, headers, resource, mgr, send_data);
+  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": sent" << dendl;
   if (ret < 0) {
-    ldpp_dout(dpp, 5) << __func__ << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
+    ldpp_dout(dpp, 5) << __PRETTY_FUNCTION__ << req.stamp << ": send_request() resource=" << resource << " returned ret=" << ret << dendl;
     return ret;
   }
 
+  ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << req.stamp << ": completing" << dendl;
   return req.complete_request(y);
 }
 
