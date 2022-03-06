@@ -26,7 +26,9 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "cephx server " << entity_name << ": "
 
-int CephxServiceHandler::start_session(EntityName& name, bufferlist::iterator& indata, bufferlist& result_bl, AuthCapsInfo& caps)
+int CephxServiceHandler::start_session(EntityName& name,
+                                       bufferlist& result_bl,
+                                       AuthCapsInfo& caps)
 {
   entity_name = name;
 

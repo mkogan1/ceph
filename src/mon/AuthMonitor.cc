@@ -521,7 +521,7 @@ bool AuthMonitor::prep_auth(MonOpRequestRef op, bool paxos_writable)
       if (m->monmap_epoch < mon->monmap->get_epoch())
 	mon->send_latest_monmap(m->get_connection().get());
 
-      proto = s->auth_handler->start_session(entity_name, indata, response_bl, caps_info);
+      proto = s->auth_handler->start_session(entity_name, response_bl, caps_info);
       ret = 0;
       if (caps_info.allow_all) {
 	s->caps.set_allow_all();

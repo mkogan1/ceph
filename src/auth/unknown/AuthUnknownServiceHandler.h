@@ -26,7 +26,9 @@ public:
     : AuthServiceHandler(cct_) {}
   ~AuthUnknownServiceHandler() {}
   
-  int start_session(EntityName& name, bufferlist::iterator& indata, bufferlist& result_bl, AuthCapsInfo& caps) {
+  int start_session(EntityName& name,
+                    bufferlist& result_bl,
+                    AuthCapsInfo& caps) override {
     return CEPH_AUTH_UNKNOWN;
   }
   int handle_request(bufferlist::iterator& indata, bufferlist& result_bl, uint64_t& global_id, AuthCapsInfo& caps, uint64_t *auid = NULL) {
