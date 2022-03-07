@@ -39,8 +39,7 @@ public:
                            RGWHTTPManager *_http_manager, const string& _path,
                            rgw_http_param_pair *params, bufferlist *_result)
     : RGWSimpleCoroutine(_cct), result(_result), conn(_conn), http_manager(_http_manager),
-    path(_path), params(make_param_list(params))
-  {}
+    path(_path), params(make_param_list(params)) {}
 
  RGWReadRawRESTResourceCR(CephContext *_cct, RGWRESTConn *_conn,
                           RGWHTTPManager *_http_manager, const string& _path,
@@ -104,10 +103,8 @@ public:
       ldout(cct, 20) << __PRETTY_FUNCTION__ << op->stamp() << ": Operation " << op->to_str()
 		     << " Got status: " << op->get_http_status() << dendl;
       if (cct->_conf->subsys.get_log_level(ceph_subsys_rgw) >= 20) {
-	std::string body;
-	result->copy(0, result->length(), body);
-	ldout(cct, 20) << __PRETTY_FUNCTION__ << op->stamp() << ": Operation " << op->to_str()
-		       << " Got error body: " << body << dendl;
+	  ldout(cct, 20) << __PRETTY_FUNCTION__ << op->stamp() << ": Operation " << op->to_str()
+			 << " Got error body: " << op->req.http_errordoc << dendl;
       }
 
 

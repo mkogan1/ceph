@@ -818,6 +818,10 @@ int RGWRESTStreamRWRequest::complete_request(string *etag,
   int ret = wait();
   if (ret < 0) {
     ldout(cct, 0) << __PRETTY_FUNCTION__ << ":" << stamp << ": wait failed with ret=" << ret << dendl;
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << ": " << stamp << ": "
+		   << "Got error status: " << http_status << dendl;
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << stamp << ": "
+		   << " Got error body: " << http_errordoc << dendl;
     return ret;
   }
 
@@ -897,6 +901,16 @@ int RGWHTTPStreamRWRequest::handle_header(const string& name, const string& val)
 int RGWHTTPStreamRWRequest::receive_data(void *ptr, size_t len, bool *pause)
 {
   size_t orig_len = len;
+  if (cct->_conf->subsys.get_log_level(ceph_subsys_rgw) >= 20 &&
+      http_status >= 300 &&
+      http_errordoc.empty()) {
+    http_errordoc = std::string(static_cast<char*>(ptr), len);
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << stamp
+		   << " Got status: " << http_status << dendl;
+
+    ldout(cct, 20) << __PRETTY_FUNCTION__ << stamp
+		   << " Got error body: " << http_errordoc << dendl;
+  }
 
   if (cb) {
     in_data.append((const char *)ptr, len);
