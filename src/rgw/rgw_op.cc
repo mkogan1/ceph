@@ -2211,6 +2211,14 @@ void RGWGetObj::execute(optional_yield y)
 
   std::unique_ptr<rgw::sal::RGWObject::ReadOp> read_op(s->object->get_read_op(s->obj_ctx));
 
+  bool error_injection = s->cct->_conf->rgw_inject_obj_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_obj_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    op_ret = -ERR_REQUEST_TIME_SKEWED;
+    goto done_err;
+  }
+
   op_ret = get_params(y);
   if (op_ret < 0)
     goto done_err;
