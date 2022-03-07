@@ -279,6 +279,7 @@ class RGWRESTReadResource : public RefCountedObject, public RGWIOProvider {
   RGWStreamIntoBufferlist cb;
 
   RGWHTTPManager *mgr;
+public:
   RGWRESTStreamReadRequest req;
 
   void init_common(param_vec_t *extra_headers);

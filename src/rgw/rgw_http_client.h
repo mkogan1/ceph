@@ -32,6 +32,9 @@ class RGWHTTPClient : public RGWIOProvider
   bufferlist::iterator send_iter;
   bool has_send_len;
   long http_status;
+public:
+  std::string http_errordoc;
+private:
   bool send_data_hint{false};
   size_t receive_pause_skip{0}; /* how many bytes to skip next time receive_data is called
                                    due to being paused */
