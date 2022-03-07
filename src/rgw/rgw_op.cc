@@ -2242,6 +2242,14 @@ void RGWGetObj::execute()
   RGWRados::Object op_target(store, s->bucket_info, *static_cast<RGWObjectCtx *>(s->obj_ctx), obj);
   RGWRados::Object::Read read_op(&op_target);
 
+  bool error_injection = s->cct->_conf->rgw_inject_obj_get_error_probability > 0;
+  if (error_injection &&
+      rand() % 10000 < s->cct->_conf->rgw_inject_obj_get_error_probability * 10000.0) {
+    dout(5) << __PRETTY_FUNCTION__ << ":" << "ERROR: FAULT INJECTED!" << dendl;
+    op_ret = -ERR_REQUEST_TIME_SKEWED;
+    goto done_err;
+  }
+
   op_ret = get_params();
   if (op_ret < 0)
     goto done_err;

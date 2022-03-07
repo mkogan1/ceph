@@ -1617,3 +1617,4 @@ OPTION(rgw_bucket_index_transaction_instrumentation, OPT_BOOL) // extra instrume
 OPTION(rgwlc_auto_session_clear, OPT_BOOL) // Clear stale lc sessions? (default true)
 OPTION(rgwlc_skip_bucket_step, OPT_BOOL) // Optionally skip of lc entries (but log operations on the work list, i.e., for debugging)
 OPTION(rgw_inject_admin_log_get_error_probability, OPT_DOUBLE) // range [0, 1]
+OPTION(rgw_inject_obj_get_error_probability, OPT_DOUBLE) // range [0, 1]

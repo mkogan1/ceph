@@ -7573,6 +7573,19 @@ std::vector<Option> get_rgw_options() {
 			  "actively causes failures. Set this to a floating "
 			  "point value between 0 and 1."),
 
+    Option("rgw_inject_obj_get_error_probability", Option::TYPE_FLOAT,
+	   Option::LEVEL_DEV)
+    .set_default(0)
+    .add_tag("fault injection")
+    .add_tag("testing")
+    .add_service("rgw")
+    .set_min_max(0.0, 1.0)
+    .set_description("Likelihood of failure on object get")
+    .set_long_description("This is the probability that RGW will return an "
+			  "error when getting an object. Please "
+			  "do not set it in a production cluster, as it "
+			  "actively causes failures. Set this to a floating "
+			  "point value between 0 and 1."),
   });
 }
 
