@@ -9853,7 +9853,7 @@ int RGWRados::check_disk_state(librados::IoCtx io_ctx,
     list_state.ver.epoch = io_ctx.get_last_version();
     list_state.ver.pool = io_ctx.get_id();
     ldout_bitx(bitx, cct, 10) << "INFO: " << __func__ << " encoding remove of " << list_state.key << " on suggested_updates" << dendl_bitx;
-    cls_rgw_encode_suggestion(CEPH_RGW_REMOVE, list_state, suggested_updates);
+    cls_rgw_encode_suggestion(CEPH_RGW_REMOVE | suggest_flag, list_state, suggested_updates);
     return -ENOENT;
   }
 
