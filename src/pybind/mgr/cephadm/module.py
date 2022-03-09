@@ -93,13 +93,13 @@ Host *
 """
 
 # Default container images -----------------------------------------------------
-DEFAULT_IMAGE = 'registry.redhat.io/rhceph/rhceph-5-rhel8:latest'
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph-beta/rhceph-5-rhel8:latest'
 DEFAULT_PROMETHEUS_IMAGE = "registry.redhat.io/openshift4/ose-prometheus:v4.6"
 DEFAULT_NODE_EXPORTER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.6"
-DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph/rhceph-5-dashboard-rhel8:latest"
+DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8:latest"
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.6"
 DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/openshift4/ose-haproxy-router:v4.9'
-DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel8:latest'
+DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph-beta/keepalived-rhel8:latest'
 #XXX: not accounted for in backported downstream change
 #XXX:  https://bugzilla.redhat.com/show_bug.cgi?id=2007648
 DEFAULT_SNMP_GATEWAY_IMAGE = 'docker.io/maxwo/snmp-notifier:v1.2.1'
@@ -343,9 +343,14 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         Option(
             'default_registry',
             type='str',
+<<<<<<< HEAD
             default='docker.io',
             desc='Search-registry to which we should normalize unqualified image names. '
                  'This is not the default registry',
+=======
+            default='registry.redhat.io',
+            desc='Registry to which we should normalize unqualified image names',
+>>>>>>> fb8a7fb46c2 (mgr/cephadm: Use beta repos for default images)
         ),
         Option(
             'max_count_per_host',
