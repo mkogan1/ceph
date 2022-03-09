@@ -57,7 +57,7 @@ DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.6"
 DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/openshift4/ose-haproxy-router:v4.9'
 DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph-beta/keepalived-rhel8:latest'
-DEFAULT_SNMP_GATEWAY_IMAGE = 'docker.io/maxwo/snmp-notifier:v1.2.1'
+DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph-beta/snmp-notifier-rhel8:latest'
 DEFAULT_REGISTRY = 'registry.redhat.io'   # normalize unqualified digests to this
 DEFAULT_SNMP_GATEWAY_IMAGE = 'docker.io/maxwo/snmp-notifier:v1.2.1'
 # ------------------------------------------------------------------------------
