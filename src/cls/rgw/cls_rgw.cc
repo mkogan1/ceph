@@ -2192,6 +2192,8 @@ int rgw_dir_suggest_changes(cls_method_context_t hctx,
         return -EINVAL;
       }
 
+      // remove any pending entries whose tag timeout has expired. until expiry,
+      // these pending entries will prevent us from applying suggested changes
       real_time cur_time = real_clock::now();
       map<string, rgw_bucket_pending_info>::iterator iter =
                 cur_disk.pending_map.begin();
@@ -2211,11 +2213,19 @@ int rgw_dir_suggest_changes(cls_method_context_t hctx,
     } // if
 
     CLS_LOG_BITX(bitx_inst, 20,
-		 "INFO: %s: cur_disk.pending_map.empty()=%d op=%c cur_disk.exists=%d "
-		 "cur_change.pending_map.size()=%ld cur_change.exists=%d",
+		 "INFO: %s: cur_disk.pending_map.empty()=%d op=%d cur_disk.exists=%d "
+		 "cur_disk.index_ver=%d cur_change.exists=%d cur_change.index_ver=%d",
 		 __func__,
-		 cur_disk.pending_map.empty(), op, cur_disk.exists,
-		 cur_change.pending_map.size(), cur_change.exists);
+		 cur_disk.pending_map.empty(), (int)op, cur_disk.exists,
+		 (int)cur_disk.index_ver, cur_change.exists,
+		 (int)cur_change.index_ver);
+
+    if (cur_change.index_ver < cur_disk.index_ver) {
+      // a pending on-disk entry was completed since this suggestion was made,
+      // don't apply it yet. if the index really is inconsistent, the next
+      // listing will get the latest version and resend the suggestion
+      continue;
+    }
 
     if (cur_disk.pending_map.empty()) {
       CLS_LOG_BITX(bitx_inst, 10, "INFO: %s: cur_disk.pending_map is empty", __func__);
