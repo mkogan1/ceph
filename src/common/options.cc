@@ -9145,6 +9145,13 @@ std::vector<Option> get_mds_client_options() {
     .set_default(false)
     .set_description(""),
 
+    Option("client_collect_and_send_global_metrics", Option::TYPE_BOOL, Option::LEVEL_ADVANCED)
+    .set_flag(Option::FLAG_RUNTIME)
+    .set_default(false)
+    .set_description("to enable and force collecting and sending the global metrics to MDS")
+    .set_long_description("To be careful for this, when connecting to some old ceph clusters"
+	"it may crash the MDS daemons while upgrading."),
+
     Option("client_fs", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_flag(Option::FLAG_STARTUP)
     .set_default("")
