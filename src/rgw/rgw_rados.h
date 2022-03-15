@@ -1608,7 +1608,7 @@ public:
     int get_bucket_shard(BucketShard **pbs) {
       if (!bs_initialized) {
         int r =
-	  bs.init(bucket_info.bucket, obj, nullptr /* no RGWBucketInfo */);
+	  bs.init(bucket_info.bucket, obj, &bucket_info);
         if (r < 0) {
           return r;
         }
@@ -1815,7 +1815,7 @@ public:
 
       int init_bs() {
         int r =
-	  bs.init(target->get_bucket(), obj, nullptr /* no RGWBucketInfo */);
+	  bs.init(target->get_bucket(), obj, &target->bucket_info);
         if (r < 0) {
           return r;
         }

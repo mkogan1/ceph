@@ -5913,8 +5913,10 @@ int RGWRados::Object::Delete::delete_obj()
       return r;
     }
 
-    ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << target->bucket_info.layout.current_index.gen << dendl;
-    add_datalog_entry(store->ctx(), store->data_log, target->bucket_info, bs->shard_id);
+    const auto gen = target->bucket_info.layout.logs.empty() ? -1 : target->bucket_info.layout.logs.back().gen;
+    ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << gen << dendl;
+    add_datalog_entry(store->ctx(), store->data_log,
+                      target->bucket_info, bs->shard_id);
 
     return 0;
   }
@@ -6979,8 +6981,10 @@ int RGWRados::Bucket::UpdateIndex::complete(int64_t poolid, uint64_t epoch,
 
   ret = store->cls_obj_complete_add(*bs, obj, optag, poolid, epoch, ent, category, remove_objs, bilog_flags, zones_trace);
 
-  ldout(store->cct, 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << target->bucket_info.layout.current_index.gen << dendl;
-  add_datalog_entry(store->cct, store->data_log, target->bucket_info, bs->shard_id);
+  const auto gen = target->bucket_info.layout.logs.empty() ? -1 : target->bucket_info.layout.logs.back().gen;
+  ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << gen << dendl;
+  add_datalog_entry(store->ctx(), store->data_log,
+                    target->bucket_info, bs->shard_id);
 
   return ret;
 }
@@ -7003,8 +7007,10 @@ int RGWRados::Bucket::UpdateIndex::complete_del(int64_t poolid, uint64_t epoch,
 
   ret = store->cls_obj_complete_del(*bs, optag, poolid, epoch, obj, removed_mtime, remove_objs, bilog_flags, zones_trace);
 
-  ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << target->bucket_info.layout.current_index.gen << dendl;
-  add_datalog_entry(store->ctx(), store->data_log, target->bucket_info, bs->shard_id);
+  const auto gen = target->bucket_info.layout.logs.empty() ? -1 : target->bucket_info.layout.logs.back().gen;
+  ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << gen << dendl;
+  add_datalog_entry(store->ctx(), store->data_log,
+                    target->bucket_info, bs->shard_id);
 
   return ret;
 }
@@ -7027,8 +7033,10 @@ int RGWRados::Bucket::UpdateIndex::cancel(list<rgw_obj_index_key> *remove_objs)
    * for following the specific bucket shard log. Otherwise they end up staying behind, and users
    * have no way to tell that they're all caught up
    */
-  ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << target->bucket_info.layout.current_index.gen << dendl;
-  add_datalog_entry(store->ctx(), store->data_log, target->bucket_info, bs->shard_id);
+  const auto gen = target->bucket_info.layout.logs.empty() ? -1 : target->bucket_info.layout.logs.back().gen;
+  ldout(store->ctx(), 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs->shard_id << " gen=" << gen << dendl;
+  add_datalog_entry(store->ctx(), store->data_log,
+                    target->bucket_info, bs->shard_id);
 
   return ret;
 }
@@ -7564,10 +7572,10 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
 	  log_tag << ". new shard_id=" << bs->shard_id << ". error: " << cpp_strerror(-ret) << dendl;
 	return ret;
       }
+      const auto gen = bucket_info.layout.logs.empty() ? -1 : bucket_info.layout.logs.back().gen;
       ldout(cct, 0) << __func__ << 
         " INFO: refreshed bucket info after reshard at " <<
-	log_tag << ". new shard_id=" << bs->shard_id << 
-        (bucket_info.layout.logs.empty() ? ". no generation" : ". gen=" + std::to_string(bucket_info.layout.logs.back().gen)) << dendl;
+	log_tag << ". new shard_id=" << bs->shard_id << ". gen=" << gen << dendl;
       return 0;
     };
 
@@ -7587,7 +7595,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
       return fetch_new_bucket_info("get_bucket_resharding_succeeded");
     }
 
-    ldout(cct, 20) << __func__ << "NOTICE: reshard still in progress; " <<
+    ldout(cct, 20) << __func__ << " NOTICE: reshard still in progress; " <<
       (i < num_retries ? "retrying" : "too many retries") << dendl;
 
     if (i == num_retries) {
@@ -7609,7 +7617,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
       ret = reshard_lock.lock();
       if (ret < 0) {
 	ldout(cct, 20) << __func__ <<
-	  " INFO: failed to take reshard lock for bucket " <<
+	  " ERROR: failed to take reshard lock for bucket " <<
 	  bucket_id << "; expected if resharding underway" << dendl;
       } else {
 	ldout(cct, 10) << __func__ <<
@@ -7693,7 +7701,8 @@ int RGWRados::bucket_index_link_olh(RGWBucketInfo& bucket_info, RGWObjState& olh
     return r;
   }
 
-  ldout(cct, 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs.shard_id << " gen=" << bucket_info.layout.current_index.gen << dendl;
+  const auto gen = bucket_info.layout.logs.empty() ? -1 : bucket_info.layout.logs.back().gen;
+  ldout(cct, 20) << __func__ << "(): call add_datalog_entry with shard_id=" << bs.shard_id << " gen=" << gen << dendl;
   add_datalog_entry(cct, data_log, bucket_info, bs.shard_id);
 
   return 0;
