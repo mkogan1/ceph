@@ -532,10 +532,13 @@ static int commit_reshard(RGWRados* store,
     for (uint32_t shard_id = 0; shard_id < prev.current_index.layout.normal.num_shards; ++shard_id) {
       ret = store->data_log->add_entry(bucket_info, prev.logs.back(), shard_id);
       if (ret < 0) {
-        ldout(store->ctx(), 1) << "WARNING: failed writing data log (bucket_info.bucket="
-        << bucket_info.bucket << ", shard_id=" << shard_id << "of generation="
-        << prev.logs.back().gen << ")" << dendl;
+        ldout(store->ctx(), 1) << __func__ << " WARNING: failed writing data log (bucket_info.bucket="
+		      << bucket_info.bucket << ", shard_id=" << shard_id << ", gen="
+		      << prev.logs.back().gen << "). error=" << ret << dendl;
       } // datalog error is not fatal
+      ldout(store->ctx(), 20) << __func__ << " INFO: writing data log (bucket_info.bucket="
+			      << bucket_info.bucket << ", shard_id=" << shard_id << ", gen="
+			      << prev.logs.back().gen << ")" << dendl;
     }
   }
 
