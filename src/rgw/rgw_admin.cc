@@ -8100,6 +8100,10 @@ next:
       cerr << "ERROR: bucket not specified" << std::endl;
       return EINVAL;
     }
+    if (!gen.has_value()) {
+      cerr << "ERROR: gen not specified" << std::endl;
+      return EINVAL;
+    }
     rgw_bucket bucket;
     int ret = init_bucket_for_sync(tenant, bucket_name, bucket_id, bucket);
     if (ret < 0) {
@@ -8113,7 +8117,7 @@ next:
       return -ret;
     }
 
-    ret = sync.run();
+    ret = sync.run(*gen);
     if (ret < 0) {
       cerr << "ERROR: sync.run() returned ret=" << ret << std::endl;
       return -ret;
