@@ -6775,6 +6775,10 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
 	  log_tag << ": " << cpp_strerror(-ret) << dendl;
 	return ret;
       }
+      const auto gen = bucket_info.layout.logs.empty() ? -1 : bucket_info.layout.logs.back().gen;
+      ldpp_dout(dpp, 20) << __func__ << 
+        " INFO: refreshed bucket info after reshard at " <<
+	log_tag << ". new shard_id=" << bs->shard_id << ". gen=" << gen << dendl;
       return 0;
     };
 
@@ -6795,7 +6799,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
       return fetch_new_bucket_info("get_bucket_resharding_succeeded");
     }
 
-    ldpp_dout(dpp, 20) << "NOTICE: reshard still in progress; " <<
+    ldpp_dout(dpp, 20) << __func__ << " NOTICE: reshard still in progress; " <<
       (i < num_retries ? "retrying" : "too many retries") << dendl;
 
     if (i == num_retries) {
@@ -6817,7 +6821,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
       ret = reshard_lock.lock();
       if (ret < 0) {
 	ldpp_dout(dpp, 20) << __func__ <<
-	  " INFO: failed to take reshard lock for bucket " <<
+	  " ERROR: failed to take reshard lock for bucket " <<
 	  bucket_id << "; expected if resharding underway" << dendl;
       } else {
 	ldpp_dout(dpp, 10) << __func__ <<
