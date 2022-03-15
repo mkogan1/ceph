@@ -5387,13 +5387,12 @@ int RGWSyncBucketCR::operate()
   return 0;
 }
 
-RGWCoroutine *RGWRemoteBucketManager::run_sync_cr(int num)
+RGWCoroutine *RGWRemoteBucketManager::run_sync_cr(int num, uint64_t gen)
 {
   if ((size_t)num >= sync_pairs.size()) {
     return nullptr;
   }
 
-  constexpr std::optional<uint64_t> gen; // sync current gen
   return sync_bucket_shard_cr(&sc, nullptr, sync_pairs[num], gen,
                               sync_env->sync_tracer->root_node, nullptr);
 }
@@ -5508,14 +5507,14 @@ int RGWBucketPipeSyncStatusManager::read_sync_status()
   return 0;
 }
 
-int RGWBucketPipeSyncStatusManager::run()
+int RGWBucketPipeSyncStatusManager::run(uint64_t gen)
 {
   list<RGWCoroutinesStack *> stacks;
 
   for (auto& mgr : source_mgrs) {
     RGWCoroutinesStack *stack = new RGWCoroutinesStack(store->ctx(), &cr_mgr);
     for (int i = 0; i < mgr->num_pipes(); ++i) {
-      stack->call(mgr->run_sync_cr(i));
+      stack->call(mgr->run_sync_cr(i, gen));
     }
 
     stacks.push_back(stack);
