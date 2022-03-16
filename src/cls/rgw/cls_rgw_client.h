@@ -384,10 +384,6 @@ int cls_rgw_bi_list(librados::IoCtx& io_ctx, const string& oid,
                    list<rgw_cls_bi_entry> *entries, bool *is_truncated);
 
 
-void cls_rgw_bucket_link_olh(librados::ObjectWriteOperation& op,
-			     const cls_rgw_obj_key& key, bufferlist& olh_tag,
-			     bool delete_marker, const string& op_tag, rgw_bucket_dir_entry_meta *meta,
-			     uint64_t olh_epoch, ceph::real_time unmod_since, bool high_precision_time, bool log_op, rgw_zone_set& zones_trace);
 int cls_rgw_bucket_link_olh(librados::IoCtx& io_ctx, librados::ObjectWriteOperation& op,
                             const string& oid, const cls_rgw_obj_key& key, bufferlist& olh_tag,
                             bool delete_marker, const string& op_tag, rgw_bucket_dir_entry_meta *meta,

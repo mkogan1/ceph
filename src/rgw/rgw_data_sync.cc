@@ -1317,26 +1317,15 @@ public:
     reenter(this) {
       if (state->obligation) {
         // this is already syncing in another DataSyncSingleEntryCR
-        if (!state->obligation->gen || !obligation.gen || 
-            (state->obligation->gen >= obligation.gen)) {
-          // one if the generations is missing, or new obligation has older/same generation
-          // compare only based on time
-          if (state->obligation->timestamp < obligation.timestamp) {
-            // cancel existing obligation and overwrite it
-            tn->log(10, SSTR("canceling existing obligation " << *state->obligation));
-            complete = std::move(*state->obligation);
-            *state->obligation = std::move(obligation);
-            state->counter++;
-          } else {
-            // cancel new obligation
-            tn->log(10, SSTR("canceling new obligation " << obligation));
-            complete = std::move(obligation);
-          }
+        if (state->obligation->timestamp < obligation.timestamp) {
+          // cancel existing obligation and overwrite it
+          tn->log(10, SSTR("canceling existing obligation " << *state->obligation));
+          complete = std::move(*state->obligation);
+          *state->obligation = std::move(obligation);
+          state->counter++;
         } else {
-          // obligation for an older generation didn't finish syncing
-          // move new obligation to error repo for retry
-          retcode = -EAGAIN;
-          tn->log(10, SSTR("obligation of gen " << state->obligation->gen <<  " still syncing. retrying new obligation " << obligation));
+          // cancel new obligation
+          tn->log(10, SSTR("canceling new obligation " << obligation));
           complete = std::move(obligation);
         }
       } else {
@@ -1757,7 +1746,7 @@ public:
         }
 
         for (log_iter = log_entries.begin(); log_iter != log_entries.end(); ++log_iter) {
-          tn->log(20, SSTR("shard_id=" << shard_id << " log_entry: " << log_iter->log_id << ":" << log_iter->log_timestamp << ":" << log_iter->entry.key << "[" << log_iter->entry.gen << "]"));
+          tn->log(20, SSTR("shard_id=" << shard_id << " log_entry: " << log_iter->log_id << ":" << log_iter->log_timestamp << ":" << log_iter->entry.key));
           retcode = parse_bucket_key(log_iter->entry.key, source_bs);
           if (retcode < 0) {
             tn->log(1, SSTR("failed to parse bucket shard: " << log_iter->entry.key));
@@ -2896,7 +2885,6 @@ int RGWReadBucketPipeSyncStatusCoroutine::operate()
                                              &attrs, true, objv_tracker));
     if (retcode == -ENOENT) {
       *status = rgw_bucket_shard_sync_info();
-      ldout(cct, 20) << "INFO: new bucket shard info for oid=" << oid << dendl;
       return set_cr_done();
     }
     if (retcode < 0) {
@@ -2904,7 +2892,6 @@ int RGWReadBucketPipeSyncStatusCoroutine::operate()
       return set_cr_error(retcode);
     }
     status->decode_from_attrs(sync_env->cct, attrs);
-    ldout(cct, 20) << "INFO: existing bucket shard info for oid=" << oid << dendl;
     return set_cr_done();
   }
   return 0;
@@ -3687,15 +3674,11 @@ class RGWWriteBucketShardIncSyncStatus : public RGWCoroutine {
       yield call(new RGWSimpleRadosWriteAttrsCR(sync_env->async_rados, sync_env->store->svc.sysobj,
                                                 obj, attrs, &objv_tracker));
       if (retcode < 0) {
-        ldpp_dout(sync_env->dpp, 0) << "failed to update sync marker: " <<
-          sync_marker.position << " in object: " << obj.oid << " error: " << retcode << dendl;
         return set_cr_error(retcode);
       }
       if (stable_timestamp) {
         *stable_timestamp = sync_marker.timestamp;
       }
-      ldpp_dout(sync_env->dpp, 0) << "update sync marker: " <<
-          sync_marker.position << " in object: " << obj.oid << dendl;
       return set_cr_done();
     }
     return 0;
@@ -4190,16 +4173,15 @@ public:
         yield call(new ReadCR(sync_env->async_rados, sync_env->store->svc.sysobj,
                               bucket_status_obj, &bucket_status, false, &objv_tracker));
         if (retcode < 0) {
-          ldout(cct, 20) << "RGWBucketShardIsDoneCR failed to read bucket shard status object: " <<
-            bucket_status_obj.oid << ". error: " << cpp_strerror(retcode) << dendl;
+          ldout(cct, 20) << "failed to read bucket shard status: "
+              << cpp_strerror(retcode) << dendl;
           return set_cr_error(retcode);
         }
 
         if (bucket_status.state != BucketSyncState::Incremental) {
           // exit with success to avoid stale shard being
           // retried in error repo if we lost a race
-          ldout(cct, 20) << "RGWBucketShardIsDoneCR found sync state = " << bucket_status.state <<
-            " in status object: " << bucket_status_obj.oid << dendl;
+          ldout(cct, 20) << "RGWBucketShardIsDoneCR found sync state = " << bucket_status.state << dendl;
           return set_cr_done();
         }
 
@@ -4207,8 +4189,7 @@ public:
           // exit with success to avoid stale shard being
           // retried in error repo if we lost a race
           ldout(cct, 20) << "RGWBucketShardIsDoneCR expected gen: " << generation
-              << ", got: " << bucket_status.incremental_gen  <<
-              " in status object: " << bucket_status_obj.oid << dendl;
+              << ", got: " << bucket_status.incremental_gen << dendl;
           return set_cr_done();
         }
 
@@ -4220,8 +4201,6 @@ public:
           // increment gen if all shards are already done with current gen
           if (std::all_of(done.begin(), done.end(),
             [] (const bool done){return done; } )) {
-            ldout(cct, 20) << "RGWBucketShardIsDoneCR generation bumped from: "  <<
-              generation << " to: " << next_log.generation << " in status object: " << bucket_status_obj.oid << dendl;
             bucket_status.incremental_gen = next_log.generation;
             done.clear();
             done.resize(next_log.num_shards, false);
@@ -4231,12 +4210,9 @@ public:
                             bucket_status_obj, bucket_status, &objv_tracker, false));
         }
         if (retcode < 0 && retcode != -ECANCELED) {
-          ldout(cct, 20) << "RGWBucketShardIsDoneCR failed to write bucket sync status object: " <<
-            bucket_status_obj.oid << ". error: " << cpp_strerror(retcode) << dendl;
+          ldout(cct, 20) << "failed to write bucket sync status: " << cpp_strerror(retcode) << dendl;
           return set_cr_error(retcode);
         } else if (retcode >= 0) {
-          ldout(cct, 20) << "RGWBucketShardIsDoneCR done for shard_id=" << shard_id << " wrote bucket sync status object: " <<
-            bucket_status_obj.oid << dendl;
           return set_cr_done();
         }
       } while (retcode == -ECANCELED);
@@ -4262,7 +4238,7 @@ class RGWBucketShardIncrementalSyncCR : public RGWCoroutine {
   list<rgw_bi_log_entry>::iterator entries_iter, entries_end;
   map<pair<string, string>, pair<real_time, RGWModifyOp> > squash_map;
   rgw_bucket_shard_sync_info& sync_info;
-  const uint64_t generation;
+  uint64_t generation;
   rgw_obj_key key;
   rgw_bi_log_entry *entry{nullptr};
   bool updated_status{false};
