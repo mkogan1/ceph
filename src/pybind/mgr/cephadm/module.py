@@ -57,7 +57,7 @@ from .services.monitoring import GrafanaService, AlertmanagerService, Prometheus
 from .services.exporter import CephadmExporter, CephadmExporterConfig
 from .schedule import HostAssignment
 from .inventory import Inventory, SpecStore, HostCache, EventStore, ClientKeyringStore, ClientKeyringSpec
-from .upgrade import CephadmUpgrade
+from .upgrade import CephadmUpgrade, UpgradeState
 from .template import TemplateMgr
 from .utils import CEPH_IMAGE_TYPES, forall_hosts, cephadmNoImage
 from .configchecks import CephadmConfigChecks
@@ -280,6 +280,12 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             # used to track track spec and other data migrations.
         ),
         Option(
+            'yes_i_know',
+            type='bool',
+            default=False,
+            desc='Check the release notes',
+        ),
+        Option(
             'config_dashboard',
             type='bool',
             default=True,
@@ -418,6 +424,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             self.autotune_interval = 0
             self.apply_spec_fails: List[Tuple[str, str]] = []
             self.max_osd_draining_count = 10
+            self.yes_i_know = False
 
         self._cons: Dict[str, Tuple[remoto.backends.BaseConnection,
                                     remoto.backends.LegacyModuleExecute]] = {}
@@ -443,6 +450,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         CephadmOrchestrator.instance = self
 
         self.upgrade = CephadmUpgrade(self)
+        self.upgrade_state = UpgradeState
 
         self.health_checks: Dict[str, dict] = {}
 
@@ -495,6 +503,9 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         self.need_connect_dashboard_rgw = False
 
         self.config_checker = CephadmConfigChecks(self)
+
+        self.found_multisite = False
+        self.checked_multisite = False
 
     def shutdown(self) -> None:
         self.log.debug('shutdown')
@@ -579,6 +590,53 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
                     # if the osd that is now empty is also part of the removal queue
                     # start the process
                     self._kick_serve_loop()
+
+    def _multisite_present(self) -> bool:
+        if self.checked_multisite:
+            return self.found_multisite
+        self.checked_multisite = True
+        try:
+            ret, keyring, err = self.check_mon_command({
+                'prefix': 'auth get-key',
+                'entity': "client.admin",
+            })
+            assert keyring
+            cmd = ['radosgw-admin',
+                   '--key=%s' % keyring,
+                   'realm', 'list',
+                   '--format=json']
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=7)
+            out = result.stdout
+            assert out
+            period = json.loads(out)
+            assert period
+            self.log.debug(period)
+            if 'realms' in period and period['realms']:
+                for realm in period['realms']:
+                    cmd = ['radosgw-admin',
+                           '--key=%s' % keyring,
+                           'period', 'get',
+                           '--rgw-realm=%s' % realm,
+                           '--format=json']
+                    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                    out = result.stdout
+                    if out:
+                        realm_period = json.loads(out)
+                        self.log.debug(realm_period)
+                        if 'period_map' in realm_period and realm_period['period_map']:
+                            if 'zonegroups' in realm_period['period_map']:
+                                if len(realm_period['period_map']['zonegroups']) > 1:
+                                    self.found_multisite = True
+                                    return True
+                                for zonegroup in realm_period['period_map']['zonegroups']:
+                                    if 'zones' in zonegroup and zonegroup['zones']:
+                                        if len(zonegroup['zones']) > 1:
+                                            self.found_multisite = True
+                                            return True
+        except Exception as e:
+            self.log.error(f'Hit exception trying to detect multisite: {e}')
+        self.found_multisite = False
+        return False
 
     def pause(self) -> None:
         if not self.paused:
@@ -781,6 +839,39 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             return 0, "value unchanged", ""
         self.validate_ssh_config_content(inbuf)
         self._validate_and_set_ssh_val('ssh_config', inbuf, old)
+        return 0, "", ""
+
+    @orchestrator._cli_write_command('cephadm fallback')
+    def _fallback(self, image_name: Optional[str] = None) -> Tuple[int, str, str]:
+        """
+        FOR RECOVERING FROM UPGRADE TO SPECIAL RHCS 5.1 IMAGE. DO NOT USE UNLESS EXPLICITLY RECOMMENDED TO DO SO
+        """
+        if not image_name:
+            mon = self.cache.get_daemons_by_service('mon')[0]
+            image_name = self._get_container_image(mon.name())
+        assert image_name is not None
+        mgrs = self.cache.get_daemons_by_service('mgr')
+        active_mgr: Optional[DaemonDescription] = None
+        for mgr in mgrs:
+            assert mgr.daemon_type is not None
+            assert mgr.daemon_id is not None
+            if self.daemon_is_self(mgr.daemon_type, mgr.daemon_id):
+                active_mgr = mgr
+            else:
+                # try to redeploy all but the active mgr with this other images
+                self._daemon_action(CephadmDaemonDeploySpec.from_daemon_description(mgr), 'redeploy', image_name)
+        assert active_mgr is not None
+        assert active_mgr.name() is not None
+        assert active_mgr.hostname is not None
+        self.set_container_image('mgr', image_name)
+        self.cache.schedule_daemon_action(active_mgr.hostname, active_mgr.name(), 'redeploy')
+        self.cache.save_host(active_mgr.hostname)
+        self.upgrade.upgrade_state = None
+        self.set_store('upgrade_state', None)
+        self.set_module_option('migration_current', 1)
+        self.migration_current = 1
+        self.mgr_service.fail_over()
+        # unreachable
         return 0, "", ""
 
     @orchestrator._cli_write_command('cephadm clear-ssh-config')
