@@ -48,16 +48,16 @@ from pathlib import Path
 FuncT = TypeVar('FuncT', bound=Callable)
 
 # Default container images -----------------------------------------------------
-DEFAULT_IMAGE = 'registry.redhat.io/rhceph-beta/rhceph-5-rhel8:latest'
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph/rhceph-5-rhel8:latest'
 DEFAULT_IMAGE_IS_MASTER = False
 DEFAULT_IMAGE_RELEASE = 'pacific'
 DEFAULT_PROMETHEUS_IMAGE = "registry.redhat.io/openshift4/ose-prometheus:v4.6"
 DEFAULT_NODE_EXPORTER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.6"
-DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8:latest"
+DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph/rhceph-5-dashboard-rhel8:latest"
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.6"
 DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/openshift4/ose-haproxy-router:v4.9'
-DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph-beta/keepalived-rhel8:latest'
-DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph-beta/snmp-notifier-rhel8:latest'
+DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel8:latest'
+DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph/snmp-notifier-rhel8:latest'
 DEFAULT_REGISTRY = 'registry.redhat.io'   # normalize unqualified digests to this
 DEFAULT_SNMP_GATEWAY_IMAGE = 'docker.io/maxwo/snmp-notifier:v1.2.1'
 # ------------------------------------------------------------------------------

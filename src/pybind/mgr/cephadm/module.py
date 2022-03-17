@@ -93,21 +93,15 @@ Host *
 """
 
 # Default container images -----------------------------------------------------
-DEFAULT_IMAGE = 'registry.redhat.io/rhceph-beta/rhceph-5-rhel8:latest'
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph/rhceph-5-rhel8:latest'
 DEFAULT_PROMETHEUS_IMAGE = "registry.redhat.io/openshift4/ose-prometheus:v4.6"
 DEFAULT_NODE_EXPORTER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.6"
-DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph-beta/rhceph-5-dashboard-rhel8:latest"
+DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph/rhceph-5-dashboard-rhel8:latest"
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.6"
 DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/openshift4/ose-haproxy-router:v4.9'
-DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph-beta/keepalived-rhel8:latest'
-<<<<<<< HEAD
-#XXX: not accounted for in backported downstream change
-#XXX:  https://bugzilla.redhat.com/show_bug.cgi?id=2007648
-DEFAULT_SNMP_GATEWAY_IMAGE = 'docker.io/maxwo/snmp-notifier:v1.2.1'
-=======
 DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph-beta/snmp-notifier-rhel8:latest'
->>>>>>> 54f03fd1dc9 (mgr/cephadm: use downstream beta image for SNMP default)
-# ------------------------------------------------------------------------------
+DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel8:latest'
+DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph/snmp-notifier-rhel8:latest'
 
 
 def service_inactive(spec_name: str) -> Callable:
