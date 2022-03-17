@@ -98,8 +98,7 @@ DEFAULT_PROMETHEUS_IMAGE = "registry.redhat.io/openshift4/ose-prometheus:v4.6"
 DEFAULT_NODE_EXPORTER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.6"
 DEFAULT_GRAFANA_IMAGE = "registry.redhat.io/rhceph/rhceph-5-dashboard-rhel8:latest"
 DEFAULT_ALERT_MANAGER_IMAGE = "registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.6"
-DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/openshift4/ose-haproxy-router:v4.9'
-DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph-beta/snmp-notifier-rhel8:latest'
+DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/rhceph/rhceph-haproxy-rhel8:latest'
 DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel8:latest'
 DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph/snmp-notifier-rhel8:latest'
 
