@@ -697,10 +697,16 @@ int RGWBucketReshard::do_reshard(const rgw::bucket_index_layout_generation& curr
   const int num_source_shards = current.layout.normal.num_shards;
   string marker;
   for (int i = 0; i < num_source_shards; ++i) {
+    ldout(store->ctx(), 5) << "INFO: " << __func__ << ": starting reshard of bucket=" <<
+      bucket_info.bucket << " shard=" << i << dendl;
+
     bool is_truncated = true;
     marker.clear();
     const std::string null_object_filter; // empty string since we're not filtering by object
     while (is_truncated) {
+      ldout(store->ctx(), 5) << "INFO: " << __func__ << ": reshard executing bi_list on bucket=" <<
+	bucket_info.bucket << " with marker=" << marker << dendl;
+
       entries.clear();
       int ret = store->bi_list(bucket_info, i, null_object_filter, marker, max_entries, &entries, &is_truncated);
       if (ret < 0 && ret != -ENOENT) {
@@ -771,8 +777,11 @@ int RGWBucketReshard::do_reshard(const rgw::bucket_index_layout_generation& curr
 	  (*out) << " " << total_entries;
 	}
       } // entries loop
-    }
-  }
+    } // while (is_truncated)
+
+    ldout(store->ctx(), 5) << "INFO: " << __func__ << ": finished reshard of bucket=" <<
+      bucket_info.bucket << " shard=" << i << dendl;
+  } // shard loop
 
   if (verbose_json_out) {
     formatter->close_section();
@@ -912,9 +921,10 @@ int RGWReshard::add(cls_rgw_reshard_entry& entry)
   }
 
   string logshard_oid;
-
   get_bucket_logshard_oid(entry.tenant, entry.bucket_name, &logshard_oid);
 
+  ldout(store->ctx(), 5) << "INFO: " << __func__ << ": adding entry from reshard log, oid=" <<
+    logshard_oid << " tenant=" << entry.tenant << " bucket=" << entry.bucket_name << dendl;
   librados::ObjectWriteOperation op;
   cls_rgw_reshard_add(op, entry);
 
@@ -995,12 +1005,16 @@ int RGWReshard::remove(const cls_rgw_reshard_entry& entry)
 
   get_bucket_logshard_oid(entry.tenant, entry.bucket_name, &logshard_oid);
 
+  ldout(store->ctx(), 5) << "INFO: " << __func__ << ": removing entry from reshard log, oid=" <<
+    logshard_oid << " tenant=" << entry.tenant << " bucket=" << entry.bucket_name << dendl;
+
   librados::ObjectWriteOperation op;
   cls_rgw_reshard_remove(op, entry);
 
   int ret = store->reshard_pool_ctx.operate(logshard_oid, &op);
   if (ret < 0) {
-    lderr(store->ctx()) << "ERROR: failed to remove entry from reshard log, oid=" << logshard_oid << " tenant=" << entry.tenant << " bucket=" << entry.bucket_name << dendl;
+    lderr(store->ctx()) << "ERROR: " << __func__ << ": failed to remove entry from reshard log, oid=" <<
+      logshard_oid << " tenant=" << entry.tenant << " bucket=" << entry.bucket_name << dendl;
     return ret;
   }
 
@@ -1069,7 +1083,7 @@ void RGWReshardWait::stop()
 int RGWReshard::process_entry(const cls_rgw_reshard_entry& entry,
                               int max_entries)
 {
-  ldout(store->ctx(), 20) << __func__ << " resharding " <<
+  ldout(store->ctx(), 5) << "ENTERING " << __PRETTY_FUNCTION__ << ": resharding " <<
       entry.bucket_name  << dendl;
 
   rgw_bucket bucket;
@@ -1111,31 +1125,29 @@ int RGWReshard::process_entry(const cls_rgw_reshard_entry& entry,
     }
 
     // we cleaned up, move on to the next entry
+    ldout(store->ctx(), 5) << "EXITING " << __PRETTY_FUNCTION__ << ": resharding " <<
+      entry.bucket_name  << dendl;
     return 0;
   }
 
   if (!RGWBucketReshard::can_reshard(bucket_info, store->svc.zone)) {
-    ldout(store->ctx(), 1) << "Bucket " << bucket_info.bucket << " is not "
-        "eligible for resharding until peer zones finish syncing one "
-        "or more of its old log generations" << dendl;
+    ldout(store->ctx(), 1) << "INFO: " << __func__ << ": bucket " <<
+      bucket_info.bucket << " is not "
+      "eligible for resharding until peer zones finish syncing one "
+      "or more of its old log generations; skipping" << dendl;
     return remove(entry);
   }
 
   RGWBucketReshard br(store, bucket_info, bucket_attrs, nullptr);
-
   ReshardFaultInjector f; // no fault injected
   ret = br.execute(entry.new_num_shards, f, max_entries,
                    false, nullptr, nullptr, this);
   if (ret < 0) {
-    ldout(store->ctx(), 0) <<  __func__ <<
-        ": Error during resharding bucket " << entry.bucket_name << ":" <<
+    lderr(store->ctx()) << "ERROR: " <<  __func__ <<
+        ": failed to reshard bucket " << entry.bucket_name << ":" <<
         cpp_strerror(-ret)<< dendl;
     return ret;
   }
-
-  ldout(store->ctx(), 20) << __func__ <<
-      " removing reshard queue entry for bucket " << entry.bucket_name <<
-      dendl;
 
   ret = remove(entry);
   if (ret < 0) {
@@ -1144,6 +1156,9 @@ int RGWReshard::process_entry(const cls_rgw_reshard_entry& entry,
         cpp_strerror(-ret) << dendl;
     return ret;
   }
+
+  ldout(store->ctx(), 5) << "EXITING " << __PRETTY_FUNCTION__ << ": resharding " <<
+      entry.bucket_name  << dendl;
   return 0;
 }
 
@@ -1152,7 +1167,6 @@ int RGWReshard::process_single_logshard(int logshard_num)
   string marker;
   bool truncated = true;
 
-  CephContext *cct = store->ctx();
   constexpr uint32_t max_entries = 1000;
 
   string logshard_oid;
@@ -1160,25 +1174,36 @@ int RGWReshard::process_single_logshard(int logshard_num)
 
   RGWBucketReshardLock logshard_lock(store, logshard_oid, false);
 
+  ldout(store->ctx(), 5) << "ENTERING " << __PRETTY_FUNCTION__ << ": process reshard queue, shard_num=" <<
+    logshard_num << ", oid=" << logshard_oid << dendl;
+
   int ret = logshard_lock.lock();
   if (ret < 0) { 
-    ldout(store->ctx(), 5) << __func__ << "(): failed to acquire lock on " <<
-      logshard_oid << ", ret = " << ret <<dendl;
+    lderr(store->ctx()) << "ERROR: " << __func__ <<
+      ": failed to acquire lock on reshard queue:" <<
+      logshard_oid << ", ret=" << ret << dendl;
     return ret;
   }
   
   do {
+    ldout(store->ctx(), 5) << "INFO: " << __func__ <<
+      ": listing reshard queue, marker=" << marker << dendl;
+
     std::list<cls_rgw_reshard_entry> entries;
     ret = list(logshard_num, marker, max_entries, entries, &truncated);
     if (ret < 0) {
-      ldout(cct, 10) << "cannot list all reshards in logshard oid=" <<
-	logshard_oid << dendl;
-      continue;
+      ldout(store->ctx(), 1) << "ERROR: " << __func__ <<
+	": cannot list all reshard entries in logshard oid=" <<
+	logshard_oid << ", ret=" << ret << dendl;
+      return ret;
     }
 
     for(auto& entry: entries) { // logshard entries
       process_entry(entry, max_entries);
       if (ret < 0) {
+	lderr(store->ctx()) << "ERROR: " << __func__ <<
+	  ": cannot process entry=" << entry.bucket_name <<
+	  " from reshard queue=" << logshard_oid << ", ret=" << ret << dendl;
         return ret;
       }
 
@@ -1186,6 +1211,8 @@ int RGWReshard::process_single_logshard(int logshard_num)
       if (logshard_lock.should_renew(now)) {
         ret = logshard_lock.renew(now);
         if (ret < 0) {
+	  lderr(store->ctx()) << "ERROR: " << __func__ <<
+	    ": failed to renew lock on reshard queue=" << logshard_oid << ", ret=" << ret << dendl;
           return ret;
         }
       }
@@ -1195,6 +1222,10 @@ int RGWReshard::process_single_logshard(int logshard_num)
   } while (truncated);
 
   logshard_lock.unlock();
+
+  ldout(store->ctx(), 5) << "EXITING " << __PRETTY_FUNCTION__ <<
+    ": process reshard queue, shard_num=" <<
+    logshard_num << ", oid=" << logshard_oid << dendl;
   return 0;
 }
 
@@ -1210,6 +1241,7 @@ void RGWReshard::get_logshard_oid(int shard_num, string *logshard)
 
 int RGWReshard::process_all_logshards()
 {
+  ldout(store->ctx(), 5) << "ENTERING " << __PRETTY_FUNCTION__ << dendl;
   int ret = 0;
 
   for (int i = 0; i < num_logshards; i++) {
@@ -1220,10 +1252,12 @@ int RGWReshard::process_all_logshards()
 
     ret = process_single_logshard(i);
     if (ret <0) {
+      ldout(store->ctx(), 5) << "EXITING " << __PRETTY_FUNCTION__ << " with error " << ret << dendl;
       return ret;
     }
   }
 
+  ldout(store->ctx(), 5) << "EXITING " << __PRETTY_FUNCTION__ << dendl;
   return 0;
 }
 
@@ -1249,7 +1283,7 @@ void RGWReshard::stop_processor()
   worker = nullptr;
 }
 
-void *RGWReshard::ReshardWorker::entry() {
+void* RGWReshard::ReshardWorker::entry() {
   utime_t last_run;
   do {
     utime_t start = ceph_clock_now();
