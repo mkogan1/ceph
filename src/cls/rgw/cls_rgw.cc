@@ -911,7 +911,7 @@ int rgw_bucket_prepare_op(cls_method_context_t hctx, bufferlist *in, bufferlist 
   info.op = op.op;
   CLS_LOG_BITX(bitx_inst, 20,
 	       "INFO: %s: inserting tag %s op %c into pending map for entry %s",
-	       __func__, op.tag, info.op, entry.key.to_string().c_str());
+	       __func__, op.tag.c_str(), info.op, entry.key.to_string().c_str());
   entry.pending_map.insert(pair<string, rgw_bucket_pending_info>(op.tag, info));
 
   // write out new key to disk

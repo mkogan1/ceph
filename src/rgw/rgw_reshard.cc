@@ -1187,7 +1187,7 @@ int RGWReshard::process_single_logshard(int logshard_num, const DoutPrefixProvid
   if (ret < 0) { 
     ldpp_derr(dpp) << "ERROR: " << __func__ <<
       ": failed to acquire lock on reshard queue, shard=" <<
-      logshard_num << ", oid="
+      logshard_num << ", oid=" <<
       logshard_oid << ", ret=" << ret << dendl;
     return ret;
   }
