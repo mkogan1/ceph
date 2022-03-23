@@ -23,7 +23,7 @@ namespace rgw::bucket_sync {
 // per bucket-shard state cached by DataSyncShardCR
 struct State {
   // the source bucket shard to sync
-  std::pair<rgw_bucket_shard, uint64_t> key;
+  rgw_bucket_shard key;
   // current sync obligation being processed by DataSyncSingleEntry
   std::optional<rgw_data_sync_obligation> obligation;
   // incremented with each new obligation
@@ -31,10 +31,7 @@ struct State {
   // highest timestamp applied by all sources
   ceph::real_time progress_timestamp;
 
-  State(const std::pair<rgw_bucket_shard, uint64_t>& key) noexcept
-    : key(key) {}
-  State(const rgw_bucket_shard& shard, uint64_t gen) noexcept
-    : key(shard, gen) {}
+  State(const rgw_bucket_shard& key) noexcept : key(key) {}
 };
 
 struct Entry;
@@ -42,7 +39,7 @@ struct EntryToKey;
 class Handle;
 
 using lru_config = ceph::common::intrusive_lru_config<
-  std::pair<rgw_bucket_shard, uint64_t>, Entry, EntryToKey>;
+    rgw_bucket_shard, Entry, EntryToKey>;
 
 // a recyclable cache entry
 struct Entry : State, ceph::common::intrusive_lru_base<lru_config> {
@@ -50,7 +47,7 @@ struct Entry : State, ceph::common::intrusive_lru_base<lru_config> {
 };
 
 struct EntryToKey {
-  using type = std::pair<rgw_bucket_shard, uint64_t>;
+  using type = rgw_bucket_shard;
   const type& operator()(const Entry& e) { return e.key; }
 };
 
@@ -74,7 +71,7 @@ class Cache : public thread_unsafe_ref_counter<Cache> {
 
   // find or create a cache entry for the given key, and return a Handle that
   // keeps it lru-pinned until destruction
-  Handle get(const rgw_bucket_shard& shard, uint64_t gen);
+  Handle get(const rgw_bucket_shard& key);
 };
 
 // a State handle that keeps the Cache referenced
@@ -107,9 +104,9 @@ class Handle {
   State* operator->() const noexcept { return entry.get(); }
 };
 
-inline Handle Cache::get(const rgw_bucket_shard& shard, uint64_t gen)
+inline Handle Cache::get(const rgw_bucket_shard& key)
 {
-  auto result = cache.get_or_create({ shard, gen });
+  auto result = cache.get_or_create(key);
   return {this, std::move(result.first)};
 }
 
