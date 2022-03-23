@@ -24,14 +24,17 @@
 // represents an obligation to sync an entry up a given time
 struct rgw_data_sync_obligation {
   rgw_bucket_shard bs;
-  uint64_t gen;
+  std::optional<uint64_t> gen;
   std::string marker;
   ceph::real_time timestamp;
   bool retry = false;
 };
 
 inline std::ostream& operator<<(std::ostream& out, const rgw_data_sync_obligation& o) {
-  out << "key=" << o.bs << '[' << o.gen << ']';
+  out << "key=" << o.bs;
+  if (o.gen) {
+    out << '[' << *o.gen << ']';
+  }
   if (!o.marker.empty()) {
     out << " marker=" << o.marker;
   }
@@ -688,7 +691,7 @@ public:
 
   RGWCoroutine *read_sync_status_cr(int num, rgw_bucket_shard_sync_info *sync_status);
   RGWCoroutine *init_sync_status_cr(RGWObjVersionTracker& objv_tracker, rgw_bucket_index_marker_info& info);
-  RGWCoroutine *run_sync_cr(int num, uint64_t gen);
+  RGWCoroutine *run_sync_cr(int num);
 
   int num_pipes() {
     return sync_pairs.size();
@@ -762,7 +765,7 @@ public:
   std::ostream& gen_prefix(std::ostream& out) const override;
 
   int read_sync_status();
-  int run(uint64_t gen);
+  int run();
 };
 
 /// read the full sync status with respect to a source bucket
