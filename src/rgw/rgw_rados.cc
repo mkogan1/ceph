@@ -9279,8 +9279,12 @@ int RGWRados::check_bucket_shards(const RGWBucketInfo& bucket_info,
   const uint64_t max_objs_per_shard =
     cct->_conf.get_val<uint64_t>("rgw_max_objs_per_shard");
 
-  quota_handler->check_bucket_shards(max_objs_per_shard, num_source_shards,
-				     num_objs, need_resharding, &suggested_num_shards);
+  // TODO: consider per-bucket sync policy here?
+  const bool is_multisite = svc.zone->get_zone().log_data;
+
+  quota_handler->check_bucket_shards(dpp, max_objs_per_shard, num_source_shards,
+				     num_objs, is_multisite, need_resharding,
+				     &suggested_num_shards);
   if (! need_resharding) {
     return 0;
   }
