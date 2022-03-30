@@ -7304,10 +7304,6 @@ std::vector<Option> get_rgw_options() {
     .set_default("")
     .set_description("torrent field encoding"),
 
-    Option("rgw_data_notify_interval_msec", Option::TYPE_INT, Option::LEVEL_ADVANCED)
-    .set_default(200)
-    .set_description("data changes notification interval to followers"),
-
     Option("rgw_torrent_origin", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("")
     .set_description("Torrent origin"),

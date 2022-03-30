@@ -741,7 +741,7 @@ class RGWDataNotifier : public RGWRadosThread {
   bc::flat_set<rgw_data_notify_entry> entry;
 
   uint64_t interval_msec() override {
-    return cct->_conf.get_val<int64_t>("rgw_data_notify_interval_msec");
+    return 0;
   }
   void stop_process() override {
     notify_mgr.stop();
