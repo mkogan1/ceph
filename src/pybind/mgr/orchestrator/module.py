@@ -1411,6 +1411,7 @@ Usage:
         r = {
             'target_image': status.target_image,
             'in_progress': status.in_progress,
+            'which': status.which,
             'services_complete': status.services_complete,
             'progress': status.progress,
             'message': status.message,
