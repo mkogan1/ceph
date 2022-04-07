@@ -93,6 +93,7 @@ export class ServiceDaemonListComponent implements OnInit, OnChanges, AfterViewI
     private cephServiceService: CephServiceService,
     private orchService: OrchestratorService,
     private relativeDatePipe: RelativeDatePipe,
+    private dimlessBinaryPipe: DimlessBinaryPipe,
     public actionLabels: ActionLabelsI18n,
     private authStorageService: AuthStorageService,
     private daemonService: DaemonService,
@@ -182,6 +183,17 @@ export class ServiceDaemonListComponent implements OnInit, OnChanges, AfterViewI
         prop: 'events',
         flexGrow: 2,
         cellTemplate: this.listTpl
+      },
+      {
+        name: $localize`Memory Usage`,
+        prop: 'memory_usage',
+        flexGrow: 1,
+        pipe: this.dimlessBinaryPipe
+      },
+      {
+        name: $localize`CPU %`,
+        prop: 'cpu_percentage',
+        flexGrow: 1
       }
     ];
 

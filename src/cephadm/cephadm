@@ -5482,13 +5482,20 @@ def list_daemons(ctx, detail=True, legacy_dir=None):
 
     # keep track of memory and cpu usage we've seen
     seen_memusage = {}  # type: Dict[str, int]
-    seen_cpuperc = {}  # type: Dict[str, str]
+    seen_cpuperc = {}  # type: Dict[str, int]
     out, err, code = call(
         ctx,
         [container_path, 'stats', '--format', '{{.ID}},{{.MemUsage}}', '--no-stream'],
         verbosity=CallVerbosity.DEBUG
     )
     seen_memusage_cid_len, seen_memusage = _parse_mem_usage(code, out)
+    
+    out, err, code = call(
+        ctx,
+        [container_path, 'stats', '--format', '{{.ID}},{{.CPUPerc}}', '--no-stream'],
+        verbosity=CallVerbosity.DEBUG
+    )
+    seen_cpuperc_cid_len, seen_cpuperc = _parse_cpu_perc(code, out)
 
     out, err, code = call(
         ctx,
@@ -5676,8 +5683,11 @@ def list_daemons(ctx, detail=True, legacy_dir=None):
                             os.path.join(data_dir, fsid, j, 'unit.image'))
                         val['configured'] = get_file_timestamp(
                             os.path.join(data_dir, fsid, j, 'unit.configured'))
+                        
+                    logger.info("helo %s", val)
                     ls.append(val)
 
+    logger.info("waah %s", ls)
     return ls
 
 
@@ -5698,6 +5708,20 @@ def _parse_mem_usage(code: int, out: str) -> Tuple[int, Dict[str, int]]:
                 pass
     return seen_memusage_cid_len, seen_memusage
 
+def _parse_cpu_perc(code: int, out: str):
+    seen_cpuperc = {}
+    seen_cpuperc_cid_len = 0
+    if not code:
+        for line in out.splitlines():
+            (cid, cpuperc) = line.split(',')
+            try:
+                seen_cpuperc[cid] = cpuperc
+                if not seen_cpuperc_cid_len:
+                    seen_cpuperc_cid_len = len(cid)
+            except ValueError:
+                logger.info('unable to parse cpu percentage line\n>{}'.format(line))
+                pass
+    return seen_cpuperc_cid_len, seen_cpuperc
 
 def _parse_cpu_perc(code: int, out: str) -> Tuple[int, Dict[str, str]]:
     seen_cpuperc = {}
