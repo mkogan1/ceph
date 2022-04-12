@@ -14,6 +14,7 @@
 #include "rgw_sal.h"
 
 #include "rgw_datalog.h"
+#include "rgw_sync.h"
 #include "rgw_sync_module.h"
 #include "rgw_sync_trace.h"
 #include "rgw_sync_policy.h"
@@ -712,29 +713,34 @@ class RGWBucketPipeSyncStatusManager : public DoutPrefixProvider {
 
   RGWDataSyncEnv sync_env;
 
-  RGWCoroutinesManager cr_mgr;
+  RGWCoroutinesManager cr_mgr{store->ctx(),
+                              store->getRados()->get_cr_registry()};
 
-  RGWHTTPManager http_manager;
+  RGWHTTPManager http_manager{store->ctx(), cr_mgr.get_completion_mgr()};
 
   std::optional<rgw_zone_id> source_zone;
   std::optional<rgw_bucket> source_bucket;
 
-  RGWRESTConn *conn;
-  RGWSyncErrorLogger *error_logger;
+  RGWRESTConn* conn = nullptr;
+  std::unique_ptr<RGWSyncErrorLogger> error_logger =
+    std::make_unique<RGWSyncErrorLogger>(store, RGW_SYNC_ERROR_LOG_SHARD_PREFIX,
+					 ERROR_LOGGER_SHARDS);
   RGWSyncModuleInstanceRef sync_module;
 
   rgw_bucket dest_bucket;
 
-  vector<RGWRemoteBucketManager *> source_mgrs;
+  std::vector<RGWRemoteBucketManager> source_mgrs;
 
   map<int, rgw_bucket_shard_sync_info> sync_status;
 
 public:
-  RGWBucketPipeSyncStatusManager(rgw::sal::RGWRadosStore *_store,
-                             std::optional<rgw_zone_id> _source_zone,
-                             std::optional<rgw_bucket> _source_bucket,
-                             const rgw_bucket& dest_bucket);
-  ~RGWBucketPipeSyncStatusManager();
+  RGWBucketPipeSyncStatusManager(rgw::sal::RGWRadosStore* store,
+				 std::optional<rgw_zone_id> source_zone,
+				 std::optional<rgw_bucket> source_bucket,
+				 const rgw_bucket& dest_bucket)
+    : store(store), source_zone(source_zone), source_bucket(source_bucket),
+      dest_bucket(dest_bucket) {}
+  ~RGWBucketPipeSyncStatusManager() = default;
 
   int init(const DoutPrefixProvider *dpp);
 
