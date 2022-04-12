@@ -906,9 +906,12 @@ class RGWIndexCompletionManager {
 
   RGWIndexCompletionThread *completion_thread{nullptr};
 
-  int num_shards;
+  uint32_t num_shards;
 
-  std::atomic<int> cur_shard {0};
+  // used to distribute the completions and the locks they use across
+  // their respective vectors; it will get incremented and can wrap
+  // around back to 0 without issue
+  std::atomic<uint32_t> cur_shard {0};
 
 
 public:
@@ -924,14 +927,13 @@ public:
     num_shards = store->ctx()->_conf->rgw_thread_pool_size;
     completions.resize(num_shards);
   }
+
   ~RGWIndexCompletionManager() {
     stop();
   }
 
-  int next_shard() {
-    int result = cur_shard % num_shards;
-    cur_shard++;
-    return result;
+  uint32_t next_shard() {
+    return cur_shard++ % num_shards;
   }
 
   void create_completion(const rgw_obj& obj,
@@ -960,7 +962,7 @@ public:
       delete completion_thread;
     }
 
-    for (int i = 0; i < num_shards; ++i) {
+    for (uint32_t i = 0; i < num_shards; ++i) {
       std::lock_guard l{locks[i]};
       for (auto c : completions[i]) {
         c->stop();
