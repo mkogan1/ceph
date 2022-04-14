@@ -60,7 +60,6 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
       font-size: 13px;
       margin-bottom: 0;
       margin-left: 44%;
-      margin-top: 10%;
     }
 
     cd-login {
@@ -152,6 +151,13 @@ $pf-global--image-path: '~@patternfly/patternfly/assets/images';
         box-shadow: 0 0 0 1000px vv.$white inset;
         -webkit-text-fill-color: vv.$black;
       }
+    }
+
+    .login-text {
+      margin-left: 44%;
+      text-align:justify;
+      text-justify: inter-word;
+      padding-right: 0px;
     }
   }
 }
