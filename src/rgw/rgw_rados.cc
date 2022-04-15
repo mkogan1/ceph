@@ -6218,6 +6218,8 @@ int RGWRados::Bucket::UpdateIndex::guard_reshard(const DoutPrefixProvider *dpp, 
     ldpp_dout(dpp, 0) << "NOTICE: resharding operation on bucket index detected, blocking" << dendl;
     r = store->block_while_resharding(bs, obj_instance, target->bucket_info, null_yield, dpp);
     if (r == -ERR_BUSY_RESHARDING) {
+      ldpp_dout(dpp, 0) << "ERROR: block_while_resharding() still busy. obj=" <<
+        obj_instance.key << dendl;
       continue;
     }
     if (r < 0) {
