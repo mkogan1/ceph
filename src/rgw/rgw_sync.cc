@@ -1766,6 +1766,7 @@ public:
         sync_marker.realm_epoch = realm_epoch;
         sync_marker.marker.clear();
       }
+      tn->log(20, SSTR("DBUG: mdlog_marker=" << mdlog_marker << "sync_marker=" << sync_marker.marker ));
       mdlog_marker = sync_marker.marker;
       set_marker_tracker(new RGWMetaSyncShardMarkerTrack(sync_env,
                                                          sync_env->shard_obj_name(shard_id),
@@ -1779,6 +1780,7 @@ public:
        * period_marker: the last marker before the next period begins (optional)
        */
       marker = max_marker = sync_marker.marker;
+      tn->log(20, SSTR("DBUG: marker=" << marker << "mdlog_marker=" << mdlog_marker ));
       /* inc sync */
       do {
         if (!lease_cr->is_locked()) {
@@ -1823,6 +1825,7 @@ public:
             *reset_backoff = false; // back off and try again later
             return retcode;
           }
+          tn->log(20, SSTR("DBUG: truncated=" << truncated << " max_marker=" << max_marker));
           for (log_iter = log_entries.begin(); log_iter != log_entries.end() && !done_with_period; ++log_iter) {
             if (!period_marker.empty() && period_marker <= log_iter->id) {
               done_with_period = true;
