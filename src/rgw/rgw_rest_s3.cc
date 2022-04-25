@@ -626,7 +626,7 @@ int RGWGetObj_ObjStore_S3::get_decrypt_filter(std::unique_ptr<RGWGetObj_Filter> 
 
   *filter = std::make_unique<RGWGetObj_BlockDecrypt>(
       s, s->cct, cb, std::move(block_crypt),
-      std::move(parts_len));
+      std::move(parts_len), s->yield);
   return 0;
 }
 int RGWGetObj_ObjStore_S3::verify_requester(const rgw::auth::StrategyRegistry& auth_registry, optional_yield y) 
@@ -2800,7 +2800,7 @@ int RGWPutObj_ObjStore_S3::get_decrypt_filter(
 
   *filter = std::make_unique<RGWGetObj_BlockDecrypt>(
       s, s->cct, cb, std::move(block_crypt),
-      std::move(parts_len));
+      std::move(parts_len), s->yield);
   return 0;
 }
 
@@ -2822,7 +2822,7 @@ int RGWPutObj_ObjStore_S3::get_encrypt_filter(
        * We use crypto mode that configured as if we were decrypting. */
       res = rgw_s3_prepare_decrypt(s, obj->get_attrs(), &block_crypt, crypt_http_responses);
       if (res == 0 && block_crypt != nullptr)
-        filter->reset(new RGWPutObj_BlockEncrypt(s, s->cct, cb, std::move(block_crypt)));
+        filter->reset(new RGWPutObj_BlockEncrypt(s, s->cct, cb, std::move(block_crypt), s->yield));
     }
     /* it is ok, to not have encryption at all */
   }
@@ -2831,7 +2831,7 @@ int RGWPutObj_ObjStore_S3::get_encrypt_filter(
     std::unique_ptr<BlockCrypt> block_crypt;
     res = rgw_s3_prepare_encrypt(s, attrs, &block_crypt, crypt_http_responses);
     if (res == 0 && block_crypt != nullptr) {
-      filter->reset(new RGWPutObj_BlockEncrypt(s, s->cct, cb, std::move(block_crypt)));
+      filter->reset(new RGWPutObj_BlockEncrypt(s, s->cct, cb, std::move(block_crypt), s->yield));
     }
   }
   return res;
@@ -3379,7 +3379,7 @@ int RGWPostObj_ObjStore_S3::get_encrypt_filter(
   int res = rgw_s3_prepare_encrypt(s, attrs, &block_crypt,
                                    crypt_http_responses);
   if (res == 0 && block_crypt != nullptr) {
-    filter->reset(new RGWPutObj_BlockEncrypt(s, s->cct, cb, std::move(block_crypt)));
+    filter->reset(new RGWPutObj_BlockEncrypt(s, s->cct, cb, std::move(block_crypt), s->yield));
   }
   return res;
 }
