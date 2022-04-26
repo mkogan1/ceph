@@ -9907,7 +9907,6 @@ int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info,
   ldout_bitx(bitx, cct, 25) <<
     "BACKTRACE: " << __func__ << ": " << BackTrace(1) << dendl_bitx;
 
-
   librados::IoCtx index_ctx;
   uint8_t suggest_flag = (svc.zone->get_zone().log_data ? CEPH_RGW_DIR_SUGGEST_LOG_OP : 0);
   std::map<int, std::string> index_oids;
@@ -9917,41 +9916,49 @@ int RGWRados::remove_objs_from_index(RGWBucketInfo& bucket_info,
     return r;
   }
 
-  // needed so objclass won't skip req
-  constexpr uint64_t highest_epoch = uint64_t(-1);
-
   // split up removals by shard
-  std::map<int, bufferlist> sharded_updates;
+  std::map<int, std::set<std::string>> sharded_removals;
   for (const auto& entry_key : entry_key_list) {
     const rgw_obj_key obj_key(entry_key);
     const uint32_t shard = rgw_bucket_shard_index(obj_key, num_shards);
-    bufferlist& updates = sharded_updates[shard];
 
-    rgw_bucket_dir_entry entry;
-    entry.key = entry_key;
-    entry.ver.epoch = highest_epoch;
+    // entry_key already combines namespace and name, so we first have
+    // to break that apart before we can then combine with instance
+    std::string name;
+    std::string ns; // namespace
+    rgw_obj_key::parse_index_key(entry_key.name, &name, &ns);
+    rgw_obj_key full_key(name, entry_key.instance, ns);
+    std::string combined_key = full_key.get_oid();
 
-    ldout_bitx(bitx, cct, 5) << "INFO: " << __func__ <<
-      ": encoding removal of bucket=" << bucket_info.bucket <<
-      " shard=" << shard <<
-      " entry=" << entry.key << " in updates" << dendl_bitx;
+    sharded_removals[shard].insert(combined_key);
 
-    updates.append(CEPH_RGW_REMOVE | suggest_flag);
-    encode(entry, updates);
+    ldout_bitx(bitx, cct, 20) << "INFO: " << __func__ <<
+      ": removal from bucket index, bucket=" << bucket_info.bucket <<
+      " key=" << combined_key << " designated for shard " << shard <<
+      dendl_bitx;
   }
 
-  ldout_bitx(bitx, cct, 10) << "INFO: " << __func__ <<
-    ": calling dir_suggest on bucket=" << bucket_info.bucket << ", " <<
-    sharded_updates.size() << " of " << index_oids.size() << " shards" << dendl_bitx;
-  // this operation ignores shards for which there's not an update, so
-  // we can send the complete list of bucket index shard oids
-  r = CLSRGWIssueBucketBIDirSuggest(index_ctx,
-				    index_oids,
-				    sharded_updates,
-				    cct->_conf->rgw_bucket_index_max_aio)();
+  for (const auto& removals : sharded_removals) {
+    const int shard = removals.first;
+    const std::string& oid = index_oids[shard];
 
-  ldout_bitx(bitx, cct, 20) <<
+    ldout_bitx(bitx, cct, 10) << "INFO: " << __func__ <<
+      ": removal from bucket index, bucket=" << bucket_info.bucket <<
+      ", shard=" << shard << ", oid=" << oid << ", num_keys=" <<
+      removals.second.size() << dendl_bitx;
+
+    r = index_ctx.omap_rm_keys(oid, removals.second);
+    if (r < 0) {
+      ldout_bitx(bitx, cct, 0) << "ERROR: " << __func__ <<
+	": omap_rm_keys returned ret=" << r <<
+	dendl_bitx;
+      return r;
+    }
+  }
+
+  ldout_bitx(bitx, cct, 5) <<
     "EXITING " << __func__ << " and returning " << r << dendl_bitx;
+
   return r;
 }
 
