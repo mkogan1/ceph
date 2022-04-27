@@ -546,7 +546,29 @@ int Mirror::init()
 
   m_local_cluster_watcher.reset(new ClusterWatcher(m_local, m_lock,
                                                    m_service_daemon.get()));
-  return r;
+
+  auto die_after = m_cct->_conf.get_val<uint64_t>("rbd_mirror_die_after_seconds");
+  if (die_after > 0) {
+    auto exit_ctx = new LambdaContext([](int) {
+        generic_derr << "hard exit due to rbd_mirror_die_after_seconds" << dendl;
+        exit(0);
+      });
+    auto stop_ctx = new LambdaContext([this, exit_ctx](int) {
+        // Mirror happens to not destroy m_threads when stopping, so we
+        // can follow up with a hard exit without involving SIGALRM
+        m_threads->timer->add_event_after(30, exit_ctx);
+
+        derr << "stopping due to rbd_mirror_die_after_seconds" << dendl;
+        handle_signal(SIGTERM);
+      });
+
+    dout(0) << "rbd_mirror_die_after_seconds=" << die_after
+            << ", arming death timer" << dendl;
+    std::lock_guard timer_locker(m_threads->timer_lock);
+    m_threads->timer->add_event_after(die_after, stop_ctx);
+  }
+
+  return 0;
 }
 
 void Mirror::run()
