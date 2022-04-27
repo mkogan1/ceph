@@ -8155,6 +8155,10 @@ static std::vector<Option> get_rbd_mirror_options() {
     .set_default(30)
     .add_see_also("rbd_mirror_memory_autotune")
     .set_description("The number of seconds to wait between rebalances when cache autotune is enabled."),
+
+    Option("rbd_mirror_die_after_seconds", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
+    .set_default(0)
+    .set_description("number of seconds to wait before stopping all replayers and exiting"),
   });
 }
 
