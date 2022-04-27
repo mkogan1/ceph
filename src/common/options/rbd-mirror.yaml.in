@@ -208,3 +208,11 @@ options:
   - rbd-mirror
   see_also:
   - rbd_mirror_memory_autotune
+- name: rbd_mirror_die_after_seconds
+  type: secs
+  level: dev
+  desc: how long to wait before stopping all replayers and exiting
+  default: 0
+  services:
+  - rbd-mirror
+  min: 0
