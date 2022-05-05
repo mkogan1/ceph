@@ -612,3 +612,10 @@ Relevant tracker: https://tracker.ceph.com/issues/55521
   (``auth_client_required=cephx`` and ``ms_mon_client_mode=secure``).
   If you have cephx authentication disabled on your cluster, you may
   need to adjust these settings for RGW.
+* RGW's default backend for `rgw_enable_ops_log` changed from RADOS to file.
+  The default value of `rgw_ops_log_rados` is now false, and `rgw_ops_log_file_path`
+  defaults to "/var/log/ceph/ops-log-$cluster-$name.log".
+
+* RGW: The beast frontend's HTTP access log line uses a new debug_rgw_access
+  configurable. This has the same defaults as debug_rgw, but can now be controlled
+  independently.
