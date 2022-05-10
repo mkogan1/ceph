@@ -33,6 +33,13 @@ static void handle_signal(int signum)
     mirror->handle_signal(signum);
 }
 
+static void godown_alarm(int signum)
+{
+  lgeneric_derr(g_ceph_context) << "exiting due to shut_down timeout" << dendl;
+  g_ceph_context->_log->flush();
+  _exit(0);
+}
+
 int main(int argc, const char **argv)
 {
   std::vector<const char*> args;
@@ -60,6 +67,7 @@ int main(int argc, const char **argv)
   register_async_signal_handler(SIGHUP, handle_signal);
   register_async_signal_handler_oneshot(SIGINT, handle_signal);
   register_async_signal_handler_oneshot(SIGTERM, handle_signal);
+  signal(SIGALRM, godown_alarm);
 
   std::vector<const char*> cmd_args;
   argv_to_vec(argc, argv, cmd_args);

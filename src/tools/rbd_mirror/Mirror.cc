@@ -550,16 +550,19 @@ int Mirror::init()
   auto die_after = m_cct->_conf.get_val<uint64_t>("rbd_mirror_die_after_seconds");
   if (die_after > 0) {
     auto exit_ctx = new LambdaContext([](int) {
-        generic_derr << "hard exit due to rbd_mirror_die_after_seconds" << dendl;
-        exit(0);
+        lgeneric_derr(g_ceph_context) << "exiting due to rbd_mirror_die_after_seconds"
+                                      << dendl;
+        g_ceph_context->_log->flush();
+        _exit(0);
       });
     auto stop_ctx = new LambdaContext([this, exit_ctx](int) {
         // Mirror happens to not destroy m_threads when stopping, so we
         // can follow up with a hard exit without involving SIGALRM
         m_threads->timer->add_event_after(30, exit_ctx);
 
-        derr << "stopping due to rbd_mirror_die_after_seconds" << dendl;
-        handle_signal(SIGTERM);
+        derr << "set stopping due to rbd_mirror_die_after_seconds" << dendl;
+        m_stopping = true;
+        m_cond.notify_all();
       });
 
     dout(0) << "rbd_mirror_die_after_seconds=" << die_after
@@ -721,6 +724,17 @@ void Mirror::update_pool_replayers(const PoolPeers &pool_peers,
     }
   }
 
+  auto shut_down_with_timeout = [this](PoolReplayer<>* pool_replayer) {
+    if (m_cct->_conf.get_val<uint64_t>("rbd_mirror_die_after_seconds")) {
+      dout(20) << "arming shut_down timer" << dendl;
+      alarm(30);
+      pool_replayer->shut_down();
+      alarm(0);
+    } else {
+      pool_replayer->shut_down();
+    }
+  };
+
   for (auto &kv : pool_peers) {
     for (auto &peer : kv.second) {
       PoolPeer pool_peer(kv.first, peer);
@@ -733,17 +747,17 @@ void Mirror::update_pool_replayers(const PoolPeers &pool_peers,
           dout(0) << "restarting pool replayer for " << peer << " due to "
                   << "updated site name" << dendl;
           // TODO: make async
-          pool_replayer->shut_down();
+          shut_down_with_timeout(pool_replayer.get());
           pool_replayer->init(site_name);
         } else if (pool_replayer->is_blocklisted()) {
           derr << "restarting blocklisted pool replayer for " << peer << dendl;
           // TODO: make async
-          pool_replayer->shut_down();
+          shut_down_with_timeout(pool_replayer.get());
           pool_replayer->init(site_name);
         } else if (!pool_replayer->is_running()) {
           derr << "restarting failed pool replayer for " << peer << dendl;
           // TODO: make async
-          pool_replayer->shut_down();
+          shut_down_with_timeout(pool_replayer.get());
           pool_replayer->init(site_name);
         }
       } else {
