@@ -130,6 +130,7 @@ export class ActionLabelsI18n {
   FLAGS: string;
   ENTER_MAINTENANCE: string;
   EXIT_MAINTENANCE: string;
+  REMOVE_SCHEDULING: string;
   START_DRAIN: string;
   STOP_DRAIN: string;
   START: string;
@@ -189,6 +190,7 @@ export class ActionLabelsI18n {
     this.FLAGS = $localize`Flags`;
     this.ENTER_MAINTENANCE = $localize`Enter Maintenance`;
     this.EXIT_MAINTENANCE = $localize`Exit Maintenance`;
+
     this.START_DRAIN = $localize`Start Drain`;
     this.STOP_DRAIN = $localize`Stop Drain`;
 
@@ -200,6 +202,8 @@ export class ActionLabelsI18n {
     this.STOP = $localize`Stop`;
     this.REDEPLOY = $localize`Redeploy`;
     this.RESTART = $localize`Restart`;
+
+    this.REMOVE_SCHEDULING = $localize`Remove Scheduling`;
   }
 }
 
