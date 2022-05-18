@@ -225,7 +225,7 @@ void usage()
   cout << "  role rm                    remove a role\n";
   cout << "  role get                   get a role\n";
   cout << "  role list                  list roles with specified path prefix\n";
-  cout << "  role modify                modify the assume role policy of an existing role\n";
+  cout << "  role-trust-policy modify   modify the assume role policy of an existing role\n";
   cout << "  role-policy put            add/update permission policy to role\n";
   cout << "  role-policy list           list policies attached to a role\n";
   cout << "  role-policy get            get the specified inline policy document embedded with the given role\n";
@@ -551,7 +551,7 @@ enum {
   OPT_ROLE_CREATE,
   OPT_ROLE_DELETE,
   OPT_ROLE_GET,
-  OPT_ROLE_MODIFY,
+  OPT_ROLE_TRUST_POLICY_MODIFY,
   OPT_ROLE_LIST,
   OPT_ROLE_POLICY_PUT,
   OPT_ROLE_POLICY_LIST,
@@ -1035,7 +1035,7 @@ static int get_cmd(const char *cmd, const char *prev_cmd, const char *prev_prev_
     if (strcmp(cmd, "get") == 0)
       return OPT_ROLE_GET;
     if (strcmp(cmd, "modify") == 0)
-      return OPT_ROLE_MODIFY;
+      return OPT_ROLE_TRUST_POLICY_MODIFY;
     if (strcmp(cmd, "list") == 0)
       return OPT_ROLE_LIST;
   } else if (strcmp(prev_cmd, "role-policy") == 0) {
@@ -1047,6 +1047,9 @@ static int get_cmd(const char *cmd, const char *prev_cmd, const char *prev_prev_
       return OPT_ROLE_POLICY_GET;
     if (match_str(cmd, "rm", "delete"))
       return OPT_ROLE_POLICY_DELETE;
+  } else if (strcmp(prev_cmd, "role-trust-policy") == 0) {
+    if (strcmp(cmd, "modify") == 0)
+      return OPT_ROLE_TRUST_POLICY_MODIFY;
   } else if (strcmp(prev_cmd, "reshard") == 0) {
     if (strcmp(cmd, "bucket") == 0)
       return OPT_BUCKET_RESHARD;
@@ -3366,7 +3369,7 @@ int main(int argc, const char **argv)
       if (user_id.empty() && opt_cmd != OPT_ROLE_CREATE
                           && opt_cmd != OPT_ROLE_DELETE
                           && opt_cmd != OPT_ROLE_GET
-                          && opt_cmd != OPT_ROLE_MODIFY
+                          && opt_cmd != OPT_ROLE_TRUST_POLICY_MODIFY
                           && opt_cmd != OPT_ROLE_LIST
                           && opt_cmd != OPT_ROLE_POLICY_PUT
                           && opt_cmd != OPT_ROLE_POLICY_LIST
@@ -5409,7 +5412,7 @@ int main(int argc, const char **argv)
       show_role_info(role, formatter);
       return 0;
     }
-  case OPT_ROLE_MODIFY:
+  case OPT_ROLE_TRUST_POLICY_MODIFY:
     {
       if (role_name.empty()) {
         cerr << "ERROR: role name is empty" << std::endl;
