@@ -50,7 +50,7 @@ RGWOp *RGWHandler_REST_IAM::op_post()
     if (action.compare("GetRole") == 0)
       return new RGWGetRole;
     if (action.compare("UpdateAssumeRolePolicy") == 0)
-      return new RGWModifyRole;
+      return new RGWModifyRoleTrustPolicy(this->post_body);
     if (action.compare("ListRoles") == 0)
       return new RGWListRoles;
     if (action.compare("PutRolePolicy") == 0)
