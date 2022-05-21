@@ -8841,6 +8841,10 @@ def _get_parser():
         '--log-to-file',
         action='store_true',
         help='configure cluster to log to traditional log files in /var/log/ceph/$fsid')
+    parser_bootstrap.add_argument(
+        '--yes-i-know',
+        action='store_true',
+        help='deprecated flag only here for backwards compatibility')
 
     parser_deploy = subparsers.add_parser(
         'deploy', help='deploy a daemon')
