@@ -431,6 +431,16 @@ int RGWRole::read_name(const DoutPrefixProvider *dpp, optional_yield y)
   return 0;
 }
 
+bool RGWRole::validate_max_session_duration(const DoutPrefixProvider* dpp)
+{
+  if (max_session_duration < SESSION_DURATION_MIN ||
+          max_session_duration > SESSION_DURATION_MAX) {
+    ldpp_dout(dpp, 0) << "ERROR: Invalid session duration, should be between 3600 and 43200 seconds " << dendl;
+    return false;
+  }
+  return true;
+}
+
 bool RGWRole::validate_input()
 {
   if (name.length() > MAX_ROLE_NAME_LEN) {
@@ -461,6 +471,15 @@ bool RGWRole::validate_input()
     return false;
   }
   return true;
+}
+
+void RGWRole::update_max_session_duration(const std::string& max_session_duration_str)
+{
+  if (max_session_duration_str.empty()) {
+    max_session_duration = SESSION_DURATION_MIN;
+  } else {
+    max_session_duration = std::stoull(max_session_duration_str);
+  }
 }
 
 void RGWRole::extract_name_tenant(const std::string& str)

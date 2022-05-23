@@ -341,6 +341,7 @@ class RGWHTTPArgs {
   }
   /** parse the received arguments */
   int parse(const DoutPrefixProvider *dpp);
+  void remove(const std::string& name);
   void append(const std::string& name, const string& val);
   /** Get the value for a specific argument parameter */
   const string& get(const std::string& name, bool *exists = NULL) const;

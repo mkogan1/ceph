@@ -83,6 +83,8 @@ RGWOp *RGWHandler_REST_IAM::op_post()
       return new RGWListRoleTags;
     if (action.compare("UntagRole") == 0)
       return new RGWUntagRole;
+    if (action.compare("UpdateRole") == 0)
+      return new RGWUpdateRole(this->post_body);
   }
 
   return nullptr;
