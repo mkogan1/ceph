@@ -5,6 +5,8 @@
 #define CEPH_RGW_REST_ROLE_H
 
 #include "rgw_role.h"
+#include "rgw_rest.h"
+#include <string>
 
 class RGWRestRole : public RGWRESTOp {
 protected:
@@ -161,4 +163,16 @@ public:
   RGWOpType get_type() override { return RGW_OP_UNTAG_ROLE; }
   uint64_t get_op() override { return rgw::IAM::iamUntagRole; }
 };
+
+class RGWUpdateRole : public RGWRoleWrite {
+  std::string post_body;
+public:
+  RGWUpdateRole(const std::string& post_body) : post_body(post_body) {};
+  void execute() override;
+  int get_params();
+  const char* name() const override { return "update_role"; }
+  RGWOpType get_type() override { return RGW_OP_UPDATE_ROLE; }
+  uint64_t get_op() override { return rgw::IAM::iamUpdateRole; }
+};
+
 #endif

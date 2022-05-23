@@ -235,6 +235,7 @@ void usage()
   cout << "                           * the three 'orphans' sub-commands are now deprecated; consider using the `rgw-orphan-list` tool\n";
   cout << "  role create                create a AWS role for use with STS\n";
   cout << "  role rm                    remove a role\n";
+  cout << "  role update                update max_session_duration of a role\n";
   cout << "  role get                   get a role\n";
   cout << "  role list                  list roles with specified path prefix\n";
   cout << "  role-trust-policy modify   modify the assume role policy of an existing role\n";
@@ -393,6 +394,7 @@ void usage()
   cout << "   --policy-name             name of the policy document\n";
   cout << "   --policy-doc              permission policy document\n";
   cout << "   --path-prefix             path prefix for filtering roles\n";
+  cout << "   --max-session-duration    update max_session_duration of a role\n";
   cout << "\nMFA options:\n";
   cout << "   --totp-serial             a string that represents the ID of a TOTP token\n";
   cout << "   --totp-seed               the secret seed that is used to calculate the TOTP\n";
@@ -569,6 +571,7 @@ enum {
   OPT_ROLE_POLICY_LIST,
   OPT_ROLE_POLICY_GET,
   OPT_ROLE_POLICY_DELETE,
+  OPT_ROLE_UPDATE,
   OPT_RESHARD_ADD,
   OPT_RESHARD_LIST,
   OPT_RESHARD_STATUS,
@@ -1046,6 +1049,8 @@ static int get_cmd(const char *cmd, const char *prev_cmd, const char *prev_prev_
       return OPT_ROLE_DELETE;
     if (strcmp(cmd, "get") == 0)
       return OPT_ROLE_GET;
+    if (strcmp(cmd, "update") == 0)
+      return OPT_ROLE_UPDATE;
     if (strcmp(cmd, "modify") == 0)
       return OPT_ROLE_TRUST_POLICY_MODIFY;
     if (strcmp(cmd, "list") == 0)
@@ -2821,7 +2826,7 @@ int main(int argc, const char **argv)
   std::string zone_name, zone_id, zone_new_name;
   std::string zonegroup_name, zonegroup_id, zonegroup_new_name;
   std::string api_name;
-  std::string role_name, path, assume_role_doc, policy_name, perm_policy_doc, path_prefix;
+  std::string role_name, path, assume_role_doc, policy_name, perm_policy_doc, path_prefix, max_session_duration;
   std::string redirect_zone;
   bool redirect_zone_set = false;
   list<string> endpoints;
@@ -3294,6 +3299,8 @@ int main(int argc, const char **argv)
       perm_policy_doc = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--path-prefix", (char*)NULL)) {
       path_prefix = val;
+    } else if (ceph_argparse_witharg(args, i, &val, "--max-session-duration", (char*)NULL)) {
+      max_session_duration = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--totp-serial", (char*)NULL)) {
       totp_serial = val;
     } else if (ceph_argparse_witharg(args, i, &val, "--totp-pin", (char*)NULL)) {
@@ -5396,6 +5403,29 @@ int main(int argc, const char **argv)
       show_role_info(role, formatter);
       return 0;
     }
+ case OPT_ROLE_UPDATE:
+   {
+     if (role_name.empty()) {
+       cerr << "ERROR: role name is empty" << std::endl;
+       return -EINVAL;
+     }
+     RGWRole role(g_ceph_context, store, role_name, tenant);
+     ret = role.get();
+     if (ret < 0) {
+       return -ret;
+     }
+     if (!role.validate_max_session_duration(dpp())) {
+       ret = -EINVAL;
+       return ret;
+     }
+     role.update_max_session_duration(max_session_duration);
+     ret = role.update();
+     if (ret < 0) {
+       return -ret;
+     }
+     cout << "Max session duration updated successfully for role: " << role_name << std::endl;
+     return 0;
+   }
   case OPT_ROLE_DELETE:
     {
       if (role_name.empty()) {

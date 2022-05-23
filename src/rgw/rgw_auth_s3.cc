@@ -465,7 +465,8 @@ bool is_non_s3_op(RGWOpType op_type)
       op_type == RGW_OP_LIST_OIDC_PROVIDERS ||
       op_type == RGW_OP_TAG_ROLE ||
       op_type == RGW_OP_LIST_ROLE_TAGS ||
-      op_type == RGW_OP_UNTAG_ROLE) {
+      op_type == RGW_OP_UNTAG_ROLE ||
+      op_type == RGW_OP_UPDATE_ROLE) {
     return true;
   }
   return false;

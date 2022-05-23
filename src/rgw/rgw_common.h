@@ -326,6 +326,7 @@ class RGWHTTPArgs {
   }
   /** parse the received arguments */
   int parse();
+  void remove(const std::string& name);
   void append(const std::string& name, const string& val);
   /** Get the value for a specific argument parameter */
   const string& get(const std::string& name, bool *exists = NULL) const;
@@ -487,6 +488,7 @@ enum RGWOpType {
   RGW_OP_TAG_ROLE,
   RGW_OP_LIST_ROLE_TAGS,
   RGW_OP_UNTAG_ROLE,
+  RGW_OP_UPDATE_ROLE,
   RGW_OP_PUT_BUCKET_POLICY,
   RGW_OP_GET_BUCKET_POLICY,
   RGW_OP_DELETE_BUCKET_POLICY,

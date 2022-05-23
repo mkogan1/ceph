@@ -136,6 +136,7 @@ public:
   const string& get_create_date() const { return creation_date; }
   const string& get_assume_role_policy() const { return trust_policy;}
   const uint64_t& get_max_session_duration() const { return max_session_duration; }
+  bool validate_max_session_duration(const DoutPrefixProvider* dpp);
 
   void set_id(const string& id) { this->id = id; }
 
@@ -152,6 +153,7 @@ public:
   int set_tags(const DoutPrefixProvider* dpp, const multimap<string,string>& tags_map);
   boost::optional<multimap<string,string>> get_tags();
   void erase_tags(const vector<string>& tagKeys);
+  void update_max_session_duration(const std::string& max_session_duration_str);
   void dump(Formatter *f) const;
   void decode_json(JSONObj *obj);
 
