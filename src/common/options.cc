@@ -7586,6 +7586,10 @@ std::vector<Option> get_rgw_options() {
    .set_description("Turns on extra instrumentation surrounding bucket index "
 		    "transactions"),
 
+   Option("rgw_keystone_accepted_reader_roles", Option::TYPE_STR, Option::LEVEL_ADVANCED)
+   .set_default("")
+   .set_description("List of roles that can only be used for reads (Keystone)"),
+      
   });
 }
 

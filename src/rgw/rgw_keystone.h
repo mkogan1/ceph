@@ -158,8 +158,17 @@ public:
 
   class Role {
   public:
+    Role() : is_admin(false), is_reader(false) { }
+    Role(const Role &r) {
+      id = r.id;
+      name = r.name;
+      is_admin = r.is_admin;
+      is_reader = r.is_reader;
+    }
     string id;
     string name;
+    bool is_admin;
+    bool is_reader;
     void decode_json(JSONObj *obj);
   };
 
@@ -200,6 +209,8 @@ public:
             const std::string& token_str,
             ceph::buffer::list& bl /* in */,
             ApiVersion version);
+  void update_roles(const std::vector<std::string> & admin,
+                    const std::vector<std::string> & reader);
 };
 
 
