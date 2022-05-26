@@ -68,9 +68,9 @@ class CephadmServe:
         self.mgr.config_checker.load_network_config()
 
         while self.mgr.run:
-            if not self.mgr.yes_i_know and self.mgr._multisite_present():
+            if not self.mgr.yes_i_know:
                 # block anyone trying to use this image who doesn't know the workaround
-                upgrade_block_str = ' Detected multisite on RHCS version with multisite regressions. Please check the release notes'
+                upgrade_block_str = ' Warning, this RHCS release had multisite regressions. Please check the release notes'
                 if self.mgr.upgrade.upgrade_state is None:
                     t = self.mgr.get_store('upgrade_state')
                     if t:
@@ -84,19 +84,19 @@ class CephadmServe:
                 if (
                     self.mgr.upgrade.upgrade_state.error != upgrade_block_str
                     or self.mgr.upgrade.upgrade_state.paused is False
-                    or 'MULTISITE_DETECTED_ON_VERSION_WITH_MULTISITE_REGRESSIONS' not in self.mgr.health_checks
+                    or 'USING_VERSION_WITH_MULTISITE_REGRESSIONS' not in self.mgr.health_checks
                 ):
                     image_rec_str = ''
                     if self.mgr.cache.get_daemons_by_service('mon'):
                         image_name = self.mgr._get_container_image(self.mgr.cache.get_daemons_by_service('mon')[0].name())
                         image_rec_str = f'Recommended image name to use for downgrade (found in use on mon daemon) is {image_name}'
-                    alert_id = 'MULTISITE_DETECTED_ON_VERSION_WITH_MULTISITE_REGRESSIONS'
+                    alert_id = 'USING_VERSION_WITH_MULTISITE_REGRESSIONS'
                     alert = {
                         'severity': 'error',
-                        'summary': 'Upgrade: Detected multisite on RHCS version with multisite regressions. Check "ceph health detail"',
+                        'summary': 'Upgrade: Using RHCS version with multisite regressions. Check "ceph health detail"',
                         'count': 1,
                         'detail': ['Please check the release notes for more information on this build and any potential multisite issues.',
-                                    'If you are certain you want to continue using this release with multisite you may set',
+                                    'If you do not plan to use RGW multisite or you want to continue using this release with multisite you may set',
                                     '"config set mgr mgr/cephadm/yes_i_know true" to return cephadm to normal operation. If that is the',
                                     'case and you are seeing this after an upgrade, follow setting the config option with "ceph orch upgrade stop"',
                                     'and then "ceph orch upgrade start <image-name>" where <image-name> is the same image used for upgrade before to coninue upgrade',
@@ -106,7 +106,7 @@ class CephadmServe:
                                     'showing the newer version in "ceph orch ps" (will likely be just one mgr)',
                                     f'{image_rec_str}'],
                     }
-                    self.mgr.log.info('Multisite detected on version with multisite regressions. Setting health warnings and upgrade failure')
+                    self.mgr.log.info('Using version with multisite regressions. Setting health warnings and upgrade failure')
                     self.mgr.upgrade.upgrade_state.error = upgrade_block_str
                     self.mgr.upgrade.upgrade_state.paused = True
                     upgrade_json = self.mgr.upgrade.upgrade_state.to_json()
@@ -159,9 +159,6 @@ class CephadmServe:
 
                     if self.mgr.upgrade.continue_upgrade():
                         continue
-
-                self.mgr.checked_multisite = False
-                self.mgr._multisite_present()
 
             except OrchestratorError as e:
                 if e.event_subject:

@@ -504,9 +504,6 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
 
         self.config_checker = CephadmConfigChecks(self)
 
-        self.found_multisite = False
-        self.checked_multisite = False
-
     def shutdown(self) -> None:
         self.log.debug('shutdown')
         self._worker_pool.close()
@@ -590,53 +587,6 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
                     # if the osd that is now empty is also part of the removal queue
                     # start the process
                     self._kick_serve_loop()
-
-    def _multisite_present(self) -> bool:
-        if self.checked_multisite:
-            return self.found_multisite
-        self.checked_multisite = True
-        try:
-            ret, keyring, err = self.check_mon_command({
-                'prefix': 'auth get-key',
-                'entity': "client.admin",
-            })
-            assert keyring
-            cmd = ['radosgw-admin',
-                   '--key=%s' % keyring,
-                   'realm', 'list',
-                   '--format=json']
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=7)
-            out = result.stdout
-            assert out
-            period = json.loads(out)
-            assert period
-            self.log.debug(period)
-            if 'realms' in period and period['realms']:
-                for realm in period['realms']:
-                    cmd = ['radosgw-admin',
-                           '--key=%s' % keyring,
-                           'period', 'get',
-                           '--rgw-realm=%s' % realm,
-                           '--format=json']
-                    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                    out = result.stdout
-                    if out:
-                        realm_period = json.loads(out)
-                        self.log.debug(realm_period)
-                        if 'period_map' in realm_period and realm_period['period_map']:
-                            if 'zonegroups' in realm_period['period_map']:
-                                if len(realm_period['period_map']['zonegroups']) > 1:
-                                    self.found_multisite = True
-                                    return True
-                                for zonegroup in realm_period['period_map']['zonegroups']:
-                                    if 'zones' in zonegroup and zonegroup['zones']:
-                                        if len(zonegroup['zones']) > 1:
-                                            self.found_multisite = True
-                                            return True
-        except Exception as e:
-            self.log.debug(f'Hit exception trying to detect multisite: {e}')
-        self.found_multisite = False
-        return False
 
     def pause(self) -> None:
         if not self.paused:
