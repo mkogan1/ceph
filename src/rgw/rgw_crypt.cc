@@ -954,16 +954,16 @@ static int get_sse_s3_bucket_key(req_state *s,
     ldpp_dout(s, 5) << "Found KEK ID: " << key_id << dendl;
   }
   if (saved_key != key_id) {
-    res = create_sse_s3_bucket_key(s, s->cct, key_id);
+    res = create_sse_s3_bucket_key(s->cct, key_id);
     if (res != 0) {
       return res;
     }
     bufferlist key_id_bl;
     key_id_bl.append(key_id.c_str(), key_id.length());
     for (int count = 0; count < 15; ++count) {
-      rgw::sal::Attrs attrs = s->bucket->get_attrs();
+      rgw::sal::RGWAttrs attrs = s->bucket->get_attrs();
       attrs[RGW_ATTR_BUCKET_ENCRYPTION_KEY_ID] = key_id_bl;
-      res = s->bucket->merge_and_store_attrs(s, attrs, s->yield);
+      res = s->bucket->set_instance_attrs(s, attrs, s->yield);
       if (res != -ECANCELED) {
         break;
       }
@@ -1190,7 +1190,7 @@ int rgw_s3_prepare_encrypt(struct req_state* s,
       set_attr(attrs, RGW_ATTR_CRYPT_MODE, "AES256");
       set_attr(attrs, RGW_ATTR_CRYPT_KEYID, key_id);
       std::string actual_key;
-      res = make_actual_key_from_sse_s3(s, s->cct, attrs, actual_key);
+      res = make_actual_key_from_sse_s3(s->cct, attrs, actual_key);
       if (res != 0) {
         ldpp_dout(s, 5) << "ERROR: failed to retrieve actual key from key_id: " << key_id << dendl;
         s->err.message = "Failed to retrieve the actual key";
@@ -1204,7 +1204,7 @@ int rgw_s3_prepare_encrypt(struct req_state* s,
       }
 
       if (block_crypt) {
-        auto aes = std::unique_ptr<AES_256_CBC>(new AES_256_CBC(s, s->cct));
+        auto aes = std::unique_ptr<AES_256_CBC>(new AES_256_CBC(s->cct));
         aes->set_key(reinterpret_cast<const uint8_t*>(actual_key.c_str()), AES_256_KEYSIZE);
         *block_crypt = std::move(aes);
       }
@@ -1439,7 +1439,7 @@ int rgw_s3_prepare_decrypt(struct req_state* s,
     /* try to retrieve actual key */
     std::string key_id = get_str_attribute(attrs, RGW_ATTR_CRYPT_KEYID);
     std::string actual_key;
-    res = reconstitute_actual_key_from_sse_s3(s, s->cct, attrs, actual_key);
+    res = reconstitute_actual_key_from_sse_s3(s->cct, attrs, actual_key);
     if (res != 0) {
       ldpp_dout(s, 10) << "ERROR: failed to retrieve actual key" << dendl;
       s->err.message = "Failed to retrieve the actual key";
@@ -1452,7 +1452,7 @@ int rgw_s3_prepare_decrypt(struct req_state* s,
       return -ERR_INVALID_ACCESS_KEY;
     }
 
-    auto aes = std::unique_ptr<AES_256_CBC>(new AES_256_CBC(s, s->cct));
+    auto aes = std::unique_ptr<AES_256_CBC>(new AES_256_CBC(s->cct));
     aes->set_key(reinterpret_cast<const uint8_t*>(actual_key.c_str()), AES_256_KEYSIZE);
     actual_key.replace(0, actual_key.length(), actual_key.length(), '\000');
     if (block_crypt) *block_crypt = std::move(aes);
@@ -1492,7 +1492,7 @@ int rgw_remove_sse_s3_bucket_key(req_state *s)
     return 0;
   }
   ldpp_dout(s, 5) << "Removing valid KEK ID: " << saved_key << dendl;
-  res = remove_sse_s3_bucket_key(s, s->cct, saved_key);
+  res = remove_sse_s3_bucket_key(s->cct, saved_key);
   if (res != 0) {
     ldpp_dout(s, 0) << "ERROR: Unable to remove KEK ID: " << saved_key << " got " << res << dendl;
   }

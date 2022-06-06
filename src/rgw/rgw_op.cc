@@ -8921,7 +8921,7 @@ void RGWDeleteBucketPublicAccessBlock::execute(optional_yield y)
 int RGWPutBucketEncryption::get_params(optional_yield y)
 {
   const auto max_size = s->cct->_conf->rgw_max_put_param_size;
-  std::tie(op_ret, data) = read_all_input(s, max_size, false);
+  std::tie(op_ret, data) = rgw_rest_read_all_input(s, max_size, false);
   return op_ret;
 }
 
@@ -8968,7 +8968,7 @@ void RGWPutBucketEncryption::execute(optional_yield y)
   bufferlist conf_bl;
   bucket_encryption_conf.encode(conf_bl);
   op_ret = retry_raced_bucket_write(this, s->bucket.get(), [this, y, &conf_bl] {
-    rgw::sal::Attrs attrs = s->bucket->get_attrs();
+    rgw::sal::RGWAttrs attrs = s->bucket->get_attrs();
     attrs[RGW_ATTR_BUCKET_ENCRYPTION_POLICY] = conf_bl;
     return s->bucket->set_instance_attrs(this, attrs, y);
   });
@@ -9021,7 +9021,7 @@ void RGWDeleteBucketEncryption::execute(optional_yield y)
   }
 
   op_ret = retry_raced_bucket_write(this, s->bucket.get(), [this, y] {
-    rgw::sal::Attrs attrs = s->bucket->get_attrs();
+    rgw::sal::RGWAttrs attrs = s->bucket->get_attrs();
     attrs.erase(RGW_ATTR_BUCKET_ENCRYPTION_POLICY);
     attrs.erase(RGW_ATTR_BUCKET_ENCRYPTION_KEY_ID);
     op_ret = s->bucket->set_instance_attrs(this, attrs, y);

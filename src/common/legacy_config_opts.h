@@ -1534,8 +1534,7 @@ OPTION(rgw_crypt_s3_kms_encryption_keys, OPT_STR) // extra keys that may be used
                                                       // defined as map "key1=YmluCmJvb3N0CmJvb3N0LQ== key2=b3V0CnNyYwpUZXN0aW5nCg=="
 OPTION(rgw_crypt_suppress_logs, OPT_BOOL)   // suppress logs that might print customer key
 OPTION(rgw_crypt_sse_s3_backend, OPT_STR) // Where SSE-S3 encryption keys are stored
-OPTION(rgw_crypt_sse_s3_vault_secret_engine, OPT_STR) // Vault Secret Engine to be used to retrieve encryption keys
-OPTION(rgw_crypt_sse_s3_vault_secret_engine, OPT_STR) // only transit for now
+OPTION(rgw_crypt_sse_s3_vault_secret_engine, OPT_STR) // Vault Secret Engine to be used to retrieve encryption keys// only transit for now
 OPTION(rgw_crypt_sse_s3_key_template, OPT_STR) // template for per-bucket sse-s3 keys in vault
 OPTION(rgw_crypt_sse_s3_vault_auth, OPT_STR) // Type of authentication method to be used with SSE-S3 and Vault
 OPTION(rgw_crypt_sse_s3_vault_token_file, OPT_STR) // Path to token file for type == 'token'

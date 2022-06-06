@@ -1191,7 +1191,7 @@ int make_actual_key_from_kms(CephContext *cct,
   const std::string &kms_backend { kctx.backend() };
   if (RGW_SSE_KMS_BACKEND_VAULT == kms_backend)
     return make_actual_key_from_vault(cct, kctx, attrs, actual_key);
-  return reconstitute_actual_key_from_kms(cct, kctx, attrs, actual_key);
+  return reconstitute_actual_key_from_kms(cct, attrs, actual_key);
 }
 
 int reconstitute_actual_key_from_sse_s3(CephContext *cct,
@@ -1228,7 +1228,7 @@ int make_actual_key_from_sse_s3(CephContext *cct,
 
 
 int create_sse_s3_bucket_key(CephContext *cct,
-                                     const std::string& bucket_key)
+			    const std::string& bucket_key)
 {
   SseS3Context kctx { cct };
 
@@ -1254,7 +1254,7 @@ int create_sse_s3_bucket_key(CephContext *cct,
 }
 
 int remove_sse_s3_bucket_key(CephContext *cct,
-                                     const std::string& bucket_key)
+			    const std::string& bucket_key)
 {
   SseS3Context kctx { cct };
   std::string secret_engine_str = kctx.secret_engine();

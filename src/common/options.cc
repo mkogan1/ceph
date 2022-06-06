@@ -7303,7 +7303,7 @@ std::vector<Option> get_rgw_options() {
 
     Option("rgw_crypt_sse_s3_key_template", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("%bucket_id")
-    .set_description("template for per-bucket sse-s3 keys in vault."
+    .set_description("template for per-bucket sse-s3 keys in vault.")
     .set_long_description("This is the template for per-bucket sse-s3 keys.  "
                           "This string may include "
                           "``%bucket_id`` which will be expanded out to "
