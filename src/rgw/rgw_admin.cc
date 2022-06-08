@@ -103,6 +103,18 @@ static const DoutPrefixProvider* dpp() {
     } \
   } while (0)
 
+static inline int posix_errortrans(int r)
+{
+  switch(r) {
+  case ERR_NO_SUCH_BUCKET:
+    r = ENOENT;
+    break;
+  default:
+    break;
+  }
+  return r;
+}
+
 void usage()
 {
   cout << "usage: radosgw-admin <cmd> [options...]" << std::endl;
@@ -6198,7 +6210,7 @@ int main(int argc, const char **argv)
     int r = RGWBucketAdminOp::info(store, bucket_op, f, null_yield, dpp());
     if (r < 0) {
       cerr << "failure: " << cpp_strerror(-r) << ": " << err << std::endl;
-      return -r;
+      return posix_errortrans(-r);
     }
   }
 
