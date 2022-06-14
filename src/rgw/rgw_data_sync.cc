@@ -3961,8 +3961,6 @@ done:
   }
 };
 
-#define BUCKET_SYNC_SPAWN_WINDOW 20
-
 class RGWBucketFullSyncCR : public RGWCoroutine {
   RGWDataSyncCtx *sc;
   RGWDataSyncEnv *sync_env;
@@ -4762,7 +4760,7 @@ int RGWRunBucketSourcesSyncCR::operate(const DoutPrefixProvider *dpp)
 
       yield_spawn_window(sync_bucket_shard_cr(sc, lease_cr, sync_pair,
                                               gen, tn, &*cur_shard_progress),
-                         BUCKET_SYNC_SPAWN_WINDOW,
+                         cct->_conf->rgw_bucket_sync_spawn_window,
                          [&](uint64_t stack_id, int ret) {
                            if (ret < 0) {
                              tn->log(10, SSTR("ERROR: a sync operation returned error: " << ret));
