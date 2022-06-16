@@ -1831,9 +1831,7 @@ public:
       if (r) {
 	return r;
       }
-      std::this_thread::sleep_for(sleep_ms);
-      sleep_ms = std::chrono::milliseconds(sleep_ms*2*retries);
-      ++retries;
+      std::this_thread::sleep_for(sleep_ms * 2 * retries++);
     }
     return false;
   }
