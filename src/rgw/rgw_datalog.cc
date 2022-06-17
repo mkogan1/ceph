@@ -43,6 +43,7 @@ void rgw_data_change::dump(ceph::Formatter *f) const
   utime_t ut(timestamp);
   encode_json("timestamp", ut, f);
   encode_json("gen", gen, f);
+  encode_json("tags", tags, f);
 }
 
 void rgw_data_change::decode_json(JSONObj *obj) {
@@ -58,6 +59,7 @@ void rgw_data_change::decode_json(JSONObj *obj) {
   JSONDecoder::decode_json("timestamp", ut, obj);
   timestamp = ut.to_real_time();
   JSONDecoder::decode_json("gen", gen, obj);
+  JSONDecoder::decode_json("tags", tags, obj);
 }
 
 void rgw_data_change_log_entry::dump(Formatter *f) const
@@ -527,16 +529,23 @@ int RGWDataChangesLog::renew_entries(const DoutPrefixProvider *dpp)
   auto be = bes->head();
   for (const auto& [bs, gen] : entries) {
     auto index = choose_oid(bs);
-
     rgw_data_change change;
     bufferlist bl;
     change.entity_type = ENTITY_TYPE_BUCKET;
     change.key = bs.get_key();
     change.timestamp = ut;
     change.gen = gen;
+    std::unique_lock l(lock);
+    auto status = _get_change(bs, gen);
+    std::unique_lock sl(status->lock);
+    l.unlock();
+    change.tags = std::move(status->tags);
+    status->tags.clear();
+    sl.unlock();
     encode(change, bl);
 
     m[index].first.push_back({bs, gen});
+    ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << " preparing to push tags=(" << change.tags << ")" << dendl;
     be->prepare(ut, change.key, std::move(bl), m[index].second);
   }
 
@@ -624,11 +633,16 @@ std::string RGWDataChangesLog::get_oid(uint64_t gen_id, int i) const {
 int RGWDataChangesLog::add_entry(const DoutPrefixProvider *dpp,
 				 const RGWBucketInfo& bucket_info,
 				 const rgw::bucket_log_layout_generation& gen,
-				 int shard_id)
+				 int shard_id, std::string_view tag)
 {
   auto& bucket = bucket_info.bucket;
 
+  ldpp_dout(dpp, 20) << "RGWDataChangesLog::add_entry() bucket.name=" << bucket.name
+		     << " tag=" << tag << dendl;
+
   if (!filter_bucket(dpp, bucket, null_yield)) {
+    ldpp_dout(dpp, 20) << "RGWDataChangesLog::add_entry(): FILTERED bucket.name=" << bucket.name
+		       << " tag=" << tag << dendl;
     return 0;
   }
 
@@ -653,8 +667,10 @@ int RGWDataChangesLog::add_entry(const DoutPrefixProvider *dpp,
 
   ldpp_dout(dpp, 20) << "RGWDataChangesLog::add_entry() bucket.name=" << bucket.name
 		     << " shard_id=" << shard_id << " now=" << now
-		     << " cur_expiration=" << status->cur_expiration << dendl;
+		     << " cur_expiration=" << status->cur_expiration
+		     << " tag=" << tag << dendl;
 
+  status->tags.emplace(tag);
   if (now < status->cur_expiration) {
     /* no need to send, recently completed */
     sl.unlock();
@@ -701,9 +717,11 @@ int RGWDataChangesLog::add_entry(const DoutPrefixProvider *dpp,
     change.key = bs.get_key();
     change.timestamp = now;
     change.gen = gen.gen;
+    change.tags = status->tags;
     encode(change, bl);
 
-    ldpp_dout(dpp, 20) << "RGWDataChangesLog::add_entry() sending update with now=" << now << " cur_expiration=" << expiration << dendl;
+    ldpp_dout(dpp, 20) << "RGWDataChangesLog::add_entry() sending update with now=" << now << " cur_expiration=" << expiration
+		       << " tags=(" << change.tags << ")" << dendl;
 
     auto be = bes->head();
     ret = be->push(dpp, index, now, change.key, std::move(bl));
@@ -717,6 +735,7 @@ int RGWDataChangesLog::add_entry(const DoutPrefixProvider *dpp,
   cond = status->cond;
 
   status->pending = false;
+  status->tags.clear();
   /* time of when operation started, not completed */
   status->cur_expiration = status->cur_sent;
   status->cur_expiration += make_timespan(cct->_conf->rgw_data_log_window);

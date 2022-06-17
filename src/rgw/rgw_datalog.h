@@ -54,16 +54,18 @@ struct rgw_data_change {
   std::string key;
   ceph::real_time timestamp;
   uint64_t gen = 0;
+  std::unordered_set<std::string> tags;
 
   void encode(ceph::buffer::list& bl) const {
     // require decoders to recognize v2 when gen>0
     const uint8_t compat = (gen == 0) ? 1 : 2;
-    ENCODE_START(2, compat, bl);
+    ENCODE_START(3, compat, bl);
     auto t = std::uint8_t(entity_type);
     encode(t, bl);
     encode(key, bl);
     encode(timestamp, bl);
     encode(gen, bl);
+    encode(tags, bl);
     ENCODE_FINISH(bl);
   }
 
@@ -78,6 +80,9 @@ struct rgw_data_change {
        gen = 0;
      } else {
        decode(gen, bl);
+     }
+     if (struct_v >= 3) {
+       decode(tags, bl);
      }
      DECODE_FINISH(bl);
   }
@@ -259,6 +264,7 @@ class RGWDataChangesLog {
     std::shared_ptr<const rgw_sync_policy_info> sync_policy;
     ceph::real_time cur_expiration;
     ceph::real_time cur_sent;
+    std::unordered_set<std::string> tags;
     bool pending = false;
     RefCountedCond* cond = nullptr;
     ceph::mutex lock = ceph::make_mutex("RGWDataChangesLog::ChangeStatus");
@@ -298,7 +304,8 @@ public:
 	    librados::Rados* lr);
 
   int add_entry(const DoutPrefixProvider *dpp, const RGWBucketInfo& bucket_info,
-		const rgw::bucket_log_layout_generation& gen, int shard_id);
+		const rgw::bucket_log_layout_generation& gen, int shard_id,
+		std::string_view tag);
   int get_log_shard_id(rgw_bucket& bucket, int shard_id);
   int list_entries(const DoutPrefixProvider *dpp, int shard, int max_entries,
 		   std::vector<rgw_data_change_log_entry>& entries,

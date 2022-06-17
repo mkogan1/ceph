@@ -267,9 +267,14 @@ WRITE_CLASS_ENCODER(rgw_data_sync_status)
 struct rgw_datalog_entry {
   string key;
   ceph::real_time timestamp;
+  std::unordered_set<std::string> tags;
 
   void decode_json(JSONObj *obj);
 };
+
+inline std::ostream& operator <<(std::ostream& m, const rgw_datalog_entry& e) {
+  return m << "key=" << e.key << ", timestamp=" << e.timestamp << ", tags=(" << e.tags << ")";
+}
 
 struct rgw_datalog_shard_data {
   string marker;
