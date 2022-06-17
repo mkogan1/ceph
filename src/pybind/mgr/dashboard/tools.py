@@ -114,13 +114,15 @@ class RequestLoggingTool(cherrypy.Tool):
         else:
             length = self._format_bytes(0)
         if user:
-            logger_fn("[%s:%s] [%s] [%s] [%s] [%s] [%s] %s", req.remote.ip,
+            logger_fn("[%s:%s] [%s] [%s] [%s] [%s] [%s] %s Queue=%r Threads_Idle=%r/%r", req.remote.ip,
                       req.remote.port, req.method, status,
-                      "{0:.3f}s".format(lat), user, length, req.path_info)
+                      "{0:.3f}s".format(lat), user, length, req.path_info,
+                      cherrypy.server.httpserver.stats['Queue'](None), cherrypy.server.httpserver.stats['Threads Idle'](None), cherrypy.server.httpserver.stats['Threads'](None))
         else:
-            logger_fn("[%s:%s] [%s] [%s] [%s] [%s] [%s] %s", req.remote.ip,
+            logger_fn("[%s:%s] [%s] [%s] [%s] [%s] [%s] %s Queue=%r Threads_Idle=%r/%r", req.remote.ip,
                       req.remote.port, req.method, status,
-                      "{0:.3f}s".format(lat), length, getattr(req, 'unique_id', '-'), req.path_info)
+                      "{0:.3f}s".format(lat), length, getattr(req, 'unique_id', '-'), req.path_info,
+                      cherrypy.server.httpserver.stats['Queue'](None), cherrypy.server.httpserver.stats['Threads Idle'](None), cherrypy.server.httpserver.stats['Threads'](None))
 
 
 # pylint: disable=too-many-instance-attributes
