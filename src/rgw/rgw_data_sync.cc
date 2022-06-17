@@ -61,6 +61,7 @@ void rgw_datalog_entry::decode_json(JSONObj *obj) {
   utime_t ut;
   JSONDecoder::decode_json("timestamp", ut, obj);
   timestamp = ut.to_real_time();
+  JSONDecoder::decode_json("tags", tags, obj);
 }
 
 void rgw_datalog_shard_data::decode_json(JSONObj *obj) {
@@ -484,6 +485,8 @@ public:
 	<< ": ERROR: failed to list remote datalog shard, ret=" << ret << dendl;
       return ret;
     }
+    ldpp_dout(sync_env->dpp, 20) << "GOT LISTING: (" << result->entries
+				 << ")" << dendl;
     return 0;
   }
 };

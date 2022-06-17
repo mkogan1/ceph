@@ -103,6 +103,8 @@ template<class A, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::list<A,Alloc>& ilist);
 template<class A, class Comp, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::set<A, Comp, Alloc>& iset);
+template<class Key, class Hash, class Equal, class Alloc>
+inline std::ostream& operator<<(std::ostream& out, const std::unordered_set<Key, Hash, Equal, Alloc>& iset);
 template<class A, class Comp, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::multiset<A,Comp,Alloc>& iset);
 template<class A, class B, class Comp, class Alloc>
@@ -200,6 +202,17 @@ inline std::ostream& operator<<(std::ostream& out, const std::list<A,Alloc>& ili
 
 template<class A, class Comp, class Alloc>
 inline std::ostream& operator<<(std::ostream& out, const std::set<A, Comp, Alloc>& iset) {
+  for (auto it = iset.begin();
+       it != iset.end();
+       ++it) {
+    if (it != iset.begin()) out << ",";
+    out << *it;
+  }
+  return out;
+}
+
+template<class Key, class Hash, class Equal, class Alloc>
+inline std::ostream& operator<<(std::ostream& out, const std::unordered_set<Key, Hash, Equal, Alloc>& iset) {
   for (auto it = iset.begin();
        it != iset.end();
        ++it) {

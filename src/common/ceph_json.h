@@ -220,6 +220,21 @@ void decode_json_obj(std::set<T>& l, JSONObj *obj)
   }
 }
 
+template<class T, class... A>
+void decode_json_obj(std::unordered_set<T, A...>& l, JSONObj *obj)
+{
+  l.clear();
+
+  JSONObjIter iter = obj->find_first();
+
+  for (; !iter.end(); ++iter) {
+    T val;
+    JSONObj *o = *iter;
+    decode_json_obj(val, o);
+    l.insert(val);
+  }
+}
+
 template<class T, class Compare, class Alloc>
 void decode_json_obj(boost::container::flat_set<T, Compare, Alloc>& l, JSONObj *obj)
 {
@@ -552,6 +567,16 @@ static void encode_json(const char *name, const std::deque<T>& l, ceph::Formatte
 
 template<class T, class Compare = std::less<T> >
 static void encode_json(const char *name, const std::set<T, Compare>& l, ceph::Formatter *f)
+{
+  f->open_array_section(name);
+  for (auto iter = l.cbegin(); iter != l.cend(); ++iter) {
+    encode_json("obj", *iter, f);
+  }
+  f->close_section();
+}
+
+template<class T, class ...A>
+static void encode_json(const char *name, const std::unordered_set<T, A...>& l, ceph::Formatter *f)
 {
   f->open_array_section(name);
   for (auto iter = l.cbegin(); iter != l.cend(); ++iter) {

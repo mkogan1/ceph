@@ -788,13 +788,14 @@ int RGWRados::get_max_chunk_size(const rgw_placement_rule& placement_rule, const
 void add_datalog_entry(const DoutPrefixProvider* dpp,
                        RGWDataChangesLog* datalog,
                        const RGWBucketInfo& bucket_info,
-                       uint32_t shard_id)
+                       uint32_t shard_id,
+		       std::string_view tag)
 {
   const auto& logs = bucket_info.layout.logs;
   if (logs.empty()) {
     return;
   }
-  int r = datalog->add_entry(dpp, bucket_info, logs.back(), shard_id);
+  int r = datalog->add_entry(dpp, bucket_info, logs.back(), shard_id, tag);
   if (r < 0) {
     ldpp_dout(dpp, -1) << "ERROR: failed writing data log" << dendl;
   } // datalog error is not fatal
@@ -903,7 +904,8 @@ int RGWIndexCompletionThread::process(const DoutPrefixProvider *dpp)
       /* ignoring error, can't do anything about it */
       continue;
     }
-    add_datalog_entry(this, store->svc.datalog_rados, bucket_info, bs.shard_id);
+    add_datalog_entry(this, store->svc.datalog_rados, bucket_info, bs.shard_id,
+		      c->obj.get_oid());
   }
 
   return 0;
@@ -5121,7 +5123,7 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y, const DoutPrefixProvi
     }
 
     add_datalog_entry(dpp, store->svc.datalog_rados,
-                      target->bucket_info, bs->shard_id);
+                      target->bucket_info, bs->shard_id, src_obj.get_oid());
 
     return 0;
   }
@@ -6195,7 +6197,7 @@ int RGWRados::Bucket::UpdateIndex::complete(const DoutPrefixProvider *dpp, int64
   ret = store->cls_obj_complete_add(*bs, obj, optag, poolid, epoch, ent, category, remove_objs, bilog_flags, zones_trace);
 
   add_datalog_entry(dpp, store->svc.datalog_rados,
-                    target->bucket_info, bs->shard_id);
+                    target->bucket_info, bs->shard_id, obj.get_oid());
 
   return ret;
 }
@@ -6220,7 +6222,7 @@ int RGWRados::Bucket::UpdateIndex::complete_del(const DoutPrefixProvider *dpp,
   ret = store->cls_obj_complete_del(*bs, optag, poolid, epoch, obj, removed_mtime, remove_objs, bilog_flags, zones_trace);
 
   add_datalog_entry(dpp, store->svc.datalog_rados,
-                    target->bucket_info, bs->shard_id);
+                    target->bucket_info, bs->shard_id, obj.get_oid());
 
   return ret;
 }
@@ -6245,7 +6247,7 @@ int RGWRados::Bucket::UpdateIndex::cancel(const DoutPrefixProvider *dpp,
    * have no way to tell that they're all caught up
    */
   add_datalog_entry(dpp, store->svc.datalog_rados,
-                    target->bucket_info, bs->shard_id);
+                    target->bucket_info, bs->shard_id, obj.get_oid());
 
   return ret;
 }
@@ -6905,7 +6907,8 @@ int RGWRados::bucket_index_link_olh(const DoutPrefixProvider *dpp, RGWBucketInfo
     return r;
   }
 
-  add_datalog_entry(dpp, svc.datalog_rados, bucket_info, bs.shard_id);
+  add_datalog_entry(dpp, svc.datalog_rados, bucket_info, bs.shard_id,
+		    obj_instance.get_oid());
 
   return 0;
 }
