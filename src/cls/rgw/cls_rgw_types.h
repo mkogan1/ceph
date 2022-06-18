@@ -704,6 +704,17 @@ struct rgw_bi_log_entry {
 };
 WRITE_CLASS_ENCODER(rgw_bi_log_entry)
 
+inline std::ostream& operator <<(std::ostream& m, const rgw_bi_log_entry& e) {
+  return m << "(" << "id=" << e.id
+	   << ", object=" << e.object
+	   << ", instance=" << e.instance
+	   << ", timestamp=" << e.timestamp
+	   << ", op=" << e.op
+	   << ")";
+}
+
+
+
 struct rgw_bucket_category_stats {
   uint64_t total_size;
   uint64_t total_size_rounded;

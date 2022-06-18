@@ -3438,6 +3438,9 @@ struct bucket_list_entry {
     }
   }
 };
+inline std::ostream& operator <<(std::ostream& m, const bucket_list_entry& e) {
+  return m << e.key;
+}
 
 struct bucket_list_result {
   string name;
@@ -3490,6 +3493,8 @@ public:
       if (retcode < 0) {
         return set_cr_error(retcode);
       }
+      ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ": Got entries: "
+			 << "(" << result->entries << ")" << dendl;
       return set_cr_done();
     }
     return 0;
@@ -3560,6 +3565,8 @@ public:
         }
         return set_cr_error(retcode);
       }
+      ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ": Got BILog entries: "
+			 << "(" << result->entries << ")" << dendl;
       return set_cr_done();
     }
     return 0;
