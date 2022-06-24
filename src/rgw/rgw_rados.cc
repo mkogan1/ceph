@@ -3201,6 +3201,8 @@ int RGWRados::Object::Write::_do_write_meta(const DoutPrefixProvider *dpp,
 
   if (!index_op->is_prepared()) {
     tracepoint(rgw_rados, prepare_enter, req_id.c_str());
+    ldpp_dout(dpp, 20) << "AE TRACE: peparing addition of: " << obj.get_oid()
+		       << dendl;
     r = index_op->prepare(dpp, CLS_RGW_OP_ADD, &state->write_tag, y);
     tracepoint(rgw_rados, prepare_exit, req_id.c_str());
     if (r < 0)
@@ -3231,6 +3233,8 @@ int RGWRados::Object::Write::_do_write_meta(const DoutPrefixProvider *dpp,
   }
 
   tracepoint(rgw_rados, complete_enter, req_id.c_str());
+  ldpp_dout(dpp, 20) << "AE TRACE: completing addition of: " << obj.get_oid()
+		     << dendl;
   r = index_op->complete(dpp, poolid, epoch, size, accounted_size,
                         meta.set_mtime, etag, content_type,
                         storage_class, &acl_bl,
@@ -5222,11 +5226,17 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y, const DoutPrefixProvi
       tombstone_entry entry{*state};
       obj_tombstone_cache->add(obj, entry);
     }
+    ldpp_dout(dpp, 20) << "AE TRACE: Completing deletion of " << obj.get_oid()
+		       << dendl;
+
     r = index_op.complete_del(dpp, poolid, ioctx.get_last_version(), state->mtime, params.remove_objs);
     
     int ret = target->complete_atomic_modification(dpp);
     if (ret < 0) {
       ldpp_dout(dpp, 0) << "ERROR: complete_atomic_modification returned ret=" << ret << dendl;
+    } else {
+      ldpp_dout(dpp, 20) << "AE TRACE: Completed deletion of " << obj.get_oid()
+			 << dendl;
     }
     /* other than that, no need to propagate error */
   } else {
