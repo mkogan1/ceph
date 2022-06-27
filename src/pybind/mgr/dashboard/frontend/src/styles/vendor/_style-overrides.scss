@@ -944,3 +944,49 @@ cd-modal {
     font-size: 1.2rem;
   }
 }
+
+// Accordion
+.accordion {
+  @extend .pf-c-accordion;
+
+  .btn-link {
+    @extend .pf-c-accordion__toggle;
+  }
+
+  .card-header {
+    border: 0;
+    margin-bottom: -0.91rem !important;
+  }
+
+  button {
+    border-radius: 0 !important;
+    color: vv.$black !important;
+
+    &:hover, &:focus {
+      background-color: none !important;
+      color: vv.$primary !important;
+      text-decoration: none;
+    }
+    &[aria-expanded='true'] {
+      border-left: 3px solid vv.$primary !important;
+      background-color: var(--pf-c-accordion__toggle--active--BackgroundColor) !important;
+      color: vv.$primary !important;
+      font-weight: bold !important;
+      text-decoration: none;
+    }
+  }
+
+  button.dropdown-toggle {
+    position: relative;
+    &::after {
+      font-size: 0.7rem !important;
+      display: inline-table !important;
+      margin-top: 0.5rem !important;
+      margin-left: 98% !important;
+    }
+  }
+
+  .collapse {
+    border-left: 3px solid vv.$primary;
+  }
+}
