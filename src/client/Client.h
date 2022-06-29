@@ -1015,6 +1015,9 @@ protected:
   // helpers
   void wake_up_session_caps(MetaSession *s, bool reconnect);
 
+  void add_nonblocking_onfinish_to_context_list(std::list<Context*>& ls, Context *onfinish) {
+    ls.push_back(onfinish);
+  }
   void wait_on_context_list(std::list<Context*>& ls);
   void signal_context_list(std::list<Context*>& ls);
 
