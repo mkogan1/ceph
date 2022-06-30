@@ -1070,7 +1070,7 @@ struct ReplicationConfiguration {
 
       for (auto& id : zone_ids) {
         RGWZone *zone;
-        if (store->svc()->zone->find_zone(id, &zone)) {
+        if ((zone = store->svc()->zone->find_zone(id))) {
           names.emplace_back(zone->name);
         }
       }

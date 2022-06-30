@@ -2084,7 +2084,7 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
 
   RGWZone *sz;
 
-  if (!store->svc()->zone->find_zone(source_zone, &sz)) {
+  if (!(sz = store->svc()->zone->find_zone(source_zone))) {
     push_ss(ss, status, tab) << string("zone not found");
     flush_ss(ss, status);
     return;
@@ -2297,7 +2297,7 @@ static void sync_status(Formatter *formatter)
     string source_str = "source: ";
     string s = source_str + source_id.id;
     RGWZone *sz;
-    if (store->svc()->zone->find_zone(source_id, &sz)) {
+    if ((sz = store->svc()->zone->find_zone(source_id))) {
       s += string(" (") + sz->name + ")";
     }
     data_status.push_back(s);
@@ -2483,7 +2483,7 @@ static rgw_zone_id resolve_zone_id(const string& s)
   rgw_zone_id result;
 
   RGWZone *zone;
-  if (store->svc()->zone->find_zone(s, &zone)) {
+  if ((zone = store->svc()->zone->find_zone(s))) {
     return rgw_zone_id(s);
   }
   if (store->svc()->zone->find_zone_id_by_name(s, &result)) {
@@ -3079,7 +3079,7 @@ class JSONFormatter_PrettyZone : public JSONFormatter {
       auto zone_id = *(static_cast<const rgw_zone_id *>(pval));
       string zone_name;
       RGWZone *zone;
-      if (store->svc()->zone->find_zone(zone_id, &zone)) {
+      if ((zone = store->svc()->zone->find_zone(zone_id))) {
         zone_name = zone->name;
       } else {
         cerr << "WARNING: cannot find zone name for id=" << zone_id << std::endl;
