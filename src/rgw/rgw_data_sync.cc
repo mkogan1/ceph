@@ -5750,7 +5750,8 @@ int RGWSyncBucketCR::operate(const DoutPrefixProvider *dpp)
   return 0;
 }
 
-int RGWBucketPipeSyncStatusManager::do_init(const DoutPrefixProvider *dpp)
+int RGWBucketPipeSyncStatusManager::do_init(const DoutPrefixProvider *dpp,
+					    std::ostream* ostr)
 {
   int ret = http_manager.start();
   if (ret < 0) {
@@ -5765,6 +5766,8 @@ int RGWBucketPipeSyncStatusManager::do_init(const DoutPrefixProvider *dpp)
                 store->svc(), async_rados, &http_manager,
                 error_logger.get(), store->getRados()->get_sync_tracer(),
                 sync_module, nullptr);
+
+  sync_env.ostr = ostr;
 
   rgw_sync_pipe_info_set pipes;
 
@@ -5843,12 +5846,13 @@ RGWBucketPipeSyncStatusManager::construct(
   rgw::sal::RadosStore* store,
   std::optional<rgw_zone_id> source_zone,
   std::optional<rgw_bucket> source_bucket,
-  const rgw_bucket& dest_bucket)
+  const rgw_bucket& dest_bucket,
+  std::ostream* ostr)
 {
   std::unique_ptr<RGWBucketPipeSyncStatusManager> self{
     new RGWBucketPipeSyncStatusManager(store, source_zone, source_bucket,
 				       dest_bucket)};
-  auto r = self->do_init(dpp);
+  auto r = self->do_init(dpp, ostr);
   if (r < 0) {
     return tl::unexpected(r);
   }
