@@ -3040,7 +3040,7 @@ int RGWDataSyncStatusManager::init(const DoutPrefixProvider *dpp)
 {
   RGWZone *zone_def;
 
-  if (!store->svc()->zone->find_zone(source_zone, &zone_def)) {
+  if (!(zone_def = store->svc()->zone->find_zone(source_zone))) {
     ldpp_dout(this, 0) << "ERROR: failed to find zone config info for zone=" << source_zone << dendl;
     return -EIO;
   }
