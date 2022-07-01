@@ -202,7 +202,6 @@ protected:
   uint32_t flags;
 
 public:
-static uint32_t recognize_flags(const std::string& flag_expr);
 
   LCFilter() : flags(make_flag(LCFlagType::none))
     {}
