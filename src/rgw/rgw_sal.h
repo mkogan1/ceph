@@ -641,6 +641,7 @@ public:
   virtual int put_head(const string& oid, const LCHead& head) = 0;
 
   virtual LCSerializer* get_serializer(const std::string& lock_name, const std::string& oid, const std::string& cookie) = 0;
+
 };
 
 } } // namespace rgw::sal

@@ -1367,3 +1367,8 @@ void RGWStoreManager::close_storage(rgw::sal::RGWRadosStore *store)
 
   delete store;
 }
+
+const std::string_view rgw::sal::RGWRadosStore::get_tier_type()
+{
+  return svc()->zone->get_zone().tier_type;
+}

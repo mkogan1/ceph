@@ -214,7 +214,7 @@ public:
     return obj_tags;
   }
 
-  const uint32_t get_flags() {
+  const uint32_t get_flags() const {
     return flags;
   }
 
@@ -437,8 +437,9 @@ struct lc_op
   int mp_expiration{0};
   boost::optional<ceph::real_time> expiration_date;
   boost::optional<RGWObjTags> obj_tags;
-  map<string, transition_action> transitions;
-  map<string, transition_action> noncur_transitions;
+  std::map<std::string, transition_action> transitions;
+  std::map<std::string, transition_action> noncur_transitions;
+  uint32_t rule_flags;
 
   /* ctors are nice */
   lc_op() = delete;

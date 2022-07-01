@@ -345,6 +345,8 @@ class RGWRadosStore : public RGWStore {
     void set_luarocks_path(const std::string& path) override {
       luarocks_path = path;
     }
+
+    const std::string_view get_tier_type(); // XXX backport for Pacific/5.x ONLY
 };
 
 class MPRadosSerializer : public MPSerializer {
