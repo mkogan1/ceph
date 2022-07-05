@@ -2320,17 +2320,21 @@ int RGWLC::set_bucket_config(RGWBucketInfo& bucket_info,
                          const map<string, bufferlist>& bucket_attrs,
                          RGWLifecycleConfiguration *config)
 {
+  int ret{0};
   map<string, bufferlist> attrs = bucket_attrs;
-  bufferlist lc_bl;
-  config->encode(lc_bl);
+  if (config) {
+    bufferlist lc_bl;
 
-  attrs[RGW_ATTR_LC] = std::move(lc_bl);
+    config->encode(lc_bl);
+    attrs[RGW_ATTR_LC] = std::move(lc_bl);
 
-  int ret =
-    store->ctl()->bucket->set_bucket_instance_attrs(
-      bucket_info, attrs, &bucket_info.objv_tracker, null_yield, this);
-  if (ret < 0)
-    return ret;
+    ret =
+      store->ctl()->bucket->set_bucket_instance_attrs(
+	bucket_info, attrs, &bucket_info.objv_tracker, null_yield, this);
+    if (ret < 0) {
+      return ret;
+    }
+  }
 
   rgw_bucket& bucket = bucket_info.bucket;
 

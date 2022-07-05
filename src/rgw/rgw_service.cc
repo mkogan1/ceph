@@ -340,7 +340,7 @@ RGWCtlDef::_meta::_meta() {}
 RGWCtlDef::_meta::~_meta() {}
 
 
-int RGWCtlDef::init(RGWServices& svc, const DoutPrefixProvider *dpp)
+int RGWCtlDef::init(RGWServices& svc, rgw::sal::RGWRadosStore* store, const DoutPrefixProvider *dpp)
 {
   meta.mgr.reset(new RGWMetadataManager(svc.meta));
 
@@ -349,10 +349,10 @@ int RGWCtlDef::init(RGWServices& svc, const DoutPrefixProvider *dpp)
   auto sync_module = svc.sync_modules->get_sync_module();
   if (sync_module) {
     meta.bucket.reset(sync_module->alloc_bucket_meta_handler());
-    meta.bucket_instance.reset(sync_module->alloc_bucket_instance_meta_handler());
+    meta.bucket_instance.reset(sync_module->alloc_bucket_instance_meta_handler(store));
   } else {
     meta.bucket.reset(RGWBucketMetaHandlerAllocator::alloc());
-    meta.bucket_instance.reset(RGWBucketInstanceMetaHandlerAllocator::alloc());
+    meta.bucket_instance.reset(RGWBucketInstanceMetaHandlerAllocator::alloc(store));
   }
 
   meta.otp.reset(RGWOTPMetaHandlerAllocator::alloc());
@@ -385,12 +385,12 @@ int RGWCtlDef::init(RGWServices& svc, const DoutPrefixProvider *dpp)
   return 0;
 }
 
-int RGWCtl::init(RGWServices *_svc, const DoutPrefixProvider *dpp)
+int RGWCtl::init(RGWServices *_svc, rgw::sal::RGWRadosStore* store, const DoutPrefixProvider *dpp)
 {
   svc = _svc;
   cct = svc->cct;
 
-  int r = _ctl.init(*svc, dpp);
+  int r = _ctl.init(*svc, store, dpp);
   if (r < 0) {
     ldpp_dout(dpp, 0) << "ERROR: failed to start init ctls (" << cpp_strerror(-r) << dendl;
     return r;
