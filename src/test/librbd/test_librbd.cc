@@ -2252,6 +2252,10 @@ TEST_F(TestLibRBD, TestEncryptionLUKS1)
           .passphrase = "password",
           .passphrase_size = 8,
   };
+  rbd_encryption_luks_format_options_t luks_opts = {
+          .passphrase = "password",
+          .passphrase_size = 8,
+  };
   ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, NULL));
 
 #ifndef HAVE_LIBCRYPTSETUP
@@ -2274,7 +2278,7 @@ TEST_F(TestLibRBD, TestEncryptionLUKS1)
 
   ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, NULL));
   ASSERT_EQ(0, rbd_encryption_load(
-          image, RBD_ENCRYPTION_FORMAT_LUKS1, &opts, sizeof(opts)));
+          image, RBD_ENCRYPTION_FORMAT_LUKS, &luks_opts, sizeof(luks_opts)));
   read_test_data(image, "test", 0, 4, 0, &passed);
   ASSERT_TRUE(passed);
 #endif
@@ -2304,6 +2308,10 @@ TEST_F(TestLibRBD, TestEncryptionLUKS2)
           .passphrase = "password",
           .passphrase_size = 8,
   };
+  rbd_encryption_luks_format_options_t luks_opts = {
+          .passphrase = "password",
+          .passphrase_size = 8,
+  };
   ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, NULL));
 
 #ifndef HAVE_LIBCRYPTSETUP
@@ -2311,7 +2319,13 @@ TEST_F(TestLibRBD, TestEncryptionLUKS2)
           image, RBD_ENCRYPTION_FORMAT_LUKS2, &opts, sizeof(opts)));
   ASSERT_EQ(-ENOTSUP, rbd_encryption_load(
           image, RBD_ENCRYPTION_FORMAT_LUKS2, &opts, sizeof(opts)));
+  ASSERT_EQ(-ENOTSUP, rbd_encryption_format(
+          image, RBD_ENCRYPTION_FORMAT_LUKS, &luks_opts, sizeof(luks_opts)));
+  ASSERT_EQ(-ENOTSUP, rbd_encryption_load(
+          image, RBD_ENCRYPTION_FORMAT_LUKS, &luks_opts, sizeof(luks_opts)));
 #else
+  ASSERT_EQ(-EINVAL, rbd_encryption_format(
+          image, RBD_ENCRYPTION_FORMAT_LUKS, &luks_opts, sizeof(luks_opts)));
   ASSERT_EQ(0, rbd_encryption_format(
           image, RBD_ENCRYPTION_FORMAT_LUKS2, &opts, sizeof(opts)));
   ASSERT_EQ(-EEXIST, rbd_encryption_load(
@@ -2326,7 +2340,7 @@ TEST_F(TestLibRBD, TestEncryptionLUKS2)
 
   ASSERT_EQ(0, rbd_open(ioctx, name.c_str(), &image, NULL));
   ASSERT_EQ(0, rbd_encryption_load(
-          image, RBD_ENCRYPTION_FORMAT_LUKS2, &opts, sizeof(opts)));
+          image, RBD_ENCRYPTION_FORMAT_LUKS, &luks_opts, sizeof(luks_opts)));
   read_test_data(image, "test", 0, 4, 0, &passed);
   ASSERT_TRUE(passed);
 #endif
