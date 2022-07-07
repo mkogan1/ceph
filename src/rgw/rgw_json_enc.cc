@@ -1941,13 +1941,13 @@ void lc_op::dump(Formatter *f) const
   if (obj_tags) {
     f->dump_object("obj_tags", *obj_tags);
   }
-  f->open_object_section("transitions");  
+  f->open_object_section("transitions");
   for(auto& [storage_class, transition] : transitions) {
     f->dump_object(storage_class, transition);
   }
   f->close_section();
 
-  f->open_object_section("noncur_transitions");  
+  f->open_object_section("noncur_transitions");
   for (auto& [storage_class, transition] : noncur_transitions) {
     f->dump_object(storage_class, transition);
   }
@@ -1958,6 +1958,9 @@ void LCFilter::dump(Formatter *f) const
 {
   f->dump_string("prefix", prefix);
   f->dump_object("obj_tags", obj_tags);
+  if (have_flag(LCFlagType::ArchiveZone)) {
+    f->dump_string("archivezone", "");
+  }
 }
 
 void LCExpiration::dump(Formatter *f) const
@@ -1975,19 +1978,20 @@ void LCRule::dump(Formatter *f) const
   f->dump_object("noncur_expiration", noncur_expiration);
   f->dump_object("mp_expiration", mp_expiration);
   f->dump_object("filter", filter);
-  f->open_object_section("transitions");  
+  f->open_object_section("transitions");
   for (auto& [storage_class, transition] : transitions) {
     f->dump_object(storage_class, transition);
   }
   f->close_section();
 
-  f->open_object_section("noncur_transitions");  
+  f->open_object_section("noncur_transitions");
   for (auto& [storage_class, transition] : noncur_transitions) {
     f->dump_object(storage_class, transition);
   }
   f->close_section();
   f->dump_bool("dm_expiration", dm_expiration);
 }
+
 
 void RGWLifecycleConfiguration::dump(Formatter *f) const
 {
