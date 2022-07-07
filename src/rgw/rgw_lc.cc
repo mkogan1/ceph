@@ -2287,7 +2287,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 	  if (advance_head(lc_shard, head, entry, now) < 0) {
 	    goto exit;
 	  }
-	      /* done with this shard */
+	  /* done with this shard */
 	  if (head.marker.empty()) {
 	    ldpp_dout(this, 5) <<
 	      "RGWLC::process() cycle finished lc_shard="
@@ -2392,17 +2392,20 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 			   << dendl;
 	/* not fatal, could result from a race */
       }
-    } else if (ret < 0) {
-      entry.status = lc_failed;
     } else {
-      entry.status = lc_complete;
-    }
-    ret = sal_lc->set_entry(lc_shard,  entry);
-    if (ret < 0) {
-      ldpp_dout(this, 0) << "RGWLC::process() failed to set entry on "
-          << lc_shard << dendl;
-      /* fatal, locked */
-      goto exit;
+      if (ret < 0) {
+        entry.status = lc_failed;
+      } else {
+        entry.status = lc_complete;
+      }
+      ret = sal_lc->set_entry(lc_shard, entry);
+      if (ret < 0) {
+        ldpp_dout(this, 0) << "RGWLC::process() failed to set entry on "
+                           << lc_shard
+                           << dendl;
+        /* fatal, locked */
+        goto exit;
+      }
     }
 
     /* done with this shard */
@@ -2422,12 +2425,9 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     }
   } while(1 && !once && !going_down());
 
-notlocked:
-  delete lock;
-  return 0;
-
 exit:
   lock->unlock();
+notlocked:
   delete lock;
   return 0;
 }
