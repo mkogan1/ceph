@@ -1481,7 +1481,8 @@ public:
 	  decode(dup, bp);
 	  if (!dups.empty()) {
 	    ceph_assert(dups.back().version < dup.version);
-	  } else if (dups.size() == NUM_DUPS_WARN_THRESHOLD) {
+	  }
+	  if (dups.size() == NUM_DUPS_WARN_THRESHOLD) {
 	    ldpp_dout(dpp, 0) << "read_log_and_missing WARN num of dups exceeded "
 			      << NUM_DUPS_WARN_THRESHOLD << "."
 			      << " You can be hit by THE DUPS BUG"
