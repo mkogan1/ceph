@@ -642,7 +642,8 @@ public:
   int64_t ll_preadv_pwritev(struct Fh *fh, const struct iovec *iov, int iovcnt,
                             int64_t offset, bool write,
                             Context *onfinish = nullptr,
-                            bufferlist *blp = nullptr);
+                            bufferlist *blp = nullptr,
+                            bool do_fsync = false, bool syncdataonly = false);
   loff_t ll_lseek(Fh *fh, loff_t offset, int whence);
   int ll_flush(Fh *fh);
   int ll_fsync(Fh *fh, bool syncdataonly);
@@ -1373,17 +1374,21 @@ private:
   public:
     void finish_io(int r);
     void finish_onuninline(int r);
+    void finish_fsync(int r);
 
     C_Write_Finisher(Client *clnt, Context *onfinish, bool dont_need_uninline,
                      bool is_file_write, utime_t start, Fh *f, Inode *in,
-                     uint64_t fpos, int64_t offset, uint64_t size)
+                     uint64_t fpos, int64_t offset, uint64_t size,
+                     bool do_fsync, bool syncdataonly)
       : clnt(clnt), onfinish(onfinish),
         is_file_write(is_file_write), start(start), f(f), in(in), fpos(fpos),
-        offset(offset), size(size) {
+        offset(offset), size(size), syncdataonly(syncdataonly) {
       iofinished_r = 0;
       onuninlinefinished_r = 0;
+      fsync_r = 0;
       iofinished = false;
       onuninlinefinished = dont_need_uninline;
+      fsync_finished = !do_fsync;
     }
 
     void finish(int r) override {
@@ -1400,10 +1405,13 @@ private:
     uint64_t fpos;
     int64_t offset;
     uint64_t size;
+    bool syncdataonly;
     int64_t iofinished_r;
     int64_t onuninlinefinished_r;
+    int64_t fsync_r;
     bool iofinished;
     bool onuninlinefinished;
+    bool fsync_finished;
     bool try_complete();
   };
 
@@ -1415,6 +1423,17 @@ private:
 
     void finish(int r) override {
       CWF->finish_io(r);
+    }
+  };
+
+  struct CWF_fsync_finish : public Context {
+    C_Write_Finisher *CWF;
+
+    CWF_fsync_finish(C_Write_Finisher *CWF)
+      : CWF(CWF) {}
+
+    void finish(int r) override {
+      CWF->finish_fsync(r);
     }
   };
 
@@ -1452,12 +1471,7 @@ private:
 
     void advance();
 
-    void complete_flush(int r) {
-      flush_completed = true;
-      result = r;
-      if (progress == 2)
-        advance();
-    }
+    void complete_flush(int r);
   };
 
   struct C_nonblocking_fsync_state_advancer : Context {
@@ -1468,11 +1482,7 @@ private:
       : clnt(clnt), state(state) {
     }
 
-    void finish(int r) override {
-      clnt->client_lock.lock();
-      state->advance();
-      clnt->client_lock.unlock();
-    }
+    void finish(int r) override;
   };
 
   struct C_nonblocking_fsync_flush_finisher : Context {
@@ -1484,9 +1494,8 @@ private:
     }
 
     void finish(int r) override {
-      clnt->client_lock.lock();
+      ceph_assert(ceph_mutex_is_locked_by_me(clnt->client_lock));
       state->complete_flush(r);
-      clnt->client_lock.unlock();
     }
   };
 
@@ -1637,12 +1646,14 @@ private:
   int64_t _write_success(Fh *fh, utime_t start, uint64_t fpos,
           int64_t offset, uint64_t size, Inode *in);
   int64_t _write(Fh *fh, int64_t offset, uint64_t size, const char *buf,
-          const struct iovec *iov, int iovcnt, Context *onfinish = nullptr);
+          const struct iovec *iov, int iovcnt, Context *onfinish = nullptr,
+          bool do_fsync = false, bool syncdataonly = false);
   int64_t _preadv_pwritev_locked(Fh *fh, const struct iovec *iov,
                                  unsigned iovcnt, int64_t offset,
                                  bool write, bool clamp_to_int,
                                  Context *onfinish = nullptr,
-                                 bufferlist *blp = nullptr);
+                                 bufferlist *blp = nullptr,
+                                 bool do_fsync = false, bool syncdataonly = false);
   int _preadv_pwritev(int fd, const struct iovec *iov, unsigned iovcnt,
                       int64_t offset, bool write, Context *onfinish = nullptr,
                       bufferlist *blp = nullptr);
