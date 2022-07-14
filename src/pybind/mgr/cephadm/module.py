@@ -105,21 +105,16 @@ os._exit = os_exit_noop   # type: ignore
 
 
 # Default container images -----------------------------------------------------
-DEFAULT_IMAGE = 'quay.io/ceph/ceph'  # DO NOT ADD TAG TO THIS
-DEFAULT_PROMETHEUS_IMAGE = 'quay.io/prometheus/prometheus:v2.43.0'
-DEFAULT_NODE_EXPORTER_IMAGE = 'quay.io/prometheus/node-exporter:v1.5.0'
-DEFAULT_NVMEOF_IMAGE = 'quay.io/ceph/nvmeof:0.0.2'
-DEFAULT_LOKI_IMAGE = 'docker.io/grafana/loki:2.4.0'
-DEFAULT_PROMTAIL_IMAGE = 'docker.io/grafana/promtail:2.4.0'
-DEFAULT_ALERT_MANAGER_IMAGE = 'quay.io/prometheus/alertmanager:v0.25.0'
-DEFAULT_GRAFANA_IMAGE = 'quay.io/ceph/ceph-grafana:9.4.7'
-DEFAULT_HAPROXY_IMAGE = 'quay.io/ceph/haproxy:2.3'
-DEFAULT_KEEPALIVED_IMAGE = 'quay.io/ceph/keepalived:2.2.4'
-DEFAULT_SNMP_GATEWAY_IMAGE = 'docker.io/maxwo/snmp-notifier:v1.2.1'
-DEFAULT_ELASTICSEARCH_IMAGE = 'quay.io/omrizeneva/elasticsearch:6.8.23'
-DEFAULT_JAEGER_COLLECTOR_IMAGE = 'quay.io/jaegertracing/jaeger-collector:1.29'
-DEFAULT_JAEGER_AGENT_IMAGE = 'quay.io/jaegertracing/jaeger-agent:1.29'
-DEFAULT_JAEGER_QUERY_IMAGE = 'quay.io/jaegertracing/jaeger-query:1.29'
+DEFAULT_IMAGE = 'registry.redhat.io/rhceph/rhceph-7-rhel9:latest'
+DEFAULT_PROMETHEUS_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus:v4.10'
+DEFAULT_NODE_EXPORTER_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.10'
+DEFAULT_LOKI_IMAGE = 'registry.redhat.io/openshift-logging/logging-loki-rhel8:v2.6.1'
+DEFAULT_PROMTAIL_IMAGE = 'registry.redhat.io/rhceph/rhceph-promtail-rhel9:v2.4.0'
+DEFAULT_ALERT_MANAGER_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.10'
+DEFAULT_GRAFANA_IMAGE = 'registry.redhat.io/rhceph/grafana-rhel9'
+DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/rhceph/rhceph-haproxy-rhel9:latest'
+DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel9:latest'
+DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph/snmp-notifier-rhel9:latest'
 # ------------------------------------------------------------------------------
 
 
