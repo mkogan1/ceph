@@ -772,15 +772,12 @@ struct cls_rgw_bucket_instance_entry {
   }
 
   void decode(ceph::buffer::list::const_iterator& bl) {
-    DECODE_START(2, bl);
+    DECODE_START(1, bl);
     uint8_t s;
     decode(s, bl);
-    if (struct_v < 2) { // fields removed from v2
-      std::string bucket_instance_id;
-      decode(bucket_instance_id, bl);
-      int32_t num_shards{-1};
-      decode(num_shards, bl);
-    }
+    reshard_status = (cls_rgw_reshard_status)s;
+    decode(new_bucket_instance_id, bl);
+    decode(num_shards, bl);
     DECODE_FINISH(bl);
   }
 
