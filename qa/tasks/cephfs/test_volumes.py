@@ -5681,7 +5681,7 @@ class TestMisc(TestVolumesHelper):
 
         # emulate a old-fashioned subvolume in the default group
         createpath1 = os.path.join(".", "volumes", "_nogroup", subvol1)
-        self.mount_a.run_shell(['mkdir', '-p', createpath1], sudo=True)
+        self.mount_a.run_shell(['sudo', 'mkdir', '-p', createpath1], omit_sudo=False)
 
         # add required xattrs to subvolume
         default_pool = self.mount_a.getfattr(".", "ceph.dir.layout.pool")
@@ -5693,7 +5693,7 @@ class TestMisc(TestVolumesHelper):
         # Create malicious .meta file in legacy subvolume root. Copy v2 subvolume
         # .meta into legacy subvol1's root
         subvol2_metapath = os.path.join(".", "volumes", "_nogroup", subvol2, ".meta")
-        self.mount_a.run_shell(["cp", subvol2_metapath, createpath1], sudo=True)
+        self.mount_a.run_shell(['sudo', 'cp', subvol2_metapath, createpath1], omit_sudo=False)
 
         # Upgrade legacy subvol1 to v1
         subvolpath1 = self._fs_cmd("subvolume", "getpath", self.volname, subvol1)
@@ -5735,7 +5735,7 @@ class TestMisc(TestVolumesHelper):
 
         # emulate a old-fashioned subvolume -- in a custom group
         createpath = os.path.join(".", "volumes", group, subvol)
-        self.mount_a.run_shell(['mkdir', '-p', createpath], sudo=True)
+        self.mount_a.run_shell(['sudo', 'mkdir', '-p', createpath], omit_sudo=False)
 
         # add required xattrs to subvolume
         default_pool = self.mount_a.getfattr(".", "ceph.dir.layout.pool")
@@ -5778,7 +5778,7 @@ class TestMisc(TestVolumesHelper):
 
         # emulate a old-fashioned subvolume -- in a custom group
         createpath = os.path.join(".", "volumes", group, subvol)
-        self.mount_a.run_shell(['mkdir', '-p', createpath], sudo=True)
+        self.mount_a.run_shell(['sudo', 'mkdir', '-p', createpath], omit_sudo=False)
 
         # add required xattrs to subvolume
         default_pool = self.mount_a.getfattr(".", "ceph.dir.layout.pool")
