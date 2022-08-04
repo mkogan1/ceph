@@ -890,7 +890,6 @@ add_custom_target(vstart-base DEPENDS
     ceph-mon
     ceph-authtool
     ceph-conf
-    ceph-exporter
     monmaptool
     crushtool
     rados)
