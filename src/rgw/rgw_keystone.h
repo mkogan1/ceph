@@ -34,6 +34,13 @@ enum class ApiVersion {
   VER_3
 };
 
+inline std::ostream& operator<<(std::ostream& out, const ApiVersion &o) {
+  switch(o) {
+  case ApiVersion::VER_2: return out << '2';
+  case ApiVersion::VER_3: return out << '3';
+  }
+  return out << '?';
+}
 
 class Config {
 protected:
@@ -119,6 +126,8 @@ public:
   typedef RGWKeystoneHTTPTransceiver RGWValidateKeystoneToken;
   typedef RGWKeystoneHTTPTransceiver RGWGetKeystoneAdminToken;
 
+  static int validate_admin_token(CephContext* const cct,
+                                  TokenEnvelope& t);
   static int get_admin_token(const DoutPrefixProvider *dpp,
                              CephContext* const cct,
                              TokenCache& token_cache,
@@ -155,6 +164,7 @@ public:
     Token() : expires(0) { }
     std::string id;
     time_t expires;
+    time_t issued;
     Project tenant_v2;
     void decode_json(JSONObj *obj);
   };
@@ -188,6 +198,7 @@ public:
   TokenEnvelope() = default;
 
   time_t get_expires() const { return token.expires; }
+  time_t get_issued() const { return token.issued; }
   const std::string& get_domain_id() const {return project.domain.id;};
   const std::string& get_domain_name() const {return project.domain.name;};
   const std::string& get_project_id() const {return project.id;};
