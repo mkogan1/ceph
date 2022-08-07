@@ -272,7 +272,7 @@ protected:
     concat_url(secret_url, std::string(infix));
     concat_url(secret_url, std::string(key_id));
 
-    RGWHTTPTransceiver secret_req(cct, method, secret_url, &secret_bl, "ValutSecretEngine");
+    RGWHTTPTransceiver secret_req(cct, method, secret_url, &secret_bl, "VaultSecretEngine");
 
     if (postdata.length()) {
       secret_req.set_post_data(postdata);
