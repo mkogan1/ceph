@@ -279,7 +279,8 @@ class TestDevice(object):
         monkeypatch.setattr(api, 'get_device_vgs', lambda x: [vg])
         lsblk = {"TYPE": "disk"}
         data = {"/dev/nvme0n1": {"size": "6442450944"}}
-        device_info(devices=data, lsblk=lsblk)
+        lv = {"tags": {"ceph.osd_id": "1"}}
+        device_info(devices=data, lsblk=lsblk, lv=lv)
         disk = device.Device("/dev/nvme0n1")
         assert disk.available_lvm
         assert not disk.available
@@ -291,7 +292,8 @@ class TestDevice(object):
         monkeypatch.setattr(api, 'get_device_vgs', lambda x: [vg])
         lsblk = {"TYPE": "disk"}
         data = {"/dev/nvme0n1": {"size": "6442450944"}}
-        device_info(devices=data, lsblk=lsblk)
+        lv = {"tags": {"ceph.osd_id": "1"}}
+        device_info(devices=data, lsblk=lsblk, lv=lv)
         disk = device.Device("/dev/nvme0n1")
         assert not disk.available_lvm
         assert not disk.available
@@ -305,7 +307,8 @@ class TestDevice(object):
         monkeypatch.setattr(api, 'get_device_vgs', lambda x: [vg1, vg2])
         lsblk = {"TYPE": "disk"}
         data = {"/dev/nvme0n1": {"size": "6442450944"}}
-        device_info(devices=data, lsblk=lsblk)
+        lv = {"tags": {"ceph.osd_id": "1"}}
+        device_info(devices=data, lsblk=lsblk, lv=lv)
         disk = device.Device("/dev/nvme0n1")
         assert disk.available_lvm
         assert not disk.available
