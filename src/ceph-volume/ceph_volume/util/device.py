@@ -122,9 +122,9 @@ class Device(object):
         self.blkid_api = None
         self._exists = None
         self._is_lvm_member = None
+        self.ceph_device = False
         self._parse()
         self.lsm_data = self.fetch_lsm(with_lsm)
-        self.ceph_device = None
 
         self.available_lvm, self.rejected_reasons_lvm = self._check_lvm_reject_reasons()
         self.available_raw, self.rejected_reasons_raw = self._check_raw_reject_reasons()
@@ -211,6 +211,7 @@ class Device(object):
             self.lv_name = lv.name
             self.ceph_device = lvm.is_ceph_device(lv)
         else:
+            self.lvs = []
             if self.lsblk_all:
                 for dev in self.lsblk_all:
                     if dev['NAME'] == os.path.basename(self.path):
@@ -222,11 +223,6 @@ class Device(object):
             # always check is this is an lvm member
             if device_type in ['part', 'disk']:
                 self._set_lvm_membership()
-            out, err, rc = process.call([
-                'ceph-bluestore-tool', 'show-label',
-                '--dev', self.path], verbose_on_failure=False)
-            if rc:
-                self.ceph_device = True
 
         self.ceph_disk = CephDiskDevice(self)
 
@@ -337,6 +333,8 @@ class Device(object):
                     self.vg_name = vgs[0]
                     self._is_lvm_member = True
                     self.lvs.extend(lvm.get_device_lvs(path))
+                if self.lvs:
+                    self.ceph_device = any([True if lv.tags.get('ceph.osd_id') else False for lv in self.lvs])
 
     def _get_partitions(self):
         """
