@@ -1575,7 +1575,7 @@ public:
   ~RGWPutLC() override {}
 
   void init(rgw::sal::RGWRadosStore *store, struct req_state *s, RGWHandler *dialect_handler) override {
-#define COOKIE_LEN 16
+    static constexpr std::size_t COOKIE_LEN = 16;
     char buf[COOKIE_LEN + 1];
 
     RGWOp::init(store, s, dialect_handler);
