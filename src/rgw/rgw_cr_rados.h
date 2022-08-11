@@ -1426,26 +1426,25 @@ class RGWContinuousLeaseCR : public RGWCoroutine {
 
   const rgw_raw_obj obj;
 
-  const string lock_name;
-  const string cookie;
+  const std::string lock_name;
+  const std::string cookie{RGWSimpleRadosLockCR::gen_random_cookie(cct)};
 
   int interval;
-  bool going_down{ false };
+  bool going_down{false};
   bool locked{false};
 
-  RGWCoroutine *caller;
+  RGWCoroutine* caller;
 
   bool aborted{false};
 
 public:
-  RGWContinuousLeaseCR(RGWAsyncRadosProcessor *_async_rados, rgw::sal::RGWRadosStore *_store,
-                       const rgw_raw_obj& _obj,
-                       const string& _lock_name, int _interval, RGWCoroutine *_caller)
-    : RGWCoroutine(_store->ctx()), async_rados(_async_rados), store(_store),
-    obj(_obj), lock_name(_lock_name),
-    cookie(RGWSimpleRadosLockCR::gen_random_cookie(cct)),
-    interval(_interval), caller(_caller)
-  {}
+  RGWContinuousLeaseCR(RGWAsyncRadosProcessor* async_rados,
+		       rgw::sal::RGWRadosStore* _store,
+                       rgw_raw_obj obj, std::string lock_name,
+		       int interval, RGWCoroutine* caller)
+    : RGWCoroutine(_store->ctx()), async_rados(async_rados), store(_store),
+      obj(std::move(obj)), lock_name(std::move(lock_name)),
+      interval(interval), caller(caller) {}
 
   int operate(const DoutPrefixProvider *dpp) override;
 
