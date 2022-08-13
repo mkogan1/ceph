@@ -1098,7 +1098,8 @@ struct perm_state_from_req_state : public perm_state_base {
   }
 };
 
-Effect eval_or_pass(const boost::optional<Policy>& policy,
+Effect eval_or_pass(const DoutPrefixProvider* dpp,
+		    const boost::optional<Policy>& policy,
 		    const rgw::IAM::Environment& env,
 		    boost::optional<const rgw::auth::Identity&> id,
 		    const uint64_t op,
@@ -1112,13 +1113,14 @@ Effect eval_or_pass(const boost::optional<Policy>& policy,
 
 }
 
-Effect eval_identity_or_session_policies(const vector<Policy>& policies,
+Effect eval_identity_or_session_policies(const DoutPrefixProvider* dpp,
+			  const vector<Policy>& policies,
                           const rgw::IAM::Environment& env,
                           const uint64_t op,
                           const ARN& resource) {
   auto usr_policy_res = Effect::Pass, prev_res = Effect::Pass;
   for (auto& user_policy : policies) {
-    if (usr_policy_res = eval_or_pass(user_policy, env, boost::none, op, resource); usr_policy_res == Effect::Deny)
+    if (usr_policy_res = eval_or_pass(dpp, user_policy, env, boost::none, op, resource); usr_policy_res == Effect::Deny)
       return usr_policy_res;
     else if (usr_policy_res == Effect::Allow)
       prev_res = Effect::Allow;
@@ -1136,13 +1138,13 @@ bool verify_user_permission(const DoutPrefixProvider* dpp,
                             const rgw::ARN& res,
                             const uint64_t op)
 {
-  auto identity_policy_res = eval_identity_or_session_policies(user_policies, s->env, op, res);
+  auto identity_policy_res = eval_identity_or_session_policies(dpp, user_policies, s->env, op, res);
   if (identity_policy_res == Effect::Deny) {
     return false;
   }
 
   if (! session_policies.empty()) {
-    auto session_policy_res = eval_identity_or_session_policies(session_policies, s->env, op, res);
+    auto session_policy_res = eval_identity_or_session_policies(dpp, session_policies, s->env, op, res);
     if (session_policy_res == Effect::Deny) {
       return false;
     }
@@ -1234,19 +1236,23 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp,
   if (!verify_requester_payer_permission(s))
     return false;
 
-  auto identity_policy_res = eval_identity_or_session_policies(identity_policies, s->env, op, ARN(bucket));
+  auto identity_policy_res = eval_identity_or_session_policies(dpp, identity_policies, s->env, op, ARN(bucket));
   if (identity_policy_res == Effect::Deny)
     return false;
 
   rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
-  auto r = eval_or_pass(bucket_policy, s->env, *s->identity,
+  if (bucket_policy) {
+    ldpp_dout(dpp, 16) << __func__ << ": policy: " << bucket_policy.get()
+		       << "resource: " << ARN(bucket) << dendl;
+  }
+  auto r = eval_or_pass(dpp, bucket_policy, s->env, *s->identity,
 			op, ARN(bucket), princ_type);
   if (r == Effect::Deny)
     return false;
 
   //Take into account session policies, if the identity making a request is a role
   if (!session_policies.empty()) {
-    auto session_policy_res = eval_identity_or_session_policies(session_policies, s->env, op, ARN(bucket));
+    auto session_policy_res = eval_identity_or_session_policies(dpp, session_policies, s->env, op, ARN(bucket));
     if (session_policy_res == Effect::Deny) {
         return false;
     }
@@ -1369,13 +1375,13 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp, struct req_state * 
 int verify_bucket_owner_or_policy(struct req_state* const s,
 				  const uint64_t op)
 {
-  auto identity_policy_res = eval_identity_or_session_policies(s->iam_user_policies, s->env, op, ARN(s->bucket->get_key()));
+  auto identity_policy_res = eval_identity_or_session_policies(s, s->iam_user_policies, s->env, op, ARN(s->bucket->get_key()));
   if (identity_policy_res == Effect::Deny) {
     return -EACCES;
   }
 
   rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
-  auto e = eval_or_pass(s->iam_policy,
+  auto e = eval_or_pass(s, s->iam_policy,
 			s->env, *s->auth.identity,
 			op, ARN(s->bucket->get_key()), princ_type);
   if (e == Effect::Deny) {
@@ -1383,7 +1389,8 @@ int verify_bucket_owner_or_policy(struct req_state* const s,
   }
 
   if (!s->session_policies.empty()) {
-    auto session_policy_res = eval_identity_or_session_policies(s->session_policies, s->env, op, ARN(s->bucket->get_key()));
+    auto session_policy_res = eval_identity_or_session_policies(s, s->session_policies, s->env, op,
+								ARN(s->bucket->get_key()));
     if (session_policy_res == Effect::Deny) {
         return -EACCES;
     }
@@ -1454,17 +1461,17 @@ bool verify_object_permission(const DoutPrefixProvider* dpp, struct perm_state_b
   if (!verify_requester_payer_permission(s))
     return false;
 
-  auto identity_policy_res = eval_identity_or_session_policies(identity_policies, s->env, op, ARN(obj));
+  auto identity_policy_res = eval_identity_or_session_policies(dpp, identity_policies, s->env, op, ARN(obj));
   if (identity_policy_res == Effect::Deny)
     return false;
 
   rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
-  auto r = eval_or_pass(bucket_policy, s->env, *s->identity, op, ARN(obj), princ_type);
+  auto r = eval_or_pass(dpp, bucket_policy, s->env, *s->identity, op, ARN(obj), princ_type);
   if (r == Effect::Deny)
     return false;
 
   if (!session_policies.empty()) {
-    auto session_policy_res = eval_identity_or_session_policies(session_policies, s->env, op, ARN(obj));
+    auto session_policy_res = eval_identity_or_session_policies(dpp, session_policies, s->env, op, ARN(obj));
     if (session_policy_res == Effect::Deny) {
         return false;
     }
