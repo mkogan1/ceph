@@ -149,10 +149,33 @@ using ceph::crypto::MD5;
 #define RGW_ATTR_BUCKET_ENCRYPTION_KEY_ID RGW_ATTR_BUCKET_ENCRYPTION_PREFIX "key-id"
 
 
-#define RGW_FORMAT_PLAIN        0
-#define RGW_FORMAT_XML          1
-#define RGW_FORMAT_JSON         2
-#define RGW_FORMAT_HTML         3
+enum class RGWFormat : int8_t {
+  BAD_FORMAT = -1,
+  PLAIN = 0,
+  XML,
+  JSON,
+  HTML,
+};
+
+static inline const char* to_mime_type(const RGWFormat f)
+{
+  switch (f) {
+  case RGWFormat::XML:
+    return "application/xml";
+    break;
+  case RGWFormat::JSON:
+    return "application/json";
+    break;
+  case RGWFormat::HTML:
+    return "text/html";
+    break;
+  case RGWFormat::PLAIN:
+    return "text/plain";
+    break;
+  default:
+    return "invalid format";
+  }
+}
 
 #define RGW_CAP_READ            0x1
 #define RGW_CAP_WRITE           0x2
@@ -1506,7 +1529,7 @@ struct req_state : DoutPrefixProvider {
   http_op op{OP_UNKNOWN};
   RGWOpType op_type{};
   bool content_started{false};
-  int format{0};
+  RGWFormat format{RGWFormat::PLAIN};
   ceph::Formatter *formatter{nullptr};
   string decoded_uri;
   string relative_uri;

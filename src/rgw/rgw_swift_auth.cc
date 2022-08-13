@@ -753,7 +753,7 @@ int RGWHandler_SWIFT_Auth::init(rgw::sal::RGWRadosStore *store, struct req_state
 {
   state->dialect = "swift-auth";
   state->formatter = new JSONFormatter;
-  state->format = RGW_FORMAT_JSON;
+  state->format = RGWFormat::JSON;
 
   return RGWHandler::init(store, state, cio);
 }

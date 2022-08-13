@@ -207,7 +207,7 @@ class RGWHandler_REST_STS : public RGWHandler_REST {
   void rgw_sts_parse_input();
 public:
 
-  static int init_from_header(struct req_state *s, int default_formatter, bool configurable_format);
+  static int init_from_header(struct req_state *s, RGWFormat default_formatter, bool configurable_format);
 
   RGWHandler_REST_STS(const rgw::auth::StrategyRegistry& auth_registry, const string& post_body="")
     : RGWHandler_REST(),

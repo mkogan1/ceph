@@ -587,7 +587,7 @@ protected:
   virtual RGWOp *op_options() { return NULL; }
 
 public:
-  static int allocate_formatter(struct req_state *s, int default_formatter,
+  static int allocate_formatter(struct req_state *s, RGWFormat default_formatter,
 				bool configurable);
 
   static constexpr int MAX_BUCKET_NAME_LEN = 255;
@@ -596,9 +596,9 @@ public:
   RGWHandler_REST() {}
   ~RGWHandler_REST() override {}
 
-  static int validate_bucket_name(const string& bucket);
-  static int validate_object_name(const string& object);
-  static int reallocate_formatter(struct req_state *s, int type);
+  static int validate_bucket_name(const std::string& bucket);
+  static int validate_object_name(const std::string& object);
+  static int reallocate_formatter(struct req_state *s, RGWFormat type);
 
   int init_permissions(RGWOp* op, optional_yield y) override;
   int read_permissions(RGWOp* op, optional_yield y) override;
