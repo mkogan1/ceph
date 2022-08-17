@@ -2353,6 +2353,7 @@ public:
 	  if (init_lease) {
 	    init_lease->go_down();
 	    init_lease.reset();
+	    lease_stack.reset();
 	  }
           tn->log(10, SSTR("spawning " << num_shards << " shards sync"));
           for (map<uint32_t, rgw_data_sync_marker>::iterator iter = sync_status.sync_markers.begin();
