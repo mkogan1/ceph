@@ -82,7 +82,7 @@ void TempURLEngine::get_owner_info(const DoutPrefixProvider* dpp, const req_stat
   const string& bucket_name = s->init_state.url_bucket;
 
   /* TempURL requires that bucket and object names are specified. */
-  if (bucket_name.empty() || s->object->empty()) {
+  if (bucket_name.empty() || !s->object || s->object->empty()) {
     throw -EPERM;
   }
 
@@ -190,66 +190,109 @@ std::string extract_swift_subuser(const std::string& swift_user_name)
   }
 }
 
-class TempURLEngine::SignatureHelper
-{
-private:
-  static constexpr uint32_t output_size =
-    CEPH_CRYPTO_HMACSHA1_DIGESTSIZE * 2 + 1;
-
-  unsigned char dest[CEPH_CRYPTO_HMACSHA1_DIGESTSIZE]; // 20
-  char dest_str[output_size];
-
+template <class H, bool O>
+class TempURLSignatureT : public rgw::auth::swift::FormatSignature<H,O> {
+  using UCHARPTR = const unsigned char*;
+  using base_t = SignatureHelperT<H>;
+  using format_signature_t = rgw::auth::swift::FormatSignature<H,O>;
 public:
-  SignatureHelper() = default;
-
   const char* calc(const std::string& key,
                    const std::string_view& method,
                    const std::string_view& path,
                    const std::string& expires) {
+    H hmac((UCHARPTR) key.data(), key.size());
 
-    using ceph::crypto::HMACSHA1;
-    using UCHARPTR = const unsigned char*;
-
-    HMACSHA1 hmac((UCHARPTR) key.c_str(), key.size());
     hmac.Update((UCHARPTR) method.data(), method.size());
     hmac.Update((UCHARPTR) "\n", 1);
     hmac.Update((UCHARPTR) expires.c_str(), expires.size());
     hmac.Update((UCHARPTR) "\n", 1);
     hmac.Update((UCHARPTR) path.data(), path.size());
-    hmac.Final(dest);
+    hmac.Final(base_t::dest);
 
-    buf_to_hex((UCHARPTR) dest, sizeof(dest), dest_str);
-
-    return dest_str;
+    return  format_signature_t::result();
   }
-
-  bool is_equal_to(const std::string& rhs) const {
-    /* never allow out-of-range exception */
-    if (rhs.size() < (output_size - 1)) {
-      return false;
-    }
-    return rhs.compare(0 /* pos */,  output_size, dest_str) == 0;
-  }
-
 }; /* TempURLEngine::SignatureHelper */
+class TempURLEngine::SignatureHelper {
+public:
+  SignatureHelper() {};
+  virtual ~SignatureHelper() {};
+  virtual const char* calc(const std::string& key,
+    const std::string_view& method,
+    const std::string_view& path,
+    const std::string& expires) {
+    return nullptr;
+  }
+  virtual bool is_equal_to(const std::string& rhs) {
+    return false;
+  };
+  static SignatureHelper* get_sig_helper(std::string_view x);
+};
+class TempURLSignature {
+  friend TempURLEngine;
+  using BadSignatureHelper = TempURLEngine::SignatureHelper;
+  template<typename H, bool O>
+  class SignatureHelper_x : public TempURLEngine::SignatureHelper
+  {
+    friend TempURLEngine;
+    TempURLSignatureT<H,O> d;
+  protected:
+    SignatureHelper_x() {};
+    ~SignatureHelper_x() { };
+  public:
+    virtual const char* calc(const std::string& key,
+      const std::string_view& method,
+      const std::string_view& path,
+      const std::string& expires) {
+      return d.calc(key,method,path,expires);
+    }
+    virtual bool is_equal_to(const std::string& rhs) {
+      return d.is_equal_to(rhs);
+    };
+  };
+};
 
-class TempURLEngine::PrefixableSignatureHelper
-    : private TempURLEngine::SignatureHelper {
-  using base_t = SignatureHelper;
+TempURLEngine::SignatureHelper* TempURLEngine::SignatureHelper::get_sig_helper(std::string_view x) {
+  size_t pos = x.find(':');
+  if (pos == x.npos || pos <= 0) {
+    switch(x.length()) {
+    case CEPH_CRYPTO_HMACSHA1_DIGESTSIZE*2:
+      return new TempURLSignature::SignatureHelper_x<ceph::crypto::HMACSHA1,false>();
+    case CEPH_CRYPTO_HMACSHA256_DIGESTSIZE*2:
+      return new TempURLSignature::SignatureHelper_x<ceph::crypto::HMACSHA256,false>();
+    case CEPH_CRYPTO_HMACSHA512_DIGESTSIZE*2:
+      return new TempURLSignature::SignatureHelper_x<ceph::crypto::HMACSHA512,false>();
+    }
+    return new TempURLSignature::BadSignatureHelper();
+  }
+  std::string_view type { x.substr(0,pos) };
+  if (type == "sha1") {
+    return new TempURLSignature::SignatureHelper_x<ceph::crypto::HMACSHA1,true>();
+  } else if (type == "sha256") {
+    return new TempURLSignature::SignatureHelper_x<ceph::crypto::HMACSHA256,true>();
+  } else if (type == "sha512") {
+    return new TempURLSignature::SignatureHelper_x<ceph::crypto::HMACSHA512,true>();
+  }
+  return new TempURLSignature::BadSignatureHelper();
+};
+
+class TempURLEngine::PrefixableSignatureHelper {
 
   const std::string_view decoded_uri;
   const std::string_view object_name;
   std::string_view no_obj_uri;
 
   const boost::optional<const std::string&> prefix;
+  SignatureHelper* base_sig_helper;
 
 public:
-  PrefixableSignatureHelper(const std::string& _decoded_uri,
+  PrefixableSignatureHelper(const std::string_view sig,
+	                    const std::string& _decoded_uri,
 	                    const std::string& object_name,
                             const boost::optional<const std::string&> prefix)
     : decoded_uri(_decoded_uri),
       object_name(object_name),
-      prefix(prefix) {
+      prefix(prefix),
+      base_sig_helper(TempURLEngine::SignatureHelper::get_sig_helper(sig)) {
     /* Transform: v1/acct/cont/obj - > v1/acct/cont/
      *
      * NOTE(rzarzynski): we really want to substr() on std::string_view,
@@ -257,23 +300,26 @@ public:
      * a temporary. */
     no_obj_uri = \
       decoded_uri.substr(0, decoded_uri.length() - object_name.length());
-  }
+  };
+  ~PrefixableSignatureHelper() {
+      delete base_sig_helper;
+  };
 
   const char* calc(const std::string& key,
                    const std::string_view& method,
                    const std::string_view& path,
                    const std::string& expires) {
     if (!prefix) {
-      return base_t::calc(key, method, path, expires);
+      return base_sig_helper->calc(key, method, path, expires);
     } else {
       const auto prefixed_path = \
         string_cat_reserve("prefix:", no_obj_uri, *prefix);
-      return base_t::calc(key, method, prefixed_path, expires);
+      return base_sig_helper->calc(key, method, prefixed_path, expires);
     }
   }
 
   bool is_equal_to(const std::string& rhs) const {
-    bool is_auth_ok = base_t::is_equal_to(rhs);
+    bool is_auth_ok = base_sig_helper->is_equal_to(rhs);
 
     if (prefix && is_auth_ok) {
       const auto prefix_uri = string_cat_reserve(no_obj_uri, *prefix);
@@ -360,6 +406,7 @@ TempURLEngine::authenticate(const DoutPrefixProvider* dpp, const req_state* cons
 
   /* Need to try each combination of keys, allowed path and methods. */
   PrefixableSignatureHelper sig_helper {
+    temp_url_sig,
     s->decoded_uri,
     s->object->get_name(),
     temp_url_prefix
@@ -772,4 +819,3 @@ RGWOp *RGWHandler_SWIFT_Auth::op_get()
 {
   return new RGW_SWIFT_Auth_Get;
 }
-

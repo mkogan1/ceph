@@ -11,6 +11,7 @@
 #include "rgw_auth_keystone.h"
 #include "rgw_auth_filters.h"
 #include "rgw_sal.h"
+#include "rgw_b64.h"
 
 #define RGW_SWIFT_TOKEN_EXPIRATION (15 * 60)
 
@@ -39,6 +40,7 @@ public:
 
 /* TempURL: engine */
 class TempURLEngine : public rgw::auth::Engine {
+  friend class TempURLSignature;
   using result_t = rgw::auth::Engine::result_t;
 
   CephContext* const cct;
@@ -301,6 +303,91 @@ public:
   const char* get_name() const noexcept override {
     return "rgw::auth::swift::DefaultStrategy";
   }
+};
+
+// shared logic for swift tempurl and formpost signatures
+template <class H>
+constexpr uint32_t signature_hash_size =
+  std::is_same<H, ceph::crypto::HMACSHA1>::value ? CEPH_CRYPTO_HMACSHA1_DIGESTSIZE :
+  std::is_same<H, ceph::crypto::HMACSHA256>::value ? CEPH_CRYPTO_HMACSHA256_DIGESTSIZE :
+  std::is_same<H, ceph::crypto::HMACSHA512>::value ? CEPH_CRYPTO_HMACSHA512_DIGESTSIZE :
+  0 ;
+
+template <class H>
+class SignatureHelperT {
+protected:
+  static constexpr uint32_t hash_size = signature_hash_size<H>;
+  static constexpr uint32_t output_size = hash_size * 2 + 1;
+  char dest_str[output_size];
+  uint32_t dest_size = 0;
+  unsigned char dest[signature_hash_size<H>];
+
+public:
+  ~SignatureHelperT() { };
+
+  void Update(const unsigned char *input, size_t length);
+
+  const char* get_signature() const {
+    return dest_str;
+  }
+
+  bool is_equal_to(const std::string& rhs) const {
+    /* never allow out-of-range exception */
+    if (!dest_size || rhs.size() < dest_size) {
+      return false;
+    }
+    return rhs.compare(0 /* pos */,  dest_size + 1, dest_str) == 0;
+  }
+};
+
+template <typename H, bool O>
+class FormatSignature {
+};
+
+// hexadecimal
+template <typename H>
+class FormatSignature<H, false> : public SignatureHelperT<H> {
+  using UCHARPTR = const unsigned char*;
+  using base_t = SignatureHelperT<H>;
+public:
+  const char *result() {
+    buf_to_hex((UCHARPTR) base_t::dest,
+      signature_hash_size<H>,
+      base_t::dest_str);
+    base_t::dest_size = strlen(base_t::dest_str);
+    return base_t::dest_str;
+  };
+};
+
+// prefix:base64
+template <typename H>
+class FormatSignature<H, true> : public SignatureHelperT<H> {
+  using UCHARPTR = const unsigned char*;
+  using base_t = SignatureHelperT<H>;
+public:
+  char * const result() {
+    const char *prefix {
+      sizeof (base_t::dest) == CEPH_CRYPTO_HMACSHA1_DIGESTSIZE ? "sha1:" :
+      sizeof (base_t::dest) == CEPH_CRYPTO_HMACSHA256_DIGESTSIZE ? "sha256:" :
+      sizeof (base_t::dest) == CEPH_CRYPTO_HMACSHA512_DIGESTSIZE ? "sha512:" :
+      nullptr };
+    std::string_view dest_view((char*)base_t::dest, sizeof base_t::dest);
+    auto b { rgw::to_base64(dest_view) };
+    for (auto &v: b ) {	// translate to "url safe" (rfc 4648 section 5)
+      switch(v) {
+      case '+': v = '-'; break;
+      case '/': v = '_'; break;
+      }
+    }
+    base_t::dest_size = strlen(prefix) + b.length();
+    if (base_t::dest_size < base_t::output_size) {
+      ::memcpy(base_t::dest_str, prefix, strlen(prefix));
+      ::strcpy(base_t::dest_str + strlen(prefix), b.c_str());
+    } else {
+      base_t::dest_size = 0;
+    }
+    return base_t::dest_str;
+  };
 };
 
 } /* namespace swift */
