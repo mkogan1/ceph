@@ -13,6 +13,7 @@
 #include "common/Throttle.h"
 
 #include <atomic>
+#include "common/ceph_time.h"
 
 #include "services/svc_sys_obj.h"
 #include "services/svc_bucket.h"
@@ -1435,7 +1436,13 @@ class RGWContinuousLeaseCR : public RGWCoroutine {
 
   RGWCoroutine* caller;
 
+  const ceph::timespan interval_tolerance = ceph::make_timespan(9*interval/10);
+  const ceph::timespan ts_interval = ceph::make_timespan(interval);
+
   bool aborted{false};
+
+  ceph::coarse_mono_time last_renew_try_time;
+  ceph::coarse_mono_time current_time;
 
 public:
   RGWContinuousLeaseCR(RGWAsyncRadosProcessor* async_rados,
@@ -1449,6 +1456,9 @@ public:
   int operate(const DoutPrefixProvider *dpp) override;
 
   bool is_locked() const {
+    if (ceph::coarse_mono_clock::now() - last_renew_try_time > ts_interval) {
+      return false;
+    }
     return locked;
   }
 

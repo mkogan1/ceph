@@ -4440,6 +4440,7 @@ int RGWBucketFullSyncCR::operate(const DoutPrefixProvider *dpp)
     do {
       if (lease_cr && !lease_cr->is_locked()) {
         drain_all();
+        tn->log(1, "no lease or lease is lost, abort");
         return set_cr_error(-ECANCELED);
       }
       set_status("listing remote bucket");
@@ -4464,6 +4465,7 @@ int RGWBucketFullSyncCR::operate(const DoutPrefixProvider *dpp)
       for (; entries_iter != list_result.entries.end(); ++entries_iter) {
         if (lease_cr && !lease_cr->is_locked()) {
           drain_all();
+          tn->log(1, "no lease or lease is lost, abort");
           return set_cr_error(-ECANCELED);
         }
         tn->log(20, SSTR("[full sync] syncing object: "
@@ -4498,6 +4500,7 @@ int RGWBucketFullSyncCR::operate(const DoutPrefixProvider *dpp)
 
     tn->unset_flag(RGW_SNS_FLAG_ACTIVE);
     if (lease_cr && !lease_cr->is_locked()) {
+      tn->log(1, "no lease or lease is lost, abort");
       return set_cr_error(-ECANCELED);
     }
     yield call(marker_tracker.flush());
@@ -4689,7 +4692,7 @@ int RGWBucketShardIncrementalSyncCR::operate(const DoutPrefixProvider *dpp)
     do {
       if (lease_cr && !lease_cr->is_locked()) {
         drain_all();
-        tn->log(0, "ERROR: lease is not taken, abort");
+        tn->log(1, "no lease or lease is lost, abort");
         return set_cr_error(-ECANCELED);
       }
       tn->log(20, SSTR("listing bilog for incremental sync; position=" << sync_info.inc_marker.position));
@@ -4745,6 +4748,7 @@ int RGWBucketShardIncrementalSyncCR::operate(const DoutPrefixProvider *dpp)
       for (; entries_iter != entries_end; ++entries_iter) {
         if (lease_cr && !lease_cr->is_locked()) {
           drain_all();
+          tn->log(1, "no lease or lease is lost, abort");
           return set_cr_error(-ECANCELED);
         }
         entry = &(*entries_iter);
@@ -5612,7 +5616,7 @@ int RGWSyncBucketCR::operate(const DoutPrefixProvider *dpp)
             yield spawn(bucket_lease_cr.get(), false);
             while (!bucket_lease_cr->is_locked()) {
               if (bucket_lease_cr->is_done()) {
-                tn->log(5, "ERROR: failed to take bucket lease");
+                tn->log(5, "failed to take lease");
                 set_status("lease lock failed, early abort");
                 drain_all();
                 return set_cr_error(bucket_lease_cr->get_ret_status());
@@ -5669,7 +5673,7 @@ int RGWSyncBucketCR::operate(const DoutPrefixProvider *dpp)
           yield spawn(bucket_lease_cr.get(), false);
           while (!bucket_lease_cr->is_locked()) {
             if (bucket_lease_cr->is_done()) {
-              tn->log(5, "ERROR: failed to take bucket lease");
+              tn->log(5, "failed to take lease");
               set_status("lease lock failed, early abort");
               drain_all();
               return set_cr_error(bucket_lease_cr->get_ret_status());
