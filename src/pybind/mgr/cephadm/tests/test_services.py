@@ -326,7 +326,7 @@ class TestMonitoring:
                         '--config-json', '-',
                         '--tcp-ports', '9095'
                     ],
-                    stdin=json.dumps({"files": {"prometheus.yml": y}}),
+                    stdin=json.dumps({"files": {"prometheus.yml": y}, 'retention_time': '15d'}),
                     image='')
 
     @patch("cephadm.serve.CephadmServe._run_cephadm")
