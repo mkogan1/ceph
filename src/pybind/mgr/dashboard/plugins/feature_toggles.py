@@ -27,13 +27,12 @@ class Features(Enum):
     NFS = 'nfs'
 
 
-PREDISABLED_FEATURES = set()  # type: Set[str]
+PREDISABLED_FEATURES = {Features.ISCSI: [Iscsi, IscsiTarget]}  # type: Set[str]
 
 Feature2Controller = {
     Features.RBD: [Rbd, RbdSnapshot, RbdTrash],
     Features.MIRRORING: [
         RbdMirroringSummary, RbdMirroringPoolMode, RbdMirroringPoolPeer],
-    Features.ISCSI: [Iscsi, IscsiTarget],
     Features.CEPHFS: [CephFS],
     Features.RGW: [Rgw, RgwDaemon, RgwBucket, RgwUser],
     Features.NFS: [NFSGaneshaUi, NFSGaneshaExports],
