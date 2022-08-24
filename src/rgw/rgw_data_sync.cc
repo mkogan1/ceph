@@ -567,7 +567,7 @@ public:
         return set_cr_error(retcode);
       }
       using WriteInfoCR = RGWSimpleRadosWriteCR<rgw_data_sync_info>;
-      yield call(new WriteInfoCR(dpp, sync_env->async_rados, sync_env->svc->sysobj,
+      yield call(new WriteInfoCR(dpp, sync_env->store,
                                  rgw_raw_obj{pool, sync_status_oid},
                                  status->sync_info));
       if (retcode < 0) {
@@ -612,7 +612,7 @@ public:
           marker.timestamp = info.last_update;
           const auto& oid = RGWDataSyncStatusManager::shard_obj_name(sc->source_zone, i);
           using WriteMarkerCR = RGWSimpleRadosWriteCR<rgw_data_sync_marker>;
-          spawn(new WriteMarkerCR(dpp, sync_env->async_rados, sync_env->svc->sysobj,
+          spawn(new WriteMarkerCR(dpp, sync_env->store,
                                   rgw_raw_obj{pool, oid}, marker), true);
         }
       }
@@ -625,7 +625,7 @@ public:
       }
 
       status->sync_info.state = rgw_data_sync_info::StateBuildingFullSyncMaps;
-      yield call(new WriteInfoCR(dpp, sync_env->async_rados, sync_env->svc->sysobj,
+      yield call(new WriteInfoCR(dpp, sync_env->store,
                                  rgw_raw_obj{pool, sync_status_oid},
                                  status->sync_info));
       if (retcode < 0) {
@@ -972,7 +972,7 @@ public:
           rgw_data_sync_marker& marker = iter->second;
           marker.total_entries = entries_index->get_total_entries(shard_id);
           spawn(new RGWSimpleRadosWriteCR<rgw_data_sync_marker>(
-		  dpp, sync_env->async_rados, sync_env->svc->sysobj,
+		  dpp, sync_env->store,
 		  rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool,
 			      RGWDataSyncStatusManager::shard_obj_name(
 				sc->source_zone, shard_id)),
@@ -1030,7 +1030,7 @@ public:
 
     tn->log(20, SSTR("updating marker marker_oid=" << marker_oid << " marker=" << new_marker));
 
-    return new RGWSimpleRadosWriteCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->async_rados, sync_env->svc->sysobj,
+    return new RGWSimpleRadosWriteCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
                                                            rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, marker_oid),
                                                            sync_marker);
   }
@@ -1834,7 +1834,7 @@ public:
         sync_marker.state = rgw_data_sync_marker::IncrementalSync;
         sync_marker.marker = sync_marker.next_step_marker;
         sync_marker.next_step_marker.clear();
-        call(new RGWSimpleRadosWriteCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->async_rados, sync_env->svc->sysobj,
+        call(new RGWSimpleRadosWriteCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
                                                              rgw_raw_obj(pool, status_oid),
                                                              sync_marker));
       }
@@ -2167,7 +2167,7 @@ public:
   }
 
   RGWCoroutine *set_sync_info_cr() {
-    return new RGWSimpleRadosWriteCR<rgw_data_sync_info>(sync_env->dpp, sync_env->async_rados, sync_env->svc->sysobj,
+    return new RGWSimpleRadosWriteCR<rgw_data_sync_info>(sync_env->dpp, sync_env->store,
                                                          rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, RGWDataSyncStatusManager::sync_status_oid(sc->source_zone)),
                                                          sync_status.sync_info);
   }
@@ -3390,7 +3390,7 @@ public:
 
       // write bucket sync status
       using CR = RGWSimpleRadosWriteCR<rgw_bucket_sync_status>;
-      yield call(new CR(dpp, sync_env->async_rados, sync_env->svc->sysobj,
+      yield call(new CR(dpp, sync_env->store,
 			status_obj, status, &objv, false));
       if (retcode < 0) {
         ldout(cct, 20) << "failed to write bucket shard status: "
@@ -3796,7 +3796,7 @@ public:
 
     tn->log(20, SSTR("updating marker oid=" << status_obj.oid << " marker=" << new_marker));
     return new RGWSimpleRadosWriteCR<rgw_bucket_sync_status>(
-        sync_env->dpp, sync_env->async_rados, sync_env->svc->sysobj,
+        sync_env->dpp, sync_env->store,
 	status_obj, sync_status, &objv_tracker);
   }
 
@@ -4277,7 +4277,7 @@ int RGWBucketFullSyncCR::operate(const DoutPrefixProvider *dpp)
       sync_status.state = BucketSyncState::Incremental;
       tn->log(5, SSTR("set bucket state=" << sync_status.state));
       yield call(new RGWSimpleRadosWriteCR<rgw_bucket_sync_status>(
-	      dpp, sync_env->async_rados, sync_env->svc->sysobj,
+	      dpp, sync_env->store,
               status_obj, sync_status, &objv));
       tn->log(5, SSTR("bucket status objv=" << objv));
     } else {
@@ -4361,7 +4361,7 @@ public:
           }
           ldpp_dout(dpp, 20) << "bucket status incremental gen is " << bucket_status.incremental_gen << dendl;
           using WriteCR = RGWSimpleRadosWriteCR<rgw_bucket_sync_status>;
-          call(new WriteCR(dpp, sync_env->async_rados, sync_env->svc->sysobj,
+          call(new WriteCR(dpp, sync_env->store,
                             bucket_status_obj, bucket_status, &objv_tracker, false));
         }
         if (retcode < 0 && retcode != -ECANCELED) {
@@ -5356,7 +5356,7 @@ int RGWSyncBucketCR::operate(const DoutPrefixProvider *dpp)
     if (retcode == -ENOENT) {
       // use exclusive create to set state=Init
       objv.generate_new_write_ver(cct);
-      yield call(new WriteCR(dpp, env->async_rados, env->svc->sysobj,
+      yield call(new WriteCR(dpp, env->store,
                              status_obj, bucket_status, &objv, true));
       tn->log(20, "bucket status object does not exist, create a new one");
       if (retcode == -EEXIST) {
@@ -5421,7 +5421,7 @@ int RGWSyncBucketCR::operate(const DoutPrefixProvider *dpp)
           if (bucket_status.state != BucketSyncState::Stopped) {
             // make sure that state is changed to stopped localy
             bucket_status.state = BucketSyncState::Stopped;
-            yield call(new WriteCR(dpp, env->async_rados, env->svc->sysobj,
+            yield call(new WriteCR(dpp, env->store,
                   status_obj, bucket_status, &objv, false));
             if (retcode < 0) {
               tn->log(20, SSTR("ERROR: failed to write 'stopped' status. error: " << retcode));
@@ -5657,9 +5657,12 @@ int RGWBucketPipeSyncStatusManager::init_sync_status(const DoutPrefixProvider *d
     full_status.emplace_back();
 
     stack->call(new RGWSimpleRadosWriteCR<rgw_bucket_sync_status>(
-		  dpp, source.sc.env->async_rados, source.sc.env->svc->sysobj,
-		  full_status_objs.back(), full_status.back()));
-
+		  dpp, source.sc.env->store,
+		  {sync_env.svc->zone->get_zone_params().log_pool,
+                   full_status_oid(source.sc.source_zone,
+				   source.info.bucket,
+				   source.dest)},
+		  rgw_bucket_sync_status{}));
     stacks.push_back(stack);
   }
 

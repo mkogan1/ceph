@@ -112,11 +112,61 @@ namespace mdlog {
 
 using Cursor = RGWPeriodHistory::Cursor;
 
+namespace {
+template <class T>
+class SysObjWriteCR : public RGWSimpleCoroutine {
+  const DoutPrefixProvider *dpp;
+  RGWAsyncRadosProcessor *async_rados;
+  RGWSI_SysObj *svc;
+  bufferlist bl;
+  rgw_raw_obj obj;
+  RGWObjVersionTracker *objv_tracker;
+  bool exclusive;
+  RGWAsyncPutSystemObj *req{nullptr};
+
+public:
+  SysObjWriteCR(const DoutPrefixProvider *_dpp, 
+		RGWAsyncRadosProcessor *_async_rados, RGWSI_SysObj *_svc,
+		const rgw_raw_obj& _obj, const T& _data,
+		RGWObjVersionTracker *objv_tracker = nullptr,
+		bool exclusive = false)
+    : RGWSimpleCoroutine(_svc->ctx()), dpp(_dpp), async_rados(_async_rados),
+      svc(_svc), obj(_obj), objv_tracker(objv_tracker), exclusive(exclusive) {
+    encode(_data, bl);
+  }
+
+  ~SysObjWriteCR() override {
+    request_cleanup();
+  }
+
+  void request_cleanup() override {
+    if (req) {
+      req->finish();
+      req = NULL;
+    }
+  }
+
+  int send_request(const DoutPrefixProvider *dpp) override {
+    req = new RGWAsyncPutSystemObj(dpp, this, stack->create_completion_notifier(),
+			           svc, objv_tracker, obj, exclusive, std::move(bl));
+    async_rados->queue(req);
+    return 0;
+  }
+
+  int request_complete() override {
+    if (objv_tracker) { // copy the updated version
+      *objv_tracker = req->objv_tracker;
+    }
+    return req->get_ret_status();
+  }
+};
+}
+
 /// read the mdlog history and use it to initialize the given cursor
 class ReadHistoryCR : public RGWCoroutine {
   const DoutPrefixProvider *dpp;
   Svc svc;
-  rgw::sal::RGWRadosStore* store;
+  rgw::sal::RadosStore* store;
   Cursor *cursor;
   RGWObjVersionTracker *objv_tracker;
   RGWMetadataLogHistory state;
@@ -124,7 +174,7 @@ class ReadHistoryCR : public RGWCoroutine {
  public:
   ReadHistoryCR(const DoutPrefixProvider *dpp,
                 const Svc& svc,
-		rgw::sal::RGWRadosStore* store,
+		rgw::sal::RadosStore* store,
                 Cursor *cursor,
                 RGWObjVersionTracker *objv_tracker)
     : RGWCoroutine(svc.zone->ctx()), dpp(dpp), svc(svc),
@@ -190,7 +240,7 @@ class WriteHistoryCR : public RGWCoroutine {
         rgw_raw_obj obj{svc.zone->get_zone_params().log_pool,
                         RGWMetadataLogHistory::oid};
 
-        using WriteCR = RGWSimpleRadosWriteCR<RGWMetadataLogHistory>;
+        using WriteCR = SysObjWriteCR<RGWMetadataLogHistory>;
         call(new WriteCR(dpp, async_processor, svc.sysobj, obj, state, objv));
       }
       if (retcode < 0) {
@@ -211,7 +261,7 @@ class WriteHistoryCR : public RGWCoroutine {
 /// update the mdlog history to reflect trimmed logs
 class TrimHistoryCR : public RGWCoroutine {
   const DoutPrefixProvider *dpp;
-  rgw::sal::RGWRadosStore* store;
+  rgw::sal::RadosStore* store;
   Svc svc;
   const Cursor cursor; //< cursor to trimmed period
   RGWObjVersionTracker *objv; //< to prevent racing updates
@@ -219,7 +269,7 @@ class TrimHistoryCR : public RGWCoroutine {
   Cursor existing; //< existing cursor read from disk
 
  public:
-  TrimHistoryCR(const DoutPrefixProvider *dpp, rgw::sal::RGWRadosStore* store,
+  TrimHistoryCR(const DoutPrefixProvider *dpp, rgw::sal::RadosStore* store,
 		const Svc& svc, Cursor cursor, RGWObjVersionTracker *objv)
     : RGWCoroutine(svc.zone->ctx()), dpp(dpp), store(store), svc(svc),
       cursor(cursor), objv(objv), next(cursor) {
@@ -375,14 +425,14 @@ Cursor RGWSI_MDLog::read_oldest_log_period(optional_yield y, const DoutPrefixPro
 }
 
 RGWCoroutine* RGWSI_MDLog::read_oldest_log_period_cr(const DoutPrefixProvider *dpp, 
-						     rgw::sal::RGWRadosStore* store,
+						     rgw::sal::RadosStore* store,
 						     Cursor *period, RGWObjVersionTracker *objv) const
 {
   return new mdlog::ReadHistoryCR(dpp, svc, store, period, objv);
 }
 
 RGWCoroutine* RGWSI_MDLog::trim_log_period_cr(const DoutPrefixProvider *dpp,
-					      rgw::sal::RGWRadosStore* store,
+					      rgw::sal::RadosStore* store,
 					      Cursor period, RGWObjVersionTracker *objv) const
 {
   return new mdlog::TrimHistoryCR(dpp, store, svc, period, objv);
