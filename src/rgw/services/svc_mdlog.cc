@@ -165,7 +165,7 @@ class ReadHistoryCR : public RGWCoroutine {
 /// write the given cursor to the mdlog history
 class WriteHistoryCR : public RGWCoroutine {
   const DoutPrefixProvider *dpp;
-  rgw::sal::RGWRadosStore* store;
+  rgw::sal::RadosStore* store;
   Svc svc;
   Cursor cursor;
   RGWObjVersionTracker *objv;
@@ -174,7 +174,7 @@ class WriteHistoryCR : public RGWCoroutine {
 
  public:
   WriteHistoryCR(const DoutPrefixProvider *dpp,
-		 rgw::sal::RGWRadosStore* store,
+		 rgw::sal::RadosStore* store,
                  Svc& svc,
                  const Cursor& cursor,
                  RGWObjVersionTracker *objv)
