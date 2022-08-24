@@ -4216,6 +4216,9 @@ done:
       if (sync_status == 0) {
         /* update marker */
         set_status() << "calling marker_tracker->finish(" << entry_marker << ")";
+        tn->log(10, SSTR("calling marker_tracker->finish(" << entry_marker << ")" << "at object"
+        << bucket_shard_str{bs} << "/" << key.name ));
+
         yield call(marker_tracker->finish(entry_marker));
         sync_status = retcode;
       }
