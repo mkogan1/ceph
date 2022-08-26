@@ -4821,7 +4821,6 @@ def command_bootstrap(ctx):
                 return False
         is_available(ctx, 'mgr epoch %d' % epoch, mgr_has_latest_epoch)
 
-    cli(['config', 'set', 'mgr', 'mgr/cephadm/no_five_one_rgw', 'true', '--force'])
     enable_cephadm_mgr_module(cli, wait_for_mgr_restart)
 
     # ssh
