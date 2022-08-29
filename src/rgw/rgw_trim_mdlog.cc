@@ -87,7 +87,7 @@ int PurgePeriodLogsCR::operate(const DoutPrefixProvider *dpp)
 {
   reenter(this) {
     // read our current oldest log period
-    yield call(svc.mdlog->read_oldest_log_period_cr(dpp, &cursor, &objv));
+    yield call(svc.mdlog->read_oldest_log_period_cr(dpp, store, &cursor, &objv));
     if (retcode < 0) {
       return set_cr_error(retcode);
     }
@@ -114,7 +114,7 @@ int PurgePeriodLogsCR::operate(const DoutPrefixProvider *dpp)
           << " period=" << cursor.get_period().get_id() << dendl;
 
       // update our mdlog history
-      yield call(svc.mdlog->trim_log_period_cr(dpp, cursor, &objv));
+      yield call(svc.mdlog->trim_log_period_cr(dpp, store, cursor, &objv));
       if (retcode == -ENOENT) {
         // must have raced to update mdlog history. return success and allow the
         // winner to continue purging
