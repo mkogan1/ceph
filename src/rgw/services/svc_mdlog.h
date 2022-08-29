@@ -88,12 +88,14 @@ public:
   /// read the oldest log period asynchronously and write its result to the
   /// given cursor pointer
   RGWCoroutine* read_oldest_log_period_cr(const DoutPrefixProvider *dpp, 
+					  rgw::sal::RGWRadosStore* store,
                                           RGWPeriodHistory::Cursor *period,
                                           RGWObjVersionTracker *objv) const;
 
   /// try to advance the oldest log period when the given period is trimmed,
   /// using a rados lock to provide atomicity
   RGWCoroutine* trim_log_period_cr(const DoutPrefixProvider *dpp, 
+				   rgw::sal::RGWRadosStore* store,
                                    RGWPeriodHistory::Cursor period,
                                    RGWObjVersionTracker *objv) const;
   int read_history(RGWMetadataLogHistory *state, RGWObjVersionTracker *objv_tracker,optional_yield y, const DoutPrefixProvider *dpp) const;
