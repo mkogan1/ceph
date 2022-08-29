@@ -48,7 +48,6 @@
 #include "include/compat.h"
 #include "include/util.h"
 
-using namespace std;
 namespace po = boost::program_options;
 
 #ifdef INTERNAL_TEST
@@ -87,7 +86,6 @@ struct action_on_object_t {
 int _action_on_all_objects_in_pg(ObjectStore *store, coll_t coll, action_on_object_t &action, bool debug)
 {
   auto ch = store->open_collection(coll);
-
   unsigned LIST_AT_A_TIME = 100;
   ghobject_t next;
   while (!next.is_max()) {
@@ -106,6 +104,8 @@ int _action_on_all_objects_in_pg(ObjectStore *store, coll_t coll, action_on_obje
     for (vector<ghobject_t>::iterator obj = list.begin();
 	 obj != list.end();
 	 ++obj) {
+      if (obj->is_pgmeta())
+	continue;
       object_info_t oi;
       if (coll != coll_t::meta()) {
         bufferlist attr;
@@ -432,7 +432,7 @@ static int get_fd_data(int fd, bufferlist &bl)
   return 0;
 }
 
-int get_log(CephContext *cct, ObjectStore *fs, __u8 struct_ver,
+int get_log(ObjectStore *fs, __u8 struct_ver,
 	    spg_t pgid, const pg_info_t &info,
 	    PGLog::IndexedLog &log, pg_missing_t &missing)
 {
@@ -444,7 +444,7 @@ int get_log(CephContext *cct, ObjectStore *fs, __u8 struct_ver,
     ostringstream oss;
     ceph_assert(struct_ver > 0);
     PGLog::read_log_and_missing(
-      cct, fs, ch,
+      fs, ch,
       pgid.make_pgmeta_oid(),
       info, log, missing,
       oss,
@@ -1070,8 +1070,7 @@ int add_osdmap(ObjectStore *store, metadata_section &ms)
   return get_osdmap(store, ms.map_epoch, ms.osdmap, ms.osdmap_bl);
 }
 
-int ObjectStoreTool::do_export(
-    CephContext *cct, ObjectStore *fs, coll_t coll, spg_t pgid,
+int ObjectStoreTool::do_export(ObjectStore *fs, coll_t coll, spg_t pgid,
     pg_info_t &info, epoch_t map_epoch, __u8 struct_ver,
     const OSDSuperblock& superblock,
     PastIntervals &past_intervals)
@@ -1081,7 +1080,7 @@ int ObjectStoreTool::do_export(
 
   cerr << "Exporting " << pgid << " info " << info << std::endl;
 
-  int ret = get_log(cct, fs, struct_ver, pgid, info, log, missing);
+  int ret = get_log(fs, struct_ver, pgid, info, log, missing);
   if (ret > 0)
       return ret;
 
@@ -4511,7 +4510,7 @@ int main(int argc, char **argv)
 
     if (op == "export" || op == "export-remove") {
       ceph_assert(superblock != nullptr);
-      ret = tool.do_export(cct.get(), fs, coll, pgid, info, map_epoch, struct_ver, *superblock, past_intervals);
+      ret = tool.do_export(fs, coll, pgid, info, map_epoch, struct_ver, *superblock, past_intervals);
       if (ret == 0) {
         cerr << "Export successful" << std::endl;
         if (op == "export-remove") {
@@ -4530,7 +4529,7 @@ int main(int argc, char **argv)
     } else if (op == "log") {
       PGLog::IndexedLog log;
       pg_missing_t missing;
-      ret = get_log(cct.get(), fs, struct_ver, pgid, info, log, missing);
+      ret = get_log(fs, struct_ver, pgid, info, log, missing);
       if (ret < 0)
           goto out;
 
@@ -4639,9 +4638,6 @@ int main(int argc, char **argv)
             throw std::runtime_error("not JSON array_type " + file);
           }
           do_dups_inject_from_json(fs, pgid, result, debug);
-        } catch (const std::runtime_error &e) {
-          cerr << e.what() << std::endl;;
-          return -1;
         } catch (const std::runtime_error &e) {
           cerr << e.what() << std::endl;;
           return -1;
