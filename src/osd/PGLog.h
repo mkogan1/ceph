@@ -1424,9 +1424,8 @@ public:
     std::set<std::string> *log_keys_debug = nullptr,
     bool debug_verify_stored_missing = false
     ) {
-    ldpp_dout(dpp, 10) << "read_log_and_missing coll " << ch->cid
+    ldpp_dout(dpp, 20) << "read_log_and_missing coll " << ch->cid
 		       << " " << pgmeta_oid << dendl;
-    size_t total_dups = 0;
 
     // legacy?
     struct stat st;
@@ -1476,7 +1475,6 @@ public:
 	  }
 	  missing.add(oid, std::move(item));
 	} else if (p->key().substr(0, 4) == std::string("dup_")) {
-	  ++total_dups;
 	  pg_log_dup_t dup;
 	  decode(dup, bp);
 	  if (!dups.empty()) {
@@ -1664,9 +1662,7 @@ public:
 	(*clear_divergent_priors) = false;
       missing.flush();
     }
-    ldpp_dout(dpp, 10) << "read_log_and_missing done coll " << ch->cid
-		       << " total_dups=" << total_dups
-		       << " log.dups.size()=" << log.dups.size() << dendl;
+    ldpp_dout(dpp, 10) << "read_log_and_missing done" << dendl;
   } // static read_log_and_missing
 
 #ifdef WITH_SEASTAR
