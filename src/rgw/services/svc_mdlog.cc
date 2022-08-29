@@ -110,101 +110,24 @@ namespace mdlog {
 
 using Cursor = RGWPeriodHistory::Cursor;
 
-namespace {
-template <class T>
-class SysObjReadCR : public RGWSimpleCoroutine {
-  const DoutPrefixProvider *dpp;
-  RGWAsyncRadosProcessor *async_rados;
-  RGWSI_SysObj *svc;
-
-  rgw_raw_obj obj;
-  T *result;
-  /// on ENOENT, call handle_data() with an empty object instead of failing
-  const bool empty_on_enoent;
-  RGWObjVersionTracker *objv_tracker;
-  RGWAsyncGetSystemObj *req{nullptr};
-
-public:
-  SysObjReadCR(const DoutPrefixProvider *_dpp, 
-	       RGWAsyncRadosProcessor *_async_rados, RGWSI_SysObj *_svc,
-	       const rgw_raw_obj& _obj,
-	       T *_result, bool empty_on_enoent = true,
-	       RGWObjVersionTracker *objv_tracker = nullptr)
-    : RGWSimpleCoroutine(_svc->ctx()), dpp(_dpp), async_rados(_async_rados), svc(_svc),
-      obj(_obj), result(_result),
-      empty_on_enoent(empty_on_enoent), objv_tracker(objv_tracker) {}
-  ~SysObjReadCR() override {
-    request_cleanup();
-  }
-
-  void request_cleanup() override {
-    if (req) {
-      req->finish();
-      req = NULL;
-    }
-  }
-
-  int send_request(const DoutPrefixProvider *dpp) {
-    req = new RGWAsyncGetSystemObj(dpp, this, stack->create_completion_notifier(), svc,
-				   objv_tracker, obj, false, false);
-    async_rados->queue(req);
-    return 0;
-  }
-
-  int request_complete() {
-    int ret = req->get_ret_status();
-    retcode = ret;
-    if (ret == -ENOENT && empty_on_enoent) {
-      *result = T();
-    } else {
-      if (ret < 0) {
-	return ret;
-      }
-      if (objv_tracker) { // copy the updated version
-	*objv_tracker = req->objv_tracker;
-      }
-      try {
-	auto iter = req->bl.cbegin();
-	if (iter.end()) {
-	  // allow successful reads with empty buffers. ReadSyncStatus
-	  // coroutines depend on this to be able to read without
-	  // locking, because the cls lock from InitSyncStatus will
-	  // create an empty object if it didn't exist
-	  *result = T();
-	} else {
-	  decode(*result, iter);
-	}
-      } catch (buffer::error& err) {
-	return -EIO;
-      }
-    }
-    return handle_data(*result);
-  }
-
-  virtual int handle_data(T& data) {
-    return 0;
-  }
-};
-}
-
 /// read the mdlog history and use it to initialize the given cursor
 class ReadHistoryCR : public RGWCoroutine {
   const DoutPrefixProvider *dpp;
   Svc svc;
+  rgw::sal::RGWRadosStore* store;
   Cursor *cursor;
   RGWObjVersionTracker *objv_tracker;
   RGWMetadataLogHistory state;
-  RGWAsyncRadosProcessor *async_processor;
 
  public:
-  ReadHistoryCR(const DoutPrefixProvider *dpp, 
+  ReadHistoryCR(const DoutPrefixProvider *dpp,
                 const Svc& svc,
+		rgw::sal::RGWRadosStore* store,
                 Cursor *cursor,
                 RGWObjVersionTracker *objv_tracker)
     : RGWCoroutine(svc.zone->ctx()), dpp(dpp), svc(svc),
-      cursor(cursor),
-      objv_tracker(objv_tracker),
-      async_processor(svc.rados->get_async_processor())
+      store(store), cursor(cursor),
+      objv_tracker(objv_tracker)
   {}
 
   int operate(const DoutPrefixProvider *dpp) {
@@ -214,9 +137,9 @@ class ReadHistoryCR : public RGWCoroutine {
                         RGWMetadataLogHistory::oid};
         constexpr bool empty_on_enoent = false;
 
-        using ReadCR = SysObjReadCR<RGWMetadataLogHistory>;
-        call(new ReadCR(dpp, async_processor, svc.sysobj, obj,
-                        &state, empty_on_enoent, objv_tracker));
+        using ReadCR = RGWSimpleRadosReadCR<RGWMetadataLogHistory>;
+        call(new ReadCR(dpp, store, obj, &state, empty_on_enoent,
+			objv_tracker));
       }
       if (retcode < 0) {
         ldpp_dout(dpp, 1) << "failed to read mdlog history: "
@@ -286,6 +209,7 @@ class WriteHistoryCR : public RGWCoroutine {
 /// update the mdlog history to reflect trimmed logs
 class TrimHistoryCR : public RGWCoroutine {
   const DoutPrefixProvider *dpp;
+  rgw::sal::RGWRadosStore* store;
   Svc svc;
   const Cursor cursor; //< cursor to trimmed period
   RGWObjVersionTracker *objv; //< to prevent racing updates
@@ -293,8 +217,9 @@ class TrimHistoryCR : public RGWCoroutine {
   Cursor existing; //< existing cursor read from disk
 
  public:
-  TrimHistoryCR(const DoutPrefixProvider *dpp, const Svc& svc, Cursor cursor, RGWObjVersionTracker *objv)
-    : RGWCoroutine(svc.zone->ctx()), dpp(dpp), svc(svc),
+  TrimHistoryCR(const DoutPrefixProvider *dpp, rgw::sal::RGWRadosStore* store,
+		const Svc& svc, Cursor cursor, RGWObjVersionTracker *objv)
+    : RGWCoroutine(svc.zone->ctx()), dpp(dpp), store(store), svc(svc),
       cursor(cursor), objv(objv), next(cursor) {
     next.next(); // advance past cursor
   }
@@ -302,7 +227,7 @@ class TrimHistoryCR : public RGWCoroutine {
   int operate(const DoutPrefixProvider *dpp) {
     reenter(this) {
       // read an existing history, and write the new history if it's newer
-      yield call(new ReadHistoryCR(dpp, svc, &existing, objv));
+      yield call(new ReadHistoryCR(dpp, svc, store, &existing, objv));
       if (retcode < 0) {
         return set_cr_error(retcode);
       }
@@ -448,15 +373,17 @@ Cursor RGWSI_MDLog::read_oldest_log_period(optional_yield y, const DoutPrefixPro
 }
 
 RGWCoroutine* RGWSI_MDLog::read_oldest_log_period_cr(const DoutPrefixProvider *dpp, 
-        Cursor *period, RGWObjVersionTracker *objv) const
+						     rgw::sal::RGWRadosStore* store,
+						     Cursor *period, RGWObjVersionTracker *objv) const
 {
-  return new mdlog::ReadHistoryCR(dpp, svc, period, objv);
+  return new mdlog::ReadHistoryCR(dpp, svc, store, period, objv);
 }
 
-RGWCoroutine* RGWSI_MDLog::trim_log_period_cr(const DoutPrefixProvider *dpp, 
-        Cursor period, RGWObjVersionTracker *objv) const
+RGWCoroutine* RGWSI_MDLog::trim_log_period_cr(const DoutPrefixProvider *dpp,
+					      rgw::sal::RGWRadosStore* store,
+					      Cursor period, RGWObjVersionTracker *objv) const
 {
-  return new mdlog::TrimHistoryCR(dpp, svc, period, objv);
+  return new mdlog::TrimHistoryCR(dpp, store, svc, period, objv);
 }
 
 RGWMetadataLog* RGWSI_MDLog::get_log(const std::string& period)
