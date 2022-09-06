@@ -3535,7 +3535,8 @@ void Client::put_cap_ref(Inode *in, int cap)
 	ldout(cct, 10) << __func__ << " finishing pending cap_snap on " << *in << dendl;
 	in->cap_snaps.rbegin()->second.writing = 0;
 	finish_cap_snap(in, in->cap_snaps.rbegin()->second, get_caps_used(in));
-	signal_context_list(in->waitfor_caps);  // wake up blocked sync writers
+	ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+	signal_caps_inode(in);  // wake up blocked sync writers
       }
       if (last & CEPH_CAP_FILE_BUFFER) {
 	for (auto &p : in->cap_snaps)
@@ -4181,6 +4182,24 @@ void Client::signal_context_list(list<Context*>& ls)
   }
 }
 
+void Client::signal_caps_inode(Inode *in)
+{
+  // Process the waitfor_caps list
+  while (!in->waitfor_caps.empty()) {
+    in->waitfor_caps.front()->complete(0);
+    in->waitfor_caps.pop_front();
+  }
+
+  // New items may have been added to the pending list, move them onto the
+  // waitfor_caps list
+  while (!in->waitfor_caps_pending.empty()) {
+    Context *ctx = in->waitfor_caps_pending.front();
+
+    in->waitfor_caps_pending.pop_front();
+    in->waitfor_caps.push_back(ctx);
+  }
+}
+
 void Client::wake_up_session_caps(MetaSession *s, bool reconnect)
 {
   for (const auto &cap : s->caps) {
@@ -4197,7 +4216,8 @@ void Client::wake_up_session_caps(MetaSession *s, bool reconnect)
 	  in.flags |= I_CAP_DROPPED;
       }
     }
-    signal_context_list(in.waitfor_caps);
+    ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+    signal_caps_inode(&in);
   }
 }
 
@@ -4451,8 +4471,10 @@ void Client::add_update_cap(Inode *in, MetaSession *mds_session, uint64_t cap_id
     }
   }
 
-  if (issued & ~old_caps)
-    signal_context_list(in->waitfor_caps);
+  if (issued & ~old_caps) {
+    ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+    signal_caps_inode(in);
+  }
 }
 
 void Client::remove_cap(Cap *cap, bool queue_release)
@@ -4544,7 +4566,8 @@ void Client::remove_session_caps(MetaSession *s, int err)
       _schedule_invalidate_callback(in.get(), 0, 0);
     }
 
-    signal_context_list(in->waitfor_caps);
+    ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+    signal_caps_inode(in.get());
   }
   s->flushing_caps_tids.clear();
   sync_cond.notify_all();
@@ -4755,8 +4778,10 @@ void Client::force_session_readonly(MetaSession *s)
   s->readonly = true;
   for (xlist<Cap*>::iterator p = s->caps.begin(); !p.end(); ++p) {
     auto &in = (*p)->inode;
-    if (in.caps_wanted() & CEPH_CAP_FILE_WR)
-      signal_context_list(in.waitfor_caps);
+    if (in.caps_wanted() & CEPH_CAP_FILE_WR) {
+      ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+      signal_caps_inode(&in);
+    }
   }
 }
 
@@ -5453,13 +5478,6 @@ void Client::handle_cap_flush_ack(MetaSession *session, Inode *in, Cap *cap, con
 	  << " cleaned " << ccap_string(cleaned) << " on " << *in
 	  << " with " << ccap_string(dirty) << dendl;
 
-  if (flushed) {
-    signal_context_list(in->waitfor_caps);
-    if (session->flushing_caps_tids.empty() ||
-	*session->flushing_caps_tids.begin() > flush_ack_tid)
-      sync_cond.notify_all();
-  }
-
   if (!dirty) {
     in->cap_dirtier_uid = -1;
     in->cap_dirtier_gid = -1;
@@ -5478,9 +5496,19 @@ void Client::handle_cap_flush_ack(MetaSession *session, Inode *in, Cap *cap, con
        if (in->flushing_cap_tids.empty())
 	  in->flushing_cap_item.remove_myself();
       }
-      if (!in->caps_dirty())
-	put_inode(in);
     }
+  }
+
+  if (flushed) {
+    ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+    signal_caps_inode(in);
+    if (session->flushing_caps_tids.empty() ||
+	*session->flushing_caps_tids.begin() > flush_ack_tid)
+      sync_cond.notify_all();
+  }
+
+  if (cleaned && !in->caps_dirty()) {
+    put_inode(in);
   }
 }
 
@@ -5506,7 +5534,8 @@ void Client::handle_cap_flushsnap_ack(MetaSession *session, Inode *in, const MCo
 	in->flushing_cap_item.remove_myself();
       in->cap_snaps.erase(it);
 
-      signal_context_list(in->waitfor_caps);
+      ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+      signal_caps_inode(in);
       if (session->flushing_caps_tids.empty() ||
 	  *session->flushing_caps_tids.begin() > flush_ack_tid)
 	sync_cond.notify_all();
@@ -5761,8 +5790,10 @@ void Client::handle_cap_grant(MetaSession *session, Inode *in, Cap *cap, const M
     check_caps(in, flags);
 
   // wake up waiters
-  if (new_caps)
-    signal_context_list(in->waitfor_caps);
+  if (new_caps) {
+    ldout(cct, 10) << __func__ << " calling signal_caps_inode" << dendl;
+    signal_caps_inode(in);
+  }
 
   // may drop inode's last ref
   if (deleted_inode)
