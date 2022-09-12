@@ -35,6 +35,7 @@
 #include "librbd/io/ImageDispatcher.h"
 #include "librbd/io/ObjectDispatcher.h"
 #include "librbd/io/QosImageDispatch.h"
+#include "librbd/io/Utils.h"
 #include "librbd/journal/StandardPolicy.h"
 #include "librbd/operation/ResizeRequest.h"
 
@@ -541,10 +542,7 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
       return 0;
     }
 
-    io::Extents extents = {{raw_size, 0}};
-    io_image_dispatcher->remap_extents(
-            extents, io::IMAGE_EXTENTS_MAP_TYPE_PHYSICAL_TO_LOGICAL);
-    return extents.front().first;
+    return io::util::raw_to_area_offset(*this, raw_size).first;
   }
 
   uint64_t ImageCtx::get_object_count(snap_t in_snap_id) const {
