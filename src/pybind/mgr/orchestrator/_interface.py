@@ -741,6 +741,8 @@ GenericSpec = Union[ServiceSpec, HostSpec]
 
 
 def json_to_generic_spec(spec: dict) -> GenericSpec:
+    if 'service_type' in spec and spec['service_type'] == 'iscsi':
+        raise OrchestratorError('Iscsi is not supported in this RHCS release')
     if 'service_type' in spec and spec['service_type'] == 'host':
         return HostSpec.from_json(spec)
     else:
