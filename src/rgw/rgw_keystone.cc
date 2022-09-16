@@ -99,7 +99,7 @@ static inline std::string read_secret(const std::string& file_path)
       auto sbuf = ifs.rdbuf();
       auto len =  sbuf->sgetn(buf, size);
       if (!len)
-	break;
+        break;
       s.append(buf, len);
     }
     boost::algorithm::trim(s);
@@ -136,8 +136,12 @@ std::string CephCtxConfig::get_admin_password() const noexcept  {
   return empty;
 }
 
-#define SMALL_TIME_SLOP 300
-#define BIG_TIME_SLOP 86400
+// for cache: picky logic to reduce lifetime slightly
+#define SMALL_TIME_SLOP 300     // max time slew
+#define MAX_SCALED_TIME_INTERVAL 3600   // max lifetime using scaled delta
+// initial validation
+#define BIG_TIME_SLOP 86400     // sanity limit on token epoch
+
 int Service::validate_admin_token(CephContext* const cct, TokenEnvelope& t)
 {
   const uint64_t now = ceph_clock_now().sec();
@@ -145,15 +149,17 @@ int Service::validate_admin_token(CephContext* const cct, TokenEnvelope& t)
   if (t.token.id.empty()) {
     ret |= 1;
   }
-  if (t.get_expires() < t.get_issued() + SMALL_TIME_SLOP
-    || now - t.get_issued() > BIG_TIME_SLOP
-    || t.get_issued() - now  > BIG_TIME_SLOP) {
+  const uint64_t delta = now - static_cast<uint64_t>(t.get_issued());
+  if (t.get_expires() < t.get_issued()
+    || static_cast<int64_t>(delta) > BIG_TIME_SLOP
+    || static_cast<int64_t>(-delta) > BIG_TIME_SLOP) {
     ret |= 2;
   }
   if (static_cast<uint64_t>(t.get_issued()) > now) {
-    t.token.expires -= (t.get_issued() - now);
+    t.set_expires(t.get_expires()
+        - (static_cast<uint64_t>(t.get_issued()) - now));
   }
-  if (t.get_expires() - now < SMALL_TIME_SLOP) {
+  if (static_cast<uint64_t>(t.get_expires()) <= now) {
     ret |= 4;
   }
   if (t.get_user_name().empty()) {
@@ -482,13 +488,27 @@ void TokenCache::add_service(const std::string& token_id,
 }
 
 void TokenCache::add_locked(const std::string& token_id, const rgw::keystone::TokenEnvelope& token,
-                            std::map<std::string, token_entry>& tokens, std::list<std::string>& tokens_lru)
+                            std::map<std::string, token_entry>& tokens, std::list<std::string>& tokens_lru,
+                            bool picky)
 {
   ceph_assert(ceph_mutex_is_locked_by_me(lock));
   map<string, token_entry>::iterator iter = tokens.find(token_id);
   if (iter != tokens.end()) {
     token_entry& e = iter->second;
     tokens_lru.erase(e.lru_iter);
+  }
+
+  // for tokens we can renew, reduce expiration slightly.
+  if (picky) {
+    time_t expires = token.get_expires();
+    time_t delta = expires - token.get_issued();
+    delta = (delta * SMALL_TIME_SLOP * 2) / MAX_SCALED_TIME_INTERVAL;
+    if (static_cast<unsigned>(delta) > (SMALL_TIME_SLOP*2)) {
+        delta = SMALL_TIME_SLOP*2;
+    }
+    if (expires > delta) {
+        token.set_expires(expires - delta);
+    }
   }
 
   tokens_lru.push_front(token_id);
@@ -510,7 +530,7 @@ void TokenCache::add_admin(const rgw::keystone::TokenEnvelope& token)
   std::lock_guard l{lock};
 
   rgw_get_token_id(token.token.id, admin_token_id);
-  add_locked(admin_token_id, token, tokens, tokens_lru);
+  add_locked(admin_token_id, token, tokens, tokens_lru, true);
 }
 
 void TokenCache::add_barbican(const rgw::keystone::TokenEnvelope& token)
@@ -518,7 +538,7 @@ void TokenCache::add_barbican(const rgw::keystone::TokenEnvelope& token)
   std::lock_guard l{lock};
 
   rgw_get_token_id(token.token.id, barbican_token_id);
-  add_locked(barbican_token_id, token, tokens, tokens_lru);
+  add_locked(barbican_token_id, token, tokens, tokens_lru, true);
 }
 
 void TokenCache::invalidate(const DoutPrefixProvider *dpp, const std::string& token_id)
