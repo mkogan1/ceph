@@ -84,9 +84,15 @@ class CephadmServe:
                 if not self.mgr.paused:
                     self.mgr.to_remove_osds.process_removal_queue()
 
-                    self.mgr.migration.migrate()
-                    if self.mgr.migration.is_migration_ongoing():
-                        continue
+                    if not (
+                        self.mgr.upgrade.upgrade_state
+                        and self.mgr.upgrade.upgrade_state.paused
+                        and self.mgr.upgrade.upgrade_state.error
+                        and self.mgr.upgrade.upgrade_state.error.startswith('UPGRADE_ISCSI_UNSUPPORTED')
+                    ):
+                        self.mgr.migration.migrate()
+                        if self.mgr.migration.is_migration_ongoing():
+                            continue
 
                     if self._apply_all_services():
                         continue  # did something, refresh
@@ -567,7 +573,13 @@ class CephadmServe:
         Schedule a service.  Deploy new daemons or remove old ones, depending
         on the target label and count specified in the placement.
         """
-        self.mgr.migration.verify_no_migration()
+        if not (
+            self.mgr.upgrade.upgrade_state
+            and self.mgr.upgrade.upgrade_state.paused
+            and self.mgr.upgrade.upgrade_state.error
+            and self.mgr.upgrade.upgrade_state.error.startswith('UPGRADE_ISCSI_UNSUPPORTED')
+        ):
+            self.mgr.migration.verify_no_migration()
 
         service_type = spec.service_type
         service_name = spec.service_name()
