@@ -118,7 +118,8 @@ class CephadmUpgrade:
         'UPGRADE_FAILED_PULL',
         'UPGRADE_REDEPLOY_DAEMON',
         'UPGRADE_BAD_TARGET_VERSION',
-        'UPGRADE_EXCEPTION'
+        'UPGRADE_EXCEPTION',
+        'UPGRADE_ISCSI_UNSUPPORTED'
     ]
 
     def __init__(self, mgr: "CephadmOrchestrator"):
@@ -482,6 +483,29 @@ class CephadmUpgrade:
         :return:
         """
         if self.upgrade_state and not self.upgrade_state.paused:
+            if self.mgr.cache.get_daemons_by_type('iscsi'):
+                self._fail_upgrade('UPGRADE_ISCSI_UNSUPPORTED', {
+                    'severity': 'error',
+                    'summary': 'Upgrade attempted to RHCS release not supporting iscsi with iscsi daemons present',
+                    'count': 1,
+                    'detail': ['Iscsi is no longer supported in RHCS 6.',
+                               'Please remove any iscsi services/daemons from the cluster before upgrading.',
+                               'If you instead would rather keep using iscsi than upgrade, please manually downgrade any',
+                               'upgraded daemons with `ceph orch daemon redeploy <daemon-name> --image <previous-5.x-image-name>`'],
+                })
+                upgrade_json_safe = {
+                    'target_name': self.upgrade_state._target_name,
+                    'progress_id': self.upgrade_state.progress_id,
+                    'target_id': self.upgrade_state.target_id,
+                    'target_digests': self.upgrade_state.target_digests,
+                    'target_version': self.upgrade_state.target_version,
+                    'error': self.upgrade_state.error,
+                    'paused': self.upgrade_state.paused,
+                }
+                self.mgr.set_store('upgrade_state', json.dumps(upgrade_json_safe))
+                self.mgr.set_module_option('migration_current', 1)
+                self.mgr.migration_current = 1
+                return False
             try:
                 self._do_upgrade()
             except Exception as e:
