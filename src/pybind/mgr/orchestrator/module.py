@@ -60,7 +60,6 @@ class ServiceType(enum.Enum):
     mds = 'mds'
     rgw = 'rgw'
     nfs = 'nfs'
-    iscsi = 'iscsi'
     snmp_gateway = 'snmp-gateway'
 
 
@@ -954,28 +953,6 @@ Usage:
         )
         return self._daemon_add_misc(spec)
 
-    @_cli_write_command('orch daemon add iscsi')
-    def _iscsi_add(self,
-                   pool: str,
-                   api_user: str,
-                   api_password: str,
-                   trusted_ip_list: Optional[str] = None,
-                   placement: Optional[str] = None,
-                   inbuf: Optional[str] = None) -> HandleCommandResult:
-        """Start iscsi daemon(s)"""
-        if inbuf:
-            raise OrchestratorValidationError('unrecognized command -i; -h or --help for usage')
-
-        spec = IscsiServiceSpec(
-            service_id='iscsi',
-            pool=pool,
-            api_user=api_user,
-            api_password=api_password,
-            trusted_ip_list=trusted_ip_list,
-            placement=PlacementSpec.from_string(placement),
-        )
-        return self._daemon_add_misc(spec)
-
     @_cli_write_command('orch')
     def _service_action(self, action: ServiceAction, service_name: str) -> HandleCommandResult:
         """Start, stop, restart, redeploy, or reconfig an entire service (i.e. all daemons)"""
@@ -1044,6 +1021,8 @@ Usage:
   ceph orch apply -i <yaml spec> [--dry-run]
   ceph orch apply <service_type> [--placement=<placement_string>] [--unmanaged]
         """
+        if service_type and service_type == 'iscsi':
+            raise OrchestratorError('Iscsi is not supported in this RHCS release')
         if inbuf:
             if service_type or placement or unmanaged:
                 raise OrchestratorValidationError(usage)
@@ -1169,37 +1148,6 @@ Usage:
         spec = NFSServiceSpec(
             service_id=svc_id,
             port=port,
-            placement=PlacementSpec.from_string(placement),
-            unmanaged=unmanaged,
-            preview_only=dry_run
-        )
-
-        spec.validate()  # force any validation exceptions to be caught correctly
-
-        return self._apply_misc([spec], dry_run, format, no_overwrite)
-
-    @_cli_write_command('orch apply iscsi')
-    def _apply_iscsi(self,
-                     pool: str,
-                     api_user: str,
-                     api_password: str,
-                     trusted_ip_list: Optional[str] = None,
-                     placement: Optional[str] = None,
-                     unmanaged: bool = False,
-                     dry_run: bool = False,
-                     format: Format = Format.plain,
-                     no_overwrite: bool = False,
-                     inbuf: Optional[str] = None) -> HandleCommandResult:
-        """Scale an iSCSI service"""
-        if inbuf:
-            raise OrchestratorValidationError('unrecognized command -i; -h or --help for usage')
-
-        spec = IscsiServiceSpec(
-            service_id=pool,
-            pool=pool,
-            api_user=api_user,
-            api_password=api_password,
-            trusted_ip_list=trusted_ip_list,
             placement=PlacementSpec.from_string(placement),
             unmanaged=unmanaged,
             preview_only=dry_run
