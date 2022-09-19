@@ -227,6 +227,12 @@ class CephadmServe:
                 if r:
                     failures.append(r)
 
+            if self.mgr.cache.host_needs_network_refresh(host):
+                self.log.debug(('Refreshing %s networks' % host))
+                r = self._refresh_host_networks(host)
+                if r:
+                    failures.append(r)
+
             if self.mgr.cache.host_needs_facts_refresh(host):
                 self.log.debug(('Refreshing %s facts' % host))
                 r = self._refresh_facts(host)
@@ -386,16 +392,26 @@ class CephadmServe:
                                                      rerun_args)
                 else:
                     raise
+        except OrchestratorError as e:
+            return str(e)
 
+        self.log.debug('Refreshed host %s devices (%d)' % (
+            host, len(devices)))
+        ret = inventory.Devices.from_json(devices)
+        self.mgr.cache.update_host_devices(host, ret.devices)
+        self.update_osdspec_previews(host)
+        self.mgr.cache.save_host(host)
+        return None
+
+    def _refresh_host_networks(self, host: str) -> Optional[str]:
+        try:
             networks = self._run_cephadm_json(host, 'mon', 'list-networks', [], no_fsid=True)
         except OrchestratorError as e:
             return str(e)
 
-        self.log.debug('Refreshed host %s devices (%d) networks (%s)' % (
-            host, len(devices), len(networks)))
-        ret = inventory.Devices.from_json(devices)
-        self.mgr.cache.update_host_devices_networks(host, ret.devices, networks)
-        self.update_osdspec_previews(host)
+        self.log.debug('Refreshed host %s networks (%s)' % (
+            host, len(networks)))
+        self.mgr.cache.update_host_networks(host, networks)
         self.mgr.cache.save_host(host)
         return None
 

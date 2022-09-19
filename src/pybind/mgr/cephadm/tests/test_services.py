@@ -588,14 +588,18 @@ class TestRGWService:
     @patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
     def test_rgw_update(self, frontend, ssl, expected, cephadm_module: CephadmOrchestrator):
         with with_host(cephadm_module, 'host1'):
-            cephadm_module.cache.update_host_devices_networks(
+            cephadm_module.cache.update_host_devices(
                 'host1',
                 dls=cephadm_module.cache.devices['host1'],
+            )
+            cephadm_module.cache.update_host_networks(
+                'host1',
                 nets={
                     'fd00:fd00:fd00:3000::/64': {
                         'if0': ['fd00:fd00:fd00:3000::1']
                     }
-                })
+                }
+            )
             s = RGWSpec(service_id="foo",
                         networks=['fd00:fd00:fd00:3000::/64'],
                         ssl=ssl,
@@ -771,9 +775,12 @@ class TestIngressService:
         _run_cephadm.return_value = ('{}', '', 0)
 
         with with_host(cephadm_module, 'test'):
-            cephadm_module.cache.update_host_devices_networks(
+            cephadm_module.cache.update_host_devices(
                 'test',
                 cephadm_module.cache.devices['test'],
+            )
+            cephadm_module.cache.update_host_networks(
+                'test',
                 {
                     '1.2.3.0/24': {
                         'if0': ['1.2.3.4/32']

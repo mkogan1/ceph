@@ -438,10 +438,12 @@ class HostCache():
         self.osdspec_previews = {}     # type: Dict[str, List[Dict[str, Any]]]
         self.osdspec_last_applied = {}  # type: Dict[str, Dict[str, datetime.datetime]]
         self.networks = {}             # type: Dict[str, Dict[str, Dict[str, List[str]]]]
+        self.last_network_update = {}  # type: Dict[str, datetime.datetime]
         self.last_device_update = {}   # type: Dict[str, datetime.datetime]
         self.last_device_change = {}   # type: Dict[str, datetime.datetime]
         self.daemon_refresh_queue = []  # type: List[str]
         self.device_refresh_queue = []  # type: List[str]
+        self.network_refresh_queue = []  # type: List[str]
         self.osdspec_previews_refresh_queue = []  # type: List[str]
 
         # host -> daemon name -> dict
@@ -472,6 +474,7 @@ class HostCache():
                 # for services, we ignore the persisted last_*_update
                 # and always trigger a new scrape on mgr restart.
                 self.daemon_refresh_queue.append(host)
+                self.network_refresh_queue.append(host)
                 self.daemons[host] = {}
                 self.osdspec_previews[host] = []
                 self.osdspec_last_applied[host] = {}
@@ -537,11 +540,10 @@ class HostCache():
             return True
         return False
 
-    def update_host_devices_networks(
+    def update_host_devices(
             self,
             host: str,
             dls: List[inventory.Device],
-            nets: Dict[str, Dict[str, List[str]]]
     ) -> None:
         if (
                 host not in self.devices
@@ -551,7 +553,14 @@ class HostCache():
             self.last_device_change[host] = datetime_now()
         self.last_device_update[host] = datetime_now()
         self.devices[host] = dls
+
+    def update_host_networks(
+            self,
+            host: str,
+            nets: Dict[str, Dict[str, List[str]]]
+    ) -> None:
         self.networks[host] = nets
+        self.last_network_update[host] = datetime_now()
 
     def update_daemon_config_deps(self, host: str, name: str, deps: List[str], stamp: datetime.datetime) -> None:
         self.daemon_config_deps[host][name] = {
@@ -598,6 +607,7 @@ class HostCache():
         self.daemon_config_deps[host] = {}
         self.daemon_refresh_queue.append(host)
         self.device_refresh_queue.append(host)
+        self.network_refresh_queue.append(host)
         self.osdspec_previews_refresh_queue.append(host)
         self.registry_login_queue.add(host)
         self.last_client_files[host] = {}
@@ -627,6 +637,13 @@ class HostCache():
             del self.last_device_update[host]
         self.mgr.event.set()
 
+    def invalidate_host_networks(self, host):
+        # type: (str) -> None
+        self.network_refresh_queue.append(host)
+        if host in self.last_network_update:
+            del self.last_network_update[host]
+        self.mgr.event.set()
+
     def distribute_new_registry_login_info(self) -> None:
         self.registry_login_queue = set(self.mgr.inventory.keys())
 
@@ -642,6 +659,8 @@ class HostCache():
             j['last_daemon_update'] = datetime_to_str(self.last_daemon_update[host])
         if host in self.last_device_update:
             j['last_device_update'] = datetime_to_str(self.last_device_update[host])
+        if host in self.last_network_update:
+            j['last_network_update'] = datetime_to_str(self.last_network_update[host])
         if host in self.last_device_change:
             j['last_device_change'] = datetime_to_str(self.last_device_change[host])
         if host in self.daemons:
@@ -698,6 +717,8 @@ class HostCache():
             del self.last_daemon_update[host]
         if host in self.last_device_update:
             del self.last_device_update[host]
+        if host in self.last_network_update:
+            del self.last_network_update[host]
         if host in self.last_device_change:
             del self.last_device_change[host]
         if host in self.daemon_config_deps:
@@ -847,6 +868,20 @@ class HostCache():
         cutoff = datetime_now() - datetime.timedelta(
             seconds=self.mgr.device_cache_timeout)
         if host not in self.last_device_update or self.last_device_update[host] < cutoff:
+            return True
+        return False
+
+    def host_needs_network_refresh(self, host):
+        # type: (str) -> bool
+        if host in self.mgr.offline_hosts:
+            logger.debug(f'Host "{host}" marked as offline. Skipping network refresh')
+            return False
+        if host in self.network_refresh_queue:
+            self.network_refresh_queue.remove(host)
+            return True
+        cutoff = datetime_now() - datetime.timedelta(
+            seconds=self.mgr.device_cache_timeout)
+        if host not in self.last_network_update or self.last_network_update[host] < cutoff:
             return True
         return False
 

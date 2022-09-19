@@ -417,9 +417,8 @@ class TestCephadm(object):
                 'value': '127.0.0.0/8'
             })
 
-            cephadm_module.cache.update_host_devices_networks(
+            cephadm_module.cache.update_host_networks(
                 'test',
-                [],
                 {
                     "127.0.0.0/8": [
                         "127.0.0.1"
@@ -735,7 +734,7 @@ class TestCephadm(object):
                 ),
             ])
 
-            cephadm_module.cache.update_host_devices_networks('test', inventory.devices, {})
+            cephadm_module.cache.update_host_devices('test', inventory.devices)
 
             _run_cephadm.return_value = (['{}'], '', 0)
 
@@ -775,7 +774,7 @@ class TestCephadm(object):
                 Device('/dev/sdd', available=True)
             ])
 
-            cephadm_module.cache.update_host_devices_networks('test', inventory.devices, {})
+            cephadm_module.cache.update_host_devices('test', inventory.devices)
 
             _run_cephadm.return_value = (['{}'], '', 0)
 
