@@ -655,6 +655,40 @@ int RGWDataChangesLog::add_entry(const DoutPrefixProvider *dpp,
 		     << " shard_id=" << shard_id << " now=" << now
 		     << " cur_expiration=" << status->cur_expiration << dendl;
 
+  if (cct->_conf->rgw_data_log_window == 0) {
+    assert(!status->cond);
+    assert(!status->pending);
+    status->cur_sent = now;
+    sl.unlock();
+
+    ceph::buffer::list bl;
+    rgw_data_change change;
+    change.entity_type = ENTITY_TYPE_BUCKET;
+    change.key = bs.get_key();
+    change.timestamp = now;
+    change.gen = gen.gen;
+    encode(change, bl);
+
+    ldpp_dout(dpp, 20)
+	<< "RGWDataChangesLog::add_entry() sending update with now=" << now
+	<< dendl;
+
+    auto be = bes->head();
+    auto ret = be->push(dpp, index, now, change.key, std::move(bl));
+    if (ret < 0) {
+      ldpp_dout(dpp, 20) << "ERROR: be->push failed with ret=" << ret << dendl;
+      return ret;
+    }
+
+    sl.lock();
+    /* time of when operation started, not completed */
+    if (status->cur_expiration < now) {
+      status->cur_expiration = now;
+    }
+    sl.unlock();
+    return 0;
+  }
+
   if (now < status->cur_expiration) {
     /* no need to send, recently completed */
     sl.unlock();
@@ -977,9 +1011,11 @@ void RGWDataChangesLog::renew_run() {
   for (;;) {
     const DoutPrefix dp(cct, dout_subsys, "rgw data changes log: ");
     ldpp_dout(&dp, 2) << "RGWDataChangesLog::ChangesRenewThread: start" << dendl;
-    int r = renew_entries(&dp);
-    if (r < 0) {
-      ldpp_dout(&dp, 0) << "ERROR: RGWDataChangesLog::renew_entries returned error r=" << r << dendl;
+    if (cct->_conf->rgw_data_log_window != 0) {
+      int r = renew_entries(&dp);
+      if (r < 0) {
+	ldpp_dout(&dp, 0) << "ERROR: RGWDataChangesLog::renew_entries returned error r=" << r << dendl;
+      }
     }
 
     if (going_down())
@@ -988,7 +1024,7 @@ void RGWDataChangesLog::renew_run() {
     if (run == runs_per_prune) {
       std::optional<uint64_t> through;
       ldpp_dout(&dp, 2) << "RGWDataChangesLog::ChangesRenewThread: pruning old generations" << dendl;
-      trim_generations(&dp, through);
+      auto r = trim_generations(&dp, through);
       if (r < 0) {
 	derr << "RGWDataChangesLog::ChangesRenewThread: failed pruning r="
 	     << r << dendl;
@@ -1004,7 +1040,9 @@ void RGWDataChangesLog::renew_run() {
       ++run;
     }
 
-    int interval = cct->_conf->rgw_data_log_window * 3 / 4;
+    auto interval = (cct->_conf->rgw_data_log_window > 0 ?
+		     cct->_conf->rgw_data_log_window * 3s / 4
+		     : 30s);
     std::unique_lock locker{renew_lock};
     renew_cond.wait_for(locker, std::chrono::seconds(interval));
   }
