@@ -1541,7 +1541,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     uint64_t mylen = len;
     ictx->image_lock.lock_shared();
-    r = clip_io(ictx, off, &mylen);
+    r = clip_io(ictx, off, &mylen, io::ImageArea::DATA);
     ictx->image_lock.unlock_shared();
     if (r < 0)
       return r;
@@ -1594,9 +1594,8 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     return total_read;
   }
 
-  // validate extent against image size; clip to image size if necessary
-  int clip_io(ImageCtx *ictx, uint64_t off, uint64_t *len)
-  {
+  // validate extent against area size; clip to area size if necessary
+  int clip_io(ImageCtx* ictx, uint64_t off, uint64_t* len, io::ImageArea area) {
     ceph_assert(ceph_mutex_is_locked(ictx->image_lock));
 
     if (ictx->snap_id != CEPH_NOSNAP &&
@@ -1608,8 +1607,7 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     if (*len == 0)
       return 0;
 
-    // TODO: pass area
-    uint64_t area_size = ictx->get_area_size(io::ImageArea::DATA);
+    uint64_t area_size = ictx->get_area_size(area);
 
     // can't start past end
     if (off >= area_size)
