@@ -1444,6 +1444,8 @@ public:
 
         tn->log(10, SSTR("sync finished on " << bucket_shard_str{state->key.first}
                          << " progress=" << progress << ' ' << complete << " r=" << retcode));
+        tn->log(10, SSTR("DBG: incremental marker pos after sync of bucket shard " <<
+        state->key.first << ":" << complete->marker));
       }
       sync_status = retcode;
 
@@ -1486,6 +1488,7 @@ public:
       /* FIXME: what do do in case of error */
       if (marker_tracker && !complete->marker.empty()) {
         /* update marker */
+        tn->log(10, SSTR("DBG: calling finish on marker: " << complete->marker));
         yield call(marker_tracker->finish(complete->marker));
       }
       if (sync_status == 0) {
@@ -1900,6 +1903,7 @@ public:
             continue;
           }
           tn->log(20, SSTR("full sync: " << iter->first));
+          tn->log(20, SSTR("DBG full sync marker: " << iter->first));
           total_entries++;
           if (!marker_tracker->start(iter->first, total_entries, entry_timestamp)) {
             tn->log(0, SSTR("ERROR: cannot start syncing " << iter->first << ". Duplicate entry?"));
@@ -1923,10 +1927,14 @@ public:
         sync_marker.state = rgw_data_sync_marker::IncrementalSync;
         sync_marker.marker = sync_marker.next_step_marker;
         sync_marker.next_step_marker.clear();
+        tn->log(10, SSTR("DBG: marker after full sync of " << source_bs << "sync_marker.marker" << 
+        sync_marker.marker));
         call(new RGWSimpleRadosWriteCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
                                                              rgw_raw_obj(pool, status_oid),
                                                              sync_marker, &objv));
       }
+      tn->log(0, SSTR("DBG: next_step marker after full sync of " << source_bs << "sync_marker.marker" <<
+      sync_marker.next_step_marker));
       if (retcode < 0) {
         tn->log(0, SSTR("ERROR: failed to set sync marker: retcode=" << retcode));
         lease_cr->go_down();
@@ -2303,6 +2311,7 @@ public:
           tn->log(10, SSTR("spawning " << num_shards << " shards sync"));
           for (map<uint32_t, rgw_data_sync_marker>::iterator iter = sync_status.sync_markers.begin();
                iter != sync_status.sync_markers.end(); ++iter) {
+            tn->log(10, SSTR("DBG: sync marker " << (iter->second).marker << "shard id" << iter->first));
             RGWDataSyncShardControlCR *cr = new RGWDataSyncShardControlCR(sc, sync_env->svc->zone->get_zone_params().log_pool,
                                                                           iter->first, iter->second, sync_status, objvs[iter->first], tn);
             cr->get();
