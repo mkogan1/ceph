@@ -1724,6 +1724,7 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   uint32_t shard_id;
   rgw_data_sync_marker& sync_marker;
+  rgw_data_sync_marker tmp_sync_marker;
   rgw_data_sync_status sync_status;
 
   RGWRadosGetOmapValsCR::ResultPtr omapvals;
@@ -1753,6 +1754,7 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   uint64_t total_entries = 0;
   RGWObjVersionTracker& objv;
+  RGWObjVersionTracker tmp_objv;
   bool *reset_backoff = nullptr;
 
   boost::intrusive_ptr<RGWContinuousLeaseCR> lease_cr;
@@ -1869,6 +1871,27 @@ public:
       }
       tn->log(10, "took lease");
       oid = full_data_sync_index_shard_oid(sc->source_zone, shard_id);
+
+        tmp_objv.clear();
+  /* Reread data sync status to fech the latest marker and update objv */
+
+        ldpp_dout(sync_env->dpp, 20) << __PRETTY_FUNCTION__ << " XXXXXXXXXXXXXXXXXXX before tmp_obv.read_version.ver=" << tmp_objv.read_version.ver << " , tmp_sync_marker.marker=" << tmp_sync_marker.marker << " , objv.read_version.ver=" << objv.read_version.ver <<" , sync_arker.marker=" << sync_marker.marker << dendl;
+
+
+  yield call(new RGWSimpleRadosReadCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
+                                                         rgw_raw_obj(pool, status_oid),
+                                                         &tmp_sync_marker, true, &tmp_objv));
+    if (retcode < 0) {
+      lease_cr->go_down();
+      drain_all();
+      return set_cr_error(retcode);
+    }
+        ldpp_dout(sync_env->dpp, 20) << __PRETTY_FUNCTION__ << " XXXXXXXXXXXXXXXXXXX after tmp_obv.read_version.ver=" << tmp_objv.read_version.ver << " , tmp_sync_marker.marker=" << tmp_sync_marker.marker << " , objv.read_version.ver=" << objv.read_version.ver <<" , sync_arker.marker=" << sync_marker.marker << dendl;
+    if (tmp_objv.read_version.ver > objv.read_version.ver) {
+      sync_marker = tmp_sync_marker;
+      objv = tmp_objv;
+    }
+
       marker_tracker.emplace(sc, status_oid, sync_marker, tn, objv);
       total_entries = sync_marker.pos;
       entry_timestamp = sync_marker.timestamp; // time when full sync started
@@ -1964,6 +1987,27 @@ public:
         set_status("lease acquired");
         tn->log(10, "took lease");
       }
+
+        tmp_objv.clear();
+  /* Reread data sync status to fech the latest marker and update objv */
+
+        ldpp_dout(sync_env->dpp, 20) << __PRETTY_FUNCTION__ << " XXXXXXXXXXXXXXXXXXX before tmp_obv.read_version.ver=" << tmp_objv.read_version.ver << " , tmp_sync_marker.marker=" << tmp_sync_marker.marker << " , objv.read_version.ver=" << objv.read_version.ver <<" , sync_arker.marker=" << sync_marker.marker << dendl;
+
+
+  yield call(new RGWSimpleRadosReadCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
+                                                         rgw_raw_obj(pool, status_oid),
+                                                         &tmp_sync_marker, true, &tmp_objv));
+    if (retcode < 0) {
+      lease_cr->go_down();
+      drain_all();
+      return set_cr_error(retcode);
+    }
+        ldpp_dout(sync_env->dpp, 20) << __PRETTY_FUNCTION__ << " XXXXXXXXXXXXXXXXXXX after tmp_obv.read_version.ver=" << tmp_objv.read_version.ver << " , tmp_sync_marker.marker=" << tmp_sync_marker.marker << " , objv.read_version.ver=" << objv.read_version.ver <<" , sync_arker.marker=" << sync_marker.marker << dendl;
+    if (tmp_objv.read_version.ver > objv.read_version.ver) {
+      sync_marker = tmp_sync_marker;
+      objv = tmp_objv;
+    }
+
       marker_tracker.emplace(sc, status_oid, sync_marker, tn, objv);
       do {
         if (!lease_cr->is_locked()) {
