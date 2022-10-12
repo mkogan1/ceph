@@ -15,6 +15,7 @@
 
 
 #define dout_context g_ceph_context
+static constexpr auto dout_subsys = ceph_subsys_rgw;
 
 using namespace std;
 

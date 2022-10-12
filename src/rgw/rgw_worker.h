@@ -22,14 +22,14 @@
 
 #include "common/Thread.h"
 #include "common/ceph_mutex.h"
+#include "common/dout.h"
 #include "include/common_fwd.h"
-
-#define dout_subsys ceph_subsys_rgw
 
 class RGWRados;
 
 class RGWRadosThread {
   class Worker : public Thread, public DoutPrefixProvider {
+    static constexpr auto dout_subsys = ceph_subsys_rgw;
     CephContext *cct;
     RGWRadosThread *processor;
     ceph::mutex lock = ceph::make_mutex("RGWRadosThread::Worker");

@@ -10,8 +10,6 @@
 #include <vector>
 #include <fstream>
 
-#define dout_subsys ceph_subsys_rgw
-
 namespace rgw { namespace sal {
   class Store;
 } }
@@ -175,6 +173,7 @@ public:
 };
 
 class OpsLogFile : public JsonOpsLogSink, public Thread, public DoutPrefixProvider {
+  static constexpr auto dout_subsys = ceph_subsys_rgw;
   CephContext* cct;
   ceph::mutex mutex = ceph::make_mutex("OpsLogFile");
   std::vector<bufferlist> log_buffer;
