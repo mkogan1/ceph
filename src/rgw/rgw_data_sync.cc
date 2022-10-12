@@ -1707,7 +1707,6 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   uint32_t shard_id;
   rgw_data_sync_marker& sync_marker;
-  rgw_data_sync_marker tmp_sync_marker;
   rgw_data_sync_status sync_status;
 
   RGWRadosGetOmapValsCR::ResultPtr omapvals;
@@ -1737,7 +1736,6 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   uint64_t total_entries = 0;
   RGWObjVersionTracker& objv;
-  RGWObjVersionTracker tmp_objv;
   bool *reset_backoff = nullptr;
 
   boost::intrusive_ptr<RGWContinuousLeaseCR> lease_cr;
@@ -1856,20 +1854,15 @@ public:
       tn->log(10, "took lease");
       oid = full_data_sync_index_shard_oid(sc->source_zone, shard_id);
 
-      tmp_objv.clear();
       /* Reread data sync status to fech the latest marker and update objv */
+      objv.clear();
       yield call(new RGWSimpleRadosReadCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
                                                          rgw_raw_obj(pool, status_oid),
-                                                         &tmp_sync_marker, true, &tmp_objv));
+                                                         &sync_marker, true, &objv));
       if (retcode < 0) {
         lease_cr->go_down();
         drain_all();
         return set_cr_error(retcode);
-      }
-
-      if (tmp_objv.read_version.ver > objv.read_version.ver) {
-        sync_marker = tmp_sync_marker;
-        objv = tmp_objv;
       }
 
       marker_tracker.emplace(sc, status_oid, sync_marker, tn, objv);
@@ -1969,20 +1962,15 @@ public:
         tn->log(10, "took lease");
       }
 
-      tmp_objv.clear();
       /* Reread data sync status to fech the latest marker and update objv */
+      objv.clear();
       yield call(new RGWSimpleRadosReadCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
                                                          rgw_raw_obj(pool, status_oid),
-                                                         &tmp_sync_marker, true, &tmp_objv));
+                                                         &sync_marker, true, &objv));
       if (retcode < 0) {
         lease_cr->go_down();
         drain_all();
         return set_cr_error(retcode);
-      }
-
-      if (tmp_objv.read_version.ver > objv.read_version.ver) {
-        sync_marker = tmp_sync_marker;
-        objv = tmp_objv;
       }
 
       marker_tracker.emplace(sc, status_oid, sync_marker, tn, objv);
