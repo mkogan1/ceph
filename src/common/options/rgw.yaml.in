@@ -2332,7 +2332,7 @@ options:
 - name: rgw_sync_lease_period
   type: int
   level: dev
-  default: 2_min
+  default: 20_min
   services:
   - rgw
   with_legacy: true
