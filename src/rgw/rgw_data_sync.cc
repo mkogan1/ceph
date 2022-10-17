@@ -1471,6 +1471,9 @@ public:
       if (marker_tracker && !complete->marker.empty()) {
         /* update marker */
         yield call(marker_tracker->finish(complete->marker));
+        if (retcode < 0) {
+          return set_cr_error(retcode);
+        }
       }
       if (sync_status == 0) {
         sync_status = retcode;
@@ -1690,6 +1693,9 @@ public:
       }
 
       yield call(marker_tracker->finish(key));
+      if (retcode < 0) {
+          return set_cr_error(retcode);
+        }
 
       return set_cr_done();
     }
