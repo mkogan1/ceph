@@ -114,6 +114,8 @@ class FIFO {
   CephContext* cct = static_cast<CephContext*>(ioctx.cct());
   const std::string oid;
   std::mutex m;
+  std::condition_variable cond;
+  bool preparing = false;
   std::uint64_t next_tid = 0;
 
   fifo::info info;
@@ -159,6 +161,7 @@ class FIFO {
   void trim_part(int64_t part_num, uint64_t ofs,
 		 std::optional<std::string_view> tag, bool exclusive,
 		 std::uint64_t tid, lr::AioCompletion* c);
+  bool _need_new_head(const DoutPrefixProvider* dpp, std::unique_lock<std::mutex>& l);
 
   /// Force refresh of metadata, yielding/blocking style
   int read_meta(const DoutPrefixProvider *dpp, std::uint64_t tid, optional_yield y);

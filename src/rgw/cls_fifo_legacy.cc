@@ -832,11 +832,19 @@ int FIFO::_prepare_new_head(const DoutPrefixProvider *dpp, std::uint64_t tid, op
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		 << " entering: tid=" << tid << dendl;
   std::unique_lock l(m);
+  assert(preparing == true);
   std::int64_t new_head_num = info.head_part_num + 1;
   auto max_push_part_num = info.max_push_part_num;
   auto version = info.version;
   l.unlock();
-
+  auto sg(make_scope_guard([this, &l] {
+    if (!l.owns_lock()) {
+      l.lock();
+    }
+    preparing = false;
+    cond.notify_all();
+    l.unlock();
+  }));
   int r = 0;
   if (max_push_part_num < new_head_num) {
     ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
@@ -1011,6 +1019,10 @@ struct NewHeadPreparer : public Completion<NewHeadPreparer> {
       lderr(f->cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		    << " _prepare_new_part failed: r=" << r
 		    << " tid=" << tid << dendl;
+      std::unique_lock l(f->m);
+      f->preparing = false;
+      f->cond.notify_all();
+      l.unlock();
       complete(std::move(p), r);
       return;
     }
@@ -1020,8 +1032,16 @@ struct NewHeadPreparer : public Completion<NewHeadPreparer> {
       lderr(f->cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		    << " _prepare_new_part failed: r=" << r
 		    << " tid=" << tid << dendl;
+      std::unique_lock l(f->m);
+      f->preparing = false;
+      f->cond.notify_all();
+      l.unlock();
       complete(std::move(p), -EIO);
     } else {
+      l.unlock();
+      std::unique_lock l(f->m);
+      f->preparing = false;
+      f->cond.notify_all();
       l.unlock();
       complete(std::move(p), 0);
     }
@@ -1037,6 +1057,10 @@ struct NewHeadPreparer : public Completion<NewHeadPreparer> {
       ldpp_dout(dpp, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		    << " _update_meta failed: r=" << r
 		    << " tid=" << tid << dendl;
+      std::unique_lock l(f->m);
+      f->preparing = false;
+      f->cond.notify_all();
+      l.unlock();
       complete(std::move(p), r);
       return;
     }
@@ -1044,6 +1068,10 @@ struct NewHeadPreparer : public Completion<NewHeadPreparer> {
       if (i >= MAX_RACE_RETRIES) {
 	ldpp_dout(dpp, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		      << " canceled too many times, giving up: tid=" << tid << dendl;
+	std::unique_lock l(f->m);
+	f->preparing = false;
+	f->cond.notify_all();
+	l.unlock();
 	complete(std::move(p), -ECANCELED);
 	return;
       }
@@ -1061,6 +1089,10 @@ struct NewHeadPreparer : public Completion<NewHeadPreparer> {
     }
     ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		   << " succeeded : i=" << i << " tid=" << tid << dendl;
+    std::unique_lock fl(f->m);
+    f->preparing = false;
+    f->cond.notify_all();
+    l.unlock();
     complete(std::move(p), 0);
     return;
   }
@@ -1071,6 +1103,7 @@ void FIFO::_prepare_new_head(const DoutPrefixProvider *dpp, std::uint64_t tid, l
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		 << " entering: tid=" << tid << dendl;
   std::unique_lock l(m);
+  assert(preparing == true);
   int64_t new_head_num = info.head_part_num + 1;
   auto max_push_part_num = info.max_push_part_num;
   auto version = info.version;
@@ -1158,6 +1191,24 @@ void FIFO::trim_part(int64_t part_num, uint64_t ofs,
   rgw::cls::fifo::trim_part(&op, tag, ofs, exclusive);
   auto r = ioctx.aio_operate(part_oid, c, &op);
   ceph_assert(r >= 0);
+}
+
+bool FIFO::_need_new_head(const DoutPrefixProvider* dpp, std::unique_lock<std::mutex>& l) {
+  assert(l.owns_lock());
+  ldpp_dout(dpp, 20)
+    << __PRETTY_FUNCTION__ << ":" << __LINE__
+    << " entering" << dendl;
+  if (preparing) {
+    ldpp_dout(dpp, 20)
+      << __PRETTY_FUNCTION__ << ":" << __LINE__
+      << " someone else is making a new head, waiting" << dendl;
+    cond.wait(l, [this] { return !preparing; });
+  }
+  if (info.need_new_head()) {
+    preparing = true;
+    return true;
+  }
+  return false;
 }
 
 int FIFO::open(const DoutPrefixProvider *dpp, lr::IoCtx ioctx, std::string oid, std::unique_ptr<FIFO>* fifo,
@@ -1320,10 +1371,8 @@ void FIFO::push(const DoutPrefixProvider *dpp, const cb::list& bl, lr::AioComple
 int FIFO::push(const DoutPrefixProvider *dpp, const std::vector<cb::list>& data_bufs, optional_yield y)
 {
   std::unique_lock l(m);
-  auto tid = ++next_tid;
   auto max_entry_size = info.params.max_entry_size;
-  auto need_new_head = info.need_new_head();
-  l.unlock();
+  auto tid = ++next_tid;
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		 << " entering: tid=" << tid << dendl;
   if (data_bufs.empty()) {
@@ -1340,7 +1389,8 @@ int FIFO::push(const DoutPrefixProvider *dpp, const std::vector<cb::list>& data_
       return -E2BIG;
     }
   }
-
+  auto need_new_head = _need_new_head(dpp, l);
+  l.unlock();
   int r = 0;
   if (need_new_head) {
     ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
@@ -1393,7 +1443,20 @@ int FIFO::push(const DoutPrefixProvider *dpp, const std::vector<cb::list>& data_
       ++retries;
       ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		     << " need new head tid=" << tid << dendl;
-      r = _prepare_new_head(dpp, tid, y);
+      l.lock();
+      if (!preparing) {
+	preparing = true;
+	l.unlock();
+	r = _prepare_new_head(dpp, tid, y);
+      } else {
+	ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+			   << " Someone else is preparing a new head, " << r
+			   << " waiting for them to finish and retrying, tid="
+			   << tid << dendl;
+	cond.wait(l, [this] { return !preparing; });
+	l.unlock();
+	continue;
+      }
       if (r < 0) {
 	ldpp_dout(dpp, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		   << " prepare_new_head failed: r=" << r
@@ -1468,7 +1531,6 @@ struct Pusher : public Completion<Pusher> {
 
     while (!remaining.empty() &&
 	   (remaining.front().length() + batch_len <= max_part_size)) {
-
       /* We can send entries with data_len up to max_entry_size,
 	 however, we want to also account the overhead when
 	 dealing with multiple entries. Previous check doesn't
@@ -1499,7 +1561,16 @@ struct Pusher : public Completion<Pusher> {
       if (r == -ERANGE) {
 	ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		       << " need new head tid=" << tid << dendl;
-	new_head(dpp, std::move(p));
+	std::unique_lock l(f->m);
+	if (!f->preparing) {
+	  f->preparing = true;
+	  l.unlock();
+	  new_head(dpp, std::move(p));
+	} else {
+	  f->cond.wait(l, [this] { return !f->preparing; });
+	  l.unlock();
+	  prep_then_push(std::move(p), r);
+	}
 	return;
       }
       if (r < 0) {
@@ -1559,7 +1630,6 @@ void FIFO::push(const DoutPrefixProvider *dpp, const std::vector<cb::list>& data
   std::unique_lock l(m);
   auto tid = ++next_tid;
   auto max_entry_size = info.params.max_entry_size;
-  auto need_new_head = info.need_new_head();
   l.unlock();
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		 << " entering: tid=" << tid << dendl;
@@ -1582,6 +1652,9 @@ void FIFO::push(const DoutPrefixProvider *dpp, const std::vector<cb::list>& data
     return;
   }
 
+  l.lock();
+  auto need_new_head = _need_new_head(dpp, l);
+  l.unlock();
   if (need_new_head) {
     ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		   << " need new head tid=" << tid << dendl;
