@@ -4438,7 +4438,7 @@ int RGWBucketFullSyncCR::operate(const DoutPrefixProvider *dpp)
       if (retcode < 0 && retcode != -ENOENT) {
         set_status("failed bucket listing, going down");
         drain_all();
-	yield call(marker_tracker.flush());
+    yield spawn(marker_tracker.flush(), true);
         return set_cr_error(retcode);
       }
       if (list_result.entries.size() > 0) {
@@ -4698,7 +4698,7 @@ int RGWBucketShardIncrementalSyncCR::operate(const DoutPrefixProvider *dpp)
       if (retcode < 0 && retcode != -ENOENT) {
         /* wait for all operations to complete */
         drain_all();
-	yield call(marker_tracker.flush());
+    yield spawn(marker_tracker.flush(), true);
         return set_cr_error(retcode);
       }
       list_result = std::move(extended_result.entries);
