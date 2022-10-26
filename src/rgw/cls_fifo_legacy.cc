@@ -825,11 +825,24 @@ int FIFO::_prepare_new_head(const DoutPrefixProvider *dpp, std::uint64_t tid, op
   ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		 << " entering: tid=" << tid << dendl;
   std::unique_lock l(m);
+  auto cur_head_num = info.head_part_num;
+  cond.wait(l, [this] { return !preparing; });
+
+  if (cur_head_num < info.head_part_num) {
+    // Another thread made a new head for us.
+    return 0;
+  }
+  preparing = true;
   std::int64_t new_head_num = info.head_part_num + 1;
   auto max_push_part_num = info.max_push_part_num;
   auto version = info.version;
   l.unlock();
-
+  auto sg(make_scope_guard(
+    [this] {
+      std::unique_lock l(m);
+      preparing = false;
+      cond.notify_all();
+    }));
   int r = 0;
   if (max_push_part_num < new_head_num) {
     ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
