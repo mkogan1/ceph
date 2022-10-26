@@ -156,10 +156,17 @@ int push_part(const DoutPrefixProvider *dpp, lr::IoCtx& ioctx, const std::string
   op.exec(fifo::op::CLASS, fifo::op::PUSH_PART, in, nullptr, &retval);
   auto r = rgw_rados_operate(dpp, ioctx, oid, &op, y, lr::OPERATION_RETURNVEC);
   if (r < 0) {
-    ldpp_dout(dpp, -1)
-      << __PRETTY_FUNCTION__ << ":" << __LINE__
-      << " fifo::op::PUSH_PART failed r=" << r
-      << " tid=" << tid << dendl;
+    if (r == -ERANGE) {
+      ldpp_dout(dpp, 20)
+	<< __PRETTY_FUNCTION__ << ":" << __LINE__
+	<< " fifo::op::PUSH_PART failed r=" << r
+	<< " (this is expected) tid=" << tid << dendl;
+    } else {
+      ldpp_dout(dpp, -1)
+	<< __PRETTY_FUNCTION__ << ":" << __LINE__
+	<< " fifo::op::PUSH_PART failed r=" << r
+	<< " tid=" << tid << dendl;
+    }
     return r;
   }
   if (retval < 0) {
@@ -1921,9 +1928,17 @@ struct Trimmer : public Completion<Trimmer> {
     }
 
     if (r < 0) {
-      ldpp_dout(dpp, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		 << (update ? " update_meta " : " trim ") << "failed: r="
-		 << r << " tid=" << tid << dendl;
+      if (update) {
+	ldpp_dout(dpp, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__
+			   << " update_meta failed: r="
+			   << r << " tid=" << tid << dendl;
+      } else {
+	ldpp_dout(dpp, -1) << __PRETTY_FUNCTION__ << ":" << __LINE__
+			   << " trim failed: r=" << r
+
+
+			   << " tid=" << tid << dendl;
+      }
       complete(std::move(p), r);
       return;
     }
