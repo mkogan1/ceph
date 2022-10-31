@@ -1702,6 +1702,7 @@ int FIFO::list(const DoutPrefixProvider *dpp, int max_entries,
 
     std::unique_lock l(m);
     auto part_oid = info.part_oid(part_num);
+    bool at_head = part_num >= info.head_part_num;
     l.unlock();
 
     r = list_part(dpp, ioctx, part_oid, {}, ofs, max_entries, &entries,
@@ -1742,7 +1743,7 @@ int FIFO::list(const DoutPrefixProvider *dpp, int max_entries,
 		 << " tid= "<< tid << dendl;
       return r;
     }
-    more = part_full || part_more;
+    more = part_more || !at_head;
     for (auto& entry : entries) {
       list_entry e;
       e.data = std::move(entry.data);
@@ -1758,10 +1759,11 @@ int FIFO::list(const DoutPrefixProvider *dpp, int max_entries,
 	part_more) {
     }
 
-    if (!part_full) {
+    // Unfull part is not a reliable indicator of the end of listing
+    if (!at_head) {
       ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
-		     << " head part is not full, so we can assume we're done: "
-		     << "tid=" << tid << dendl;
+			 << " not at head, continuing: "
+			 << "tid=" << tid << dendl;
       break;
     }
     if (!part_more) {
