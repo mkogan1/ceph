@@ -359,16 +359,17 @@ struct info {
     return fmt::format("{}.{}", oid_prefix, part_num);
   }
 
-  journal_entry next_journal_entry(std::string tag) const {
+  journal_entry next_journal_entry(std::int64_t part_num,
+				   std::string tag) const {
     journal_entry entry;
     entry.op = journal_entry::Op::create;
-    entry.part_num = max_push_part_num + 1;
+    entry.part_num = part_num;
     entry.part_tag = std::move(tag);
     return entry;
   }
 
-  std::optional<std::string>
-  apply_update(const update& update) {
+  [[nodiscard]] int apply_update(const update& update,
+				 std::string* errmsg = nullptr) {
     if (update.tail_part_num()) {
       tail_part_num = *update.tail_part_num();
     }
@@ -385,11 +386,27 @@ struct info {
       auto iter = journal.find(entry.part_num);
       if (iter != journal.end() &&
 	  iter->second.op == entry.op) {
-	/* don't allow multiple concurrent (same) operations on the same part,
+	/* don't allow multiple identical operations on the same part,
 	   racing clients should use objv to avoid races anyway */
-	return fmt::format("multiple concurrent operations on same part are not "
-			   "allowed, part num={}", entry.part_num);
+	if (errmsg) {
+	  *errmsg = fmt::format("multiple identical operations on same part "
+				"are not allowed, part num={}", entry.part_num);
+	}
+	return -ECANCELED;
       }
+
+      if (entry.op == journal_entry::Op::set_head &&
+	  std::count_if(journal.cbegin(), journal.cend(),
+			[](const auto& e) {
+			  return e.second.op == journal_entry::Op::set_head; })) {
+	if (errmsg) {
+	  *errmsg =
+	    "multiple set_head operations are not allowed in the journal";
+	}
+	return -ECANCELED;
+      }
+
+
 
       if (entry.op == journal_entry::Op::create) {
 	tags[entry.part_num] = entry.part_tag;
@@ -413,7 +430,7 @@ struct info {
       }
     }
 
-    return std::nullopt;
+    return 0;
   }
 };
 WRITE_CLASS_ENCODER(info)
