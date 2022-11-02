@@ -344,13 +344,14 @@ int update_meta(cls_method_context_t hctx, ceph::buffer::list* in,
     .journal_entries_rm(
       std::move(op.journal_entries_rm));
 
-  auto err = header.apply_update(u);
-  if (err) {
+  std::string err;
+  r = header.apply_update(u, &err);
+  if (r < 0) {
     std::ostringstream ss;
     ss << u;
-    CLS_ERR("%s: %s: %s", __PRETTY_FUNCTION__, err->c_str(),
+    CLS_ERR("%s: %s: %s", __PRETTY_FUNCTION__, err.c_str(),
 	    ss.str().c_str());
-    return -EINVAL;
+    return r;
   }
 
   r = write_header(hctx, header);
