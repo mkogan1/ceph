@@ -473,7 +473,7 @@ int FIFO::_update_meta(const DoutPrefixProvider *dpp, const fifo::update& update
 		 << " entering: tid=" << tid << dendl;
   lr::ObjectWriteOperation op;
   bool canceled = false;
-  update_meta(&op, info.version, update);
+  update_meta(&op, version, update);
   auto r = rgw_rados_operate(dpp, ioctx, oid, &op, y);
   if (r >= 0 || r == -ECANCELED) {
     canceled = (r == -ECANCELED);
@@ -791,6 +791,7 @@ int FIFO::_prepare_new_part(const DoutPrefixProvider *dpp,
     r = _update_meta(dpp, u, version, &canceled, tid, y);
     if (r >= 0 && canceled) {
       std::unique_lock l(m);
+      version = info.version;
       auto found = (info.journal.find(new_part_num) != info.journal.end());
       if ((info.max_push_part_num >= new_part_num &&
 	   info.head_part_num >= new_part_num)) {
@@ -876,6 +877,7 @@ int FIFO::_prepare_new_head(const DoutPrefixProvider *dpp,
       std::unique_lock l(m);
       auto iter = info.journal.find(new_head_part_num);
       bool found = iter != info.journal.cend() && iter->second.op == fifo::journal_entry::Op::set_head;
+      version = info.version;
       if ((info.head_part_num >= new_head_part_num)) {
 	ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		       << " raced, but journaled and processed: i=" << i
