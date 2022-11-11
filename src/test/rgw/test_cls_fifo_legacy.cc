@@ -130,6 +130,87 @@ TEST_F(LegacyClsFIFO, TestGetInfo)
   EXPECT_EQ(-ECANCELED, r);
 }
 
+TEST_F(LegacyClsFIFO, TestDoubleJournalRefusal)
+{
+  auto r = fifo_create(&dp, ioctx, fifo_id, fifo_id, null_yield);
+  fifo::info info;
+  std::uint32_t part_header_size;
+  std::uint32_t part_entry_overhead;
+  r = RCf::get_meta(&dp, ioctx, fifo_id, std::nullopt, &info, &part_header_size,
+		    &part_entry_overhead, 0, null_yield);
+  ASSERT_EQ(0, r);
+
+  static constexpr auto tag1 = "0123456789ABCDEF"sv;
+  static constexpr auto tag2 = "123456789ABCDEF0"sv;
+  std::string err;
+  ASSERT_TRUE(info.journal.empty());
+  r = info.apply_update(fifo::update{}.journal_entries_add(
+			  {{ info.next_journal_entry(1, std::string(tag1))}}),
+			&err);
+  EXPECT_EQ("", err);
+  ASSERT_EQ(0, r);
+  r = info.apply_update(fifo::update{}.journal_entries_add(
+			  {{ info.next_journal_entry(1, std::string(tag2))}}),
+			&err);
+  EXPECT_NE("", err);
+  ASSERT_EQ(-ECANCELED, r);
+}
+
+TEST_F(LegacyClsFIFO, TestCreatePartClash)
+{
+  auto r = fifo_create(&dp, ioctx, fifo_id, fifo_id, null_yield);
+  fifo::info info;
+  std::uint32_t part_header_size;
+  std::uint32_t part_entry_overhead;
+  r = RCf::get_meta(&dp, ioctx, fifo_id, std::nullopt, &info, &part_header_size,
+		    &part_entry_overhead, 0, null_yield);
+  ASSERT_EQ(0, r);
+
+  static constexpr auto part_num = 1;
+  static constexpr auto tag1 = "0123456789ABCDEF"sv;
+  static constexpr auto tag2 = "123456789ABCDEF0"sv;
+  auto oid = info.part_oid(part_num);
+  {
+    R::ObjectWriteOperation op;
+    op.create(false);
+    fifo::op::init_part ip;
+    ip.tag = tag1;
+    ip.params = info.params;
+
+    cb::list in;
+    encode(ip, in);
+    op.exec(fifo::op::CLASS, fifo::op::INIT_PART, in);
+    r = rgw_rados_operate(&dp, ioctx, oid, &op, null_yield);
+    ASSERT_EQ(0, r);
+  }
+  {
+    R::ObjectWriteOperation op;
+    op.create(false);
+    fifo::op::init_part ip;
+    ip.tag = tag2;
+    ip.params = info.params;
+
+    cb::list in;
+    encode(ip, in);
+    op.exec(fifo::op::CLASS, fifo::op::INIT_PART, in);
+    r = rgw_rados_operate(&dp, ioctx, oid, &op, null_yield);
+    EXPECT_EQ(-EEXIST, r);
+  }
+  {
+    R::ObjectWriteOperation op;
+    op.create(false);
+    fifo::op::init_part ip;
+    ip.tag = tag1;
+    ip.params = info.params;
+
+    cb::list in;
+    encode(ip, in);
+    op.exec(fifo::op::CLASS, fifo::op::INIT_PART, in);
+    r = rgw_rados_operate(&dp, ioctx, oid, &op, null_yield);
+    EXPECT_EQ(0, r);
+  }
+}
+
 TEST_F(LegacyFIFO, TestOpenDefault)
 {
   std::unique_ptr<RCf::FIFO> fifo;
