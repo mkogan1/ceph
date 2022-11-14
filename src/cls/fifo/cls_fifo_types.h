@@ -384,6 +384,15 @@ struct info {
     }
 
     for (const auto& entry : update.journal_entries_add()) {
+      if ((entry.op == journal_entry::Op::create && entry.part_num == max_push_part_num)
+	  || (entry.op == journal_entry::Op::set_head && entry.part_num == head_part_num)) {
+	if (errmsg) {
+	  *errmsg = fmt::format("Repeated operationis are not allowed, "
+				"part num={}", entry.part_num);
+	}
+	return -ECANCELED;
+      }
+
       auto iter = target.journal.find(entry.part_num);
       if (iter != target.journal.end() &&
 	  iter->second.op == entry.op) {

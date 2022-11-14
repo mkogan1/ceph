@@ -447,6 +447,7 @@ int FIFO::apply_update(fifo::info* info,
   ldout(cct, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		 << " entering: tid=" << tid << dendl;
   std::unique_lock l(m);
+
   if (objv != info->version) {
     lderr(cct) << __PRETTY_FUNCTION__ << ":" << __LINE__
 	       << " version mismatch, canceling: tid=" << tid << dendl;
@@ -695,13 +696,14 @@ int FIFO::process_journal(const DoutPrefixProvider *dpp, std::uint64_t tid, opti
 
     std::unique_lock l(m);
     auto objv = info.version;
-    if (new_tail > tail_part_num) tail_part_num = new_tail;
+    if (new_tail > info.tail_part_num) tail_part_num = new_tail;
     if (new_head > info.head_part_num) head_part_num = new_head;
     if (new_max > info.max_push_part_num) max_part_num = new_max;
     l.unlock();
 
     if (processed.empty() &&
 	!tail_part_num &&
+	!head_part_num &&
 	!max_part_num) {
       ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
 		     << " nothing to update any more: i=" << i << " tid="
