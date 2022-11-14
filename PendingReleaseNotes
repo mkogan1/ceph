@@ -7,6 +7,94 @@
 
 * OSD: The issue of high CPU utilization during recovery/backfill operations
   has been fixed. For more details, see: https://tracker.ceph.com/issues/56530.
+* RGW's default backend for `rgw_enable_ops_log` changed from RADOS to file.
+  The default value of `rgw_ops_log_rados` is now false, and `rgw_ops_log_file_path`
+  defaults to "/var/log/ceph/ops-log-$cluster-$name.log".
+* The SPDK backend for BlueStore is now able to connect to an NVMeoF target.
+  Please note that this is not an officially supported feature.
+* RGW's pubsub interface now returns boolean fields using bool. Before this change,
+  `/topics/<topic-name>` returns "stored_secret" and "persistent" using a string
+  of "true" or "false" with quotes around them. After this change, these fields
+  are returned without quotes so they can be decoded as boolean values in JSON.
+  The same applies to the `is_truncated` field returned by `/subscriptions/<sub-name>`.
+* RGW's response of `Action=GetTopicAttributes&TopicArn=<topic-arn>` REST API now
+  returns `HasStoredSecret` and `Persistent` as boolean in the JSON string
+  encoded in `Attributes/EndPoint`.
+* All boolean fields previously rendered as string by `rgw-admin` command when
+  the JSON format is used are now rendered as boolean. If your scripts/tools
+  relies on this behavior, please update them accordingly. The impacted field names
+  are:
+  * absolute
+  * add
+  * admin
+  * appendable
+  * bucket_key_enabled
+  * delete_marker
+  * exists
+  * has_bucket_info
+  * high_precision_time
+  * index
+  * is_master
+  * is_prefix
+  * is_truncated
+  * linked
+  * log_meta
+  * log_op
+  * pending_removal
+  * read_only
+  * retain_head_object
+  * rule_exist
+  * start_with_full_sync
+  * sync_from_all
+  * syncstopped
+  * system
+  * truncated
+  * user_stats_sync
+* RGW: The beast frontend's HTTP access log line uses a new debug_rgw_access
+  configurable. This has the same defaults as debug_rgw, but can now be controlled
+  independently.
+* RBD: The semantics of compare-and-write C++ API (`Image::compare_and_write`
+  and `Image::aio_compare_and_write` methods) now match those of C API.  Both
+  compare and write steps operate only on `len` bytes even if the respective
+  buffers are larger. The previous behavior of comparing up to the size of
+  the compare buffer was prone to subtle breakage upon straddling a stripe
+  unit boundary.
+* RBD: compare-and-write operation is no longer limited to 512-byte sectors.
+  Assuming proper alignment, it now allows operating on stripe units (4M by
+  default).
+* RBD: New `rbd_aio_compare_and_writev` API method to support scatter/gather
+  on both compare and write buffers.  This compliments existing `rbd_aio_readv`
+  and `rbd_aio_writev` methods.
+* The 'AT_NO_ATTR_SYNC' macro is deprecated, please use the standard 'AT_STATX_DONT_SYNC'
+  macro. The 'AT_NO_ATTR_SYNC' macro will be removed in the future.
+* Trimming of PGLog dups is now controlled by the size instead of the version.
+  This fixes the PGLog inflation issue that was happening when the on-line
+  (in OSD) trimming got jammed after a PG split operation. Also, a new off-line
+  mechanism has been added: `ceph-objectstore-tool` got `trim-pg-log-dups` op
+  that targets situations where OSD is unable to boot due to those inflated dups.
+  If that is the case, in OSD logs the "You can be hit by THE DUPS BUG" warning
+  will be visible.
+  Relevant tracker: https://tracker.ceph.com/issues/53729
+* RBD: `rbd device unmap` command gained `--namespace` option.  Support for
+  namespaces was added to RBD in Nautilus 14.2.0 and it has been possible to
+  map and unmap images in namespaces using the `image-spec` syntax since then
+  but the corresponding option available in most other commands was missing.
+* RGW: Compression is now supported for objects uploaded with Server-Side Encryption.
+  When both are enabled, compression is applied before encryption.
+* RGW: the "pubsub" functionality for storing bucket notifications inside Ceph
+  is removed. Together with it, the "pubsub" zone should not be used anymore.
+  The REST operations, as well as radosgw-admin commands for manipulating
+  subscriptions, as well as fetching and acking the notifications are removed 
+  as well.
+  In case that the endpoint to which the notifications are sent maybe down or 
+  disconnected, it is recommended to use persistent notifications to guarantee 
+  the delivery of the notifications. In case the system that consumes the 
+  notifications needs to pull them (instead of the notifications be pushed 
+  to it), an external message bus (e.g. rabbitmq, Kafka) should be used for 
+  that purpose.
+* RBD: Trailing newline in passphrase files (`<passphrase-file>` argument in
+  `rbd encryption format` command and `--encryption-passphrase-file` option
+  in other commands) is no longer stripped.
 
 >=17.2.1
 
