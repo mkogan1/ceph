@@ -310,7 +310,7 @@ struct info {
   std::int64_t max_push_part_num{-1};
 
   std::string head_tag;
-  std::map<int64_t, std::string> tags;
+  std::map<int64_t, std::string> tags; // Nothing should use this.
 
   std::multimap<int64_t, journal_entry> journal;
 
@@ -359,12 +359,10 @@ struct info {
     return fmt::format("{}.{}", oid_prefix, part_num);
   }
 
-  journal_entry next_journal_entry(std::int64_t part_num,
-				   std::string tag) const {
+  journal_entry next_journal_entry(std::int64_t part_num) const {
     journal_entry entry;
     entry.op = journal_entry::Op::create;
     entry.part_num = part_num;
-    entry.part_tag = std::move(tag);
     return entry;
   }
 
@@ -416,12 +414,6 @@ struct info {
 	return -ECANCELED;
       }
 
-
-
-      if (entry.op == journal_entry::Op::create) {
-	target.tags[entry.part_num] = entry.part_tag;
-      }
-
       target.journal.emplace(entry.part_num, entry);
     }
 
@@ -430,14 +422,7 @@ struct info {
     }
 
     if (update.head_part_num()) {
-      target.tags.erase(target.head_part_num);
       target.head_part_num = *update.head_part_num();
-      auto iter = target.tags.find(target.head_part_num);
-      if (iter != target.tags.end()) {
-	target.head_tag = iter->second;
-      } else {
-	target.head_tag.erase();
-      }
     }
 
     *this = std::move(target);
