@@ -2026,17 +2026,16 @@ void RGWGetBucketLocation_ObjStore_S3::send_response()
   RGWZoneGroup zonegroup;
   string api_name;
 
-  if (s->bucket) {
-    int ret = store->get_zone()->get_zonegroup(s->bucket->get_info().zonegroup, zonegroup);
-    if (ret >= 0) {
-      api_name = zonegroup.api_name;
-    } else  {
-      if (s->bucket->get_info().zonegroup != "default") {
-	api_name = s->bucket->get_info().zonegroup;
-      }
+  RGWBucketInfo emptybucket;
+  const RGWBucketInfo& bucketinfo = s->bucket ? s->bucket->get_info() : emptybucket;
+
+  int ret = store->get_zone()->get_zonegroup(bucketinfo.zonegroup, zonegroup);
+  if (ret >= 0) {
+    api_name = zonegroup.api_name;
+  } else  {
+    if (bucketinfo.zonegroup != "default") {
+      api_name = bucketinfo.zonegroup;
     }
-  } else {
-    api_name = "error";
   }
 
   s->formatter->dump_format_ns("LocationConstraint", XMLNS_AWS_S3,
