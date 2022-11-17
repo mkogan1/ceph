@@ -3759,6 +3759,7 @@ bool CDir::scrub_local()
     mdcache->repair_dirfrag_stats(this);
     scrub_infop->header->set_repaired();
     good = true;
+    mdcache->mds->damage_table.remove_dentry_damage_entry(this);
   }
   return good;
 }
