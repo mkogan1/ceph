@@ -50,7 +50,7 @@ Options
 .. option:: --encryption-format
 
    Image encryption format.
-   Possible values: *luks*
+   Possible values: *luks*, *luks1*, *luks2*
 
 .. option:: --encryption-passphrase-file
 
