@@ -1554,7 +1554,7 @@ public:
 			    timestamp), sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window),
                             [&](uint64_t stack_id, int ret) {
                               if (ret < 0) {
-                                retcode = ret;
+                                cbret = ret;
                               }
                               return 0;
                             });
@@ -1773,6 +1773,7 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   ceph::coarse_real_time error_retry_time;
   static constexpr uint32_t retry_backoff_secs = 60;
+  std::atomic<int> cbret = 0;
 
   RGWSyncTraceNodeRef tn;
 
@@ -1895,6 +1896,7 @@ public:
         if (!lease_cr->is_locked()) {
           lease_cr->go_down();
           drain_all();
+          yield spawn(marker_tracker->flush(), true);
           return set_cr_error(-ECANCELED);
         }
         omapvals = std::make_shared<RGWRadosGetOmapValsCR::Result>();
@@ -1903,6 +1905,7 @@ public:
         if (retcode < 0) {
           lease_cr->go_down();
           drain_all();
+          yield spawn(marker_tracker->flush(), true);
           return set_cr_error(retcode);
         }
         entries = std::move(omapvals->entries);
@@ -1926,10 +1929,35 @@ public:
             tn->log(10, SSTR("timestamp for " << iter->first << " is :" << entry_timestamp));
             yield_spawn_window(new RGWDataFullSyncSingleEntryCR(sc, pool, source_bs, iter->first, sync_status,
                             error_repo, entry_timestamp, lease_cr, bucket_shard_cache, &*marker_tracker, tn),
-			       sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window), std::nullopt);
+			       sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window),
+                            [&](uint64_t stack_id, int ret) {
+                              if (ret < 0) {
+                                tn->log(10, SSTR("RGWDataFullSyncSingleEntryCR returned error: " << ret));
+                                cbret = ret;
+                              }
+                              return 0;
+                            });
           }
 	  sync_marker.marker = iter->first;
+      if (cbret < 0) {
+         break;
+      } 
         }
+      if (cbret < 0) {
+        drain_all_but_stack_cb(lease_stack.get(), [&](uint64_t stack_id, int ret) {
+                   if (ret < 0) {
+                     tn->log(10, SSTR("RGWDataFullSyncSingleEntryCR returned error: " << ret));
+		             cbret = ret;
+                   }
+                   return 0;
+                 });
+        retcode = cbret;
+        lease_cr->go_down();
+        drain_all();
+        yield spawn(marker_tracker->flush(), true);
+        return set_cr_error(retcode);
+      }
+
       } while (omapvals->more);
       omapvals.reset();
 
@@ -2000,6 +2028,7 @@ public:
         if (!lease_cr->is_locked()) {
           lease_cr->go_down();
           drain_all();
+	      yield call(marker_tracker->flush());
           return set_cr_error(-ECANCELED);
         }
         current_modified.clear();
@@ -2013,8 +2042,8 @@ public:
         /* process out of band updates */
         for (modified_iter = current_modified.begin(); modified_iter != current_modified.end(); ++modified_iter) {
 	  if (!lease_cr->is_locked()) {
-	    yield call(marker_tracker->flush());
 	    drain_all();
+	    yield call(marker_tracker->flush());
 	    return set_cr_error(-ECANCELED);
 	  }
           retcode = parse_bucket_key(modified_iter->key, source_bs);
@@ -2037,8 +2066,8 @@ public:
           iter = error_entries.begin();
           for (; iter != error_entries.end(); ++iter) {
 	    if (!lease_cr->is_locked()) {
-	      yield call(marker_tracker->flush());
 	      drain_all();
+	      yield call(marker_tracker->flush());
 	      return set_cr_error(-ECANCELED);
 	    }
             error_marker = iter->first;
@@ -2078,6 +2107,7 @@ public:
           tn->log(0, SSTR("ERROR: failed to read remote data log info: ret=" << retcode));
           lease_cr->go_down();
           drain_all();
+          yield spawn(marker_tracker->flush(), true);
           return set_cr_error(retcode);
         }
 
@@ -2087,8 +2117,8 @@ public:
 
         for (log_iter = log_entries.begin(); log_iter != log_entries.end(); ++log_iter) {
 	  if (!lease_cr->is_locked()) {
-	    yield call(marker_tracker->flush());
 	    drain_all();
+	    yield call(marker_tracker->flush());
 	    return set_cr_error(-ECANCELED);
 	  }
 
@@ -2106,10 +2136,32 @@ public:
             yield_spawn_window(data_sync_single_entry(sc, source_bs, log_iter->entry.gen, log_iter->log_id,
                                                  log_iter->log_timestamp, lease_cr,bucket_shard_cache,
                                                  &*marker_tracker, error_repo, tn, false),
-                               sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window), std::nullopt);
+                               sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window),
+                              [&](uint64_t stack_id, int ret) {
+                                if (ret < 0) {
+                                  tn->log(10, SSTR("data_sync_single_entry returned error: " << ret));
+                                  cbret = ret;
+                                }
+                                return 0;
+                                });
+          }
+          if (cbret < 0) {
+            break;
           }
         }
+        if (cbret < 0 ){
+          drain_all_but_stack_cb(lease_stack.get(), [&](uint64_t stack_id, int ret) {
+            if (ret < 0) {
+              tn->log(10, SSTR("data_sync_single_entry returned error: " << ret));
+              cbret = ret;
+            }
+            return 0;
+          });
 
+          retcode = cbret;
+          yield spawn(marker_tracker->flush(), true);
+          return set_cr_error(retcode);
+        }
         tn->log(20, SSTR("shard_id=" << shard_id << " sync_marker=" << sync_marker.marker
                          << " next_marker=" << next_marker << " truncated=" << truncated));
         if (!next_marker.empty()) {
