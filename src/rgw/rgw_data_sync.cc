@@ -1773,7 +1773,7 @@ class RGWDataSyncShardCR : public RGWCoroutine {
 
   ceph::coarse_real_time error_retry_time;
   static constexpr uint32_t retry_backoff_secs = 60;
-  std::atomic<int> cbret = 0;
+  int cbret = 0;
 
   RGWSyncTraceNodeRef tn;
 
@@ -1953,7 +1953,6 @@ public:
                  });
         retcode = cbret;
         lease_cr->go_down();
-        drain_all();
         yield spawn(marker_tracker->flush(), true);
         return set_cr_error(retcode);
       }
