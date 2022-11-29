@@ -1944,13 +1944,7 @@ public:
       } 
         }
       if (cbret < 0) {
-        drain_all_but_stack_cb(lease_stack.get(), [&](uint64_t stack_id, int ret) {
-                   if (ret < 0) {
-                     tn->log(10, SSTR("RGWDataFullSyncSingleEntryCR returned error: " << ret));
-		             cbret = ret;
-                   }
-                   return 0;
-                 });
+        drain_all_but_stack(lease_stack.get());
         retcode = cbret;
         lease_cr->go_down();
         yield spawn(marker_tracker->flush(), true);
@@ -2149,15 +2143,9 @@ public:
           }
         }
         if (cbret < 0 ){
-          drain_all_but_stack_cb(lease_stack.get(), [&](uint64_t stack_id, int ret) {
-            if (ret < 0) {
-              tn->log(10, SSTR("data_sync_single_entry returned error: " << ret));
-              cbret = ret;
-            }
-            return 0;
-          });
-
+          drain_all();
           retcode = cbret;
+          lease_cr->go_down();
           yield spawn(marker_tracker->flush(), true);
           return set_cr_error(retcode);
         }
