@@ -1944,9 +1944,9 @@ public:
       } 
         }
       if (cbret < 0) {
-        drain_all_but_stack(lease_stack.get());
         retcode = cbret;
         lease_cr->go_down();
+        drain_all();
         yield spawn(marker_tracker->flush(), true);
         return set_cr_error(retcode);
       }
@@ -2143,9 +2143,9 @@ public:
           }
         }
         if (cbret < 0 ){
-          drain_all();
           retcode = cbret;
           lease_cr->go_down();
+          drain_all();
           yield spawn(marker_tracker->flush(), true);
           return set_cr_error(retcode);
         }
