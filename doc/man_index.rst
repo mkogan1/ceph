@@ -42,3 +42,4 @@
    man/8/rbdmap
    man/8/rgw-orphan-list
    man/8/ceph-diff-sorted
+   man/8/rgw-policy-check
