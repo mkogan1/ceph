@@ -2003,8 +2003,33 @@ public:
         }
         set_status("lease acquired");
         tn->log(10, "took lease");
+	do {
+          /* just a hack - to ensure this will be the only writer updating marker */
+          objv.clear();
+          yield call(new RGWSimpleRadosReadCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
+                                                         rgw_raw_obj(pool, status_oid),
+                                                         &sync_marker, true, &objv));
+	  if (retcode < 0) {
+            lease_cr->go_down();
+            drain_all();
+            return set_cr_error(retcode);
+          }
+
+          marker_tracker.emplace(sc, status_oid, sync_marker, tn, objv);
+          yield call(marker_tracker->flush());
+
+          if (retcode < 0 && retcode != -ECANCELED) { // for any other errors, go down
+            lease_cr->go_down();
+            return set_cr_error(retcode);
+          }
+        } while (retcode == -ECANCELED);
+
       }
 
+      {
+      /* Now that all these are done in the above block, do we still
+       * need to redo all these ? probably needed for next
+       * iterations */
       /* Reread data sync status to fech the latest marker and update objv */
       objv.clear();
       yield call(new RGWSimpleRadosReadCR<rgw_data_sync_marker>(sync_env->dpp, sync_env->store,
@@ -2017,6 +2042,7 @@ public:
       }
 
       marker_tracker.emplace(sc, status_oid, sync_marker, tn, objv);
+      }
       do {
         if (!lease_cr->is_locked()) {
           lease_cr->go_down();
