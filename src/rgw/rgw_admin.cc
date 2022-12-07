@@ -2031,7 +2031,7 @@ static void get_md_sync_status(list<string>& status)
         continue;
       }
       auto master_marker = iter->second.marker;
-      ldpp_dout(dpp(), 30) << "mdlog shard_id = " << shard_id << ", master_marker= " << master_marker << " , local_marker= " << local_iter.second.marker <<dendl;
+      ldpp_dout(dpp(), 10) << "SSTRACE: mdlog shard_id = " << shard_id << ", master_marker= " << master_marker << " , local_marker= " << local_iter.second.marker <<dendl;
       if (local_iter.second.state == rgw_meta_sync_marker::SyncState::IncrementalSync &&
           master_marker > local_iter.second.marker) {
         shards_behind[shard_id] = local_iter.second.marker;
@@ -2058,10 +2058,10 @@ static void get_md_sync_status(list<string>& status)
         } else {
           rgw_mdlog_entry& entry = shard_data.entries.front();
           if (!oldest) {
-            ldpp_dout(dpp(), 30) << "mdlog no oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << dendl;
+            ldpp_dout(dpp(), 10) << "SSTRACE: mdlog no oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << dendl;
             oldest.emplace(iter.first, entry.timestamp);
           } else if (!ceph::real_clock::is_zero(entry.timestamp) && entry.timestamp < oldest->second) {
-            ldpp_dout(dpp(), 30) << "mdlog oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << ", oldest->second= " <<oldest->second << dendl;
+            ldpp_dout(dpp(), 10) << "SSTRACE: mdlog oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << ", oldest->second= " <<oldest->second << dendl;
             oldest.emplace(iter.first, entry.timestamp);
           }
         }
@@ -2193,7 +2193,7 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
       continue;
     }
     auto master_marker = iter->second.marker;
-    ldpp_dout(dpp(), 30) << "datalog shard_id = " << shard_id << ", master_marker= " << master_marker << " , local_marker= " << local_iter.second.marker <<dendl;
+    ldpp_dout(dpp(), 10) << "SSTRACE: datalog shard_id = " << shard_id << ", master_marker= " << master_marker << " , local_marker= " << local_iter.second.marker <<dendl;
     if (local_iter.second.state == rgw_data_sync_marker::SyncState::IncrementalSync &&
         master_marker > local_iter.second.marker) {
       shards_behind[shard_id] = local_iter.second.marker;
@@ -2218,10 +2218,10 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
         } else {
           rgw_datalog_entry& entry = shard_data.entries.front();
           if (!oldest) {
-            ldpp_dout(dpp(), 30) << "datalog no oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << dendl;
+            ldpp_dout(dpp(), 10) << "SSTRACE: datalog no oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << dendl;
             oldest.emplace(iter.first, entry.timestamp);
           } else if (!ceph::real_clock::is_zero(entry.timestamp) && entry.timestamp < oldest->second) {
-            ldpp_dout(dpp(), 30) << "datalog oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << ", oldest->second= " <<oldest->second << dendl;
+            ldpp_dout(dpp(), 10) << "SSTRACE: datalog oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << ", oldest->second= " <<oldest->second << dendl;
             oldest.emplace(iter.first, entry.timestamp);
           }
         }
@@ -2433,13 +2433,13 @@ static int bucket_source_sync_status(const DoutPrefixProvider *dpp, rgw::sal::RG
     }
     if (shard_id >= total_shards) {
       // unexpected shard id. we don't have status for it, so we're behind
-      ldpp_dout(dpp, 30) << "bucket log unexpected shard_id = " << shard_id << dendl;
+      ldpp_dout(dpp, 10) << "SSTRACE: bucket log unexpected shard_id = " << shard_id << dendl;
       shards_behind.insert(shard_id);
       continue;
     }
     auto& m = shard_status[shard_id];
     const auto pos = BucketIndexShardsManager::get_shard_marker(m.inc_marker.position);
-    ldpp_dout(dpp, 30) << "bucket log shard_id = " << shard_id << ", local marker position = " << pos << ", remote marker position =" << r.second << dendl;
+    ldpp_dout(dpp, 10) << "SSTRACE: bucket log shard_id = " << shard_id << ", local marker position = " << pos << ", remote marker position =" << r.second << dendl;
     if (pos < r.second) {
       shards_behind.insert(shard_id);
     }
