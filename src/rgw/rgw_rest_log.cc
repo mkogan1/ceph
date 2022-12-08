@@ -755,6 +755,9 @@ void RGWOp_DATALog_List::send_response() {
 
 
 void RGWOp_DATALog_Info::execute(optional_yield y) {
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Entering" << dendl;
   bool error_injection = s->cct->_conf->rgw_inject_admin_log_get_error_probability > 0;
   if (error_injection &&
       rand() % 10000 < s->cct->_conf->rgw_inject_admin_log_get_error_probability * 10000.0) {
@@ -763,10 +766,19 @@ void RGWOp_DATALog_Info::execute(optional_yield y) {
     return;
   }
   num_objects = s->cct->_conf->rgw_data_log_num_shards;
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "num_objects=" << num_objects << dendl;
   op_ret = 0;
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "exiting op_ret=" << op_ret << dendl;
 }
 
 void RGWOp_DATALog_Info::send_response() {
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Entering" << dendl;
   set_req_state_err(s, op_ret);
   dump_errno(s);
   end_header(s);
@@ -775,6 +787,9 @@ void RGWOp_DATALog_Info::send_response() {
   s->formatter->dump_unsigned("num_objects", num_objects);
   s->formatter->close_section();
   flusher.flush();
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Exiting" << dendl;
 }
 
 void RGWOp_DATALog_ShardInfo::execute(optional_yield y) {
@@ -795,7 +810,13 @@ void RGWOp_DATALog_ShardInfo::execute(optional_yield y) {
     return;
   }
 
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Getting info for shard_id=" << shard_id << dendl;
   op_ret = store->svc()->datalog_rados->get_info(this, shard_id, &info);
+  ldout(get_cct(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Got info for shard_id=" << shard_id << ": " << info << dendl;
 }
 
 void RGWOp_DATALog_ShardInfo::send_response() {
