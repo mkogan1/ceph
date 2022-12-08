@@ -120,6 +120,11 @@ struct RGWDataChangesLogInfo {
   void dump(ceph::Formatter* f) const;
   void decode_json(JSONObj* obj);
 };
+inline std::ostream& operator <<(std::ostream& m,
+				 const RGWDataChangesLogInfo& i) {
+  return m << "[marker: " << i.marker
+	   << ", last_update: " << i.last_update;
+}
 
 struct RGWDataChangesLogMarker {
   int shard = 0;

@@ -4,6 +4,7 @@
 #ifndef CEPH_RGW_DATA_SYNC_H
 #define CEPH_RGW_DATA_SYNC_H
 
+#include "cls_fifo_legacy.h"
 #undef FMT_HEADER_ONLY
 #define FMT_HEADER_ONLY 1
 #include <fmt/format.h>
@@ -92,6 +93,9 @@ struct rgw_datalog_info {
 
   void decode_json(JSONObj *obj);
 };
+inline std::ostream& operator <<(std::ostream& m, const rgw_datalog_info& i) {
+  return m << "[num_shards: " << i.num_shards  << "]";
+}
 
 struct rgw_data_sync_info {
   enum SyncState {
@@ -121,6 +125,23 @@ struct rgw_data_sync_info {
        decode(instance_id, bl);
      }
      DECODE_FINISH(bl);
+  }
+
+  std::string_view state_string() const {
+    switch (SyncState(state)) {
+      case StateInit:
+	return "init"sv;
+	break;
+      case StateBuildingFullSyncMaps:
+	return  "building-full-sync-maps"sv;
+	break;
+      case StateSync:
+	return "sync"sv;
+	break;
+      default:
+	return "unknown"sv;
+	break;
+    }
   }
 
   void dump(Formatter *f) const {
@@ -161,6 +182,13 @@ struct rgw_data_sync_info {
   rgw_data_sync_info() : state((int)StateInit), num_shards(0) {}
 };
 WRITE_CLASS_ENCODER(rgw_data_sync_info)
+
+inline std::ostream& operator <<(std::ostream& m,
+				 const rgw_data_sync_info& i) {
+  return m << "[state: " << i.state_string()
+	   << ", num_shards: " << i.num_shards
+	   << ", instance_id: " << i.instance_id << "]";
+}
 
 struct rgw_data_sync_marker {
   enum SyncState {
@@ -238,6 +266,16 @@ struct rgw_data_sync_marker {
 };
 WRITE_CLASS_ENCODER(rgw_data_sync_marker)
 
+inline std::ostream& operator <<(std::ostream& m,
+				 const rgw_data_sync_marker& r) {
+  return m << "[state: " << r.state
+	   << ", marker: " << r.marker
+	   << ", next_step_marker: " << r.next_step_marker
+	   << ", total_entries: " << r.total_entries
+	   << ", pos: " << r.pos
+	   << ", timestamp: " << r.timestamp << "]";
+}
+
 struct rgw_data_sync_status {
   rgw_data_sync_info sync_info;
   map<uint32_t, rgw_data_sync_marker> sync_markers;
@@ -270,12 +308,23 @@ struct rgw_data_sync_status {
 };
 WRITE_CLASS_ENCODER(rgw_data_sync_status)
 
+inline std::ostream& operator <<(std::ostream& m,
+				 const rgw_data_sync_status& s) {
+  return m << "[sync_info: " << s.sync_info
+	   << ", sync_markers: " << s.sync_markers << "]";
+}
+
 struct rgw_datalog_entry {
   string key;
   ceph::real_time timestamp;
 
   void decode_json(JSONObj *obj);
 };
+inline std::ostream& operator <<(std::ostream& m,
+				 const rgw_datalog_entry& e) {
+  return m << "[key: " << e.key
+	   << ", timestamp" << e.timestamp << "]";
+}
 
 struct rgw_datalog_shard_data {
   string marker;
@@ -284,6 +333,12 @@ struct rgw_datalog_shard_data {
 
   void decode_json(JSONObj *obj);
 };
+inline std::ostream& operator <<(std::ostream& m,
+				 const rgw_datalog_shard_data& d) {
+  return m << "[marker: " << d.marker
+	   << ", truncated: " << d.truncated
+	   << ", entries" << d.entries << "]";
+}
 
 class RGWAsyncRadosProcessor;
 class RGWDataSyncControlCR;

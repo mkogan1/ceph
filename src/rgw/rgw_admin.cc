@@ -2090,13 +2090,24 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
 
   RGWZone *sz;
 
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Getting sync status for zone " << source_zone << dendl;
+
+
   if (!(sz = store->svc()->zone->find_zone(source_zone))) {
+    ldpp_dout(dpp(), 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "ERROR: No such zone as " << source_zone << dendl;
     push_ss(ss, status, tab) << string("zone not found");
     flush_ss(ss, status);
     return;
   }
 
   if (!store->svc()->zone->zone_syncs_from(store->svc()->zone->get_zone(), *sz)) {
+    ldpp_dout(dpp(), 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "ERROR: Not syncing from zone " << source_zone << dendl;
     push_ss(ss, status, tab) << string("not syncing from zone");
     flush_ss(ss, status);
     return;
@@ -2105,24 +2116,42 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
 
   int ret = sync.init(dpp());
   if (ret < 0) {
+    ldpp_dout(dpp(), 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "ERROR: failed to retrieve sync info: " << cpp_strerror(-ret) << dendl;
     push_ss(ss, status, tab) << string("failed to retrieve sync info: ") + cpp_strerror(-ret);
     flush_ss(ss, status);
     return;
   }
 
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Getting sync status for zone " << source_zone << dendl;
   rgw_data_sync_status sync_status;
   ret = sync.read_sync_status(dpp(), &sync_status);
   if (ret < 0 && ret != -ENOENT) {
+    ldpp_dout(dpp(), 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "ERROR: failed to retrieve sync status: " << cpp_strerror(-ret) << dendl;
     push_ss(ss, status, tab) << string("failed read sync status: ") + cpp_strerror(-ret);
     return;
   }
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Get status for zone " << source_zone << ": " << sync_status << dendl;
 
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Getting recovering shards for zone: " << source_zone << dendl;
   set<int> recovering_shards;
   ret = sync.read_recovering_shards(dpp(), sync_status.sync_info.num_shards, recovering_shards);
   if (ret < 0 && ret != ENOENT) {
     push_ss(ss, status, tab) << string("failed read recovering shards: ") + cpp_strerror(-ret);
     return;
   }
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Got recovering shards for zone " << source_zone << ": " << recovering_shards << dendl;
 
   string status_str;
   switch (sync_status.sync_info.state) {
@@ -2156,6 +2185,10 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
       num_full++;
       full_complete += marker_iter.second.pos;
       int shard_id = marker_iter.first;
+      ldpp_dout(dpp(), 10)
+	<< "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+	<< "adding shard " << shard_id
+	<< " to shards_behind_set as it is still in full sync" << dendl;
       shards_behind_set.insert(shard_id);
     } else {
       full_complete += marker_iter.second.total_entries;
@@ -2175,11 +2208,17 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
 
   map<int, RGWDataChangesLogInfo> source_shards_info;
 
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Getting source_shards_info" << dendl;
   ret = sync.read_source_log_shards_info(dpp(), &source_shards_info);
   if (ret < 0) {
     push_ss(ss, status, tab) << string("failed to fetch source sync status: ") + cpp_strerror(-ret);
     return;
   }
+  ldpp_dout(dpp(), 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Got source_shards_info: " << source_shards_info << dendl;
 
   map<int, string> shards_behind;
 
@@ -2196,6 +2235,13 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
     ldpp_dout(dpp(), 10) << "SSTRACE: datalog shard_id = " << shard_id << ", master_marker= " << master_marker << " , local_marker= " << local_iter.second.marker <<dendl;
     if (local_iter.second.state == rgw_data_sync_marker::SyncState::IncrementalSync &&
         master_marker > local_iter.second.marker) {
+      ldpp_dout(dpp(), 10)
+	<< "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+	<< "Adding " << shard_id << "to shards_behind "
+	<< "master_marker=" << master_marker
+	<< "local state=" << local_iter.second.state
+	<< "local marker=" << local_iter.second.marker
+	<< dendl;
       shards_behind[shard_id] = local_iter.second.marker;
       shards_behind_set.insert(shard_id);
     }
@@ -2205,23 +2251,30 @@ static void get_data_sync_status(const rgw_zone_id& source_zone, list<string>& s
   if (!shards_behind.empty()) {
     map<int, rgw_datalog_shard_data> master_pos;
     ret = sync.read_source_log_shards_next(dpp(), shards_behind, &master_pos);
+    ldpp_dout(dpp(), 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "Got master_pos=" << master_pos << dendl;
 
     if (ret < 0) {
       derr << "ERROR: failed to fetch next positions (" << cpp_strerror(-ret) << ")" << dendl;
     } else {
+
       for (auto iter : master_pos) {
         rgw_datalog_shard_data& shard_data = iter.second;
         if (shard_data.entries.empty()) {
           // there aren't any entries in this shard, so we're not really behind
           shards_behind.erase(iter.first);
           shards_behind_set.erase(iter.first);
+	  ldpp_dout(dpp(), 10)
+	    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+	    << "Removing empty shard from behind set: " << iter.first << dendl;
         } else {
           rgw_datalog_entry& entry = shard_data.entries.front();
           if (!oldest) {
-            ldpp_dout(dpp(), 10) << "SSTRACE: datalog no oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << dendl;
+            ldpp_dout(dpp(), 10) << "SBTRACE: datalog no oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << dendl;
             oldest.emplace(iter.first, entry.timestamp);
           } else if (!ceph::real_clock::is_zero(entry.timestamp) && entry.timestamp < oldest->second) {
-            ldpp_dout(dpp(), 10) << "SSTRACE: datalog oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << ", oldest->second= " <<oldest->second << dendl;
+            ldpp_dout(dpp(), 10) << "SBTRACE: datalog oldest found - shard_id = " << iter.first << ", marker= " << shard_data.marker << ", entry.timestamp= " << entry.timestamp << ", oldest->second= " <<oldest->second << dendl;
             oldest.emplace(iter.first, entry.timestamp);
           }
         }

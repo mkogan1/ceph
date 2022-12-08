@@ -194,10 +194,16 @@ public:
 int RGWReadDataSyncStatusCoroutine::operate(const DoutPrefixProvider *dpp)
 {
   reenter(this) {
+    ldpp_dout(dpp, 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "Entering" << dendl;
     // read sync info
     using ReadInfoCR = RGWSimpleRadosReadCR<rgw_data_sync_info>;
     yield {
       bool empty_on_enoent = false; // fail on ENOENT
+      ldpp_dout(dpp, 10)
+	<< "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+	<< "Reading data_sync_info" << dendl;
       call(new ReadInfoCR(dpp, sync_env->store,
                           rgw_raw_obj(sync_env->svc->zone->get_zone_params().log_pool, RGWDataSyncStatusManager::sync_status_oid(sc->source_zone)),
                           &sync_status->sync_info, empty_on_enoent, objv_tracker));
@@ -207,8 +213,14 @@ int RGWReadDataSyncStatusCoroutine::operate(const DoutPrefixProvider *dpp)
           << cpp_strerror(retcode) << dendl;
       return set_cr_error(retcode);
     }
+    ldpp_dout(dpp, 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "Got data_sync_info:" << sync_status->sync_info << dendl;
     // read shard markers
     objvs.resize(sync_status->sync_info.num_shards);
+    ldpp_dout(dpp, 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "Reading shard markers" << dendl;
     using ReadMarkersCR = RGWReadDataSyncStatusMarkersCR;
     yield call(new ReadMarkersCR(sc, sync_status->sync_info.num_shards,
                                  sync_status->sync_markers, objvs));
@@ -217,6 +229,9 @@ int RGWReadDataSyncStatusCoroutine::operate(const DoutPrefixProvider *dpp)
           << cpp_strerror(retcode) << dendl;
       return set_cr_error(retcode);
     }
+    ldpp_dout(dpp, 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "Got shard markers: " << sync_status->sync_markers << dendl;
     return set_cr_done();
   }
   return 0;
@@ -674,14 +689,23 @@ RGWRemoteDataLog::RGWRemoteDataLog(const DoutPrefixProvider *dpp,
 
 int RGWRemoteDataLog::read_log_info(const DoutPrefixProvider *dpp, rgw_datalog_info *log_info)
 {
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Entering" << dendl;
   rgw_http_param_pair pairs[] = { { "type", "data" },
                                   { NULL, NULL } };
 
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Fetching log info" << dendl;
   int ret = sc.conn->get_json_resource(dpp, "/admin/log", pairs, null_yield, *log_info);
   if (ret < 0) {
     ldpp_dout(dpp, 0) << "ERROR: failed to fetch datalog info" << dendl;
     return ret;
   }
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "got log info: " << *log_info << dendl;
 
   ldpp_dout(dpp, 20) << "remote datalog, num_shards=" << log_info->num_shards << dendl;
 
@@ -691,12 +715,24 @@ int RGWRemoteDataLog::read_log_info(const DoutPrefixProvider *dpp, rgw_datalog_i
 int RGWRemoteDataLog::read_source_log_shards_info(const DoutPrefixProvider *dpp, map<int, RGWDataChangesLogInfo> *shards_info)
 {
   rgw_datalog_info log_info;
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Reading log info" << dendl;
   int ret = read_log_info(dpp, &log_info);
   if (ret < 0) {
     return ret;
   }
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Got log info:" << log_info << dendl;
 
-  return run(dpp, new RGWReadRemoteDataLogInfoCR(&sc, log_info.num_shards, shards_info));
+  ret = run(dpp, new RGWReadRemoteDataLogInfoCR(&sc, log_info.num_shards, shards_info));
+  if (ret >= 0) {
+    ldpp_dout(dpp, 10)
+      << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+      << "Got shards info:" << shards_info << dendl;
+  }
+  return ret;
 }
 
 int RGWRemoteDataLog::read_source_log_shards_next(const DoutPrefixProvider *dpp, map<int, string> shard_markers, map<int, rgw_datalog_shard_data> *result)
@@ -708,6 +744,9 @@ int RGWRemoteDataLog::init(const rgw_zone_id& _source_zone, RGWRESTConn *_conn, 
                            RGWSyncTraceManager *_sync_tracer, RGWSyncModuleInstanceRef& _sync_module,
                            PerfCounters* counters)
 {
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "initializing zone " << _source_zone << dendl;
   sync_env.init(dpp, cct, store, store->svc(), async_rados, &http_manager, _error_logger,
                 _sync_tracer, _sync_module, counters);
   sc.init(&sync_env, _conn, _source_zone);
@@ -726,6 +765,9 @@ int RGWRemoteDataLog::init(const rgw_zone_id& _source_zone, RGWRESTConn *_conn, 
 
   initialized = true;
 
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "initialized zone " << _source_zone << dendl;
   return 0;
 }
 
@@ -736,6 +778,9 @@ void RGWRemoteDataLog::finish()
 
 int RGWRemoteDataLog::read_sync_status(const DoutPrefixProvider *dpp, rgw_data_sync_status *sync_status)
 {
+  ldpp_dout(dpp, 10)
+    << "SBTRACE " << __PRETTY_FUNCTION__ << ":" << __LINE__ << " "
+    << "Entering" << dendl;
   // cannot run concurrently with run_sync(), so run in a separate manager
   RGWObjVersionTracker objv;
   std::vector<RGWObjVersionTracker> shard_objvs;
