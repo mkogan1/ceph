@@ -161,7 +161,8 @@ TEST_F(PolicyTest, Parse1) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example1)));
+			     bufferlist::static_from_string(example1),
+			     true));
   ASSERT_TRUE(p);
 
   EXPECT_EQ(p->text, example1);
@@ -190,7 +191,7 @@ TEST_F(PolicyTest, Parse1) {
 
 TEST_F(PolicyTest, Eval1) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example1));
+		   bufferlist::static_from_string(example1), true);
   Environment e;
 
   ARN arn1(Partition::aws, Service::s3,
@@ -214,7 +215,8 @@ TEST_F(PolicyTest, Parse2) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example2)));
+			     bufferlist::static_from_string(example2),
+			     true));
   ASSERT_TRUE(p);
 
   EXPECT_EQ(p->text, example2);
@@ -256,7 +258,7 @@ TEST_F(PolicyTest, Parse2) {
 
 TEST_F(PolicyTest, Eval2) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example2));
+		   bufferlist::static_from_string(example2), true);
   Environment e;
 
   auto trueacct = FakeIdentity(
@@ -297,7 +299,7 @@ TEST_F(PolicyTest, Parse3) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example3)));
+			     bufferlist::static_from_string(example3), true));
   ASSERT_TRUE(p);
 
   EXPECT_EQ(p->text, example3);
@@ -407,7 +409,7 @@ TEST_F(PolicyTest, Parse3) {
 
 TEST_F(PolicyTest, Eval3) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example3));
+		   bufferlist::static_from_string(example3), true);
   Environment em;
   Environment tr = { { "aws:MultiFactorAuthPresent", "true" } };
   Environment fa = { { "aws:MultiFactorAuthPresent", "false" } };
@@ -514,7 +516,7 @@ TEST_F(PolicyTest, Parse4) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example4)));
+			     bufferlist::static_from_string(example4), true));
   ASSERT_TRUE(p);
 
   EXPECT_EQ(p->text, example4);
@@ -543,7 +545,7 @@ TEST_F(PolicyTest, Parse4) {
 
 TEST_F(PolicyTest, Eval4) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example4));
+		   bufferlist::static_from_string(example4), true);
   Environment e;
 
   ARN arn1(Partition::aws, Service::iam,
@@ -561,7 +563,7 @@ TEST_F(PolicyTest, Parse5) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example5)));
+			     bufferlist::static_from_string(example5), true));
   ASSERT_TRUE(p);
   EXPECT_EQ(p->text, example5);
   EXPECT_EQ(p->version, Version::v2012_10_17);
@@ -590,7 +592,7 @@ TEST_F(PolicyTest, Parse5) {
 
 TEST_F(PolicyTest, Eval5) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example5));
+		   bufferlist::static_from_string(example5), true);
   Environment e;
 
   ARN arn1(Partition::aws, Service::iam,
@@ -613,7 +615,7 @@ TEST_F(PolicyTest, Parse6) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example6)));
+			     bufferlist::static_from_string(example6), true));
   ASSERT_TRUE(p);
   EXPECT_EQ(p->text, example6);
   EXPECT_EQ(p->version, Version::v2012_10_17);
@@ -642,7 +644,7 @@ TEST_F(PolicyTest, Parse6) {
 
 TEST_F(PolicyTest, Eval6) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example6));
+		   bufferlist::static_from_string(example6), true);
   Environment e;
 
   ARN arn1(Partition::aws, Service::iam,
@@ -660,7 +662,7 @@ TEST_F(PolicyTest, Parse7) {
   boost::optional<Policy> p;
 
   ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(example7)));
+			     bufferlist::static_from_string(example7), true));
   ASSERT_TRUE(p);
 
   EXPECT_EQ(p->text, example7);
@@ -692,7 +694,7 @@ TEST_F(PolicyTest, Parse7) {
 
 TEST_F(PolicyTest, Eval7) {
   auto p  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(example7));
+		   bufferlist::static_from_string(example7), true);
   Environment e;
 
   auto subacct = FakeIdentity(
@@ -936,8 +938,9 @@ TEST_F(IPPolicyTest, IPEnvironment) {
 TEST_F(IPPolicyTest, ParseIPAddress) {
   boost::optional<Policy> p;
 
-  ASSERT_NO_THROW(p = Policy(cct.get(), arbitrary_tenant,
-			     bufferlist::static_from_string(ip_address_full_example)));
+  ASSERT_NO_THROW(
+    p = Policy(cct.get(), arbitrary_tenant,
+	       bufferlist::static_from_string(ip_address_full_example), true));
   ASSERT_TRUE(p);
 
   EXPECT_EQ(p->text, ip_address_full_example);
@@ -993,12 +996,15 @@ TEST_F(IPPolicyTest, ParseIPAddress) {
 }
 
 TEST_F(IPPolicyTest, EvalIPAddress) {
-  auto allowp  = Policy(cct.get(), arbitrary_tenant,
-			bufferlist::static_from_string(ip_address_allow_example));
-  auto denyp  = Policy(cct.get(), arbitrary_tenant,
-		       bufferlist::static_from_string(ip_address_deny_example));
-  auto fullp  = Policy(cct.get(), arbitrary_tenant,
-		   bufferlist::static_from_string(ip_address_full_example));
+  auto allowp =
+    Policy(cct.get(), arbitrary_tenant,
+	   bufferlist::static_from_string(ip_address_allow_example), true);
+  auto denyp =
+    Policy(cct.get(), arbitrary_tenant,
+	   bufferlist::static_from_string(ip_address_deny_example), true);
+  auto fullp =
+    Policy(cct.get(), arbitrary_tenant,
+	   bufferlist::static_from_string(ip_address_full_example), true);
   Environment e;
   Environment allowedIP, blacklistedIP, allowedIPv6, blacklistedIPv6;
   allowedIP.emplace("aws:SourceIp","192.168.1.2");

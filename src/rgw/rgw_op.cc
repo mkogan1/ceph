@@ -296,7 +296,7 @@ static boost::optional<Policy> get_iam_policy_from_attr(CephContext* cct,
 							const string& tenant) {
   auto i = attrs.find(RGW_ATTR_IAM_POLICY);
   if (i != attrs.end()) {
-    return Policy(cct, tenant, i->second);
+    return Policy(cct, tenant, i->second, false);
   } else {
     return none;
   }
@@ -313,7 +313,7 @@ vector<Policy> get_iam_user_policy_from_attr(CephContext* cct,
    decode(policy_map, out_bl);
    for (auto& it : policy_map) {
      bufferlist bl = bufferlist::static_from_string(it.second);
-     Policy p(cct, tenant, bl);
+     Policy p(cct, tenant, bl, false);
      policies.push_back(std::move(p));
    }
   }
@@ -8327,7 +8327,9 @@ void RGWPutBucketPolicy::execute()
   }
 
   try {
-    const Policy p(s->cct, s->bucket_tenant, data);
+    const Policy p(
+      s->cct, s->bucket_tenant, data,
+      s->cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
     op_ret = retry_raced_bucket_write(store, s, [&p, this] {
 	auto attrs = s->bucket_attrs;
 	attrs[RGW_ATTR_IAM_POLICY].clear();

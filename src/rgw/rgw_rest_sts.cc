@@ -653,7 +653,7 @@ int RGWREST_STS::verify_permission()
   //Parse the policy
   //TODO - This step should be part of Role Creation
   try {
-    const rgw::IAM::Policy p(s->cct, s->user->user_id.tenant, bl);
+    const rgw::IAM::Policy p(s->cct, s->user->user_id.tenant, bl, false);
     if (!s->principal_tags.empty()) {
       auto res = p.eval(s->env, *s->auth.identity, rgw::IAM::stsTagSession, boost::none);
       if (res != rgw::IAM::Effect::Allow) {
@@ -767,7 +767,9 @@ int RGWSTSAssumeRoleWithWebIdentity::get_params()
   if (! policy.empty()) {
     bufferlist bl = bufferlist::static_from_string(policy);
     try {
-      const rgw::IAM::Policy p(s->cct, s->user->user_id.tenant, bl);
+      const rgw::IAM::Policy p(
+	s->cct, s->user->user_id.tenant, bl,
+	s->cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
     }
     catch (rgw::IAM::PolicyParseException& e) {
       ldout(s->cct, 20) << "failed to parse policy: " << e.what() << "policy" << policy << dendl;
@@ -826,7 +828,9 @@ int RGWSTSAssumeRole::get_params()
   if (! policy.empty()) {
     bufferlist bl = bufferlist::static_from_string(policy);
     try {
-      const rgw::IAM::Policy p(s->cct, s->user->user_id.tenant, bl);
+      const rgw::IAM::Policy p(
+	s->cct, s->user->user_id.tenant, bl,
+	s->cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
     }
     catch (rgw::IAM::PolicyParseException& e) {
       ldout(s->cct, 20) << "failed to parse policy: " << e.what() << "policy" << policy << dendl;

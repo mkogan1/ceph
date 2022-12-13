@@ -1,6 +1,9 @@
 14.2.19
 -------
-
+* The RGW policy parser can reject unknown principals. If you are
+  not mirroring policies between RGW and AWS, you may wish to set
+  "rgw policy reject invalid principals" to "true".
+  This affects only newly set policies, not policies that are already in place.
 * OSD: the option ``osd_fast_shutdown_notify_mon`` has been introduced to allow
   the OSD to notify the monitor it is shutting down even if ``osd_fast_shutdown``
   is enabled. This helps with the monitor logs on larger clusters, that may get

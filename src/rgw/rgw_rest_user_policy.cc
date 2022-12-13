@@ -132,7 +132,9 @@ void RGWPutUserPolicy::execute()
   }
 
   try {
-    const Policy p(s->cct, s->user->user_id.tenant, bl);
+    const Policy p(
+      s->cct, s->user->user_id.tenant, bl,
+      s->cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
     map<string, string> policies;
     if (auto it = uattrs.find(RGW_ATTR_USER_POLICY); it != uattrs.end()) {
       bufferlist out_bl = uattrs[RGW_ATTR_USER_POLICY];

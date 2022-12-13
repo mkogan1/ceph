@@ -7590,6 +7590,18 @@ std::vector<Option> get_rgw_options() {
 			  "do not set it in a production cluster, as it "
 			  "actively causes failures. Set this to a floating "
 			  "point value between 0 and 1."),
+
+    Option("rgw_policy_reject_invalid_principals", Option::TYPE_BOOL,
+	   Option::LEVEL_BASIC)
+    .set_default(false)
+    .add_service("rgw")
+    .set_description("Whether to reject policies with invalid principals")
+    .set_long_description("If true, policies with invalid principals will be "
+			  "rejected. We don't support Canonical User "
+			  "identifiers or some other form of policies that "
+			  "Amazon does, so if you are mirroring policies "
+			  "between RGW and AWS, you may wish to set this to "
+			  "false."),
   });
 }
 
