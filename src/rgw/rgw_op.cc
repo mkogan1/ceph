@@ -6228,8 +6228,10 @@ void RGWInitMultipart::execute(optional_yield y)
   bufferlist aclbl;
   rgw::sal::RGWAttrs attrs;
 
-  if (get_params(y) < 0)
+  op_ret = get_params(y);
+  if (op_ret < 0) {
     return;
+  }
 
   if (rgw::sal::RGWObject::empty(s->object.get()))
     return;
