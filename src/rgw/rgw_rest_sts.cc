@@ -772,7 +772,8 @@ int RGWSTSAssumeRoleWithWebIdentity::get_params()
 	s->cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
     }
     catch (rgw::IAM::PolicyParseException& e) {
-      ldout(s->cct, 20) << "failed to parse policy: " << e.what() << "policy" << policy << dendl;
+      ldout(s->cct, 5) << "failed to parse policy: " << e.what() << "policy" << policy << dendl;
+      s->err.message = e.what();
       return -ERR_MALFORMED_DOC;
     }
   }
@@ -833,7 +834,8 @@ int RGWSTSAssumeRole::get_params()
 	s->cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
     }
     catch (rgw::IAM::PolicyParseException& e) {
-      ldout(s->cct, 20) << "failed to parse policy: " << e.what() << "policy" << policy << dendl;
+      ldout(s->cct, 5) << "failed to parse policy: " << e.what() << "policy" << policy << dendl;
+      s->err.message = e.what();
       return -ERR_MALFORMED_DOC;
     }
   }

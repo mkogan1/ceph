@@ -151,7 +151,8 @@ void RGWPutUserPolicy::execute()
       op_ret = -ERR_INTERNAL_ERROR;
     }
   } catch (rgw::IAM::PolicyParseException& e) {
-    ldout(s->cct, 20) << "failed to parse policy: " << e.what() << dendl;
+    ldout(s->cct, 5) << "failed to parse policy: " << e.what() << dendl;
+    s->err.message = e.what();
     op_ret = -ERR_MALFORMED_DOC;
   }
 
