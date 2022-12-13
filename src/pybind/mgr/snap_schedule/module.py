@@ -41,8 +41,8 @@ class Module(MgrModule):
         if not subvol:
             return path
 
-        rc, subvol_path, err = self.remote('fs', 'subvolume', 'getpath',
-                                           fs, subvol)
+        rc, subvol_path, err = self.remote('volumes', 'subvolume_getpath',
+                                           fs, subvol, None)
         if rc != 0:
             # TODO custom exception?
             raise Exception(f'Could not resolve {path} in {fs}, {subvol}')
@@ -76,7 +76,8 @@ class Module(MgrModule):
         '''
         use_fs = fs if fs else self.default_fs
         try:
-            ret_scheds = self.client.get_snap_schedules(use_fs, path)
+            abs_path = self.resolve_subvolume_path(use_fs, subvol, path)
+            ret_scheds = self.client.get_snap_schedules(use_fs, abs_path)
         except CephfsConnectionException as e:
             return e.to_tuple()
         if format == 'json':
@@ -95,7 +96,8 @@ class Module(MgrModule):
         '''
         try:
             use_fs = fs if fs else self.default_fs
-            scheds = self.client.list_snap_schedules(use_fs, path, recursive)
+            abs_path = self.resolve_subvolume_path(use_fs, subvol, path)
+            scheds = self.client.list_snap_schedules(use_fs, abs_path, recursive)
             self.log.debug(f'recursive is {recursive}')
         except CephfsConnectionException as e:
             return e.to_tuple()
