@@ -425,8 +425,6 @@ int FIFO::apply_update(const DoutPrefixProvider *dpp,
   }
 
   info->apply_update(update);
-  ++info->version.ver;
-
   return {};
 }
 
