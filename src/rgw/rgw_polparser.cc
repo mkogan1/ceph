@@ -26,8 +26,7 @@ bool parse(CephContext* cct, const std::string& tenant,
   bl.append(in);
   try {
     auto p = rgw::IAM::Policy(
-      cct, tenant, bl,
-      cct->_conf.get_val<bool>("rgw_policy_reject_invalid_principals"));
+      cct, tenant, bl);
   } catch (const rgw::IAM::PolicyParseException& e) {
     std::cerr << fname << ": " << e.what() << std::endl;
     return false;
@@ -55,9 +54,7 @@ int main(int argc, const char** argv)
   std::string_view cmdname = argv[0];
   std::string tenant;
 
-  std::vector<const char*> args;
-  argv_to_vec(argc, argv, args);
-
+  std::vector<const char*> args = argv_to_vec(argc, argv);
   if (ceph_argparse_need_usage(args)) {
     usage(cmdname);
     exit(0);
