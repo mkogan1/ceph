@@ -3513,3 +3513,15 @@ options:
   desc: Turns on extra instrumentation surrounding bucket index
     transactions.
   with_legacy: true
+- name: rgw_pending_bucket_index_op_expiration
+  type: uint
+  level: advanced
+  default: 120
+  desc: Number of seconds a pending operation can remain in
+    bucket index shard.
+  long_desc: Number of seconds a pending operation can remain
+    in bucket index shard before it expires. Used for
+    transactional bucket index operations, and if the
+    operation does not complete in this time period,
+    the operation will be dropped.
+  with_legacy: true
