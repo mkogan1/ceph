@@ -4,6 +4,7 @@
 #ifndef CEPH_RGWRADOS_H
 #define CEPH_RGWRADOS_H
 
+#include <iostream>
 #include <functional>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
