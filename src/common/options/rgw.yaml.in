@@ -3506,3 +3506,10 @@ options:
   - rgw
   see_also:
   - rgw_trust_forwarded_https
+- name: rgw_bucket_index_transaction_instrumentation
+  type: bool
+  level: dev
+  default: false
+  desc: Turns on extra instrumentation surrounding bucket index
+    transactions.
+  with_legacy: true
