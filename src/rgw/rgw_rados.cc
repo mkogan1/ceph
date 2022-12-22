@@ -847,7 +847,10 @@ class RGWIndexCompletionManager {
   bool _stop{false};
   std::thread retry_thread;
 
-  std::atomic<int> cur_shard {0};
+  // used to distribute the completions and the locks they use across
+  // their respective vectors; it will get incremented and can wrap
+  // around back to 0 without issue
+  std::atomic<uint32_t> cur_shard {0};
 
   void process();
 
@@ -870,9 +873,7 @@ class RGWIndexCompletionManager {
   }
 
   int next_shard() {
-    int result = cur_shard % num_shards;
-    cur_shard++;
-    return result;
+    return cur_shard++ % num_shards;
   }
 
 public:
