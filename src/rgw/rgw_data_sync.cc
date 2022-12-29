@@ -1961,6 +1961,7 @@ public:
           if (lease_cr->is_done()) {
             tn->log(5, "failed to take lease");
             set_status("lease lock failed, early abort");
+            lease_cr->go_down();
             drain_all();
             return set_cr_error(lease_cr->get_ret_status());
           }
@@ -2001,6 +2002,7 @@ public:
         /* process out of band updates */
         for (modified_iter = current_modified.begin(); modified_iter != current_modified.end(); ++modified_iter) {
 	  if (!lease_cr->is_locked()) {
+        lease_cr->go_down();
 	    drain_all();
 	    yield call(marker_tracker->flush());
 	    if (retcode < 0) {
@@ -2029,6 +2031,7 @@ public:
           iter = error_entries.begin();
           for (; iter != error_entries.end(); ++iter) {
 	    if (!lease_cr->is_locked()) {
+          lease_cr->go_down();
 	      drain_all();
 	      yield call(marker_tracker->flush());
 	      if (retcode < 0) {
@@ -2083,6 +2086,7 @@ public:
 
         for (log_iter = log_entries.begin(); log_iter != log_entries.end(); ++log_iter) {
 	  if (!lease_cr->is_locked()) {
+        lease_cr->go_down();
 	    drain_all();
 	    yield call(marker_tracker->flush());
 	    if (retcode < 0) {
