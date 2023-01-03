@@ -1488,12 +1488,15 @@ public:
         /* update marker */
         yield call(marker_tracker->finish(complete->marker));
         if (retcode < 0) {
+          tn->log(0, SSTR("ERROR: failed to flush datalog marker_tracker: retcode=" << retcode));
           return set_cr_error(retcode);
         }
       }
-      if (sync_status == 0) {
+//      if (sync_status == 0) {
+      // if sync failure is successfully logged into error repo, no need
+      // to return that sync error.
         sync_status = retcode;
-      }
+//      }
       if (sync_status < 0) {
         return set_cr_error(sync_status);
       }
