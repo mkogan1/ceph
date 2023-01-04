@@ -614,6 +614,12 @@ uint64_t cls_current_version(cls_method_context_t hctx)
   return ctx->pg->get_last_user_version();
 }
 
+const ConfigProxy& cls_get_config(cls_method_context_t hctx)
+{
+  PrimaryLogPG::OpContext *ctx = *(PrimaryLogPG::OpContext **)hctx;
+  return ctx->pg->get_cct()->_conf;
+}
+
 const object_info_t& cls_get_object_info(cls_method_context_t hctx)
 {
   PrimaryLogPG::OpContext *ctx = *(PrimaryLogPG::OpContext **)hctx;
