@@ -1928,10 +1928,24 @@ public:
             tn->log(10, SSTR("timestamp for " << iter->first << " is :" << entry_timestamp));
             yield_spawn_window(new RGWDataFullSyncSingleEntryCR(sc, pool, source_bs, iter->first, sync_status,
                             error_repo, entry_timestamp, lease_cr, bucket_shard_cache, &*marker_tracker, tn),
-			       sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window), std::nullopt);
+			       sc->lcc.adj_concurrency(cct->_conf->rgw_data_sync_spawn_window), 
+                   [&](uint64_t stack_id, int ret) {
+                     if (ret < 0) {
+                       tn->log(10, SSTR("RGWDataFullSyncSingleEntryCR returned error: " << ret));
+                       cbret = ret;
+                     }
+                     return 0;
+                   });
           }
 	  sync_marker.marker = iter->first;
         }
+        if (cbret < 0 ) {
+          retcode = cbret;
+          lease_cr->go_down();
+          drain_all();
+          return set_cr_error(retcode);
+        }
+
       } while (omapvals->more);
       omapvals.reset();
 
