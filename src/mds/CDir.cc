@@ -2287,6 +2287,13 @@ void CDir::_omap_commit_ops(int r, int op_prio, int64_t metapool, version_t vers
   auto commit_one = [&](bool header=false) {
     ObjectOperation op;
 
+    /*
+     * Shouldn't submit empty op to Rados, which could cause
+     * the cephfs to become readonly.
+     */
+    ceph_assert(header || !_set.empty() || !_rm.empty());
+
+
     // don't create new dirfrag blindly
     if (!_new)
       op.stat(nullptr, nullptr, nullptr);
@@ -2321,7 +2328,7 @@ void CDir::_omap_commit_ops(int r, int op_prio, int64_t metapool, version_t vers
 
   for (auto &key : stales) {
     unsigned size = key.length() + sizeof(__u32);
-    if (write_size + size > max_write_size)
+    if (write_size > 0 && write_size + size > max_write_size)
       commit_one();
 
     write_size += size;
@@ -2330,7 +2337,7 @@ void CDir::_omap_commit_ops(int r, int op_prio, int64_t metapool, version_t vers
 
   for (auto &key : to_remove) {
     unsigned size = key.length() + sizeof(__u32);
-    if (write_size + size > max_write_size)
+    if (write_size > 0 && write_size + size > max_write_size)
       commit_one();
 
     write_size += size;
@@ -2357,7 +2364,7 @@ void CDir::_omap_commit_ops(int r, int op_prio, int64_t metapool, version_t vers
     off += item.dft_len;
 
     unsigned size = item.key.length() + bl.length() + 2 * sizeof(__u32);
-    if (write_size + size > max_write_size)
+    if (write_size > 0 && write_size + size > max_write_size)
       commit_one();
 
     write_size += size;
