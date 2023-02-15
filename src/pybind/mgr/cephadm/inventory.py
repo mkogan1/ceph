@@ -186,6 +186,15 @@ class Inventory:
                 return stored_name
         return host
 
+    def get_fqdn(self, hname: str) -> Optional[str]:
+        if hname in self._inventory:
+            if hname in self._all_known_names:
+                all_names = self._all_known_names[hname]  # [hostname, shortname, fqdn]
+                if all_names:
+                    return all_names[2]
+            return hname  # names info is not yet available!
+        return None
+
     def update_known_hostnames(self, hostname: str, shortname: str, fqdn: str) -> None:
         for hname in [hostname, shortname, fqdn]:
             # if we know the host by any of the names, store the full set of names
