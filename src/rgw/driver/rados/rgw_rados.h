@@ -763,7 +763,9 @@ public:
         uint64_t *obj_size;
         std::map<std::string, bufferlist> *attrs;
         rgw_obj *target_obj;
-	uint64_t *epoch;
+	    uint64_t *epoch;
+	    int* part_num = nullptr;
+        int* parts_count = nullptr;
 
         Params() : lastmod(nullptr), obj_size(nullptr), attrs(nullptr),
 		   target_obj(nullptr), epoch(nullptr)
