@@ -29,7 +29,7 @@ export class DocService {
     let sections = {};
 
     if (environment.build === 'ibm') {
-      const domain = `https://www.ibm.com/docs/storage-ceph/5.3/html-single/`;
+      const domain = `https://www.ibm.com/docs/storage-ceph/${docVersion}/html-single/`;
       const domainIBM = `https://www.ibm.com/`;
 
       sections = {
