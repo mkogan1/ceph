@@ -343,6 +343,7 @@ cd-create-cluster {
   background-size: cover;
 
   .list-inline {
+    display: none !important;
     margin-left: calc(50vw - (100% / 2)) !important;
     width: 100%;
   }
