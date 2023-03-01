@@ -505,6 +505,11 @@ static int init_reshard(rgw::sal::RGWRadosStore* store,
                         uint32_t new_num_shards,
                         const DoutPrefixProvider *dpp)
 {
+  if (new_num_shards == 0) {
+    ldpp_dout(dpp, 0) << "ERROR: " << __func__ << " got invalid new_num_shards=0" << dendl;
+    return -EINVAL;
+  }
+
   int ret = init_target_layout(store, bucket_info, bucket_attrs, fault, new_num_shards, dpp);
   if (ret < 0) {
     return ret;
