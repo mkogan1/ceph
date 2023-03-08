@@ -1,4 +1,6 @@
 overrides:
   s3tests:
-    force-branch: ceph-master
+    # force-branch: ceph-master
+    force-branch: wip-chunked-trans-enc
     # git_remote: https://github.com/ceph/
+    git_remote: https://github.com/mkogan1/
