@@ -488,4 +488,5 @@ install(PROGRAMS
   rgw-gap-list
   rgw-gap-list-comparator
   rgw-orphan-list
+  rgw-restore-bucket-index
   DESTINATION bin)
