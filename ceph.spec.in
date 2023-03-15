@@ -1558,6 +1558,10 @@ exit 0
 %{_bindir}/rbd-replay
 %{_bindir}/rbd-replay-many
 %{_bindir}/rbdmap
+%{_bindir}/rgw-gap-list
+%{_bindir}/rgw-gap-list-comparator
+%{_bindir}/rgw-orphan-list
+%{_bindir}/rgw-restore-bucket-index
 %{_sbindir}/mount.ceph
 %if 0%{?suse_version} && !0%{?usrmerged}
 /sbin/mount.ceph
@@ -2008,10 +2012,6 @@ fi
 %{_bindir}/radosgw-token
 %{_bindir}/radosgw-es
 %{_bindir}/radosgw-object-expirer
-%{_bindir}/rgw-gap-list
-%{_bindir}/rgw-gap-list-comparator
-%{_bindir}/rgw-orphan-list
-%{_bindir}/rgw-restore-bucket-index
 %{_libdir}/libradosgw.so*
 %{_bindir}/rgw-policy-check
 %{_mandir}/man8/radosgw.8*
