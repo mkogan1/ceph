@@ -869,7 +869,7 @@ namespace rgw {
 
     RGWFileHandle::FHCache fh_cache;
     RGWFileHandle::FhLRU fh_lru;
-    
+
     std::string uid; // should match user.user_id, iiuc
 
     RGWUserInfo user;
@@ -1046,7 +1046,7 @@ namespace rgw {
 			     const uint32_t flags = RGWFileHandle::FLAG_NONE) {
       using std::get;
 
-      // cast int32_t(RGWFileHandle::FLAG_NONE) due to strictness of Clang 
+      // cast int32_t(RGWFileHandle::FLAG_NONE) due to strictness of Clang
       // the cast transfers a lvalue into a rvalue  in the ctor
       // check the commit message for the full details
       LookupFHResult fhr { nullptr, uint32_t(RGWFileHandle::FLAG_NONE) };
@@ -1089,7 +1089,7 @@ namespace rgw {
 			     const uint32_t flags = RGWFileHandle::FLAG_NONE) {
       using std::get;
 
-      // cast int32_t(RGWFileHandle::FLAG_NONE) due to strictness of Clang 
+      // cast int32_t(RGWFileHandle::FLAG_NONE) due to strictness of Clang
       // the cast transfers a lvalue into a rvalue  in the ctor
       // check the commit message for the full details
       LookupFHResult fhr { nullptr, uint32_t(RGWFileHandle::FLAG_NONE) };
@@ -1239,8 +1239,8 @@ namespace rgw {
 
     MkObjResult create(RGWFileHandle* parent, const char *name, struct stat *st,
 		      uint32_t mask, uint32_t flags);
-    
-    MkObjResult symlink(RGWFileHandle* parent, const char *name, 
+
+    MkObjResult symlink(RGWFileHandle* parent, const char *name,
                const char *link_path, struct stat *st, uint32_t mask, uint32_t flags);
 
     MkObjResult mkdir(RGWFileHandle* parent, const char *name, struct stat *st,
@@ -2652,16 +2652,16 @@ public:
     state->info.method = "PUT"; // XXX check
     state->op = OP_PUT;
 
-    src_bucket_name = src_parent->bucket_name();
-    // need s->src_bucket_name?
-    dest_bucket_name = dst_parent->bucket_name();
-    // need s->bucket.name?
-    dest_obj_name = dst_parent->format_child_name(dst_name, false);
-    // need s->object_name?
+    state->src_bucket_name = src_parent->bucket_name();
+    state->bucket_name = dst_parent->bucket_name();
+
+    std::string dest_obj_name = dst_parent->format_child_name(dst_name, false);
 
     int rc = valid_s3_object_name(dest_obj_name);
     if (rc != 0)
       return rc;
+
+    state->object = rgwlib.get_store()->get_object(rgw_obj_key(dest_obj_name));
 
     /* XXX and fixup key attr (could optimize w/string ref and
      * dest_obj_name) */
@@ -2689,8 +2689,8 @@ public:
     dest_policy = s3policy;
     /* src_object required before RGWCopyObj::verify_permissions() */
     rgw_obj_key k = rgw_obj_key(src_name);
-    src_object = rgwlib.get_store()->get_object(k);
-    s->object = src_object->clone(); // needed to avoid trap at rgw_op.cc:5150
+    s->src_object = rgwlib.get_store()->get_object(k);
+    s->object = s->src_object->clone(); // needed to avoid trap at rgw_op.cc:5150
     return ret;
   }
 

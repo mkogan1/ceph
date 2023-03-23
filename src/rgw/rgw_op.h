@@ -1434,12 +1434,7 @@ protected:
   ceph::real_time *mod_ptr;
   ceph::real_time *unmod_ptr;
   rgw::sal::RGWAttrs attrs;
-  string src_tenant_name, src_bucket_name, src_obj_name;
   std::unique_ptr<rgw::sal::RGWBucket> src_bucket;
-  std::unique_ptr<rgw::sal::RGWObject> src_object;
-  string dest_tenant_name, dest_bucket_name, dest_obj_name;
-  std::unique_ptr<rgw::sal::RGWBucket> dest_bucket;
-  std::unique_ptr<rgw::sal::RGWObject> dest_object;
   ceph::real_time src_mtime;
   ceph::real_time mtime;
   rgw::sal::AttrsMod attrs_mod;

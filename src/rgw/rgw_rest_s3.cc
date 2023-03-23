@@ -3399,13 +3399,6 @@ int RGWCopyObj_ObjStore_S3::get_params(optional_yield y)
   if_match = s->info.env->get("HTTP_X_AMZ_COPY_IF_MATCH");
   if_nomatch = s->info.env->get("HTTP_X_AMZ_COPY_IF_NONE_MATCH");
 
-  src_tenant_name = s->src_tenant_name;
-  src_bucket_name = s->src_bucket_name;
-  src_object = s->src_object->clone();
-  dest_tenant_name = s->bucket->get_tenant();
-  dest_bucket_name = s->bucket->get_name();
-  dest_obj_name = s->object->get_name();
-
   if (s->system_request) {
     source_zone = s->info.args.get(RGW_SYS_PARAM_PREFIX "source-zone");
     s->info.args.get_bool(RGW_SYS_PARAM_PREFIX "copy-if-newer", &copy_if_newer, false);
@@ -3429,10 +3422,10 @@ int RGWCopyObj_ObjStore_S3::get_params(optional_yield y)
   }
 
   if (source_zone.empty() &&
-      (dest_tenant_name.compare(src_tenant_name) == 0) &&
-      (dest_bucket_name.compare(src_bucket_name) == 0) &&
-      (dest_obj_name.compare(src_object->get_name()) == 0) &&
-      src_object->get_instance().empty() &&
+      (s->bucket->get_tenant() == s->src_tenant_name) &&
+      (s->bucket->get_name() == s->src_bucket_name) &&
+      (s->object->get_name() == s->src_object->get_name()) &&
+      s->src_object->get_instance().empty() &&
       (attrs_mod != rgw::sal::ATTRSMOD_REPLACE)) {
     need_to_check_storage_class = true;
   }
@@ -6256,7 +6249,7 @@ int RGWSelectObj_ObjStore_S3::create_header_records(char* buff)
 
   //headers description(AWS)
   //[header-name-byte-length:1][header-name:variable-length][header-value-type:1][header-value:variable-length]
-  
+
   //1
   buff[i++] = char(strlen(header_name_str[EVENT_TYPE]));
   memcpy(&buff[i], header_name_str[EVENT_TYPE], strlen(header_name_str[EVENT_TYPE]));
@@ -6289,9 +6282,9 @@ int RGWSelectObj_ObjStore_S3::create_header_records(char* buff)
 
 int RGWSelectObj_ObjStore_S3::create_message(std::string &out_string, u_int32_t result_len, u_int32_t header_len)
 {
-  //message description(AWS): 
+  //message description(AWS):
   //[total-byte-length:4][header-byte-length:4][crc:4][headers:variable-length][payload:variable-length][crc:4]
-  //s3select result is produced into m_result, the m_result is also the response-message, thus the attach headers and CRC 
+  //s3select result is produced into m_result, the m_result is also the response-message, thus the attach headers and CRC
   //are created later to the produced SQL result, and actually wrapping the payload.
 
   u_int32_t total_byte_len = 0;

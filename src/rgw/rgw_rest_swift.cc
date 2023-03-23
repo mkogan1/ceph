@@ -1390,13 +1390,6 @@ int RGWCopyObj_ObjStore_SWIFT::get_params(optional_yield y)
   if_match = s->info.env->get("HTTP_COPY_IF_MATCH");
   if_nomatch = s->info.env->get("HTTP_COPY_IF_NONE_MATCH");
 
-  src_tenant_name = s->src_tenant_name;
-  src_bucket_name = s->src_bucket_name;
-  src_object = s->src_object->clone();
-  dest_tenant_name = s->bucket_tenant;
-  dest_bucket_name = s->bucket_name;
-  dest_obj_name = s->object->get_name();
-
   const char * const fresh_meta = s->info.env->get("HTTP_X_FRESH_METADATA");
   if (fresh_meta && strcasecmp(fresh_meta, "TRUE") == 0) {
     attrs_mod = rgw::sal::ATTRSMOD_REPLACE;
@@ -1439,7 +1432,7 @@ void RGWCopyObj_ObjStore_SWIFT::dump_copy_info()
 {
   /* Dump X-Copied-From. */
   dump_header(s, "X-Copied-From", url_encode(src_bucket->get_name()) +
-              "/" + url_encode(src_object->get_name()));
+              "/" + url_encode(s->src_object->get_name()));
 
   /* Dump X-Copied-From-Account. */
   /* XXX tenant */

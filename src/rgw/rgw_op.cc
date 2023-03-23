@@ -5093,7 +5093,7 @@ void RGWDeleteObj::execute(optional_yield y)
     // make reservation for notification if needed
     rgw::notify::reservation_t res(this, store, s, s->object.get());
     const auto versioned_object = s->bucket->versioning_enabled();
-    const auto event_type = versioned_object && s->object->get_instance().empty() ? 
+    const auto event_type = versioned_object && s->object->get_instance().empty() ?
         rgw::notify::ObjectRemovedDeleteMarkerCreated : rgw::notify::ObjectRemovedDelete;
     op_ret = rgw::notify::publish_reserve(this, event_type, res, nullptr);
     if (op_ret < 0) {
@@ -5217,7 +5217,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
     return op_ret;
   }
 
-  op_ret = src_bucket->load_by_name(this, src_tenant_name, src_bucket_name, s->bucket_instance_id,
+  op_ret = src_bucket->load_by_name(this, s->src_tenant_name, s->src_bucket_name, s->bucket_instance_id,
 				    s->sysobj_ctx, s->yield);
   if (op_ret < 0) {
     if (op_ret == -ENOENT) {
@@ -5226,17 +5226,17 @@ int RGWCopyObj::verify_permission(optional_yield y)
     return op_ret;
   }
 
-  src_object->set_bucket(src_bucket.get());
+  s->src_object->set_bucket(src_bucket.get());
   /* get buckets info (source and dest) */
   if (s->local_source &&  source_zone.empty()) {
-    src_object->set_atomic(s->obj_ctx);
-    src_object->set_prefetch_data(s->obj_ctx);
+    s->src_object->set_atomic(s->obj_ctx);
+    s->src_object->set_prefetch_data(s->obj_ctx);
 
     rgw_placement_rule src_placement;
 
     /* check source object permissions */
     op_ret = read_obj_policy(this, store, s, src_bucket->get_info(), src_bucket->get_attrs(), &src_acl, &src_placement.storage_class,
-			     src_policy, src_bucket.get(), src_object.get(), y);
+			     src_policy, src_bucket.get(), s->src_object.get(), y);
     if (op_ret < 0) {
       return op_ret;
     }
@@ -5256,22 +5256,22 @@ int RGWCopyObj::verify_permission(optional_yield y)
       if (src_policy || ! s->iam_user_policies.empty() || !s->session_policies.empty()) {
         auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, src_policy, s->iam_user_policies, s->session_policies);
         if (has_s3_existing_tag || has_s3_resource_tag)
-          rgw_iam_add_objtags(this, s, src_object.get(), has_s3_existing_tag, has_s3_resource_tag);
+          rgw_iam_add_objtags(this, s, s->src_object.get(), has_s3_existing_tag, has_s3_resource_tag);
 
 	auto identity_policy_res = eval_identity_or_session_policies(this, s->iam_user_policies, s->env,
-                                                  src_object->get_instance().empty() ?
+                                                  s->src_object->get_instance().empty() ?
                                                   rgw::IAM::s3GetObject :
                                                   rgw::IAM::s3GetObjectVersion,
-                                                  ARN(src_object->get_obj()));
+                                                  ARN(s->src_object->get_obj()));
         if (identity_policy_res == Effect::Deny) {
           return -EACCES;
         }
         auto e = Effect::Pass;
         rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
         if (src_policy) {
-          ARN obj_arn(src_object->get_obj());
+          ARN obj_arn(s->src_object->get_obj());
 	        e = src_policy->eval(s->env, *s->auth.identity,
-            src_object->get_instance().empty() ?
+            s->src_object->get_instance().empty() ?
             rgw::IAM::s3GetObject :
             rgw::IAM::s3GetObjectVersion,
             obj_arn,
@@ -5282,10 +5282,10 @@ int RGWCopyObj::verify_permission(optional_yield y)
 	}
         if (!s->session_policies.empty()) {
 	  auto session_policy_res = eval_identity_or_session_policies(this, s->session_policies, s->env,
-                                                  src_object->get_instance().empty() ?
+                                                  s->src_object->get_instance().empty() ?
                                                   rgw::IAM::s3GetObject :
                                                   rgw::IAM::s3GetObjectVersion,
-                                                  ARN(src_object->get_obj()));
+                                                  ARN(s->src_object->get_obj()));
         if (session_policy_res == Effect::Deny) {
             return -EACCES;
         }
@@ -5313,7 +5313,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
 	}
       //remove src object tags as it may interfere with policy evaluation of destination obj
       if (has_s3_existing_tag || has_s3_resource_tag)
-        rgw_iam_remove_objtags(this, s, src_object.get(), has_s3_existing_tag, has_s3_resource_tag);
+        rgw_iam_remove_objtags(this, s, s->src_object.get(), has_s3_existing_tag, has_s3_resource_tag);
 
       } else if (!src_acl.verify_permission(this, *s->auth.identity,
 					       s->perm_mask,
@@ -5325,47 +5325,22 @@ int RGWCopyObj::verify_permission(optional_yield y)
 
   RGWAccessControlPolicy dest_bucket_policy(s->cct);
 
-  if (src_bucket_name.compare(dest_bucket_name) == 0) { /* will only happen if s->local_source
-                                                           or intra region sync */
-    dest_bucket = src_bucket->clone();
-  } else {
-    op_ret = store->get_bucket(s->user.get(), RGWBucketInfo(), &dest_bucket);
-    if (op_ret < 0) {
-      if (op_ret == -ENOENT) {
-        ldpp_dout(this, 0) << "ERROR: Destination Bucket not found for user: " << s->user->get_id().to_str() << dendl;
-	op_ret = -ERR_NO_SUCH_BUCKET;
-      }
-      return op_ret;
-    }
-    op_ret = dest_bucket->load_by_name(this, dest_tenant_name, dest_bucket_name, std::string(),
-				      s->sysobj_ctx, s->yield);
-    if (op_ret < 0) {
-      if (op_ret == -ENOENT) {
-        op_ret = -ERR_NO_SUCH_BUCKET;
-      }
-      return op_ret;
-    }
-  }
-
-  dest_object = store->get_object(rgw_obj_key(dest_obj_name));
-  dest_object->set_bucket(dest_bucket.get());
-  dest_object->set_atomic(s->obj_ctx);
-
+  s->object->set_atomic(s->obj_ctx);
   /* check dest bucket permissions */
-  op_ret = read_bucket_policy(this, store, s, dest_bucket->get_info(),
-			      dest_bucket->get_attrs(),
-                              &dest_bucket_policy, dest_bucket->get_key(), y);
+  op_ret = read_bucket_policy(this, store, s, s->bucket->get_info(),
+			      s->bucket->get_attrs(),
+                              &dest_bucket_policy, s->bucket->get_key(), y);
   if (op_ret < 0) {
     return op_ret;
   }
-  auto dest_iam_policy = get_iam_policy_from_attr(s->cct, dest_bucket->get_attrs(), dest_bucket->get_tenant());
+  auto dest_iam_policy = get_iam_policy_from_attr(s->cct, s->bucket->get_attrs(), s->bucket->get_tenant());
   /* admin request overrides permission checks */
   if (! s->auth.identity->is_admin_of(dest_policy.get_owner().get_id())){
     if (dest_iam_policy != boost::none || ! s->iam_user_policies.empty() || !s->session_policies.empty()) {
       //Add destination bucket tags for authorization
       auto [has_s3_existing_tag, has_s3_resource_tag] = rgw_check_policy_condition(this, dest_iam_policy, s->iam_user_policies, s->session_policies);
       if (has_s3_resource_tag)
-        rgw_iam_add_buckettags(this, s, dest_bucket.get());
+        rgw_iam_add_buckettags(this, s, s->bucket.get());
 
       rgw_add_to_iam_environment(s->env, "s3:x-amz-copy-source", copy_source);
       if (md_directive)
@@ -5375,14 +5350,14 @@ int RGWCopyObj::verify_permission(optional_yield y)
       auto identity_policy_res = eval_identity_or_session_policies(this, s->iam_user_policies,
                                                                   s->env,
                                                                   rgw::IAM::s3PutObject,
-                                                                  ARN(dest_object->get_obj()));
+                                                                  ARN(s->object->get_obj()));
       if (identity_policy_res == Effect::Deny) {
         return -EACCES;
       }
       auto e = Effect::Pass;
       rgw::IAM::PolicyPrincipal princ_type = rgw::IAM::PolicyPrincipal::Other;
       if (dest_iam_policy) {
-        ARN obj_arn(dest_object->get_obj());
+        ARN obj_arn(s->object->get_obj());
         e = dest_iam_policy->eval(s->env, *s->auth.identity,
                                       rgw::IAM::s3PutObject,
                                       obj_arn,
@@ -5392,7 +5367,7 @@ int RGWCopyObj::verify_permission(optional_yield y)
         return -EACCES;
       }
       if (!s->session_policies.empty()) {
-	auto session_policy_res = eval_identity_or_session_policies(this, s->session_policies, s->env, rgw::IAM::s3PutObject, ARN(dest_object->get_obj()));
+	auto session_policy_res = eval_identity_or_session_policies(this, s->session_policies, s->env, rgw::IAM::s3PutObject, ARN(s->object->get_obj()));
         if (session_policy_res == Effect::Deny) {
             return false;
         }
@@ -5497,7 +5472,7 @@ void RGWCopyObj::execute(optional_yield y)
     return;
 
   if (! s->object->get_bucket()) {
-    s->bucket = src_object->get_bucket()->clone();
+    s->bucket = s->src_object->get_bucket()->clone();
     s->object->set_bucket(s->bucket.get());
   }
 
@@ -5510,13 +5485,13 @@ void RGWCopyObj::execute(optional_yield y)
   }
 
   if ( ! version_id.empty()) {
-    dest_object->set_instance(version_id);
-  } else if (dest_bucket->versioning_enabled()) {
-    dest_object->gen_rand_obj_instance_name();
+    s->object->set_instance(version_id);
+  } else if (s->bucket->versioning_enabled()) {
+    s->object->gen_rand_obj_instance_name();
   }
 
-  src_object->set_atomic(s->obj_ctx);
-  dest_object->set_atomic(s->obj_ctx);
+  s->src_object->set_atomic(s->obj_ctx);
+  s->object->set_atomic(s->obj_ctx);
 
   encode_delete_at_attr(delete_at, attrs);
 
@@ -5524,7 +5499,7 @@ void RGWCopyObj::execute(optional_yield y)
   {
     // get src object size (cached in obj_ctx from verify_permission())
     RGWObjState* astate = nullptr;
-    op_ret = src_object->get_obj_state(this, s->obj_ctx, *src_bucket, &astate,
+    op_ret = s->src_object->get_obj_state(this, s->obj_ctx, *src_bucket, &astate,
 				       s->yield, true);
     if (op_ret < 0) {
       return;
@@ -5533,7 +5508,7 @@ void RGWCopyObj::execute(optional_yield y)
   
     if (!s->system_request) { // no quota enforcement for system requests
       // enforce quota against the destination bucket owner
-      op_ret = dest_bucket->check_quota(user_quota, bucket_quota,
+      op_ret = s->bucket->check_quota(user_quota, bucket_quota,
 				      astate->accounted_size, y);
       if (op_ret < 0) {
         return;
@@ -5545,18 +5520,18 @@ void RGWCopyObj::execute(optional_yield y)
 
   /* Handle object versioning of Swift API. In case of copying to remote this
    * should fail gently (op_ret == 0) as the dst_obj will not exist here. */
-  op_ret = dest_object->swift_versioning_copy(s->obj_ctx, this, s->yield);
+  op_ret = s->object->swift_versioning_copy(s->obj_ctx, this, s->yield);
   if (op_ret < 0) {
     return;
   }
 
   RGWObjectCtx& obj_ctx = *static_cast<RGWObjectCtx *>(s->obj_ctx);
-  op_ret = src_object->copy_object(obj_ctx,
+  op_ret = s->src_object->copy_object(obj_ctx,
 	   s->user.get(),
 	   &s->info,
 	   source_zone,
-	   dest_object.get(),
-	   dest_bucket.get(),
+	   s->object.get(),
+	   s->bucket.get(),
 	   src_bucket.get(),
 	   s->dest_placement,
 	   &src_mtime,
