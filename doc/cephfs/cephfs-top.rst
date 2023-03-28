@@ -76,7 +76,7 @@ By default, `cephfs-top` connects to cluster name `ceph`. To use a non-default c
 
   $ cephfs-top -d <seconds>
 
-Interval should be greater or equal to 0.5 second. Fractional seconds are honoured.
+Refresh interval should be a positive integer.
 
 Interactive Commands
 --------------------
