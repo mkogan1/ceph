@@ -1137,7 +1137,9 @@ public:
                        const DoutPrefixProvider *dpp,
                        RGWFetchObjFilter *filter,
                        const rgw_zone_set_entry& source_trace_entry,
-                       rgw_zone_set *zones_trace = nullptr,
+                       bool stat_follow_olh,
+                       const rgw_obj& stat_dest_obj,
+                       rgw_zone_set *zones_trace= nullptr,
                        std::optional<uint64_t>* bytes_transferred = 0);
   /**
    * Copy an object.
