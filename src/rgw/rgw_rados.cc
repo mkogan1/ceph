@@ -7353,7 +7353,7 @@ int RGWRados::bucket_index_link_olh(const DoutPrefixProvider *dpp, RGWBucketInfo
 		      cls_rgw_bucket_link_olh(op, key, olh_state.olh_tag,
                                               delete_marker, op_tag, meta, olh_epoch,
 					      unmod_since, high_precision_time,
-					      svc.zone->get_zone().log_data, zones_trace);
+					      svc.zone->need_to_log_data(), zones_trace);
                       return rgw_rados_operate(dpp, ref.pool.ioctx(), ref.obj.oid, &op, null_yield);
                     });
   if (r < 0) {
@@ -7400,7 +7400,7 @@ int RGWRados::bucket_index_unlink_instance(const DoutPrefixProvider *dpp,
 		      op.assert_exists(); // bucket index shard must exist
 		      cls_rgw_guard_bucket_resharding(op, -ERR_BUSY_RESHARDING);
 		      cls_rgw_bucket_unlink_instance(op, key, op_tag,
-						     olh_tag, olh_epoch, svc.zone->get_zone().log_data, zones_trace);
+						     olh_tag, olh_epoch, svc.zone->need_to_log_data(), zones_trace);
                       return rgw_rados_operate(dpp, ref.pool.ioctx(), ref.obj.oid, &op, null_yield);
                     });
   if (r < 0) {
@@ -8783,7 +8783,7 @@ int RGWRados::cls_obj_prepare_op(const DoutPrefixProvider *dpp, BucketShard& bs,
 
   cls_rgw_obj_key key(obj.key.get_index_key_name(), obj.key.instance);
   cls_rgw_guard_bucket_resharding(o, -ERR_BUSY_RESHARDING);
-  cls_rgw_bucket_prepare_op(o, op, tag, key, obj.key.get_loc(), svc.zone->get_zone().log_data, bilog_flags, zones_trace);
+  cls_rgw_bucket_prepare_op(o, op, tag, key, obj.key.get_loc(), svc.zone->need_to_log_data(), bilog_flags, zones_trace);
   int ret = bs.bucket_obj.operate(dpp, &o, y);
   ldout_bitx(bitx, cct, 10) << "EXITING " << __func__ << ": ret=" << ret << dendl_bitx;
   return ret;
@@ -9559,7 +9559,7 @@ int RGWRados::check_disk_state(const DoutPrefixProvider *dpp,
     bucket_info.bucket << " dir_entry=" << list_state.key << dendl_bitx;
 
   const rgw_bucket& bucket = bucket_info.bucket;
-  uint8_t suggest_flag = (svc.zone->get_zone().log_data ? CEPH_RGW_DIR_SUGGEST_LOG_OP : 0);
+  uint8_t suggest_flag = (svc.zone->need_to_log_data() ? CEPH_RGW_DIR_SUGGEST_LOG_OP : 0);
 
   std::string loc;
 
@@ -9753,7 +9753,7 @@ int RGWRados::check_bucket_shards(const RGWBucketInfo& bucket_info,
     cct->_conf.get_val<uint64_t>("rgw_max_objs_per_shard");
 
   // TODO: consider per-bucket sync policy here?
-  const bool is_multisite = svc.zone->get_zone().log_data;
+  const bool is_multisite = svc.zone->need_to_log_data();
 
   quota_handler->check_bucket_shards(dpp, max_objs_per_shard, num_source_shards,
 				     num_objs, is_multisite, need_resharding,
