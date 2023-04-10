@@ -71,6 +71,7 @@ void decode_json_obj(rgw_placement_rule& v, JSONObj *obj)
 void RGWOLHInfo::dump(Formatter *f) const
 {
   encode_json("target", target, f);
+  encode_json("removed", removed, f);
 }
 
 void RGWOLHPendingInfo::dump(Formatter *f) const
