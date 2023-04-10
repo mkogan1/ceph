@@ -9740,6 +9740,7 @@ void RGWOLHInfo::generate_test_instances(list<RGWOLHInfo*> &o)
 void RGWOLHInfo::dump(Formatter *f) const
 {
   encode_json("target", target, f);
+  encode_json("removed", removed, f);
 }
 
 void RGWOLHPendingInfo::dump(Formatter *f) const
