@@ -16,7 +16,9 @@ if(WITH_MGR_DASHBOARD_FRONTEND)
   endif()
 else()
   # prebuilt
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist-redhat
+    DESTINATION ${CEPH_INSTALL_DATADIR}/mgr/dashboard/frontend)
+  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist-ibm
     DESTINATION ${CEPH_INSTALL_DATADIR}/mgr/dashboard/frontend)
   install(FILES frontend/package.json
     DESTINATION ${CEPH_INSTALL_DATADIR}/mgr/dashboard/frontend)
