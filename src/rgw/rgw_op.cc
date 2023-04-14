@@ -63,6 +63,9 @@
 #include "cls/lock/cls_lock_client.h"
 #include "cls/rgw/cls_rgw_client.h"
 
+#include "rgw_auth.h"
+#include "rgw_auth_registry.h"
+
 
 #include "include/ceph_assert.h"
 
@@ -5588,6 +5591,158 @@ void RGWCopyObj::pre_exec()
   rgw_bucket_object_pre_exec(s);
 }
 
+class RGWCOE_filter_from_proc: public RGWGetObj_Filter {
+  std::unique_ptr<rgw::sal::ObjectProcessor> processor;
+  off_t ofs;
+public:
+  RGWCOE_filter_from_proc() {}
+  RGWCOE_filter_from_proc(rgw::sal::ObjectProcessor &_p) : processor(&_p), ofs(0) {
+  };
+  ~RGWCOE_filter_from_proc() {};
+  int handle_data(bufferlist &bl, off_t bl_ofs, off_t bl_len) override {
+    uint64_t read_len = bl_len;
+    int ret = processor->process(std::move(bl), ofs);
+    if (ret < 0) { return ret; }
+    ofs += read_len;
+    return ret;
+  };
+  int flush() override {
+    int ret = processor->process({}, ofs);
+    return ret;
+  };
+  // no override: virtual int fixup_range(off&ofs, off_t&end){ return 0; }
+};
+
+// getobject filter pipeline
+// get_filter uses this as the apex of the filter chain it constructs
+class RGWCOE_proc_from_filters : public rgw::sal::ObjectProcessor
+{
+  RGWGetObj_Filter &filter;
+public:
+  RGWCOE_proc_from_filters(RGWGetObj_Filter &f) : filter(f) {
+  }
+  int process(bufferlist &&bl, uint64_t ofs) override {
+    off_t len = bl.length();
+    int ret = filter.handle_data(bl, ofs, len);
+    return ret;
+  };
+  int prepare(optional_yield y) override {
+    throw -EDOM;	// do this elsewhere...
+  };
+  int complete(size_t account_size, const std::string& etag,
+    ceph::real_time *mtime, ceph::real_time set_mtime,
+    std::map<std::string, bufferlist>& attrs,
+    ceph::real_time delete_at,
+    const char *if_match, const char *if_nomatch,
+    const std::string *user_data,
+    rgw_zone_set *zones_trace, bool *canceled,
+    optional_yield y)
+  {
+    throw -EDOM;	// do this elsewhere...
+  }
+};
+
+class RGWCOE_make_filter_pipeline : public rgw::sal::ObjectFilter {
+  CephContext *cct;
+  int op_ret;
+  map<string, bufferlist> attrs;
+  bool need_decompress;
+  RGWCompressionInfo cs_info;
+  bool encrypted;
+  std::unique_ptr<RGWGetObj_Filter> decrypt;
+  int64_t ofs_x, end_x;
+  std::unique_ptr<RGWGetObj_Filter> cb;
+  bool skip_decrypt;
+  DoutPrefixProvider *dpp;
+  boost::optional<RGWGetObj_Decompress> decompress;
+  bool partial_content = false;
+  std::map<std::string, std::string> crypt_http_responses;	// XXX who consumes?
+  std::unique_ptr<rgw::sal::ObjectProcessor> oproc;
+  const RGWEnv *env;
+  struct rgw_err &err;
+  std::unique_ptr<rgw::sal::Object> &object;
+  uint64_t &obj_size;
+  RGWDecryptContext dctx;
+public:
+  RGWCOE_make_filter_pipeline(CephContext *_cct, DoutPrefixProvider *_dpp,
+      map<string, bufferlist> _a, bool _skip_decrypt, const RGWEnv * _env,
+      std::unique_ptr<rgw::sal::Object> & _object, uint64_t &_obj_size,
+      rgw_err &_err)
+    : cct(_cct), attrs(_a), encrypted( attrs.count(RGW_ATTR_CRYPT_MODE)),
+      skip_decrypt(_skip_decrypt), dpp(_dpp),
+      env(_env), err(_err),
+      object(_object),
+      obj_size(_obj_size),
+      dctx( dpp, cct,
+        err.message,
+        false, 
+        !cct->_conf->rgw_crypt_require_ssl
+            || rgw_transport_is_secure(cct, *_env),
+        env) {
+  };
+  int get_decrypt_filter(std::unique_ptr<RGWGetObj_Filter> *filter,
+      RGWGetObj_Filter* cb,
+      bufferlist* manifest_bl,
+      optional_yield y) {
+    if (skip_decrypt) {
+      return 0;
+    }
+    std::unique_ptr<BlockCrypt> block_crypt;
+    int res = rgw_s3_prepare_decrypt(dctx, attrs, &block_crypt, crypt_http_responses);
+    if (res < 0) {
+      return res;
+    }
+    if (block_crypt == nullptr) {
+      return 0;
+    }
+    std::vector<size_t> parts_len;
+    res = RGWGetObj_BlockDecrypt::read_manifest_parts(dpp, *manifest_bl, parts_len);
+    if (res < 0) {
+      return res;
+    }
+    *filter = std::make_unique<RGWGetObj_BlockDecrypt>(dpp, cct, cb,
+	 std::move(block_crypt), std::move(parts_len),
+	 y);
+    return res;
+  }
+  rgw::sal::ObjectProcessor & get_filter(rgw::sal::ObjectProcessor&next, optional_yield y) override {
+    ofs_x = 0;
+    end_x = obj_size;
+    encrypted = false;
+    *cb = RGWCOE_filter_from_proc(next);
+    RGWGetObj_Filter *filter = &*cb;
+    // decompress
+    op_ret = rgw_compression_info_from_attrset(attrs, need_decompress, cs_info);
+    if (op_ret < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: failed to decode compression info, cannot decompress" << dendl;
+      throw op_ret;
+    }
+    if (need_decompress && (!encrypted || !skip_decrypt)) {
+      obj_size = cs_info.orig_size;			// XXX where?
+      object->set_obj_size(cs_info.orig_size);		// XXX where?
+      decompress.emplace(cct, &cs_info, partial_content, filter);
+      filter = &*decompress;
+    }
+    // decrypt
+    filter->fixup_range(ofs_x, end_x);
+
+    auto attr_iter = attrs.find(RGW_ATTR_MANIFEST);
+    op_ret = this->get_decrypt_filter(&decrypt, filter,
+				      attr_iter != attrs.end() ? &(attr_iter->second) : nullptr, y);
+    if (decrypt != nullptr) {
+      filter = decrypt.get();
+      filter->fixup_range(ofs_x, end_x);
+    }
+    if (op_ret < 0) {
+      throw op_ret;
+    }
+    oproc = std::make_unique<RGWCOE_proc_from_filters>(RGWCOE_proc_from_filters(*filter));
+    return *oproc;
+//    return new RGWCOE_proc_from_filters(&this);
+  };
+};
+
+
 void RGWCopyObj::execute(optional_yield y)
 {
   if (init_common() < 0)
@@ -5678,8 +5833,9 @@ void RGWCopyObj::execute(optional_yield y)
   if (op_ret < 0) {
     return;
   }
-
-  op_ret = s->src_object->copy_object(s->user.get(),
+  try {
+    RGWCOE_make_filter_pipeline cb { s->cct, this, attrs, false, s->info.env, s->src_object, obj_size, s->err };
+    op_ret = s->src_object->copy_object(s->user.get(),
 	   &s->info,
 	   source_zone,
 	   s->object.get(),
@@ -5703,8 +5859,16 @@ void RGWCopyObj::execute(optional_yield y)
 	   &s->req_id, /* use req_id as tag */
 	   &etag,
 	   copy_obj_progress_cb, (void *)this,
+	   &cb,
 	   this,
 	   s->yield);
+  } catch (int caught_errno) {
+      std::stringstream os;
+      os << "Caught error " << caught_errno << " during copy object";
+      s->err.message = os.str();
+      op_ret = caught_errno;
+      return;
+  }
 
   // send request to notification manager
   int ret = res->publish_commit(this, obj_size, mtime, etag, s->object->get_instance());
