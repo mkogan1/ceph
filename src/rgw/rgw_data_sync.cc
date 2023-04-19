@@ -1786,8 +1786,17 @@ class RGWDataSyncShardCR : public RGWCoroutine {
   boost::intrusive_ptr<rgw::bucket_sync::Cache> bucket_shard_cache;
 
   int parse_bucket_key(const std::string& key, rgw_bucket_shard& bs) const {
-    return rgw_bucket_parse_bucket_key(sync_env->cct, key,
+    int ret = rgw_bucket_parse_bucket_key(sc->env->cct, key,
                                        &bs.bucket, &bs.shard_id);
+    //for the case of num_shards 0, shard_id gets a value of -1
+    //because of the way bucket instance gets parsed in the absence of shard_id delimiter.
+    //interpret it as a non-negative value.
+    if (ret == 0) {
+      if (bs.shard_id < 0) {
+        bs.shard_id = 0;
+      }
+    }
+    return ret;
   }
 
 public:
