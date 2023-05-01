@@ -740,7 +740,7 @@ public:
         rgw_obj obj;
         rgw_raw_obj head_obj;
       } state;
-      
+
       struct ConditionParams {
         const ceph::real_time *mod_ptr;
         const ceph::real_time *unmod_ptr;
@@ -749,8 +749,8 @@ public:
         uint64_t mod_pg_ver;
         const char *if_match;
         const char *if_nomatch;
-        
-        ConditionParams() : 
+
+        ConditionParams() :
                  mod_ptr(NULL), unmod_ptr(NULL), high_precision_time(false), mod_zone_id(0), mod_pg_ver(0),
                  if_match(NULL), if_nomatch(NULL) {}
       } conds;
@@ -776,7 +776,7 @@ public:
 
     struct Write {
       RGWRados::Object *target;
-      
+
       struct MetaParams {
         ceph::real_time *mtime;
         std::map<std::string, bufferlist>* rmattrs;
@@ -848,7 +848,7 @@ public:
 
         DeleteResult() : delete_marker(false) {}
       } result;
-      
+
       explicit Delete(RGWRados::Object *_target) : target(_target) {}
 
       int delete_obj(optional_yield y, const DoutPrefixProvider *dpp);
@@ -951,7 +951,7 @@ public:
       void set_bilog_flags(uint16_t flags) {
         bilog_flags = flags;
       }
-      
+
       void set_zones_trace(rgw_zone_set *_zones_trace) {
         zones_trace = _zones_trace;
       }
@@ -1052,14 +1052,14 @@ public:
                             const rgw_user& user,               /* in */
                             rgw::sal::Bucket* bucket,        /* in */
                             rgw::sal::Object* obj,           /* in */
-                            const DoutPrefixProvider *dpp,      /* in/out */ 
-                            optional_yield y);                  /* in */                
+                            const DoutPrefixProvider *dpp,      /* in/out */
+                            optional_yield y);                  /* in */
   int swift_versioning_restore(RGWObjectCtx& obj_ctx,           /* in/out */
                                const rgw_user& user,            /* in */
                                rgw::sal::Bucket* bucket,     /* in */
                                rgw::sal::Object* obj,        /* in */
                                bool& restored,                 /* out */
-                               const DoutPrefixProvider *dpp);     /* in/out */                
+                               const DoutPrefixProvider *dpp);     /* in/out */
   int copy_obj_to_remote_dest(const DoutPrefixProvider *dpp,
                               RGWObjState *astate,
                               std::map<std::string, bufferlist>& src_attrs,
@@ -1132,7 +1132,8 @@ public:
                        RGWFetchObjFilter *filter,
                        bool stat_follow_olh,
                        const rgw_obj& stat_dest_obj,
-                       rgw_zone_set *zones_trace= nullptr,
+                       const rgw_zone_set_entry& source_trace_entry,
+                       rgw_zone_set *zones_trace = nullptr,
                        std::optional<uint64_t>* bytes_transferred = 0);
   /**
    * Copy an object.
@@ -1191,7 +1192,7 @@ public:
                std::string *petag,
                const DoutPrefixProvider *dpp,
                optional_yield y);
-  
+
   int transition_obj(RGWObjectCtx& obj_ctx,
                      rgw::sal::Bucket* bucket,
                      rgw::sal::Object& obj,
