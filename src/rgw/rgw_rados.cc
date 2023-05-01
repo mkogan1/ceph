@@ -3359,7 +3359,7 @@ int RGWRados::Object::Write::_do_write_meta(const DoutPrefixProvider *dpp,
   }
   else {
     store->quota_handler->update_stats(meta.owner, obj.bucket, (orig_exists ? 0 : 1),
-                                     accounted_size, orig_size);  
+                                     accounted_size, orig_size);
   }
   return 0;
 
@@ -3983,6 +3983,7 @@ int RGWRados::fetch_remote_obj(RGWObjectCtx& obj_ctx,
                RGWFetchObjFilter *filter,
                bool stat_follow_olh,
                const rgw_obj& stat_dest_obj,
+               const rgw_zone_set_entry& source_trace_entry,
                rgw_zone_set *zones_trace,
                std::optional<uint64_t>* bytes_transferred)
 {
@@ -4427,13 +4428,14 @@ int RGWRados::copy_obj(RGWObjectCtx& obj_ctx,
   ldpp_dout(dpp, 5) << "Copy object " << src_obj->get_bucket() << ":" << src_obj->get_oid() << " => " << dest_obj->get_bucket() << ":" << dest_obj->get_oid() << dendl;
 
   if (remote_src || !source_zone.empty()) {
+    rgw_zone_set_entry source_trace_entry{source_zone.id, std::nullopt};
     return fetch_remote_obj(obj_ctx, user_id, info, source_zone,
                dest_obj, src_obj, dest_bucket, src_bucket,
                dest_placement, src_mtime, mtime, mod_ptr,
                unmod_ptr, high_precision_time,
                if_match, if_nomatch, attrs_mod, copy_if_newer, attrs, category,
                olh_epoch, delete_at, ptag, petag, progress_cb, progress_data, dpp,
-               nullptr /* filter */, stat_follow_olh, stat_dest_obj);
+               nullptr /* filter */, stat_follow_olh, stat_dest_obj, source_trace_entry);
   }
 
   map<string, bufferlist> src_attrs;
@@ -5385,7 +5387,7 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y, const DoutPrefixProvi
 
   RGWRados::Bucket bop(store, bucket_info);
   RGWRados::Bucket::UpdateIndex index_op(&bop, obj);
-  
+
   index_op.set_zones_trace(params.zones_trace);
   index_op.set_bilog_flags(params.bilog_flags);
 
@@ -5409,7 +5411,7 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y, const DoutPrefixProvi
       obj_tombstone_cache->add(obj, entry);
     }
     r = index_op.complete_del(dpp, poolid, ioctx.get_last_version(), state->mtime, params.remove_objs);
-    
+
     int ret = target->complete_atomic_modification(dpp);
     if (ret < 0) {
       ldpp_dout(dpp, 0) << "ERROR: complete_atomic_modification returned ret=" << ret << dendl;
@@ -6962,7 +6964,7 @@ int RGWRados::block_while_resharding(RGWRados::BucketShard *bs,
 	return ret;
       }
       const auto gen = bucket_info.layout.logs.empty() ? -1 : bucket_info.layout.logs.back().gen;
-      ldpp_dout(dpp, 20) << __func__ << 
+      ldpp_dout(dpp, 20) << __func__ <<
         " INFO: refreshed bucket info after reshard at " <<
 	log_tag << ". new shard_id=" << bs->shard_id << ". gen=" << gen << dendl;
       return 0;
