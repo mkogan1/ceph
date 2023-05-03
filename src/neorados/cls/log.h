@@ -245,9 +245,9 @@ template<typename CompletionToken>
 auto info(RADOS& r, Object o, IOContext ioc, CompletionToken&& token)
 {
   using namespace std::literals;
-  return exec<::cls::log::ops::list_ret>(
+  return exec<::cls::log::ops::info_ret>(
     r, std::move(o), std::move(ioc),
-    "log"s, "info"s,
+    "log"s, "info"s, ::cls::log::ops::info_op{},
     [](const ::cls::log::ops::info_ret& ret) {
       return ret.header;
     }, std::forward<CompletionToken>(token));
