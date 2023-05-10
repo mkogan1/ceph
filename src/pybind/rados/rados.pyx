@@ -69,6 +69,7 @@ MAX_ERRNO = _MAX_ERRNO
 ANONYMOUS_AUID = 0xffffffffffffffff
 ADMIN_AUID = 0
 
+OMAP_KEY_TYPE = Union[str,bytes]
 
 class Error(Exception):
     """ `Error` class, derived from `Exception` """
@@ -1354,10 +1355,12 @@ cdef class OmapIterator(object):
     """Omap iterator"""
 
     cdef public Ioctx ioctx
+    cdef public object omap_key_type
     cdef rados_omap_iter_t ctx
 
-    def __cinit__(self, Ioctx ioctx):
+    def __cinit__(self, Ioctx ioctx, omap_key_type):
         self.ioctx = ioctx
+        self.omap_key_type = omap_key_type
 
     def __iter__(self):
         return self
@@ -1379,7 +1382,7 @@ cdef class OmapIterator(object):
             raise make_ex(ret, "error iterating over the omap")
         if key_ == NULL:
             raise StopIteration()
-        key = decode_cstr(key_)
+        key = self.omap_key_type(key_)
         val = None
         if val_ != NULL:
             val = val_[:len_]
@@ -3566,7 +3569,7 @@ returned %d, but should return zero on success." % (self.name, ret))
         """
         read_op.release()
 
-    def set_omap(self, write_op: WriteOp, keys: Sequence[str], values: Sequence[bytes]):
+    def set_omap(self, write_op: WriteOp, keys: Sequence[OMAP_KEY_TYPE], values: Sequence[bytes]):
         """
         set keys values to write_op
         :para write_op: write_operation object
@@ -3713,9 +3716,10 @@ returned %d, but should return zero on success." % (self.name, ret))
 
     def get_omap_vals(self,
                       read_op: ReadOp,
-                      start_after: str,
-                      filter_prefix: str,
-                      max_return: int) -> Tuple[OmapIterator, int]:
+                      start_after: OMAP_KEY_TYPE,
+                      filter_prefix: OMAP_KEY_TYPE,
+                      max_return: int,
+                      omap_key_type = bytes.decode) -> Tuple[OmapIterator, int]:
         """
         get the omap values
         :para read_op: read operation object
@@ -3737,11 +3741,15 @@ returned %d, but should return zero on success." % (self.name, ret))
         with nogil:
             rados_read_op_omap_get_vals2(_read_op.read_op, _start_after, _filter_prefix,
                                          _max_return, &iter_addr, NULL, NULL)
-        it = OmapIterator(self)
+        it = OmapIterator(self, omap_key_type)
         it.ctx = iter_addr
         return it, 0   # 0 is meaningless; there for backward-compat
 
-    def get_omap_keys(self, read_op: ReadOp, start_after: str, max_return: int) -> Tuple[OmapIterator, int]:
+    def get_omap_keys(self,
+                      read_op: ReadOp,
+                      start_after: OMAP_KEY_TYPE,
+                      max_return: int,
+                      omap_key_type = bytes.decode) -> Tuple[OmapIterator, int]:
         """
         get the omap keys
         :para read_op: read operation object
@@ -3759,11 +3767,14 @@ returned %d, but should return zero on success." % (self.name, ret))
         with nogil:
             rados_read_op_omap_get_keys2(_read_op.read_op, _start_after,
                                          _max_return, &iter_addr, NULL, NULL)
-        it = OmapIterator(self)
+        it = OmapIterator(self, omap_key_type)
         it.ctx = iter_addr
         return it, 0   # 0 is meaningless; there for backward-compat
 
-    def get_omap_vals_by_keys(self, read_op: ReadOp, keys: Sequence[str]) -> Tuple[OmapIterator, int]:
+    def get_omap_vals_by_keys(self,
+                              read_op: ReadOp,
+                              keys: Sequence[OMAP_KEY_TYPE],
+                              omap_key_type = bytes.decode) -> Tuple[OmapIterator, int]:
         """
         get the omap values by keys
         :para read_op: read operation object
@@ -3782,13 +3793,13 @@ returned %d, but should return zero on success." % (self.name, ret))
                 rados_read_op_omap_get_vals_by_keys(_read_op.read_op,
                                                     <const char**>_keys,
                                                     key_num, &iter_addr, NULL)
-            it = OmapIterator(self)
+            it = OmapIterator(self, omap_key_type)
             it.ctx = iter_addr
             return it, 0   # 0 is meaningless; there for backward-compat
         finally:
             free(_keys)
 
-    def remove_omap_keys(self, write_op: WriteOp, keys: Sequence[str]):
+    def remove_omap_keys(self, write_op: WriteOp, keys: Sequence[OMAP_KEY_TYPE]):
         """
         remove omap keys specifiled
         :para write_op: write operation object
@@ -3819,7 +3830,7 @@ returned %d, but should return zero on success." % (self.name, ret))
         with nogil:
             rados_write_op_omap_clear(_write_op.write_op)
 
-    def remove_omap_range2(self, write_op: WriteOp, key_begin: str, key_end: str):
+    def remove_omap_range2(self, write_op: WriteOp, key_begin: OMAP_KEY_TYPE, key_end: OMAP_KEY_TYPE):
         """
         Remove key/value pairs from an object whose keys are in the range
         [key_begin, key_end)
