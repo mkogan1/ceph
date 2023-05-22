@@ -283,18 +283,19 @@ void cls_rgw_bucket_prepare_op(ObjectWriteOperation& o, RGWModifyOp op, string& 
 void cls_rgw_bucket_complete_op(ObjectWriteOperation& o, RGWModifyOp op, string& tag,
                                 rgw_bucket_entry_ver& ver,
                                 const cls_rgw_obj_key& key,
-                                rgw_bucket_dir_entry_meta& dir_meta,
-				list<cls_rgw_obj_key> *remove_objs, bool log_op,
+                                const rgw_bucket_dir_entry_meta& dir_meta,
+				const list<cls_rgw_obj_key> *remove_objs, bool log_op,
                                 uint16_t bilog_flags,
-                                rgw_zone_set *zones_trace)
+                                const rgw_zone_set *zones_trace,
+				const std::string& obj_locator)
 {
-
   bufferlist in;
   rgw_cls_obj_complete_op call;
   call.op = op;
   call.tag = tag;
   call.key = key;
   call.ver = ver;
+  call.locator = obj_locator;
   call.meta = dir_meta;
   call.log_op = log_op;
   call.bilog_flags = bilog_flags;
