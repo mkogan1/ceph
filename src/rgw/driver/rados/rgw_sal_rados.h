@@ -256,6 +256,7 @@ class RadosStore : public StoreDriver {
 
     void setRados(RGWRados * st) { rados = st; }
     RGWRados* getRados(void) { return rados; }
+    boost::asio::io_context& get_io_context() { return io_context; }
 
     RGWServices* svc() { return &rados->svc; }
     const RGWServices* svc() const { return &rados->svc; }
