@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "common/errno.h"
+#include "librados/AioCompletionImpl.h"
 #include "librados/librados_asio.h"
 
 #include "include/stringify.h"
