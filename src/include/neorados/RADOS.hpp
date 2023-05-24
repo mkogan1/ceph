@@ -1530,8 +1530,8 @@ public:
     return boost::asio::async_initiate<decltype(consigned), SimpleOpSig>(
       [o = std::move(o), ioc = std::move(ioc), notify_id, cookie,
        bl = std::move(bl), this](auto&& handler) mutable {
-	notify_ack_(std::move(o), std::move(ioc), std::move(cookie),
-		    std::move(bl), std::move(handler));
+	  notify_ack_(std::move(o), std::move(ioc), std::move(notify_id),
+		      std::move(cookie), std::move(bl), std::move(handler));
       }, consigned);
   }
 
