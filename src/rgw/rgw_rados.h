@@ -247,7 +247,7 @@ public:
 
   RGWObjState *get_state(const rgw_obj& obj);
 
-  void set_atomic(rgw_obj& obj);
+  void set_atomic(const rgw_obj& obj);
   void set_prefetch_data(const rgw_obj& obj);
   void invalidate(const rgw_obj& obj);
 };
@@ -1299,7 +1299,7 @@ public:
    */
   int set_attr(const DoutPrefixProvider *dpp, RGWObjectCtx* ctx, RGWBucketInfo& bucket_info, rgw_obj& obj, const char *name, bufferlist& bl);
 
-  int set_attrs(const DoutPrefixProvider *dpp, void *ctx, RGWBucketInfo& bucket_info, rgw_obj& obj,
+  int set_attrs(const DoutPrefixProvider *dpp, void *ctx, RGWBucketInfo& bucket_info, const rgw_obj& obj,
 		map<string, bufferlist>& attrs, map<string, bufferlist>* rmattrs,
 		optional_yield y,
 		ceph::real_time set_mtime = ceph::real_clock::zero());
@@ -1537,6 +1537,16 @@ public:
                          map<RGWObjCategory, RGWStorageStats> *existing_stats,
                          map<RGWObjCategory, RGWStorageStats> *calculated_stats);
   int bucket_rebuild_index(const DoutPrefixProvider *dpp, RGWBucketInfo& bucket_info);
+
+  // Search the bucket for encrypted multipart uploads, and increase their mtime
+  // slightly to generate a bilog entry to trigger a resync to repair any
+  // corrupted replicas. See https://tracker.ceph.com/issues/46062
+  int bucket_resync_encrypted_multipart(const DoutPrefixProvider* dpp,
+                                        optional_yield y,
+                                        RGWBucketInfo& bucket_info,
+                                        const std::string& marker,
+                                        RGWFormatterFlusher& flusher);
+
   int bucket_set_reshard(const DoutPrefixProvider *dpp, const RGWBucketInfo& bucket_info, const cls_rgw_bucket_instance_entry& entry);
   int remove_objs_from_index(const DoutPrefixProvider *dpp, RGWBucketInfo& bucket_info,
 			     const std::list<rgw_obj_index_key>& oid_list);
