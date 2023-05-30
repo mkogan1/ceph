@@ -465,6 +465,10 @@ public:
       return ofs;
     }
 
+    int get_cur_part_id() const {
+      return cur_part_id;
+    }
+
     /* stripe number */
     int get_cur_stripe() const {
       return cur_stripe;
