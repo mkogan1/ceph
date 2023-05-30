@@ -57,7 +57,7 @@ static constexpr auto max_list_entries = 1000u;
 /// \param entries Entries to push
 ///
 /// \return The ClsWriteOp to be passed to WriteOp::exec
-[[nodiscard]] auto add(std::vector<entry> entries)
+[[nodiscard]] inline auto add(std::vector<entry> entries)
 {
   buffer::list in;
   ::cls::log::ops::add_op call;
@@ -75,7 +75,7 @@ static constexpr auto max_list_entries = 1000u;
 /// \param entry Entry to push
 ///
 /// \return The ClsWriteOp to be passed to WriteOp::exec
-[[nodiscard]] auto add(entry e)
+[[nodiscard]] inline auto add(entry e)
 {
   bufferlist in;
   ::cls::log::ops::add_op call;
@@ -96,8 +96,8 @@ static constexpr auto max_list_entries = 1000u;
 /// \param bl Data held in the log entry
 ///
 /// \return The ClsWriteOp to be passed to WriteOp::exec
-[[nodiscard]] auto add(ceph::real_time timestamp, std::string section,
-		       std::string name, buffer::list&& bl)
+[[nodiscard]] inline auto add(ceph::real_time timestamp, std::string section,
+			      std::string name, buffer::list&& bl)
 {
   bufferlist in;
   ::cls::log::ops::add_op call;
@@ -123,10 +123,10 @@ static constexpr auto max_list_entries = 1000u;
 ///                  there's more to list)
 ///
 /// \return The ClsReadOp to be passed to WriteOp::exec
-[[nodiscard]] auto list(ceph::real_time from, ceph::real_time to,
-			std::optional<std::string> in_marker,
-			std::span<entry> entries, std::span<entry>* result,
-			std::optional<std::string>* const out_marker)
+[[nodiscard]] inline auto list(ceph::real_time from, ceph::real_time to,
+			       std::optional<std::string> in_marker,
+			       std::span<entry> entries, std::span<entry>* result,
+			       std::optional<std::string>* const out_marker)
 {
   using boost::system::error_code;
   bufferlist in;
@@ -208,7 +208,7 @@ auto list(RADOS& r, Object o, IOContext ioc, ceph::real_time from,
 /// \param header Place to store the log header
 ///
 /// \return The ClsReadOp to be passed to WriteOp::exec
-[[nodiscard]] auto info(header* const header)
+[[nodiscard]] inline auto info(header* const header)
 {
   using boost::system::error_code;
   buffer::list in;
@@ -270,7 +270,8 @@ auto info(RADOS& r, Object o, IOContext ioc, CompletionToken&& token)
 /// boost::system::errc::no_message_available
 ///
 /// \return The ClsWriteOp to be passed to WriteOp::exec
-[[nodiscard]] auto trim(ceph::real_time from_time, ceph::real_time to_time)
+[[nodiscard]] inline auto trim(ceph::real_time from_time,
+			       ceph::real_time to_time)
 {
   bufferlist in;
   ::cls::log::ops::trim_op call;
@@ -311,7 +312,7 @@ inline constexpr std::string end_marker{"9"};
 /// boost::system::errc::no_message_available
 ///
 /// \return The ClsWriteOp to be passed to WriteOp::exec
-[[nodiscard]] auto trim(std::string from_marker, std::string to_marker)
+[[nodiscard]] inline auto trim(std::string from_marker, std::string to_marker)
 {
   bufferlist in;
   ::cls::log::ops::trim_op call;
