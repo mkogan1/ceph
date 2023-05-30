@@ -36,6 +36,8 @@
 
 #include "include/neorados/RADOS.hpp"
 
+#include "common/dout.h"
+
 #include "gtest/gtest.h"
 
 /// \file test/neorados/common_tests.h
@@ -227,6 +229,12 @@ protected:
   neorados::RADOS& rados =
     *reinterpret_cast<neorados::RADOS*>(rspace);
   neorados::IOContext pool; ///< The pool usable by this test.
+  std::string prefix{std::string{"test framework "} +
+		     testing::UnitTest::GetInstance()->
+		     current_test_info()->name() +
+		     std::string{": "}};
+  const DoutPrefix* dpp = nullptr;
+
 public:
 
   /// \brief Create RADOS handle and pool for the test
@@ -234,6 +242,7 @@ public:
     auto r = co_await neorados::RADOS::Builder{}
       .build(asio_context, boost::asio::use_awaitable);
     new (&rados) neorados::RADOS(std::move(r));
+    dpp = new DoutPrefix(rados.cct(), 0, prefix.data());
     pool.pool(co_await create_pool(rados, get_temp_pool_name(
 				     testing::UnitTest::GetInstance()
 				     ->current_test_info()->name()),
@@ -249,6 +258,8 @@ public:
   boost::asio::awaitable<void> CoTearDown() override {
     co_await rados.delete_pool(pool.pool(),
 				boost::asio::use_awaitable);
+    delete dpp;
+    dpp = nullptr;
     co_return;
   }
 };
