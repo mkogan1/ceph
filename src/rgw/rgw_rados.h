@@ -1301,7 +1301,8 @@ public:
 
   int set_attrs(const DoutPrefixProvider *dpp, void *ctx, RGWBucketInfo& bucket_info, rgw_obj& obj,
 		map<string, bufferlist>& attrs, map<string, bufferlist>* rmattrs,
-		optional_yield y);
+		optional_yield y,
+		ceph::real_time set_mtime = ceph::real_clock::zero());
 
   int get_obj_state(const DoutPrefixProvider *dpp, RGWObjectCtx *rctx, RGWBucketInfo& bucket_info, const rgw_obj& obj, RGWObjState **state,
                     bool follow_olh, optional_yield y, bool assume_noent = false);
