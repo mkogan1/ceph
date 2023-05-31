@@ -1,13 +1,11 @@
 #!/usr/bin/python3
 
 import errno
-import logging as log
 import time
-import subprocess
+import logging as log
 import json
-import boto3
-import botocore.exceptions
 import os
+from common import exec_cmd, boto_connect, create_user
 
 """
 Rgw manual and dynamic resharding  testing against a running instance
