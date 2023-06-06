@@ -133,6 +133,7 @@ class RadosStore : public StoreDriver {
       delete rados;
     }
 
+    int init_neorados(const DoutPrefixProvider* dpp);
     virtual int initialize(CephContext *cct, const DoutPrefixProvider *dpp) override;
     virtual const std::string get_name() const override {
       return "rados";

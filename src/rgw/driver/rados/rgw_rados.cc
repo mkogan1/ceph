@@ -1357,6 +1357,17 @@ int RGWRados::init_begin(const DoutPrefixProvider *dpp)
     cct->_conf.get_val<double>("rgw_inject_notify_timeout_probability");
   max_notify_retries = cct->_conf.get_val<uint64_t>("rgw_max_notify_retries");
 
+  ret = driver->init_neorados(dpp);
+  if (ret < 0) {
+    ldpp_dout(dpp, 0) << "ERROR: failed to initialize neorados (ret=" << cpp_strerror(-ret) << ")" << dendl;
+    return ret;
+  }
+  ret = init_rados();
+  if (ret < 0) {
+    ldpp_dout(dpp, 0) << "ERROR: failed to initialize librados (ret=" << cpp_strerror(-ret) << ")" << dendl;
+    return ret;
+  }
+
   ret = init_svc(false, dpp);
   if (ret < 0) {
     ldpp_dout(dpp, 0) << "ERROR: failed to init services (ret=" << cpp_strerror(-ret) << ")" << dendl;
@@ -1371,7 +1382,7 @@ int RGWRados::init_begin(const DoutPrefixProvider *dpp)
 
   host_id = svc.zone_utils->gen_host_id();
 
-  return init_rados();
+  return 0;
 }
 
 /**
