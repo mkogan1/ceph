@@ -3566,8 +3566,8 @@ void Objecter::handle_osd_op_reply(MOSDOpReply *m)
 			 bs::error_code(),
 			 p->rval, p->outdata);
       } catch (const bs::system_error& e) {
-	ldout(cct, 0) << "ERROR: tid " << op->tid << ": handler function threw "
-		      << e.what() << dendl;
+	ldout(cct, 10) << "ERROR: tid " << op->tid << ": handler function threw "
+		       << e.what() << dendl;
 	handler_error = e.code();
 	if (*pe) {
 	  **pe = e.code();
