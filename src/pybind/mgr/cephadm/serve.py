@@ -1479,20 +1479,7 @@ class CephadmServe:
         if not self.mgr.cgroups_split:
             final_args += ['--no-cgroups-split']
 
-        if not timeout:
-            # default global timeout if no timeout was passed
-            timeout = self.mgr.default_cephadm_command_timeout
-            # put a lower bound of 60 seconds in case users
-            # accidentally set it to something unreasonable.
-            # For example if they though it was in minutes
-            # rather than seconds
-            if timeout < 60:
-                self.log.info(f'Found default timeout set to {timeout}. Instead trying minimum of 60.')
-                timeout = 60
-            # subtract a small amount to give this timeout
-            # in the binary a chance to actually happen over
-            # the asyncio based timeout in the mgr module
-            timeout -= 5
+        timeout = self._set_cephadm_command_timeout(timeout)
         final_args += ['--timeout', str(timeout)]
 
         # subcommand
@@ -1596,6 +1583,39 @@ class CephadmServe:
         )
         self.log.debug(f'image {image_name} -> {r}')
         return r
+
+    def _set_cephadm_command_timeout(self, timeout: Any) -> int:
+        def _safe_convert_to_int(t: Any) -> int:
+            if not isinstance(t, int):
+                try:
+                    t = int(t)
+                except Exception:
+                    # just use a default if we can't convert to an int
+                    self.log.info(f'Got cephadm command timeout {t} of type '
+                                  f'{type(t)} that could not be converted to '
+                                  'an integer. Using default 900')
+                    t = 900
+            return t
+
+        if not timeout:
+            # default global timeout if no timeout was passed
+            timeout = _safe_convert_to_int(self.mgr.default_cephadm_command_timeout)
+        else:
+            timeout = _safe_convert_to_int(timeout)
+
+        # put a lower bound of 60 seconds in case users
+        # accidentally set it to something unreasonable.
+        # For example if they though it was in minutes
+        # rather than seconds
+        if timeout < 60:
+            self.log.info(f'Found default timeout set to {timeout}. Instead trying minimum of 60.')
+            timeout = 60
+        # subtract a small amount to give this timeout
+        # in the binary a chance to actually happen over
+        # the asyncio based timeout in the mgr module
+        timeout -= 5
+
+        return timeout
 
     # function responsible for logging single host into custom registry
     async def _registry_login(self, host: str, registry_json: Dict[str, str]) -> Optional[str]:

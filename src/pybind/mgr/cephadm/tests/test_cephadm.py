@@ -2243,6 +2243,34 @@ Traceback (most recent call last):
                     return_value=[mock.Mock().hostname, mock.Mock().hostname])
                 cephadm_module._validate_tuned_profile_spec(spec)
 
+    def test_set_cephadm_command_timeout(self, cephadm_module):
+        # Note that the value we pass to --timeout in the binary
+        # (which is what this func is for) subtracts 5 seconds so
+        # the timeout is slightly below the one used for the
+        # asyncio timeout in the mgr module. So we expect to get
+        # the value passed minus 5 in normal cases
+
+        # normal case
+        t = CephadmServe(cephadm_module)._set_cephadm_command_timeout(105)
+        assert isinstance(t, int)
+        assert t == 100
+        # float, should convert to an int
+        t = CephadmServe(cephadm_module)._set_cephadm_command_timeout(205.0)
+        assert isinstance(t, int)
+        assert t == 200
+        # string, but the string can be converted to an int
+        t = CephadmServe(cephadm_module)._set_cephadm_command_timeout("305")
+        assert isinstance(t, int)
+        assert t == 300
+        # string, but it cannot be converted. Should get default value
+        t = CephadmServe(cephadm_module)._set_cephadm_command_timeout("not an integer")
+        assert isinstance(t, int)
+        assert t == 895
+        # value too low, should be bumped up to minimum
+        t = CephadmServe(cephadm_module)._set_cephadm_command_timeout(2)
+        assert isinstance(t, int)
+        assert t == 55
+
     def test_set_unmanaged(self, cephadm_module):
         cephadm_module.spec_store._specs['crash'] = ServiceSpec('crash', unmanaged=False)
         assert not cephadm_module.spec_store._specs['crash'].unmanaged
