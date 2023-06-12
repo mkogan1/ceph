@@ -7761,9 +7761,15 @@ next:
       }
 
       std::string obj_name;
-      const std::string empty_version;
       while (std::getline(file, obj_name)) {
-	ret = process(obj_name, empty_version);
+	std::string version;
+	auto pos = obj_name.find('\t');
+	if (pos != std::string::npos) {
+	  version = obj_name.substr(1 + pos);
+	  obj_name = obj_name.substr(0, pos);
+	}
+
+	ret = process(obj_name, version);
 	if (ret < 0) {
 	  std::cerr << "ERROR: while processing \"" << obj_name <<
 	    "\", received " << cpp_strerror(-ret) << "." << std::endl;
