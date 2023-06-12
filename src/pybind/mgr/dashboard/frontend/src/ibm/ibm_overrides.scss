@@ -743,3 +743,16 @@ cd-error {
     }
   }
 }
+
+cd-api-docs {
+  div {
+    margin-top: 1rem !important;
+  }
+  .swagger-ui {
+    .scheme-container {
+      .servers {
+        margin-top: 1rem !important;
+      }
+    }
+  }
+}
