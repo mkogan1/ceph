@@ -221,7 +221,7 @@ class Device(object):
             self.disk_api = dev
             device_type = dev.get('TYPE', '')
             # always check is this is an lvm member
-            if device_type in ['part', 'disk']:
+            if device_type in ['part', 'disk', 'mpath']:
                 self._set_lvm_membership()
 
         self.ceph_disk = CephDiskDevice(self)
