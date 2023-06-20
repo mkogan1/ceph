@@ -1035,6 +1035,7 @@ class IngressSpec(ServiceSpec):
                  virtual_interface_networks: Optional[List[str]] = [],
                  use_keepalived_multicast: Optional[bool] = False,
                  vrrp_interface_network: Optional[str] = None,
+                 first_virtual_router_id: Optional[int] = 50,
                  unmanaged: bool = False,
                  ssl: bool = False,
                  extra_container_args: Optional[List[str]] = None,
@@ -1067,6 +1068,7 @@ class IngressSpec(ServiceSpec):
         self.virtual_interface_networks = virtual_interface_networks or []
         self.use_keepalived_multicast = use_keepalived_multicast
         self.vrrp_interface_network = vrrp_interface_network
+        self.first_virtual_router_id = first_virtual_router_id
         self.unmanaged = unmanaged
         self.ssl = ssl
 
