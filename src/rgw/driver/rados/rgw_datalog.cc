@@ -318,8 +318,15 @@ public:
        std::optional<std::string> marker) override {
     try {
       std::vector<fifo::entry> log_entries{entries.size()};
+      ldpp_dout(dpp, 10) << __PRETTY_FUNCTION__
+			 << ": about to call FIFO::list"
+			 << dendl;
       auto [lentries, outmark] =
 	co_await fifos[shard].list(dpp, marker, log_entries);
+      ldpp_dout(dpp, 10) << __PRETTY_FUNCTION__
+			 << ": FIFO::list yielded " << lentries.size()
+			 << " entries." << dendl;
+
       entries = entries.first(lentries.size());
       std::ranges::transform(lentries, entries.begin(),
 			     [](const auto& e) {
@@ -759,9 +766,15 @@ DataLogBackends::list(const DoutPrefixProvider *dpp, int shard,
     auto incursor = (gen_id == start_id ?
 		     std::optional{start_cursor} :
 		     std::nullopt);
+    ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		       << "Calling be->list(" << dpp << ", " << shard << ", "
+		       << "span{" << inspan.size() << "}, "
+		       << incursor << ")" << dendl;
     auto [raw_entries, raw_cursor]
       = co_await be->list(dpp, shard, inspan, incursor);
-    auto oldout = out;
+    ldpp_dout(dpp, 20) << __PRETTY_FUNCTION__ << ":" << __LINE__
+		       << "be->list -> (" << raw_entries.size() << ", "
+		       << raw_cursor << ")" << dendl;
     out = std::transform(std::make_move_iterator(raw_entries.begin()),
 			 std::make_move_iterator(raw_entries.end()),
 			 out, [gen_id](rgw_data_change_log_entry e) {

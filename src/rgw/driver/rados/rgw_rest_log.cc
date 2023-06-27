@@ -656,8 +656,16 @@ void RGWOp_DATALog_List::execute(optional_yield y) {
 
   string   max_entries_str = s->info.args.get("max-entries"),
            marker = s->info.args.get("marker"),
+           tid_ = s->info.args.get("tid"),
            err;
   unsigned shard_id, max_entries = LOG_CLASS_LIST_MAX_ENTRIES;
+
+  tid = (uint64_t)strict_strtoll(tid_.c_str(), 10, &err);
+  if (!err.empty()) {
+    ldpp_dout(this, 5) << "Error parsing tid " << tid_ << dendl;
+    op_ret = -EINVAL;
+    return;
+  }
 
   if (s->info.args.exists("start-time") ||
       s->info.args.exists("end-time")) {

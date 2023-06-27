@@ -306,6 +306,7 @@ class RGWReadRemoteDataLogShardCR : public RGWCoroutine {
 
   int shard_id;
   const std::string& marker;
+  uint64_t tid;
   string *pnext_marker;
   vector<rgw_data_change_log_entry> *entries;
   bool *truncated;
@@ -315,11 +316,12 @@ class RGWReadRemoteDataLogShardCR : public RGWCoroutine {
 
 public:
   RGWReadRemoteDataLogShardCR(RGWDataSyncCtx *_sc, int _shard_id,
-                              const std::string& marker, string *pnext_marker,
-                              vector<rgw_data_change_log_entry> *_entries,
+                              const std::string& marker, uint64_t tid,
+			      string *pnext_marker,
+			      vector<rgw_data_change_log_entry> *_entries,
                               bool *_truncated)
     : RGWCoroutine(_sc->cct), sc(_sc), sync_env(_sc->env),
-      shard_id(_shard_id), marker(marker), pnext_marker(pnext_marker),
+      shard_id(_shard_id), marker(marker), tid(tid), pnext_marker(pnext_marker),
       entries(_entries), truncated(_truncated) {
   }
   ~RGWReadRemoteDataLogShardCR() override {
@@ -331,12 +333,16 @@ public:
   int operate(const DoutPrefixProvider *dpp) override {
     reenter(this) {
       yield {
+	ldpp_dout(dpp, 0) << "About to read data log: tid=" << tid << dendl;
 	char buf[16];
 	snprintf(buf, sizeof(buf), "%d", shard_id);
+	char buf2[32];
+	snprintf(buf2, sizeof(buf2), "%" PRIu64, tid);
         rgw_http_param_pair pairs[] = { { "type" , "data" },
 	                                { "id", buf },
 	                                { "marker", marker.c_str() },
 	                                { "extra-info", "true" },
+	                                { "tid", buf2 },
 	                                { NULL, NULL } };
 
         string p = "/admin/log/";
@@ -1860,6 +1866,13 @@ public:
   }
 };
 
+std::mutex m;
+inline std::uint64_t next_tid = 0;
+uint64_t get_next_tid() {
+  std::unique_lock l(m);
+  return next_tid++;
+}
+
 class RGWDataIncSyncShardCR : public RGWDataBaseSyncShardCR {
   static constexpr int max_error_entries = 10;
   static constexpr uint32_t retry_backoff_secs = 60;
@@ -1882,6 +1895,7 @@ class RGWDataIncSyncShardCR : public RGWDataBaseSyncShardCR {
   decltype(log_entries)::iterator log_iter;
   bool truncated = false;
   int cbret = 0;
+  uint64_t tid = get_next_tid();
 
   utime_t get_idle_interval() const {
     ceph::timespan interval = std::chrono::seconds(cct->_conf->rgw_data_sync_poll_interval);
@@ -2023,12 +2037,13 @@ public:
         tn->log(20, SSTR("shard_id=" << shard_id << " sync_marker="
 			 << sync_marker.marker));
         yield call(new RGWReadRemoteDataLogShardCR(sc, shard_id,
-						   sync_marker.marker,
+						   sync_marker.marker, tid,
                                                    &next_marker, &log_entries,
 						   &truncated));
         if (retcode < 0 && retcode != -ENOENT) {
           tn->log(0, SSTR("ERROR: failed to read remote data log info: ret="
-			  << retcode));
+			  << retcode << ", tid=" << tid << ", shard_id=" << shard_id
+			  << ", sync_marker.marker=" << sync_marker.marker));
           drain_all();
           return set_cr_error(retcode);
         }
@@ -3850,7 +3865,7 @@ int RGWReadPendingBucketShardsCoroutine::operate(const DoutPrefixProvider *dpp)
     marker = sync_marker->marker;
     count = 0;
     do{
-      yield call(new RGWReadRemoteDataLogShardCR(sc, shard_id, marker,
+      yield call(new RGWReadRemoteDataLogShardCR(sc, shard_id, marker, -1,
                                                  &next_marker, &log_entries, &truncated));
 
       if (retcode == -ENOENT) {

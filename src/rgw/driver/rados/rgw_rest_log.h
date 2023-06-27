@@ -209,6 +209,7 @@ class RGWOp_DATALog_List : public RGWRESTOp {
   std::string last_marker;
   bool truncated;
   bool extra_info;
+  uint64_t tid = -1;
 public:
   RGWOp_DATALog_List() : truncated(false), extra_info(false) {}
   ~RGWOp_DATALog_List() override {}
@@ -223,6 +224,10 @@ public:
   void send_response() override;
   const char* name() const override {
     return "list_data_changes_log";
+  }
+
+  std::ostream& gen_prefix(std::ostream& out) const override {
+    return RGWOp::gen_prefix(out) << " tid=" << tid << ": ";
   }
 };
 
