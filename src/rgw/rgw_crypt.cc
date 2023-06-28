@@ -631,14 +631,16 @@ bool AES_256_ECB_encrypt(CephContext* cct,
 
 RGWGetObj_BlockDecrypt::RGWGetObj_BlockDecrypt(CephContext* cct,
                                                RGWGetObj_Filter* next,
-                                               std::unique_ptr<BlockCrypt> crypt):
+                                               std::unique_ptr<BlockCrypt> crypt,
+                                               std::vector<size_t> parts_len) :
     RGWGetObj_Filter(next),
     cct(cct),
     crypt(std::move(crypt)),
     enc_begin_skip(0),
     ofs(0),
     end(0),
-    cache()
+    cache(),
+    parts_len(std::move(parts_len))
 {
   block_size = this->crypt->get_block_size();
 }
@@ -646,8 +648,10 @@ RGWGetObj_BlockDecrypt::RGWGetObj_BlockDecrypt(CephContext* cct,
 RGWGetObj_BlockDecrypt::~RGWGetObj_BlockDecrypt() {
 }
 
-int RGWGetObj_BlockDecrypt::read_manifest(const DoutPrefixProvider *dpp, bufferlist& manifest_bl) {
-  parts_len.clear();
+int RGWGetObj_BlockDecrypt::read_manifest_parts(const DoutPrefixProvider *dpp,
+                                                const bufferlist& manifest_bl,
+                                                std::vector<size_t>& parts_len)
+{
   RGWObjManifest manifest;
   if (manifest_bl.length()) {
     auto miter = manifest_bl.cbegin();
@@ -664,10 +668,8 @@ int RGWGetObj_BlockDecrypt::read_manifest(const DoutPrefixProvider *dpp, bufferl
       }
       parts_len.back() += mi.get_stripe_size();
     }
-    if (cct->_conf->subsys.should_gather<ceph_subsys_rgw, 20>()) {
-      for (size_t i = 0; i<parts_len.size(); i++) {
-        ldpp_dout(dpp, 20) << "Manifest part " << i << ", size=" << parts_len[i] << dendl;
-      }
+    for (size_t i = 0; i<parts_len.size(); i++) {
+      ldpp_dout(dpp, 20) << "Manifest part " << i << ", size=" << parts_len[i] << dendl;
     }
   }
   return 0;

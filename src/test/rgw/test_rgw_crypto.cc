@@ -422,7 +422,7 @@ TEST(TestRGWCrypto, verify_RGWGetObj_BlockDecrypt_ranges)
     ut_get_sink get_sink;
     auto cbc = AES_256_CBC_create(g_ceph_context, &key[0], 32);
     ASSERT_NE(cbc.get(), nullptr);
-    RGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink, std::move(cbc) );
+    RGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink, std::move(cbc), {});
 
     //random ranges
     off_t begin = (r/3)*r*(r+13)*(r+23)*(r+53)*(r+71) % test_range;
@@ -467,7 +467,7 @@ TEST(TestRGWCrypto, verify_RGWGetObj_BlockDecrypt_chunks)
     ut_get_sink get_sink;
     auto cbc = AES_256_CBC_create(g_ceph_context, &key[0], 32);
     ASSERT_NE(cbc.get(), nullptr);
-    RGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink, std::move(cbc) );
+    RGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink, std::move(cbc), {});
 
     //random
     off_t begin = (r/3)*r*(r+13)*(r+23)*(r+53)*(r+71) % test_range;
@@ -512,7 +512,7 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup)
   ut_get_sink get_sink;
   auto nonecrypt = std::unique_ptr<BlockCrypt>(new BlockCryptNone);
   RGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-                                 std::move(nonecrypt));
+                                 std::move(nonecrypt), {});
   ASSERT_EQ(fixup_range(&decrypt,0,0),     range_t(0,255));
   ASSERT_EQ(fixup_range(&decrypt,1,256),   range_t(0,511));
   ASSERT_EQ(fixup_range(&decrypt,0,255),   range_t(0,255));
@@ -520,16 +520,6 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup)
   ASSERT_EQ(fixup_range(&decrypt,511,1023), range_t(256,1023));
   ASSERT_EQ(fixup_range(&decrypt,513,1024), range_t(512,1024+255));
 }
-
-using parts_len_t = std::vector<size_t>;
-
-class TestRGWGetObj_BlockDecrypt : public RGWGetObj_BlockDecrypt {
-  using RGWGetObj_BlockDecrypt::RGWGetObj_BlockDecrypt;
-public:
-  void set_parts_len(parts_len_t&& other) {
-    parts_len = std::move(other);
-  }
-};
 
 std::vector<size_t> create_mp_parts(size_t obj_size, size_t mp_part_len){
   std::vector<size_t> parts_len;
@@ -552,9 +542,9 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_simple)
 
   ut_get_sink get_sink;
   auto nonecrypt = std::make_unique<BlockCryptNone>(4096);
-  TestRGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-				     std::move(nonecrypt));
-  decrypt.set_parts_len(create_mp_parts(obj_size, part_size));
+  RGWGetObj_BlockDecrypt decrypt(&no_dpp, g_ceph_context, &get_sink,
+				 std::move(nonecrypt),
+				 create_mp_parts(obj_size, part_size));
   ASSERT_EQ(fixup_range(&decrypt,0,0),     range_t(0,4095));
   ASSERT_EQ(fixup_range(&decrypt,1,4096),   range_t(0,8191));
   ASSERT_EQ(fixup_range(&decrypt,0,4095),   range_t(0,4095));
@@ -580,12 +570,13 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_simple)
 TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_non_aligned_obj_size)
 {
 
+  const size_t na_obj_size = obj_size + 1;
+
   ut_get_sink get_sink;
   auto nonecrypt = std::make_unique<BlockCryptNone>(4096);
-  TestRGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-				     std::move(nonecrypt));
-  auto na_obj_size = obj_size + 1;
-  decrypt.set_parts_len(create_mp_parts(na_obj_size, part_size));
+  RGWGetObj_BlockDecrypt decrypt(&no_dpp, g_ceph_context, &get_sink,
+				 std::move(nonecrypt),
+				 create_mp_parts(na_obj_size, part_size));
 
   // these should be unaffected here
   ASSERT_EQ(fixup_range(&decrypt, 0, part_size - 2), range_t(0, part_size -1));
@@ -607,12 +598,13 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_non_aligned_obj_size)
 TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_non_aligned_part_size)
 {
 
+  const size_t na_part_size = part_size + 1;
+
   ut_get_sink get_sink;
   auto nonecrypt = std::make_unique<BlockCryptNone>(4096);
-  TestRGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-				     std::move(nonecrypt));
-  auto na_part_size = part_size + 1;
-  decrypt.set_parts_len(create_mp_parts(obj_size, na_part_size));
+  RGWGetObj_BlockDecrypt decrypt(&no_dpp, g_ceph_context, &get_sink,
+				 std::move(nonecrypt),
+				 create_mp_parts(obj_size, na_part_size));
 
   // na_part_size -2, ie. part_size -1  is aligned to 4095 boundary
   ASSERT_EQ(fixup_range(&decrypt, 0, na_part_size - 2), range_t(0, na_part_size -2));
@@ -640,13 +632,14 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_non_aligned_part_size)
 TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_non_aligned)
 {
 
+  const size_t na_part_size = part_size + 1;
+  const size_t na_obj_size = obj_size + 7; // (6*(5MiB + 1) + 1) for the last 1B overflow
+
   ut_get_sink get_sink;
   auto nonecrypt = std::make_unique<BlockCryptNone>(4096);
-  TestRGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-				     std::move(nonecrypt));
-  auto na_part_size = part_size + 1;
-  auto na_obj_size = obj_size + 7; // (6*(5MiB + 1) + 1) for the last 1B overflow
-  decrypt.set_parts_len(create_mp_parts(na_obj_size, na_part_size));
+  RGWGetObj_BlockDecrypt decrypt(&no_dpp, g_ceph_context, &get_sink,
+				 std::move(nonecrypt),
+				 create_mp_parts(na_obj_size, na_part_size));
 
   // na_part_size -2, ie. part_size -1  is aligned to 4095 boundary
   ASSERT_EQ(fixup_range(&decrypt, 0, na_part_size - 2), range_t(0, na_part_size -2));
@@ -671,10 +664,10 @@ TEST(TestRGWCrypto, check_RGWGetObj_BlockDecrypt_fixup_invalid_ranges)
 
   ut_get_sink get_sink;
   auto nonecrypt = std::make_unique<BlockCryptNone>(4096);
-  TestRGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-				     std::move(nonecrypt));
+  RGWGetObj_BlockDecrypt decrypt(&no_dpp, g_ceph_context, &get_sink,
+				 std::move(nonecrypt),
+				 create_mp_parts(obj_size, part_size));
 
-  decrypt.set_parts_len(create_mp_parts(obj_size, part_size));
 
   // the ranges below would be mostly unreachable in current code as rgw
   // would've returned a 411 before reaching, but we're just doing this to make
@@ -782,7 +775,7 @@ TEST(TestRGWCrypto, verify_Encrypt_Decrypt)
 
     ut_get_sink get_sink;
     RGWGetObj_BlockDecrypt decrypt(g_ceph_context, &get_sink,
-                                   AES_256_CBC_create(g_ceph_context, &key[0], 32) );
+                                   AES_256_CBC_create(g_ceph_context, &key[0], 32) {});
 
     off_t bl_ofs = 0;
     off_t bl_end = test_size - 1;
