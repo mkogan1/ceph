@@ -21,6 +21,7 @@ endif()
 set(mgr_modules
   alerts
   balancer
+  call_home_agent
   cephadm
   cli_api
   crash
