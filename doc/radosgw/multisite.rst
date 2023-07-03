@@ -1462,11 +1462,13 @@ On creation of new zones and zonegroups, all known features are supported/enable
 Supported Features
 ------------------
 
-+---------------------------+---------+
-| Feature                   | Release |
-+===========================+=========+
-| :ref:`feature_resharding` | Quincy  |
-+---------------------------+---------+
++-----------------------------------+---------+----------+
+| Feature                           | Release | Default  |
++===================================+=========+==========+
+| :ref:`feature_resharding`         | Quincy  | Enabled  |
++-----------------------------------+---------+----------+
+| :ref:`feature_compress_encrypted` | Reef    | Disabled |
++-----------------------------------+---------+----------+
 
 .. _feature_resharding:
 
@@ -1475,6 +1477,21 @@ resharding
 
 Allows buckets to be resharded in a multisite configuration without interrupting the replication of their objects. When ``rgw_dynamic_resharding`` is enabled, it runs on each zone independently, and zones may choose different shard counts for the same bucket. When buckets are resharded manunally with ``radosgw-admin bucket reshard``, only that zone's bucket is modified. A zone feature should only be marked as supported after all of its radosgws and osds have upgraded.
 
+
+.. _feature_compress_encrypted:
+
+compress-encrypted
+~~~~~~~~~~~~~~~~~~
+
+This feature enables support for combining `Server-Side Encryption`_ and
+`Compression`_ on the same object. Object data gets compressed before encryption.
+Prior to Reef, multisite would not replicate such objects correctly, so all zones
+must upgrade to Reef or later before enabling.
+
+.. warning:: The compression ratio may leak information about the encrypted data,
+   and allow attackers to distinguish whether two same-sized objects might contain
+   the same data. Due to these security considerations, this feature is disabled
+   by default.
 
 Commands
 -----------------
@@ -1514,3 +1531,5 @@ On any cluster in the realm::
 
 .. _`Pools`: ../pools
 .. _`Sync Policy Config`: ../multisite-sync-policy
+.. _`Server-Side Encryption`: ../encryption
+.. _`Compression`: ../compression
