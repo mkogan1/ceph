@@ -255,6 +255,11 @@ class Activate(object):
             help='force bluestore objectstore activation',
         )
         parser.add_argument(
+            '--bluestore-rdr',
+            action='store_true',
+            help='Use the bluestore-rdr objectstore. (Experimental).',
+        )
+        parser.add_argument(
             '--all',
             dest='activate_all',
             action='store_true',
@@ -275,6 +280,13 @@ class Activate(object):
             print(sub_command_help)
             return
         args = parser.parse_args(self.argv)
+        if args.bluestore and args.bluestore_rdr:
+            raise SystemExit('--bluestore and --bluestore-rdr are mutually exclusive.')
+        if args.bluestore_rdr:
+            args.bluestore = True
+        for objectstore in ['bluestore']:
+            if args.__dict__.get(objectstore,):
+                args.objectstore = objectstore.replace('_', '-')
         if args.activate_all:
             self.activate_all(args)
         else:

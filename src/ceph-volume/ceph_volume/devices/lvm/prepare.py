@@ -25,7 +25,14 @@ def prepare_dmcrypt(key, device, device_type, tags):
     uuid = tags[tag_name]
     return encryption_utils.prepare_dmcrypt(key, device, uuid)
 
-def prepare_bluestore(block, wal, db, secrets, tags, osd_id, fsid):
+def prepare_bluestore(block,
+                      wal,
+                      db,
+                      secrets,
+                      tags,
+                      osd_id,
+                      fsid,
+                      objectstore):
     """
     :param block: The name of the logical volume for the bluestore data
     :param wal: a regular/plain disk or logical volume, to be used for block.wal
@@ -60,7 +67,8 @@ def prepare_bluestore(block, wal, db, secrets, tags, osd_id, fsid):
         osd_id, fsid,
         keyring=cephx_secret,
         wal=wal,
-        db=db
+        db=db,
+        objectstore=objectstore
     )
 
 
@@ -242,7 +250,7 @@ class Prepare(object):
             'ceph.crush_device_class': crush_device_class,
             'ceph.osdspec_affinity': prepare_utils.get_osdspec_affinity()
         }
-        if self.args.bluestore:
+        if self.args.bluestore or self.args.bluestore_rdr:
             try:
                 vg_name, lv_name = self.args.data.split('/')
                 block_lv = api.get_single_lv(filters={'lv_name': lv_name,
@@ -283,6 +291,7 @@ class Prepare(object):
                 tags,
                 self.osd_id,
                 osd_fsid,
+                self.args.objectstore
             )
 
     def main(self):
@@ -322,6 +331,11 @@ class Prepare(object):
         self.args = parser.parse_args(self.argv)
         # Default to bluestore here since defaulting it in add_argument may
         # cause both to be True
-        if not self.args.bluestore:
+        if self.args.bluestore and self.args.bluestore_rdr:
+            raise SystemExit('--bluestore and --bluestore-rdr are mutually exclusive.')
+        if not self.args.bluestore and not self.args.bluestore_rdr:
             self.args.bluestore = True
+        for objectstore in ['bluestore', 'bluestore_rdr']:
+            if self.args.__dict__.get(objectstore,):
+                self.args.objectstore = objectstore.replace('_', '-')
         self.safe_prepare()
