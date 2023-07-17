@@ -145,6 +145,10 @@ export class ActionLabelsI18n {
   REDEPLOY: string;
   RESTART: string;
   RESYNC: string;
+  EXPORT: string;
+  IMPORT: any;
+  MIGRATE: string;
+  START_UPGRADE: string;
 
   constructor() {
     /* Create a new item */
@@ -214,6 +218,8 @@ export class ActionLabelsI18n {
     this.REMOVE_SCHEDULING = $localize`Remove Scheduling`;
     this.PROMOTE = $localize`Promote`;
     this.DEMOTE = $localize`Demote`;
+
+    this.START_UPGRADE = $localize`Start Upgrade`;
   }
 }
 
