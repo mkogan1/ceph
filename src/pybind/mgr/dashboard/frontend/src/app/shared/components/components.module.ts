@@ -81,6 +81,11 @@ import { FormAdvancedFieldsetComponent } from './form-advanced-fieldset/form-adv
 import { UpgradableComponent } from './upgradable/upgradable.component';
 import { ProgressComponent } from './progress/progress.component';
 
+import { CallHomeModalComponent } from '~/app/shared/components/call-home-modal/call-home-modal.component';
+import { CallHomeNotificationComponent } from './call-home-notification/call-home-notification.component';
+import { StorageInsightsModalComponent } from './storage-insights-modal/storage-insights-modal.component';
+import { StorageInsightsNotificationComponent } from './storage-insights-notification/storage-insights-notification.component';
+
 // Icons
 import InfoIcon from '@carbon/icons/es/information/16';
 import CopyIcon from '@carbon/icons/es/copy/32';
@@ -164,7 +169,12 @@ import CopyIcon from '@carbon/icons/es/copy/32';
     HelpTextComponent,
     FormAdvancedFieldsetComponent,
     UpgradableComponent,
-    ProgressComponent
+    ProgressComponent,
+    CardGroupComponent,
+    CallHomeModalComponent,
+    CallHomeNotificationComponent,
+    StorageInsightsModalComponent,
+    StorageInsightsNotificationComponent
   ],
   providers: [provideCharts(withDefaultRegisterables())],
   exports: [
@@ -203,7 +213,11 @@ import CopyIcon from '@carbon/icons/es/copy/32';
     HelpTextComponent,
     FormAdvancedFieldsetComponent,
     UpgradableComponent,
-    ProgressComponent
+    ProgressComponent,
+    CardGroupComponent,
+    CallHomeModalComponent,
+    CallHomeNotificationComponent,
+    StorageInsightsNotificationComponent
   ]
 })
 export class ComponentsModule {
