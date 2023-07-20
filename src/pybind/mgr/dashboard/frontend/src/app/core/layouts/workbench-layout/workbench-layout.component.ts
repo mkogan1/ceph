@@ -12,6 +12,9 @@ import { TaskManagerService } from '~/app/shared/services/task-manager.service';
 import { TelemetryNotificationService } from '../../../shared/services/telemetry-notification.service';
 import { MotdNotificationService } from '~/app/shared/services/motd-notification.service';
 import _ from 'lodash';
+import { environment } from '../../../../environments/environment.ibm';
+import { CallHomeNotificationService } from '~/app/shared/services/call-home-notification.service';
+import { StorageInsightsNotificationService } from '~/app/shared/services/storage-insights-notification.service';
 
 @Component({
   selector: 'cd-workbench-layout',
@@ -26,6 +29,7 @@ export class WorkbenchLayoutComponent implements OnInit, OnDestroy {
   @HostBinding('class') get class(): string {
     return 'top-notification-' + this.notifications.length;
   }
+  environment = environment;
 
   constructor(
     public router: Router,
@@ -35,7 +39,9 @@ export class WorkbenchLayoutComponent implements OnInit, OnDestroy {
     private faviconService: FaviconService,
     private authStorageService: AuthStorageService,
     private telemetryNotificationService: TelemetryNotificationService,
-    private motdNotificationService: MotdNotificationService
+    private motdNotificationService: MotdNotificationService,
+    private callHomeNotificationService: CallHomeNotificationService,
+    private storageInsightsNotificationService: StorageInsightsNotificationService
   ) {
     this.permissions = this.authStorageService.getPermissions();
   }
@@ -54,15 +60,29 @@ export class WorkbenchLayoutComponent implements OnInit, OnDestroy {
       })
     );
     this.subs.add(
-      this.telemetryNotificationService.update.subscribe((visible: boolean) => {
-        this.showTopNotification('telemetryNotificationEnabled', visible);
-      })
-    );
-    this.subs.add(
       this.motdNotificationService.motd$.subscribe((motd: any) => {
         this.showTopNotification('motdNotificationEnabled', _.isPlainObject(motd));
       })
     );
+    if (this.environment.build === 'ibm') {
+      this.subs.add(
+        this.callHomeNotificationService.remindLaterOn$.subscribe((visible: boolean) => {
+          this.showTopNotification('callHomeNotificationEnabled', visible);
+        })
+      );
+      this.subs.add(
+        this.storageInsightsNotificationService.remindLaterOn$.subscribe((visible: boolean) => {
+          this.showTopNotification('storagteInsightsEnabled', visible);
+        })
+      );
+    } else {
+      // disabling telemetry notification in ibm builds
+      this.subs.add(
+        this.telemetryNotificationService.update.subscribe((visible: boolean) => {
+          this.showTopNotification('telemetryNotificationEnabled', visible);
+        })
+      );
+    }
     this.faviconService.init();
   }
   showTopNotification(name: string, isDisplayed: boolean) {
