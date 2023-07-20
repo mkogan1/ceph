@@ -19,5 +19,13 @@
             *ngIf="configOptPermission.read"
             routerLink="/telemetry"
             i18n>Telemetry configuration</button>
+    <button ngbDropdownItem
+            *ngIf="userPermission.read && environment.build === 'ibm'"
+            (click)="openCallHomeModal()"
+            i18n>IBM Call Home</button>
+    <button ngbDropdownItem
+            *ngIf="userPermission.read && environment.build === 'ibm'"
+            (click)="openSIModal()"
+            i18n>IBM Storage Insights</button>
   </div>
 </div>

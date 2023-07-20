@@ -6,6 +6,7 @@ import { Subscription } from 'rxjs';
 import { Icons } from '~/app/shared/enum/icons.enum';
 import { Permissions } from '~/app/shared/models/permissions';
 import { AuthStorageService } from '~/app/shared/services/auth-storage.service';
+import { CallHomeNotificationService } from '~/app/shared/services/call-home-notification.service';
 import {
   FeatureTogglesMap$,
   FeatureTogglesService
@@ -14,6 +15,8 @@ import { MotdNotificationService } from '~/app/shared/services/motd-notification
 import { PrometheusAlertService } from '~/app/shared/services/prometheus-alert.service';
 import { SummaryService } from '~/app/shared/services/summary.service';
 import { TelemetryNotificationService } from '~/app/shared/services/telemetry-notification.service';
+import { environment } from '~/environments/environment';
+import { StorageInsightsNotificationService } from '../../../shared/services/storage-insights-notification.service';
 
 @Component({
   selector: 'cd-navigation',
@@ -40,13 +43,17 @@ export class NavigationComponent implements OnInit, OnDestroy {
   };
   private subs = new Subscription();
 
+  evironment = environment;
+
   constructor(
     private authStorageService: AuthStorageService,
     private summaryService: SummaryService,
     private featureToggles: FeatureTogglesService,
     private telemetryNotificationService: TelemetryNotificationService,
     public prometheusAlertService: PrometheusAlertService,
-    private motdNotificationService: MotdNotificationService
+    private motdNotificationService: MotdNotificationService,
+    private callHomeNotificationService: CallHomeNotificationService,
+    private storageInsightsNotificationService: StorageInsightsNotificationService
   ) {
     this.permissions = this.authStorageService.getPermissions();
     this.enabledFeature$ = this.featureToggles.get();
@@ -78,6 +85,19 @@ export class NavigationComponent implements OnInit, OnDestroy {
         this.showTopNotification('motdNotificationEnabled', _.isPlainObject(motd));
       })
     );
+
+    if (this.evironment.build === 'ibm') {
+      this.subs.add(
+        this.callHomeNotificationService.remindLaterOn$.subscribe((visible: boolean) => {
+          this.showTopNotification('callHomeNotificationEnabled', visible);
+        })
+      );
+      this.subs.add(
+        this.storageInsightsNotificationService.remindLaterOn$.subscribe((visible: boolean) => {
+          this.showTopNotification('storagteInsightsEnabled', visible);
+        })
+      );
+    }
   }
 
   ngOnDestroy(): void {

@@ -120,6 +120,8 @@ class Options(object):
                                         [str])
 
     UNSAFE_TLS_v1_2 = Setting(False, [bool])
+    CALL_HOME_REMIND_LATER_ON = Setting('', [str])
+    STORAGE_INSIGHTS_REMIND_LATER_ON = Setting('', [str])
 
     @staticmethod
     def has_default_value(name):

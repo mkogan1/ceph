@@ -51,6 +51,10 @@ import { UsageBarComponent } from './usage-bar/usage-bar.component';
 import { WizardComponent } from './wizard/wizard.component';
 import { CardComponent } from './card/card.component';
 import { CardRowComponent } from './card-row/card-row.component';
+import { CallHomeModalComponent } from '~/app/shared/components/call-home-modal/call-home-modal.component';
+import { CallHomeNotificationComponent } from './call-home-notification/call-home-notification.component';
+import { StorageInsightsModalComponent } from './storage-insights-modal/storage-insights-modal.component';
+import { StorageInsightsNotificationComponent } from './storage-insights-notification/storage-insights-notification.component';
 
 @NgModule({
   imports: [
@@ -105,7 +109,11 @@ import { CardRowComponent } from './card-row/card-row.component';
     CdLabelComponent,
     ColorClassFromTextPipe,
     CardComponent,
-    CardRowComponent
+    CardRowComponent,
+    CallHomeModalComponent,
+    CallHomeNotificationComponent,
+    StorageInsightsModalComponent,
+    StorageInsightsNotificationComponent
   ],
   providers: [],
   exports: [
@@ -137,7 +145,10 @@ import { CardRowComponent } from './card-row/card-row.component';
     CustomLoginBannerComponent,
     CdLabelComponent,
     CardComponent,
-    CardRowComponent
+    CardRowComponent,
+    CallHomeModalComponent,
+    CallHomeNotificationComponent,
+    StorageInsightsNotificationComponent
   ]
 })
 export class ComponentsModule {}
