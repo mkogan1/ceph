@@ -9154,7 +9154,13 @@ std::vector<Option> get_mds_options() {
      .set_default(0)
      .set_flag(Option::FLAG_RUNTIME)
      .set_description("maximum number of entries per directory before new creat/links fail")
-     .set_long_description("The maximum number of entries before any new entries are rejected with ENOSPC.")
+     .set_long_description("The maximum number of entries before any new entries are rejected with ENOSPC."),
+
+    Option("mds_session_metadata_threshold", Option::TYPE_SIZE, Option::LEVEL_ADVANCED)
+     .set_default(16_M)
+     .set_flag(Option::FLAG_RUNTIME)
+     .set_description("Evict non-advancing client-tid sessions exceeding the config size.")
+     .set_long_description("Evict clients which are not advancing their request tids which causes a large buildup of session metadata (`completed_requests`) in the MDS causing the MDS to go read-only since the RADOS operation exceeds the size threashold. This config is the maximum size (in bytes) that a session metadata (encoded) can grow.")
   });
 }
 
