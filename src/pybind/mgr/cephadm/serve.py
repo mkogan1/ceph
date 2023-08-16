@@ -1167,11 +1167,6 @@ class CephadmServe:
                     REDEPLOY_TRIGGERS = ['secure_monitoring_stack', 'mgmt-gateway']
                     if any(svc in e for e in diff for svc in REDEPLOY_TRIGGERS):
                         action = 'redeploy'
-                elif dd.daemon_type == 'jaeger-agent':
-                    # changes to jaeger-agent deps affect the way the unit.run for
-                    # the daemon is written, which we rewrite on redeploy, but not
-                    # on reconfig.
-                    action = 'redeploy'
                 elif dd.daemon_type == 'nfs':
                     # check what has changed, based on that decide action
                     only_kmip_updated = all(s.startswith('kmip') for s in list(sym_diff))
