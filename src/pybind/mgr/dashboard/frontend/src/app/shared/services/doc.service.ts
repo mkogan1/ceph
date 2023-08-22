@@ -60,6 +60,7 @@ export class DocService {
         'rgw-nfs': `${domain}dashboard_guide/management-of-nfs-ganesha-exports-on-the-ceph-dashboard`,
         rgw: `${domain}dashboard_guide/management-of-ceph-object-gateway-using-the-dashboard`,
         'rgw-multisite': `${domain}/radosgw/multisite/#failover-and-disaster-recovery`,
+        multisite: `${domain}/radosgw/multisite`,
         dashboard: `${domain}dashboard_guide/`,
         grafana: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard#enabling-monitoring-stack_dash`,
         orch: `${domain}operations_guide/introduction-to-the-ceph-orchestrator`,
