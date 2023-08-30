@@ -933,6 +933,10 @@ cd-create-cluster {
     margin-left: 25%;
     padding-top: 0.8rem;
   }
+
+  legend {
+    float: unset !important;
+  }
 }
 
 cd-modal {
