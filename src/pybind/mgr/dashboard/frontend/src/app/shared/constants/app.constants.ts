@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core';
 import { environment } from '~/environments/environment';
 
 export class AppConstants {
-  public static readonly version = '6';
+  public static readonly version = '7';
   public static readonly organization = environment.build === 'ibm' ? 'IBM' : 'Redhat';
   public static readonly projectName =
     environment.build === 'ibm' ? 'IBM Storage Ceph' : 'Red Hat Ceph Storage Dashboard';
