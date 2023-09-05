@@ -2696,7 +2696,12 @@ void MDSRankDispatcher::handle_asok_command(
     r = config_client(client_id, !got_value, option, value, *css);
   } else if (command == "scrub start" ||
 	     command == "scrub_start") {
-    if (whoami != 0) {
+    if (!is_active()) {
+      *css << "MDS is not active";
+      r = -CEPHFS_EINVAL;
+      goto out;
+    }
+    else if (whoami != 0) {
       *css << "Not rank 0";
       r = -CEPHFS_EXDEV;
       goto out;
@@ -2722,7 +2727,12 @@ void MDSRankDispatcher::handle_asok_command(
 	}));
     return;
   } else if (command == "scrub abort") {
-    if (whoami != 0) {
+    if (!is_active()) {
+      *css << "MDS is not active";
+      r = -CEPHFS_EINVAL;
+      goto out;
+    }
+    else if (whoami != 0) {
       *css << "Not rank 0";
       r = -CEPHFS_EXDEV;
       goto out;
@@ -2744,7 +2754,12 @@ void MDSRankDispatcher::handle_asok_command(
 	}));
     return;
   } else if (command == "scrub pause") {
-    if (whoami != 0) {
+    if (!is_active()) {
+      *css << "MDS is not active";
+      r = -CEPHFS_EINVAL;
+      goto out;
+    }
+    else if (whoami != 0) {
       *css << "Not rank 0";
       r = -CEPHFS_EXDEV;
       goto out;
@@ -2766,7 +2781,12 @@ void MDSRankDispatcher::handle_asok_command(
 	}));
     return;
   } else if (command == "scrub resume") {
-    if (whoami != 0) {
+    if (!is_active()) {
+      *css << "MDS is not active";
+      r = -CEPHFS_EINVAL;
+      goto out;
+    }
+    else if (whoami != 0) {
       *css << "Not rank 0";
       r = -CEPHFS_EXDEV;
       goto out;
