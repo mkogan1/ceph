@@ -106,12 +106,12 @@ os._exit = os_exit_noop   # type: ignore
 
 # Default container images -----------------------------------------------------
 DEFAULT_IMAGE = 'registry.redhat.io/rhceph/rhceph-7-rhel9:latest'
-DEFAULT_PROMETHEUS_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus:v4.10'
-DEFAULT_NODE_EXPORTER_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.10'
+DEFAULT_PROMETHEUS_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus:v4.12'
+DEFAULT_NODE_EXPORTER_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.12'
 DEFAULT_LOKI_IMAGE = 'registry.redhat.io/openshift-logging/logging-loki-rhel8:v2.6.1'
 DEFAULT_PROMTAIL_IMAGE = 'registry.redhat.io/rhceph/rhceph-promtail-rhel9:v2.4.0'
-DEFAULT_ALERT_MANAGER_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.10'
-DEFAULT_GRAFANA_IMAGE = 'registry.redhat.io/rhceph/grafana-rhel9'
+DEFAULT_ALERT_MANAGER_IMAGE = 'registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.12'
+DEFAULT_GRAFANA_IMAGE = 'registry.redhat.io/rhceph/grafana-rhel9:latest'
 DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/rhceph/rhceph-haproxy-rhel9:latest'
 DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel9:latest'
 DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph/snmp-notifier-rhel9:latest'
