@@ -582,6 +582,7 @@ struct rgw_cls_bi_entry {
 
   bool get_info(cls_rgw_obj_key *key, RGWObjCategory *category,
 		rgw_bucket_category_stats *accounted_stats);
+  void generate_test_instances(std::list<rgw_cls_bi_entry*>& o);
 };
 WRITE_CLASS_ENCODER(rgw_cls_bi_entry)
 
