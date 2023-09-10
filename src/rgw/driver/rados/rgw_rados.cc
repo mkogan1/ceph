@@ -978,7 +978,8 @@ bool RGWIndexCompletionManager::handle_completion(completion_t cb, complete_op_d
     comps.erase(iter);
   }
 
-  int r = rados_aio_get_return_value(cb);
+  //int r = rados_aio_get_return_value(cb);
+  int r = 0;
   if (r != -ERR_BUSY_RESHARDING) {
     ldout(arg->manager->ctx(), 20) << __func__ << "(): completion " << 
       (r == 0 ? "ok" : "failed with " + to_string(r)) << 

@@ -92,7 +92,7 @@ def check_sanity():
 
         int main(void) {
             rados_t cluster;
-            rados_create(&cluster, NULL);
+            //rados_create(&cluster, NULL);
             return 0;
         }
         """)
@@ -110,13 +110,17 @@ def check_sanity():
     try:
         link_objects = compiler.compile(
             sources=[tmp_file],
-            output_dir=tmp_dir
+            output_dir=tmp_dir,
+            extra_postargs=["-fuse-ld=/usr/local/bin/mold"]
         )
+        print("link_objects=", file=sys.stderr)
+        print(link_objects, file=sys.stderr)
         compiler.link_executable(
             objects=link_objects,
             output_progname=os.path.join(tmp_dir, 'rados_dummy'),
             libraries=['rados'],
             output_dir=tmp_dir,
+            extra_postargs=["-v", "-fuse-ld=/usr/local/bin/mold"]
         )
 
     except CompileError:

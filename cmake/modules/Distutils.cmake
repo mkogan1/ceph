@@ -94,9 +94,14 @@ function(distutils_add_cython_module target name src)
     env
     CC="${PY_CC}"
     CFLAGS="${PY_CFLAGS}"
+    #CPPFLAGS="${PY_CPPFLAGS}"
+    #CFLAGS="-fuse-ld=bfd -Wl,-v ${PY_CFLAGS}"
+    #CFLAGS=""
     CPPFLAGS="${PY_CPPFLAGS}"
     CXX="${PY_CXX}"
     LDSHARED="${PY_LDSHARED}"
+    #LDSHARED="/usr/bin/ld.bfdxxx"
+    #OPT=\"-fuse-ld=bfd -Wl,-v -DNDEBUG -g -fwrapv -O2 -w\"
     OPT=\"-DNDEBUG -g -fwrapv -O2 -w\"
     LDFLAGS=-L${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
     CYTHON_BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
