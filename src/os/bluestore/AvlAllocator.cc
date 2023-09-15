@@ -38,9 +38,9 @@ uint64_t AvlAllocator::_pick_block_after(uint64_t *cursor,
   uint64_t search_bytes = 0;
   auto rs_start = range_tree.lower_bound(range_t{*cursor, size}, compare);
   for (auto rs = rs_start; rs != range_tree.end(); ++rs) {
-    uint64_t offset = p2roundup(rs->start, align);
+    uint64_t offset = rs->start;
+    *cursor = offset + size;
     if (offset + size <= rs->end) {
-      *cursor = offset + size;
       return offset;
     }
     if (max_search_count > 0 && ++search_count > max_search_count) {
@@ -57,9 +57,9 @@ uint64_t AvlAllocator::_pick_block_after(uint64_t *cursor,
   }
   // If we reached end, start from beginning till cursor.
   for (auto rs = range_tree.begin(); rs != rs_start; ++rs) {
-    uint64_t offset = p2roundup(rs->start, align);
+    uint64_t offset = rs->start;
+    *cursor = offset + size;
     if (offset + size <= rs->end) {
-      *cursor = offset + size;
       return offset;
     }
     if (max_search_count > 0 && ++search_count > max_search_count) {
@@ -80,7 +80,7 @@ uint64_t AvlAllocator::_pick_block_fits(uint64_t size,
   const auto compare = range_size_tree.key_comp();
   auto rs_start = range_size_tree.lower_bound(range_t{0, size}, compare);
   for (auto rs = rs_start; rs != range_size_tree.end(); ++rs) {
-    uint64_t offset = p2roundup(rs->start, align);
+    uint64_t offset = rs->start;
     if (offset + size <= rs->end) {
       return offset;
     }

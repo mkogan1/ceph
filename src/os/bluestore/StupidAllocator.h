@@ -32,10 +32,6 @@ class StupidAllocator : public Allocator {
   unsigned _choose_bin(uint64_t len);
   void _insert_free(uint64_t offset, uint64_t len);
 
-  uint64_t _aligned_len(
-    interval_set_t::iterator p,
-    uint64_t alloc_unit);
-
 public:
   StupidAllocator(CephContext* cct,
                   const std::string& name,
