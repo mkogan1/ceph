@@ -1017,6 +1017,23 @@ class RgwService(CephService):
             'value': frontend
         })
 
+        mgr_map = self.mgr.get('mgr_map')
+        if 'prometheus' in mgr_map.get('services', {}):
+            ret, out, err = self.mgr.check_mon_command({
+                    'prefix': 'config set',
+                    'who': utils.name_to_config_section(daemon_spec.name()),
+                    'name': 'rgw_perf_counters_cache',
+                    'value': 'true',
+            })
+
+        if spec.rgw_perf_counters_cache_size:
+            ret, out, err = self.mgr.check_mon_command({
+                    'prefix': 'config set',
+                    'who': utils.name_to_config_section(daemon_spec.name()),
+                    'name': 'rgw_perf_counters_cache_size',
+                    'value': spec.rgw_perf_counters_cache_size,
+            })
+
         daemon_spec.keyring = keyring
         daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
 
