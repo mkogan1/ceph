@@ -1332,6 +1332,7 @@ static int bucket_stats(rgw::sal::RGWRadosStore *store,
   formatter->dump_int("num_shards",
 		      bucket_info.layout.current_index.layout.normal.num_shards);
   formatter->dump_string("tenant", bucket_info.bucket.tenant);
+  formatter->dump_string("versioning", bucket_info.versioned() ? (bucket_info.versioning_enabled() ? "enabled" : "suspended") : "off");
   formatter->dump_string("zonegroup", bucket_info.zonegroup);
   formatter->dump_string("placement_rule", bucket_info.placement_rule.to_str());
   ::encode_json("explicit_placement", bucket_info.bucket.explicit_placement, formatter);
