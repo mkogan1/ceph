@@ -104,9 +104,6 @@
                 "inject": false
               }
             ],
-            "scripts": [
-              "node_modules/chart.js/dist/Chart.bundle.js"
-            ],
             "stylePreprocessorOptions": {
               "includePaths": [
                 "src/styles"
