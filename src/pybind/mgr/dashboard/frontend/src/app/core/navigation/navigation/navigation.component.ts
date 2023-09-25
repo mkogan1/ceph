@@ -43,7 +43,7 @@ export class NavigationComponent implements OnInit, OnDestroy {
   };
   private subs = new Subscription();
 
-  evironment = environment;
+  environment = environment;
 
   constructor(
     private authStorageService: AuthStorageService,
@@ -86,7 +86,7 @@ export class NavigationComponent implements OnInit, OnDestroy {
       })
     );
 
-    if (this.evironment.build === 'ibm') {
+    if (this.environment.build === 'ibm') {
       this.subs.add(
         this.callHomeNotificationService.remindLaterOn$.subscribe((visible: boolean) => {
           this.showTopNotification('callHomeNotificationEnabled', visible);
