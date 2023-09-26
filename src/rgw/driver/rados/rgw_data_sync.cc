@@ -2115,11 +2115,12 @@ public:
 	}
       } while (true);
 
+      drain_all();
+      yield marker_tracker->flush();
+
       if (lost_bid) {
         return set_cr_error(-EBUSY);
       } else if (lost_lock) {
-        drain_all();
-        yield marker_tracker->flush();
         return set_cr_error(-ECANCELED);
       }
 
