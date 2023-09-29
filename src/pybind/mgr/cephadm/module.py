@@ -115,6 +115,7 @@ DEFAULT_GRAFANA_IMAGE = 'registry.redhat.io/rhceph/grafana-rhel9:latest'
 DEFAULT_HAPROXY_IMAGE = 'registry.redhat.io/rhceph/rhceph-haproxy-rhel9:latest'
 DEFAULT_KEEPALIVED_IMAGE = 'registry.redhat.io/rhceph/keepalived-rhel9:latest'
 DEFAULT_SNMP_GATEWAY_IMAGE = 'registry.redhat.io/rhceph/snmp-notifier-rhel9:latest'
+DEFAULT_NVMEOF_IMAGE = 'registry.redhat.io/rhceph/ceph-nvmeof-rhel9:latest'
 # ------------------------------------------------------------------------------
 
 
