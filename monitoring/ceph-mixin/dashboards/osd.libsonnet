@@ -25,7 +25,7 @@ local u = import 'utils.libsonnet';
         u.graphPanelSchema(alias,
                            title,
                            description,
-                           'null',
+                           'null as zero',
                            false,
                            formatY1,
                            'short',
@@ -269,7 +269,7 @@ local u = import 'utils.libsonnet';
                          formatY2='short',
                          labelY1='# of OSDs',
                          min='0',
-                         nullPointMode='null')
+                         nullPointMode='null as zero')
         .addTarget(u.addTargetSchema(
           'ceph_osd_numpg\n', 'PGs per OSD', 'time_series', 1, true
         )) + { gridPos: { x: 12, y: 8, w: 8, h: 8 } },
@@ -327,7 +327,7 @@ local u = import 'utils.libsonnet';
         u.graphPanelSchema({},
                            title,
                            description,
-                           'null',
+                           'null as zero',
                            false,
                            formatY1,
                            'short',
@@ -505,7 +505,7 @@ local u = import 'utils.libsonnet';
           {},
           'Physical Device Util% for $osd',
           '',
-          'null',
+          'null as zero',
           false,
           'percentunit',
           'short',
