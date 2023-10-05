@@ -1,7 +1,7 @@
 @use '/src/ibm/variables' as vv;
 @use '@carbon/colors' as colors;
 
-@import '~carbon-components/scss/globals/scss/styles';
+@import 'carbon-components/scss/globals/scss/styles';
 
 $chart-color-blue: #0f62fe;
 $chart-color-green: #198038;
@@ -490,6 +490,10 @@ cd-create-cluster {
 
               label {
                 font-weight: normal;
+              }
+
+              input {
+                margin-top: 0.5rem;
               }
             }
 

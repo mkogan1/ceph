@@ -3,7 +3,7 @@
 Example:
 $my-accent-color: #a18fff
 */
-@use '~@patternfly/patternfly/sass-utilities/colors';
+@use '@patternfly/patternfly/sass-utilities/colors';
 
 $navbar-bg: colors.$pf-color-black-900 !default;
 $sidebar-bg: colors.$pf-color-black-850 !default;
