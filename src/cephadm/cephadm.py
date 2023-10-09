@@ -6178,6 +6178,97 @@ def rollback(func: FuncT) -> FuncT:
             raise
     return cast(FuncT, _rollback)
 
+def verify_call_home_settings(ctx: CephadmContext) -> None:
+    if ctx.enable_ibm_call_home:
+        # grab any settings from call home config if provided
+        if ctx.call_home_config:
+            logger.info('Pulling call home info from %s.' % ctx.call_home_config)
+            d = get_parm(ctx.call_home_config)
+            if d.get('icn', None):
+                ctx.call_home_icn = d.get('icn')
+            if d.get('email', None):
+                ctx.ceph_call_home_contact_email = d.get('email')
+            if d.get('phone', None):
+                ctx.ceph_call_home_contact_phone = d.get('phone')
+            if d.get('first_name', None):
+                ctx.ceph_call_home_contact_first_name = d.get('first_name')
+            if d.get('last_name', None):
+                ctx.ceph_call_home_contact_last_name = d.get('last_name')
+            if d.get('country_code', None):
+                ctx.ceph_call_home_country_code = d.get('country_code')
+
+        # Check if all necessary call home settings have been provided
+        if not (
+            ctx.call_home_icn
+            and ctx.ceph_call_home_contact_email
+            and ctx.ceph_call_home_contact_phone
+            and ctx.ceph_call_home_contact_first_name
+            and ctx.ceph_call_home_contact_last_name
+            and ctx.ceph_call_home_country_code
+        ):
+            err_msg = ('In order to enable IBM call home, all necessary settings '
+                       'must be provided. This includes the ibm customer number '
+                       '(--call-home-icn), contact email (--ceph-call-home-contect-email), '
+                       'contact phone number (--ceph-call-home-context-phone), first name of contact '
+                       '(--ceph-call-home-contact-first-name), last name of contact (--ceph-call-home-contact-first-name) '
+                       'and country code (--ceph-call-home-country-code).\n'
+                       'These options may be provided directly through their flags or through a json config '
+                       'whose filepath may be passed to --call-home-config and should be structured as\n'
+                       '{\n'
+                       ' "icn": "<IBM_CUSTOMER_NUMBER>",\n'
+                       ' "email": "<CALL_HOME_CONTACT_EMAIL_ADDRESS>",\n'
+                       ' "phone": "<CALL_HOME_CONTACT_PHONE_NUMBER>"\n'
+                       ' "first_name": "<CALL_HOME_CONTACT_FIRST_NAME>",\n'
+                       ' "last_name": "<CALL_HOME_CONTACT_LAST_NAME>"\n'
+                       ' "country_code": "<CUSTOMER_COUNTRY_CODE>",\n'
+                       '}\n')
+            raise Error(err_msg)
+
+    if ctx.enable_storage_insights:
+        # grab any settings from storage insights config if provided
+        if ctx.storage_insights_config:
+            logger.info('Pulling Storage Insights info from %s.' % ctx.storage_insights_config)
+            d = get_parm(ctx.storage_insights_config)
+            if d.get('tenant_id', None):
+                ctx.storage_insights_tenant_id = d.get('tenant_id')
+
+        # verify all necessary settings have been provided
+        if not (
+            ctx.storage_insights_tenant_id
+        ):
+            err_msg = ('In order to enable Storage Insights, all necessary settings '
+                       'must be provided. This includes the tenant id '
+                       '(--storage-insights-tenant-id)\n'
+                       'These options may be provided directly through their flags or through a json config '
+                       'whose filepath may be passed to --storage-insights-config and should be structured as\n'
+                       '{\n'
+                       ' "tenant_id": "<STORAGE_INSIGHTS_TENANT_ID>",\n'
+                       '}\n')
+            raise Error(err_msg)
+
+
+def apply_call_home_settings(ctx: CephadmContext, cli: Callable, wait_for_mgr_restart: Callable) -> None:
+    if not ctx.enable_ibm_call_home:
+        logger.info('Skipping call home integration. --enable-ibm-call-home not provided')
+        return
+
+    # if we got here, attempt to setup call home integration
+    cli(['mgr', 'module', 'enable', 'call_home_agent'])
+    wait_for_mgr_restart()
+    # store user info for call home module to use
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/icn', ctx.call_home_icn])
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/customer_email', ctx.ceph_call_home_contact_email])
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/customer_phone', ctx.ceph_call_home_contact_phone])
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/customer_first_name', ctx.ceph_call_home_contact_first_name])
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/customer_last_name', ctx.ceph_call_home_contact_last_name])
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/customer_country_code', ctx.ceph_call_home_country_code])
+
+    if not ctx.enable_storage_insights:
+        logger.info('Skipping Storage Insights integration. --enable-storage-insights not provided')
+        return
+
+    cli(['config', 'set', 'mgr', 'mgr/call_home_agent/owner_tenant_id', ctx.storage_insights_tenant_id])
+
 
 @rollback
 @default_image
