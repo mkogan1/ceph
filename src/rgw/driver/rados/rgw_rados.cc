@@ -10067,7 +10067,7 @@ int RGWRados::check_bucket_shards(const RGWBucketInfo& bucket_info,
       return 0;
   }
 
-  if (bucket_info.is_indexless()) {
+  if (! is_layout_reshardable(bucket_info.layout)) {
     return 0;
   }
 
