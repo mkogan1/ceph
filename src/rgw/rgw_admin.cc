@@ -2843,6 +2843,14 @@ int check_reshard_bucket_params(rgw::sal::RGWRadosStore *store,
     return ret;
   }
 
+  if (! is_layout_reshardable(bucket_info.layout)) {
+    std::cerr << "Bucket '" << bucket_name <<
+      "' currently has layout '" <<
+      current_layout_desc(bucket_info.layout) <<
+      "', which does not support resharding." << std::endl;
+    return -EINVAL;
+  }
+
   int num_source_shards = rgw::current_num_shards(bucket_info.layout);
 
   if (num_shards <= num_source_shards && !yes_i_really_mean_it) {
@@ -7394,7 +7402,8 @@ next:
           "have the resharding feature enabled." << std::endl;
       return ENOTSUP;
     }
-    if (!RGWBucketReshard::can_reshard(bucket_info, zone_svc) &&
+
+    if (!RGWBucketReshard::should_zone_reshard_now(bucket_info, zone_svc) &&
         !yes_i_really_mean_it) {
       std::cerr << "Bucket '" << bucket_info.bucket.name << "' already has too many "
           "log generations (" << bucket_info.layout.logs.size() << ") "
