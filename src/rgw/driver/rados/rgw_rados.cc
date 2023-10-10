@@ -10096,6 +10096,10 @@ int RGWRados::check_bucket_shards(const RGWBucketInfo& bucket_info,
       return 0;
   }
 
+  if (bucket_info.is_indexless()) {
+    return 0;
+  }
+
   bool need_resharding = false;
   uint32_t num_source_shards = rgw::current_num_shards(bucket_info.layout);
   const uint32_t max_dynamic_shards =
