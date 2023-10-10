@@ -6311,6 +6311,11 @@ def command_bootstrap(ctx):
     if not is_fsid(fsid):
         raise Error('not an fsid: %s' % fsid)
 
+    if ctx.enable_storage_insights and not ctx.enable_ibm_call_home:
+        raise Error('Cannot enable Storage Insights without enabling call home (--enable-ibm-call-home)')
+    elif ctx.enable_ibm_call_home:
+        verify_call_home_settings(ctx)
+
     # verify output files
     for f in [ctx.output_config, ctx.output_keyring, ctx.output_pub_ssh_key]:
         if not ctx.allow_overwrite:
