@@ -1274,6 +1274,7 @@ class GrafanaSpec(MonitoringSpec):
                  preview_only: bool = False,
                  config: Optional[Dict[str, str]] = None,
                  networks: Optional[List[str]] = None,
+                 only_bind_port_on_networks: bool = False,
                  port: Optional[int] = None,
                  initial_admin_password: Optional[str] = None,
                  extra_container_args: Optional[List[str]] = None,
@@ -1289,6 +1290,7 @@ class GrafanaSpec(MonitoringSpec):
             custom_configs=custom_configs)
 
         self.initial_admin_password = initial_admin_password
+        self.only_bind_port_on_networks = only_bind_port_on_networks
 
 
 yaml.add_representer(GrafanaSpec, ServiceSpec.yaml_representer)
