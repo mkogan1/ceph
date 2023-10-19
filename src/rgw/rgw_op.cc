@@ -1699,6 +1699,7 @@ int RGWGetObj::read_user_manifest_part(rgw::sal::Bucket* bucket,
 
   auto counters = rgw::op_counters::get(s);
   rgw::op_counters::inc(counters, l_rgw_op_get_obj_b, cur_end - cur_ofs);
+  perfcounter->inc(l_rgw_get_b, cur_end - cur_ofs);
   filter->fixup_range(cur_ofs, cur_end);
   op_ret = read_op->iterate(this, cur_ofs, cur_end, filter, s->yield);
   if (op_ret >= 0)
@@ -1770,6 +1771,9 @@ static int iterate_user_manifest_parts(const DoutPrefixProvider *dpp,
 	end_ofs = end - cur_total_len + 1;
 	found_end = true;
       }
+
+      perfcounter->tinc(l_rgw_get_lat,
+                        (ceph_clock_now() - start_time));
 
       rgw::op_counters::CountersContainer counters;
       rgw::op_counters::tinc(counters, l_rgw_op_get_obj_lat,
@@ -1867,6 +1871,9 @@ static int iterate_slo_parts(const DoutPrefixProvider *dpp,
       end_ofs = end - cur_total_len;
       found_end = true;
     }
+
+    perfcounter->tinc(l_rgw_get_lat,
+                      (ceph_clock_now() - start_time));
 
     rgw::op_counters::CountersContainer counters;
     rgw::op_counters::tinc(counters, l_rgw_op_get_obj_lat,
@@ -2217,6 +2224,8 @@ void RGWGetObj::execute(optional_yield y)
   std::unique_ptr<RGWGetObj_Filter> run_lua;
   map<string, bufferlist>::iterator attr_iter;
 
+  perfcounter->inc(l_rgw_get);
+
   auto counters = rgw::op_counters::get(s);
   rgw::op_counters::inc(counters, l_rgw_op_get_obj, 1);
 
@@ -2420,6 +2429,7 @@ void RGWGetObj::execute(optional_yield y)
   }
 
   rgw::op_counters::inc(counters, l_rgw_op_get_obj_b, end-ofs);
+  perfcounter->inc(l_rgw_get_b, end - ofs);
 
   op_ret = read_op->iterate(this, ofs_x, end_x, filter, s->yield);
 
@@ -2428,6 +2438,7 @@ void RGWGetObj::execute(optional_yield y)
 
   rgw::op_counters::tinc(counters, l_rgw_op_get_obj_lat, s->time_elapsed());
 
+  perfcounter->tinc(l_rgw_get_lat, s->time_elapsed());
   if (op_ret < 0) {
     goto done_err;
   }
@@ -4007,10 +4018,12 @@ void RGWPutObj::execute(optional_yield y)
 
   bool need_calc_md5 = (dlo_manifest == NULL) && (slo_info == NULL);
   rgw::op_counters::inc(counters, l_rgw_op_put_obj, 1);
+  perfcounter->inc(l_rgw_put);
 
   // report latency on return
   auto put_lat = make_scope_guard([&] {
       rgw::op_counters::tinc(counters, l_rgw_op_put_obj_lat, s->time_elapsed());
+      perfcounter->tinc(l_rgw_put_lat, s->time_elapsed());
     });
 
   op_ret = -EINVAL;
@@ -4285,6 +4298,7 @@ void RGWPutObj::execute(optional_yield y)
   s->object->set_obj_size(ofs);
 
   rgw::op_counters::inc(counters, l_rgw_op_put_obj_b, s->obj_size);
+  perfcounter->inc(l_rgw_put_b, s->obj_size);
 
   op_ret = do_aws4_auth_completion();
   if (op_ret < 0) {

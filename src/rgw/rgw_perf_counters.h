@@ -17,6 +17,14 @@ enum {
   l_rgw_req,
   l_rgw_failed_req,
 
+  l_rgw_get,
+  l_rgw_get_b,
+  l_rgw_get_lat,
+
+  l_rgw_put,
+  l_rgw_put_b,
+  l_rgw_put_lat,
+
   l_rgw_qlen,
   l_rgw_qactive,
 

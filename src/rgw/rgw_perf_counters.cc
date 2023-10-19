@@ -20,6 +20,13 @@ void add_rgw_frontend_counters(PerfCountersBuilder *pcb) {
   pcb->add_u64_counter(l_rgw_req, "req", "Requests");
   pcb->add_u64_counter(l_rgw_failed_req, "failed_req", "Aborted requests");
 
+  pcb->add_u64_counter(l_rgw_get, "get", "Gets");
+  pcb->add_u64_counter(l_rgw_get_b, "get_b", "Size of gets");
+  pcb->add_time_avg(l_rgw_get_lat, "get_initial_lat", "Get latency");
+  pcb->add_u64_counter(l_rgw_put, "put", "Puts");
+  pcb->add_u64_counter(l_rgw_put_b, "put_b", "Size of puts");
+  pcb->add_time_avg(l_rgw_put_lat, "put_initial_lat", "Put latency");
+
   pcb->add_u64(l_rgw_qlen, "qlen", "Queue length");
   pcb->add_u64(l_rgw_qactive, "qactive", "Active requests queue");
 
