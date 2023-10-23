@@ -107,3 +107,32 @@ TEST(TestLCFilterInvalidAnd, XMLDoc3)
   /* check our flags */
   ASSERT_EQ(filter.get_flags(), uint32_t(LCFlagType::none));
 }
+
+static const char *xmldoc_4 =
+R"(<Rule>
+        <ID>noncur-cleanup-rule</ID>
+        <Filter>
+           <Prefix></Prefix>
+        </Filter>
+        <Status>Enabled</Status>
+       <NoncurrentVersionExpiration>
+            <NewerNoncurrentVersions>5</NewerNoncurrentVersions>
+            <NoncurrentDays>365</NoncurrentDays>
+       </NoncurrentVersionExpiration>
+    </Rule>
+)";
+
+TEST(TestLCConfigurationDecoder, XMLDoc4)
+{
+  RGWXMLDecoder::XMLParser parser;
+  ASSERT_TRUE(parser.init());
+  ASSERT_TRUE(parser.parse(xmldoc_4, strlen(xmldoc_4), 1));
+  LCRule_S3 rule;
+  auto result = RGWXMLDecoder::decode_xml("Rule", rule, &parser, true);
+  ASSERT_TRUE(result);
+  /* check results */
+  ASSERT_TRUE(rule.is_enabled());
+  const auto& noncur_expiration = rule.get_noncur_expiration();
+  ASSERT_EQ(noncur_expiration.get_days(), 365);
+  ASSERT_EQ(noncur_expiration.get_newer(), 5);
+}
