@@ -136,3 +136,37 @@ TEST(TestLCConfigurationDecoder, XMLDoc4)
   ASSERT_EQ(noncur_expiration.get_days(), 365);
   ASSERT_EQ(noncur_expiration.get_newer(), 5);
 }
+
+static const char *xmldoc_5 =
+R"(<Rule>
+        <ID>expire-size-rule</ID>
+        <Filter>
+           <And>
+              <Prefix></Prefix>
+              <ObjectSizeGreaterThan>1024</ObjectSizeGreaterThan>
+              <ObjectSizeLessThan>65536</ObjectSizeGreaterThan>
+           </And>
+        </Filter>
+        <Status>Enabled</Status>
+       <Expiration>
+            <Days>365</Days>
+       </Expiration>
+    </Rule>
+)";
+
+TEST(TestLCConfigurationDecoder, XMLDoc5)
+{
+  RGWXMLDecoder::XMLParser parser;
+  ASSERT_TRUE(parser.init());
+  ASSERT_TRUE(parser.parse(xmldoc_5, strlen(xmldoc_5), 1));
+  LCRule_S3 rule;
+  auto result = RGWXMLDecoder::decode_xml("Rule", rule, &parser, true);
+  ASSERT_TRUE(result);
+  /* check results */
+  ASSERT_TRUE(rule.is_enabled());
+  const auto& expiration = rule.get_expiration();
+  ASSERT_EQ(expiration.get_days(), 365);
+  const auto& filter = rule.get_filter();
+  ASSERT_EQ(filter.get_size_gt(), 1024);
+  ASSERT_EQ(filter.get_size_lt(), 65536);
+}
