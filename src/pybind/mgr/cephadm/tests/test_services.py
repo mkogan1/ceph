@@ -376,6 +376,7 @@ port = {default_port}
 enable_auth = False
 state_update_notify = True
 state_update_interval_sec = 5
+enable_spdk_discovery_controller = true
 
 [ceph]
 pool = {pool}
