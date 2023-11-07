@@ -69,7 +69,7 @@ class List(object):
     def generate(self, devs=None):
         logger.debug('Listing block devices via lsblk...')
         info_devices = disk.lsblk_all(abspath=True)
-        if devs is None or devs == []:
+        if not devs or not any(devs):
             # If no devs are given initially, we want to list ALL devices including children and
             # parents. Parent disks with child partitions may be the appropriate device to return if
             # the parent disk has a bluestore header, but children may be the most appropriate
