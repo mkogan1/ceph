@@ -1336,7 +1336,6 @@ public:
 
     /* notifications */
     auto& bucket = oc.bucket;
-    auto& bucket_info = oc.bucket->get_info();
     auto& obj = oc.obj;
 
     RGWObjState* obj_state{nullptr};
@@ -1635,6 +1634,17 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
     return ret;
   }
 
+  // XXXX currently, rgw::sal::Bucket.owner is always null here
+  std::unique_ptr<rgw::sal::User> user;
+  if (! bucket->get_owner()) {
+    auto& bucket_info = bucket->get_info();
+    user = driver->get_user(bucket_info.owner);
+    // forgive me, lord
+    if (user) {
+      bucket->set_owner(user.get());
+    }
+  }
+
   auto stack_guard = make_scope_guard(
     [&worker]
       {
@@ -1755,15 +1765,6 @@ int RGWLC::bucket_lc_process(string& shard_id, LCWorker* worker,
       }
     }
     worker->workpool->drain();
-  }
-
-  std::unique_ptr<rgw::sal::User> user;
-  if (! bucket->get_owner()) {
-    auto& bucket_info = bucket->get_info();
-    std::unique_ptr<rgw::sal::User> user = driver->get_user(bucket_info.owner);
-      if (user) {
-	bucket->set_owner(user.get());
-      }
   }
 
   ret = handle_multipart_expiration(bucket.get(), prefix_map, worker, stop_at, once);
