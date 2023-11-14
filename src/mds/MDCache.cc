@@ -9957,6 +9957,10 @@ void MDCache::request_kill(const MDRequestRef& mdr)
     mdr->item_session_request.remove_myself();
   } else {
     dout(10) << "request_kill " << *mdr << dendl;
+    if (mdr->internal_op_finish) {
+      mdr->internal_op_finish->complete(-CEPHFS_ECANCELED);
+      mdr->internal_op_finish = nullptr;
+    }
     request_cleanup(mdr);
   }
 }
