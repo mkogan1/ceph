@@ -72,6 +72,53 @@
 * CephFS: The period specifier ``m`` now implies minutes and the period specifier
   ``M`` now implies months. This has been made consistent with the rest
   of the system.
+* CephFS: Running the command "ceph fs authorize" for an existing entity now
+  upgrades the entity's capabilities instead of printing an error. It can now
+  also change read/write permissions in a capability that the entity already
+  holds. If the capability passed by user is same as one of the capabilities
+  that the entity already holds, idempotency is maintained.
+* CephFS: Two FS names can now be swapped, optionally along with their IDs,
+  using "ceph fs swap" command. The function of this API is to facilitate
+  file system swaps for disaster recovery. In particular, it avoids situations
+  where a named file system is temporarily missing which would prompt a higher
+  level storage operator (like Rook) to recreate the missing file system.
+  See https://docs.ceph.com/en/latest/cephfs/administration/#file-systems
+  docs for more information.
+* CephFS: Before running the command "ceph fs rename", the filesystem to be
+  renamed must be offline and the config "refuse_client_session" must be set
+  for it. The config "refuse_client_session" can be removed/unset and
+  filesystem can be online after the rename operation is complete.
+* RADOS: A POOL_APP_NOT_ENABLED health warning will now be reported if
+  the application is not enabled for the pool irrespective of whether
+  the pool is in use or not. Always tag a pool with an application
+  using ``ceph osd pool application enable`` command to avoid reporting
+  of POOL_APP_NOT_ENABLED health warning for that pool.
+  The user might temporarily mute this warning using
+  ``ceph health mute POOL_APP_NOT_ENABLED``.
+CephFS: Disallow delegating preallocated inode ranges to clients. Config
+  `mds_client_delegate_inos_pct` defaults to 0 which disables async dirops
+  in the kclient.
+* S3 Get/HeadObject now support query parameter `partNumber` to read a specific
+  part of a completed multipart upload.
+* RGW: Fixed a S3 Object Lock bug with PutObjectRetention requests that specify
+  a RetainUntilDate after the year 2106. This date was truncated to 32 bits when
+  stored, so a much earlier date was used for object lock enforcement. This does
+  not effect PutBucketObjectLockConfiguration where a duration is given in Days.
+  The RetainUntilDate encoding is fixed for new PutObjectRetention requests, but
+  cannot repair the dates of existing object locks. Such objects can be identified
+  with a HeadObject request based on the x-amz-object-lock-retain-until-date
+  response header.
+* RADOS: `get_pool_is_selfmanaged_snaps_mode` C++ API has been deprecated
+  due to being prone to false negative results.  It's safer replacement is
+  `pool_is_in_selfmanaged_snaps_mode`.
+* RADOS: For bug 62338 (https://tracker.ceph.com/issues/62338), we did not choose
+  to condition the fix on a server flag in order to simplify backporting.  As
+  a result, in rare cases it may be possible for a PG to flip between two acting
+  sets while an upgrade to a version with the fix is in progress.  If you observe
+  this behavior, you should be able to work around it by completing the upgrade or
+  by disabling async recovery by setting osd_async_recovery_min_cost to a very
+  large value on all OSDs until the upgrade is complete:
+  ``ceph config set osd osd_async_recovery_min_cost 1099511627776``
 
 >=18.0.0
 
