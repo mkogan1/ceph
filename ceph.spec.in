@@ -112,7 +112,9 @@
 # this is tracked in https://bugzilla.redhat.com/2152265
 %bcond_with system_arrow
 %endif
-%if 0%{?fedora} || 0%{?suse_version} || 0%{?rhel} >= 8
+# TODO: enable system_qatlib once qatlib-devel provides qae_mem_utils.h
+%bcond_with system_qatlib
+%if 0%{?fedora} || 0%{?suse_version} || 0%{?rhel} >= 8 || 0%{?openEuler}
 %global weak_deps 1
 %endif
 %if %{with selinux}
@@ -330,6 +332,9 @@ BuildRequires:  libpmemobj-devel >= 1.8
 BuildRequires:  libarrow-devel
 BuildRequires:  parquet-libs-devel
 BuildRequires:  utf8proc-devel
+%endif
+%if 0%{with system_qatlib}
+BuildRequires:  qatlib-devel
 %endif
 %if 0%{with seastar}
 BuildRequires:  c-ares-devel
@@ -1435,6 +1440,9 @@ cmake .. \
 %if 0%{with system_arrow}
     -DWITH_SYSTEM_ARROW:BOOL=ON \
     -DWITH_SYSTEM_UTF8PROC:BOOL=ON \
+%endif
+%if 0%{with system_qatlib}
+    -DWITH_SYSTEM_QATLIB:BOOL=ON \
 %endif
 %if 0%{with seastar}
     -DWITH_SEASTAR:BOOL=ON \
