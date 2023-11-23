@@ -114,6 +114,11 @@
 %endif
 # TODO: enable system_qatlib once qatlib-devel provides qae_mem_utils.h
 %bcond_with system_qatlib
+%if 0%{?fedora} || 0%{?rhel} >= 9
+%bcond_without system_qatzip
+%else
+%bcond_with system_qatzip
+%endif
 %if 0%{?fedora} || 0%{?suse_version} || 0%{?rhel} >= 8 || 0%{?openEuler}
 %global weak_deps 1
 %endif
@@ -335,6 +340,9 @@ BuildRequires:  utf8proc-devel
 %endif
 %if 0%{with system_qatlib}
 BuildRequires:  qatlib-devel
+%endif
+%if 0%{with system_qatzip}
+BuildRequires:  qatzip-devel
 %endif
 %if 0%{with seastar}
 BuildRequires:  c-ares-devel
@@ -1443,6 +1451,9 @@ cmake .. \
 %endif
 %if 0%{with system_qatlib}
     -DWITH_SYSTEM_QATLIB:BOOL=ON \
+%endif
+%if 0%{with system_qatzip}
+    -DWITH_SYSTEM_QATZIP:BOOL=ON \
 %endif
 %if 0%{with seastar}
     -DWITH_SEASTAR:BOOL=ON \
