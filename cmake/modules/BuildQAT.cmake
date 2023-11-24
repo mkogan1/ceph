@@ -1,12 +1,9 @@
 function(build_qat)
-  set(QAT_REPO https://github.com/intel/qatlib.git)
-  set(QAT_TAG "23.11.0")
-
   include(FindMake)
   find_make("MAKE_EXECUTABLE" "make_cmd")
 
-  set(QAT_SOURCE_DIR ${CMAKE_BINARY_DIR}/src/qatlib)
-  set(QAT_INSTALL_DIR ${QAT_SOURCE_DIR}/install)
+  set(QAT_BINARY_DIR ${CMAKE_BINARY_DIR}/src/qatlib)
+  set(QAT_INSTALL_DIR ${QAT_BINARY_DIR}/install)
   set(QAT_INCLUDE_DIR ${QAT_INSTALL_DIR}/include)
   set(QAT_LIBRARY_DIR ${QAT_INSTALL_DIR}/lib)
   set(QAT_LIBRARY ${QAT_LIBRARY_DIR}/libqat.a)
@@ -24,18 +21,11 @@ function(build_qat)
 
   set(install_cmd ${make_cmd} install)
   # 'make install' is missing one header that ceph requires, so copy it manually
-  list(APPEND install_cmd COMMAND cmake -E copy ${QAT_SOURCE_DIR}/quickassist/utilities/libusdm_drv/include/qae_mem_utils.h ${QAT_INCLUDE_DIR}/qat)
-
-  set(source_dir_args
-    SOURCE_DIR ${QAT_SOURCE_DIR}
-    GIT_REPOSITORY ${QAT_REPO}
-    GIT_TAG ${QAT_TAG}
-    GIT_SHALLOW TRUE
-    GIT_CONFIG advice.detachedHead=false)
+  list(APPEND install_cmd COMMAND cmake -E copy <SOURCE_DIR>/quickassist/utilities/libusdm_drv/include/qae_mem_utils.h ${QAT_INCLUDE_DIR}/qat)
 
   include(ExternalProject)
   ExternalProject_Add(qatlib_ext
-    ${source_dir_args}
+    SOURCE_DIR "${PROJECT_SOURCE_DIR}/src/qatlib"
     CONFIGURE_COMMAND ./autogen.sh COMMAND ${configure_cmd}
     BUILD_COMMAND ${make_cmd} -j3
     BUILD_IN_SOURCE 1
