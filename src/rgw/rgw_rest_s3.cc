@@ -1,6 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
+#include <cstdint>
 #include <errno.h>
 #include <array>
 #include <string.h>
@@ -5473,6 +5474,146 @@ AWSGeneralAbstractor::get_v4_canonical_headers(
                                                  using_qs, false);
 }
 
+#if 0
+/* 
+   > 70115ea6725 (rgw: cumulatively fix 6 AWS SigV4 request failure cases)
+*/
+AWSSignerV4::prepare_result_t
+AWSSignerV4::prepare(const DoutPrefixProvider *dpp,
+                     const std::string& access_key_id,
+                     const string& region,
+                     const string& service,
+                     const req_info& info,
+                     const bufferlist *opt_content,
+                     bool s3_op)
+{
+  std::string signed_hdrs;
+
+  ceph::real_time timestamp = ceph::real_clock::now();
+
+  map<string, string> extra_headers;
+
+  std::string date = ceph::to_iso_8601_no_separators(timestamp, ceph::iso_8601_format::YMDhms);
+
+  std::string credential_scope = gen_v4_scope(timestamp, region, service);
+
+  extra_headers["x-amz-date"] = date;
+
+  string content_hash;
+
+  if (opt_content) {
+    content_hash = rgw::auth::s3::calc_v4_payload_hash(opt_content->to_str());
+    extra_headers["x-amz-content-sha256"] = content_hash;
+
+  }
+
+  /* craft canonical headers */
+  std::string canonical_headers = \
+    gen_v4_canonical_headers(info, extra_headers, &signed_hdrs);
+
+  using sanitize = rgw::crypt_sanitize::log_content;
+  ldpp_dout(dpp, 10) << "canonical headers format = "
+                     << sanitize{canonical_headers} << dendl;
+
+  bool is_non_s3_op = !s3_op;
+
+  const char* exp_payload_hash = nullptr;
+  string payload_hash;
+  if (is_non_s3_op) {
+    //For non s3 ops, we need to calculate the payload hash
+    payload_hash = info.args.get("PayloadHash");
+    exp_payload_hash = payload_hash.c_str();
+  } else {
+    /* Get the expected hash. */
+    if (content_hash.empty()) {
+      exp_payload_hash = rgw::auth::s3::get_v4_exp_payload_hash(info);
+    } else {
+      exp_payload_hash = content_hash.c_str();
+    }
+  }
+
+  /* Craft canonical URI. Using std::move later so let it be non-const. */
+  auto canonical_uri = rgw::auth::s3::gen_v4_canonical_uri(info);
+
+
+  /* Craft canonical query string. std::moving later so non-const here. */
+  auto canonical_qs = rgw::auth::s3::gen_v4_canonical_qs(info, is_non_s3_op);
+
+  auto cct = dpp->get_cct();
+
+  /* Craft canonical request. */
+  auto canonical_req_hash = \
+    rgw::auth::s3::get_v4_canon_req_hash(cct,
+                                         info.method,
+                                         std::move(canonical_uri),
+                                         std::move(canonical_qs),
+                                         std::move(canonical_headers),
+                                         signed_hdrs,
+                                         exp_payload_hash,
+                                         dpp);
+
+  auto string_to_sign = \
+    rgw::auth::s3::get_v4_string_to_sign(cct,
+                                         AWS4_HMAC_SHA256_STR,
+                                         date,
+                                         credential_scope,
+                                         std::move(canonical_req_hash),
+                                         dpp);
+
+  const auto sig_factory = gen_v4_signature;
+
+  /* Requests authenticated with the Query Parameters are treated as unsigned.
+   * From "Authenticating Requests: Using Query Parameters (AWS Signature
+   * Version 4)":
+   *
+   *   You don't include a payload hash in the Canonical Request, because
+   *   when you create a presigned URL, you don't know the payload content
+   *   because the URL is used to upload an arbitrary payload. Instead, you
+   *   use a constant string UNSIGNED-PAYLOAD.
+   *
+   * This means that, in the absence of a trailer, we don't need to spawn
+   * a completer. Both aws4_auth_needs_complete and aws4_auth_streaming_mode
+   * are set to false by default. We don't need to change that. */
+  return {
+    access_key_id,
+    date,
+    credential_scope,
+    std::move(signed_hdrs),
+    std::move(string_to_sign),
+    std::move(extra_headers),
+    sig_factory,
+  };
+}
+
+AWSSignerV4::signature_headers_t
+gen_v4_signature(const DoutPrefixProvider *dpp,
+                 const std::string_view& secret_key,
+                 const AWSSignerV4::prepare_result_t& sig_info)
+{
+  auto signature = rgw::auth::s3::get_v4_signature(sig_info.scope,
+                                                   dpp->get_cct(),
+                                                   secret_key,
+                                                   sig_info.string_to_sign,
+                                                   dpp);
+  AWSSignerV4::signature_headers_t result;
+
+  for (auto& entry : sig_info.extra_headers) {
+    result[entry.first] = entry.second;
+  }
+  auto& payload_hash = result["x-amz-content-sha256"];
+  if (payload_hash.empty()) {
+    payload_hash = AWS4_UNSIGNED_PAYLOAD_HASH;
+  }
+  string auth_header = string("AWS4-HMAC-SHA256 Credential=").append(sig_info.access_key_id) + "/";
+  auth_header.append(sig_info.scope + ",SignedHeaders=")
+             .append(sig_info.signed_headers + ",Signature=")
+             .append(signature);
+  result["Authorization"] = auth_header;
+
+  return result;
+}
+#endif /* 0 */
+
 AWSEngine::VersionAbstractor::auth_data_t
 AWSGeneralAbstractor::get_auth_data_v4(const req_state* const s,
                                        const bool using_qs) const
@@ -5554,19 +5695,22 @@ AWSGeneralAbstractor::get_auth_data_v4(const req_state* const s,
                                      std::placeholders::_3,
                                      s);
 
-  /* Requests authenticated with the Query Parameters are treated as unsigned.
-   * From "Authenticating Requests: Using Query Parameters (AWS Signature
-   * Version 4)":
-   *
-   *   You don't include a payload hash in the Canonical Request, because
-   *   when you create a presigned URL, you don't know the payload content
-   *   because the URL is used to upload an arbitrary payload. Instead, you
-   *   use a constant string UNSIGNED-PAYLOAD.
-   *
-   * This means we have absolutely no business in spawning completer. Both
-   * aws4_auth_needs_complete and aws4_auth_streaming_mode are set to false
-   * by default. We don't need to change that. */
-  if (is_v4_payload_unsigned(exp_payload_hash) || is_v4_payload_empty(s) || is_non_s3_op) {
+  /* Traditional UNSIGNED-PAYLOAD requests do not require a completer, but since
+   * 2022, even unsigned payload requests can be sent as aws-chunked and may
+   * have a checksum trailer */
+
+  auto traditional_v4_unsigned =
+    is_traditional_v4_unsigned_payload(exp_payload_hash);
+  auto v4_unsigned = is_v4_payload_unsigned(exp_payload_hash);
+  auto v4_unsigned_chunked = is_v4_payload_unsigned_chunked(exp_payload_hash);
+  auto checksum_trailer = have_checksum_trailer(exp_payload_hash);
+  auto trailer_signature = expect_trailer_signature(exp_payload_hash);
+
+  if (traditional_v4_unsigned ||
+      (v4_unsigned && !checksum_trailer) ||
+      is_v4_payload_empty(s) ||
+      is_non_s3_op) {
+    ldpp_dout(s, 10) << __func__ << ": UNSIGNED-PAYLOAD or other v4 no-completer case" << dendl;
     return {
       access_key_id,
       client_signature,
@@ -5641,9 +5785,6 @@ AWSGeneralAbstractor::get_auth_data_v4(const req_state* const s,
         cmpl_factory
       };
     } else {
-      /* IMHO "streamed" doesn't fit too good here. I would prefer to call
-       * it "chunked" but let's be coherent with Amazon's terminology. */
-
       ldpp_dout(s, 10) << "body content detected in multiple chunks" << dendl;
 
       /* payload in multiple chunks */
@@ -5669,11 +5810,31 @@ AWSGeneralAbstractor::get_auth_data_v4(const req_state* const s,
       /* In the case of query string-based authentication there should be no
        * x-amz-content-sha256 header and the value "UNSIGNED-PAYLOAD" is used
        * for CanonReq. */
+
+      uint32_t flags{AWSv4ComplMulti::FLAG_NONE};
+
+      if (v4_unsigned) {
+	flags |= AWSv4ComplMulti::FLAG_UNSIGNED_PAYLOAD;
+      }
+
+      if (checksum_trailer) {
+	flags |= AWSv4ComplMulti::FLAG_TRAILING_CHECKSUM;
+      }
+
+      if (v4_unsigned_chunked) {
+	flags |= AWSv4ComplMulti::FLAG_UNSIGNED_CHUNKED;
+      }
+
+      if (trailer_signature) {
+	flags |= AWSv4ComplMulti::FLAG_TRAILER_SIGNATURE;
+      }
+
       const auto cmpl_factory = std::bind(AWSv4ComplMulti::create,
                                           s,
                                           date,
                                           credential_scope,
                                           client_signature,
+					  flags,
                                           std::placeholders::_1);
       return {
         access_key_id,

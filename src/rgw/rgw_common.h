@@ -389,6 +389,16 @@ class RGWHTTPArgs {
   std::map<std::string, std::string>& get_params() {
     return val_map;
   }
+  const std::map<std::string, std::string>& get_params() const {
+    return val_map;
+  }
+  std::map<std::string, std::string>& get_sys_params() {
+    return sys_val_map;
+  }
+  const std::map<std::string, std::string>& get_sys_params() const {
+    return sys_val_map;
+  }
+
   const std::map<std::string, std::string>& get_sub_resources() const {
     return sub_resources;
   }
@@ -428,6 +438,8 @@ public:
       defer_to_bucket_acls(0) {
   }
 };
+
+using env_map_t = std::map<std::string, std::string, ltstr_nocase>;
 
 class RGWEnv {
   std::map<string, string, ltstr_nocase> env_map;
@@ -2383,3 +2395,15 @@ int decode_bl(bufferlist& bl, T& t)
   }
   return 0;
 }
+
+static inline std::string ys_header_mangle(std::string_view name)
+{
+  /* can we please stop doing this? */
+  std::string out;
+  out.reserve(name.length());
+  std::transform(std::begin(name), std::end(name),
+		 std::back_inserter(out), [](const int c) {
+		   return c == '-' ? '_' : c == '_' ? '-' : std::toupper(c);
+		 });
+  return out;
+} /* ys_header_mangle */
