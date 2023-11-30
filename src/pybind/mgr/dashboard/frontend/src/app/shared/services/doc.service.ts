@@ -24,8 +24,8 @@ export class DocService {
     });
   }
 
-  urlGenerator(section: string, release = 'quincy'): string {
-    const docVersion = release === 'quincy' ? '6' : release;
+  urlGenerator(section: string, release = '7'): string {
+    const docVersion = release;
     let sections = {};
 
     if (environment.build === 'ibm') {
