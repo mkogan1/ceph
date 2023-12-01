@@ -11014,13 +11014,13 @@ next:
     }
 
     real_time mtime = real_clock::now();
-    string oid = static_cast<rgw::sal::RadosStore*>(driver)->svc()->cls->mfa.get_mfa_oid(user->get_id());
 
-    int ret = static_cast<rgw::sal::RadosStore*>(driver)->ctl()->meta.mgr->mutate(RGWSI_MetaBackend_OTP::get_meta_key(user->get_id()),
-					     mtime, &objv_tracker,
-					     null_yield, dpp(),
-					     MDLOG_STATUS_WRITE,
-					     [&] {
+    int ret = static_cast<rgw::sal::RadosStore*>(driver)->ctl()->meta.mgr->mutate(
+        rgwrados::otp::get_meta_key(user->get_id()),
+        mtime, &objv_tracker,
+        null_yield, dpp(),
+        MDLOG_STATUS_WRITE,
+        [&] {
       return static_cast<rgw::sal::RadosStore*>(driver)->svc()->cls->mfa.create_mfa(dpp(), user->get_id(), config, &objv_tracker, mtime, null_yield);
     });
     if (ret < 0) {
@@ -11052,11 +11052,12 @@ next:
 
     real_time mtime = real_clock::now();
 
-    int ret = static_cast<rgw::sal::RadosStore*>(driver)->ctl()->meta.mgr->mutate(RGWSI_MetaBackend_OTP::get_meta_key(user->get_id()),
-					     mtime, &objv_tracker,
-					     null_yield, dpp(),
-					     MDLOG_STATUS_WRITE,
-					     [&] {
+    int ret = static_cast<rgw::sal::RadosStore*>(driver)->ctl()->meta.mgr->mutate(
+        rgwrados::otp::get_meta_key(user->get_id()),
+        mtime, &objv_tracker,
+        null_yield, dpp(),
+        MDLOG_STATUS_WRITE,
+        [&] {
       return static_cast<rgw::sal::RadosStore*>(driver)->svc()->cls->mfa.remove_mfa(dpp(), user->get_id(), totp_serial, &objv_tracker, mtime, null_yield);
     });
     if (ret < 0) {
@@ -11199,11 +11200,12 @@ next:
     /* now update the backend */
     real_time mtime = real_clock::now();
 
-    ret = static_cast<rgw::sal::RadosStore*>(driver)->ctl()->meta.mgr->mutate(RGWSI_MetaBackend_OTP::get_meta_key(user->get_id()),
-				         mtime, &objv_tracker,
-				         null_yield, dpp(),
-				         MDLOG_STATUS_WRITE,
-				         [&] {
+    ret = static_cast<rgw::sal::RadosStore*>(driver)->ctl()->meta.mgr->mutate(
+        rgwrados::otp::get_meta_key(user->get_id()),
+        mtime, &objv_tracker,
+        null_yield, dpp(),
+        MDLOG_STATUS_WRITE,
+        [&] {
       return static_cast<rgw::sal::RadosStore*>(driver)->svc()->cls->mfa.create_mfa(dpp(), user->get_id(), config, &objv_tracker, mtime, null_yield);
     });
     if (ret < 0) {
