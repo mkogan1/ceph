@@ -26,7 +26,6 @@
 
 #include "rgw_formats.h"
 
-#include "services/svc_bucket_types.h"
 #include "services/svc_bucket_sync.h"
 
 // define as static when RGWBucket implementation completes
@@ -172,24 +171,18 @@ public:
 };
 WRITE_CLASS_ENCODER(RGWUserBuckets)
 
-class RGWBucketInstanceMetadataHandlerBase : public RGWMetadataHandler_GenericMetaBE {
-public:
-  virtual ~RGWBucketInstanceMetadataHandlerBase() {}
-  virtual void init(RGWSI_Zone *zone_svc,
-                    RGWSI_Bucket *bucket_svc,
-                    RGWSI_BucketIndex *bi_svc) = 0;
-};
-
 // bucket entrypoint metadata handler factory
 auto create_bucket_metadata_handler(librados::Rados& rados,
                                     RGWSI_Bucket* svc_bucket,
                                     RGWBucketCtl* ctl_bucket)
     -> std::unique_ptr<RGWMetadataHandler>;
 
-class RGWBucketInstanceMetaHandlerAllocator {
-public:
-  static RGWBucketInstanceMetadataHandlerBase *alloc(rgw::sal::Driver* driver);
-};
+// bucket instance metadata handler factory
+auto create_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
+                                             RGWSI_Zone* svc_zone,
+                                             RGWSI_Bucket* svc_bucket,
+                                             RGWSI_BucketIndex* svc_bi)
+    -> std::unique_ptr<RGWMetadataHandler>;
 
 // archive bucket entrypoint metadata handler factory
 auto create_archive_bucket_metadata_handler(librados::Rados& rados,
@@ -197,10 +190,13 @@ auto create_archive_bucket_metadata_handler(librados::Rados& rados,
                                             RGWBucketCtl* ctl_bucket)
     -> std::unique_ptr<RGWMetadataHandler>;
 
-class RGWArchiveBucketInstanceMetaHandlerAllocator {
-public:
-  static RGWBucketInstanceMetadataHandlerBase *alloc(rgw::sal::Driver* driver);
-};
+// archive bucket instance metadata handler factory
+auto create_archive_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
+                                                     RGWSI_Zone* svc_zone,
+                                                     RGWSI_Bucket* svc_bucket,
+                                                     RGWSI_BucketIndex* svc_bi)
+    -> std::unique_ptr<RGWMetadataHandler>;
+
 
 extern int rgw_remove_object(const DoutPrefixProvider *dpp, rgw::sal::Driver* driver, rgw::sal::Bucket* bucket, rgw_obj_key& key, optional_yield y);
 
@@ -433,10 +429,6 @@ class RGWBucketCtl {
     RGWUserCtl *user{nullptr};
   } ctl;
 
-  RGWBucketInstanceMetadataHandler *bmi_handler;
-
-  RGWSI_BucketInstance_BE_Handler bi_be_handler; /* bucket instance backend handler */
-
 public:
   RGWBucketCtl(RGWSI_Zone *zone_svc,
                RGWSI_Bucket *bucket_svc,
@@ -445,7 +437,6 @@ public:
                RGWSI_User* user_svc);
 
   void init(RGWUserCtl *user_ctl,
-            RGWBucketInstanceMetadataHandler *_bmi_handler,
             RGWDataChangesLog *datalog,
             const DoutPrefixProvider *dpp);
 
