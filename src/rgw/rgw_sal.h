@@ -1186,9 +1186,14 @@ public:
  */
 class MultipartUpload {
 public:
+
+  //object lock
+  std::optional<RGWObjectRetention> obj_retention = std::nullopt;
+  std::optional<RGWObjectLegalHold> obj_legal_hold = std::nullopt;
+
   MultipartUpload() = default;
   virtual ~MultipartUpload() = default;
-
+  
   /** Get the name of the object representing this upload in the backing store */
   virtual const std::string& get_meta() const = 0;
   /** Get the name of the target object for this upload */
