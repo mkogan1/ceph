@@ -2645,7 +2645,7 @@ int RGWBucketInstanceMetadataHandler::put_prepare(
     } else {
       // replace peer's layout with default-constructed, then apply our defaults
       bci.info.layout = rgw::BucketLayout{};
-      init_default_bucket_layout(cct, bci.info.layout,
+      init_default_bucket_layout(dpp->get_cct(), bci.info.layout,
 				 svc_zone->get_zone(),
 				 std::nullopt, std::nullopt);
     }
@@ -2938,7 +2938,6 @@ int RGWBucketCtl::read_bucket_info(const rgw_bucket& bucket,
     ep.emplace();
 
     int r = read_bucket_entrypoint_info(*b, &(*ep), y, dpp, RGWBucketCtl::Bucket::GetParams()
-                                                    .set_bectx_params(params.bectx_params)
                                                     .set_objv_tracker(ep_objv_tracker));
     if (r < 0) {
       return r;
