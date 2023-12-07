@@ -25,7 +25,7 @@ export class DocService {
   }
 
   urlGenerator(section: string, release = '7'): string {
-    const docVersion = release;
+    const docVersion = release === 'reef' ? '7' : release;
     let sections = {};
 
     if (environment.build === 'ibm') {
