@@ -3745,6 +3745,8 @@ std::vector<Option> get_global_options() {
     .set_default(false),
     Option("osd_debug_no_purge_strays", Option::TYPE_BOOL, Option::LEVEL_DEV)
     .set_default(false),
+    Option("osd_skip_check_past_interval_bounds", Option::TYPE_BOOL, Option::LEVEL_DEV)
+    .set_default(false),
 
     Option("osd_debug_pretend_recovery_active", Option::TYPE_BOOL, Option::LEVEL_DEV)
     .set_default(false)
