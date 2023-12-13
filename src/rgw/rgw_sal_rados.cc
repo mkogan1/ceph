@@ -2449,7 +2449,8 @@ int RadosMultipartUpload::complete(const DoutPrefixProvider *dpp,
 
   rgw_placement_rule* ru;
   ru = &placement;
-  ret = RadosMultipartUpload::get_info(dpp, y, obj_ctx, &ru, &attrs);
+  rgw::sal::Attrs mpu_attrs; // don't overwrite the target object attrs we are updating
+  ret = RadosMultipartUpload::get_info(dpp, y, obj_ctx, &ru, &mpu_attrs);
   if (upload_information.obj_retention_exist) {
     bufferlist obj_retention_bl;
     upload_information.obj_retention.encode(obj_retention_bl);
