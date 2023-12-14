@@ -55,6 +55,8 @@
   affected and to clean them up accordingly.
 * mgr/snap-schedule: For clusters with multiple CephFS file systems, all the
   snap-schedule commands now expect the '--fs' argument.
+* CephFS: Full support for subvolumes and subvolume groups is now available
+  for snap_schedule Manager module.
 
 >=18.0.0
 
