@@ -8758,7 +8758,7 @@ std::vector<Option> get_mds_options() {
     .set_description("size of fragments where merging should occur"),
 
     Option("mds_bal_interval", Option::TYPE_INT, Option::LEVEL_ADVANCED)
-    .set_default(10)
+    .set_default(0)
     .set_description("interval between MDS balancer cycles"),
 
     Option("mds_bal_fragment_interval", Option::TYPE_INT, Option::LEVEL_ADVANCED)
