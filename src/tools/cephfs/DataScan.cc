@@ -1223,7 +1223,7 @@ int DataScan::scan_links()
       derr << "Unexpected error reading dentry "
 	   << p.second.dirfrag() << "/" << p.second.name
 	   << ": " << cpp_strerror(r) << dendl;
-      return r;
+      continue;
     }
 
     if (inode.inode->ino != p.first || inode.inode->version != p.second.version)
@@ -1249,7 +1249,7 @@ int DataScan::scan_links()
       derr << "Unexpected error reading dentry "
 	<< p.second.dirfrag() << "/" << p.second.name
 	<< ": " << cpp_strerror(r) << dendl;
-      return r;
+      continue;
     }
 
     if (first != CEPH_NOSNAP) {
