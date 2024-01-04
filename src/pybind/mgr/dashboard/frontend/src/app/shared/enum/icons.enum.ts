@@ -75,6 +75,7 @@ export enum Icons {
   restart = 'fa fa-history', // Restart
   deploy = 'fa fa-cube', // Deploy, Redeploy
   cubes = 'fa fa-cubes',
+  externalUrl = 'fa fa-external-link', // links to external page
 
   /* Icons for special effect */
   large = 'fa fa-lg', // icon becomes 33% larger
