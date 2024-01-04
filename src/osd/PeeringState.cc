@@ -936,6 +936,9 @@ void PeeringState::check_past_interval_bounds() const
   auto rpib = get_required_past_interval_bounds(
     info,
     oldest_epoch);
+  if (cct->_conf.get_val<bool>("osd_skip_check_past_interval_bounds")) {
+    return;
+  }
   if (rpib.first >= rpib.second) {
     // do not warn if the start bound is dictated by oldest_map; the
     // past intervals are presumably appropriate given the pg info.
