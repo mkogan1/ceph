@@ -122,6 +122,7 @@ class Options(object):
     UNSAFE_TLS_v1_2 = Setting(False, [bool])
     CALL_HOME_REMIND_LATER_ON = Setting('', [str])
     STORAGE_INSIGHTS_REMIND_LATER_ON = Setting('', [str])
+    MULTICLUSTER_CONFIG = Setting({}, [dict, str])
 
     @staticmethod
     def has_default_value(name):
