@@ -832,6 +832,7 @@ public:
       struct DeleteParams {
         rgw_user bucket_owner;
         int versioning_status; // versioning flags defined in enum RGWBucketFlags
+        bool null_verid;
         ACLOwner obj_owner;    // needed for creation of deletion marker
         uint64_t olh_epoch;
         std::string marker_version_id;
@@ -845,7 +846,7 @@ public:
 	bool abortmp;
 	uint64_t parts_accounted_size;
 
-        DeleteParams() : versioning_status(0), olh_epoch(0), bilog_flags(0), remove_objs(NULL), high_precision_time(false), zones_trace(nullptr), abortmp(false), parts_accounted_size(0) {}
+        DeleteParams() : versioning_status(0), null_verid(false), olh_epoch(0), bilog_flags(0), remove_objs(NULL), high_precision_time(false), zones_trace(nullptr), abortmp(false), parts_accounted_size(0) {}
       } params;
 
       struct DeleteResult {
@@ -956,6 +957,10 @@ public:
 
       void set_bilog_flags(uint16_t flags) {
         bilog_flags = flags;
+      }
+
+      int get_bilog_flags() {
+        return bilog_flags;
       }
 
       void set_zones_trace(rgw_zone_set *_zones_trace) {
@@ -1234,6 +1239,7 @@ public:
 		 const RGWBucketInfo& bucket_owner,
 		 const rgw_obj& src_obj,
 		 int versioning_status,  // versioning flags defined in enum RGWBucketFlags
+     bool null_verid,
 		 uint16_t bilog_flags = 0,
 		 const ceph::real_time& expiration_time = ceph::real_time(),
 		 rgw_zone_set *zones_trace = nullptr);
@@ -1323,7 +1329,7 @@ public:
                                    RGWBucketInfo& bucket_info,
                                    const rgw_obj& obj_instance,
                                    const std::string& op_tag, const std::string& olh_tag,
-                                   uint64_t olh_epoch, rgw_zone_set *zones_trace = nullptr);
+                                   uint64_t olh_epoch, bool null_verid, rgw_zone_set *zones_trace = nullptr);
   int bucket_index_read_olh_log(const DoutPrefixProvider *dpp,
                                 RGWBucketInfo& bucket_info, RGWObjState& state,
                                 const rgw_obj& obj_instance, uint64_t ver_marker,
@@ -1332,8 +1338,9 @@ public:
   int bucket_index_clear_olh(const DoutPrefixProvider *dpp, RGWBucketInfo& bucket_info, const std::string& olh_tag, const rgw_obj& obj_instance);
   int apply_olh_log(const DoutPrefixProvider *dpp, RGWObjectCtx& ctx, RGWObjState& obj_state, RGWBucketInfo& bucket_info, const rgw_obj& obj,
                     bufferlist& obj_tag, std::map<uint64_t, std::vector<rgw_bucket_olh_log_entry> >& log,
-                    uint64_t *plast_ver, rgw_zone_set *zones_trace = nullptr);
-  int update_olh(const DoutPrefixProvider *dpp, RGWObjectCtx& obj_ctx, RGWObjState *state, RGWBucketInfo& bucket_info, const rgw_obj& obj, rgw_zone_set *zones_trace = nullptr);
+                    uint64_t *plast_ver, bool null_verid, rgw_zone_set *zones_trace = nullptr);
+  int update_olh(const DoutPrefixProvider *dpp, RGWObjectCtx& obj_ctx, RGWObjState *state, RGWBucketInfo& bucket_info, const rgw_obj& obj,
+		 rgw_zone_set *zones_trace = nullptr, bool null_verid = false);
   int clear_olh(const DoutPrefixProvider *dpp,
                 RGWObjectCtx& obj_ctx,
                 const rgw_obj& obj,
@@ -1347,7 +1354,7 @@ public:
   int repair_olh(const DoutPrefixProvider *dpp, RGWObjState* state, const RGWBucketInfo& bucket_info,
                  const rgw_obj& obj);
   int unlink_obj_instance(const DoutPrefixProvider *dpp, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& target_obj,
-                          uint64_t olh_epoch, optional_yield y, rgw_zone_set *zones_trace = nullptr);
+                          uint64_t olh_epoch, optional_yield y, bool null_verid, rgw_zone_set *zones_trace = nullptr);
 
   void check_pending_olh_entries(const DoutPrefixProvider *dpp, std::map<std::string, bufferlist>& pending_entries, std::map<std::string, bufferlist> *rm_pending_entries);
   int remove_olh_pending_entries(const DoutPrefixProvider *dpp, RGWBucketInfo& bucket_info, RGWObjState& state, const rgw_obj& olh_obj, std::map<std::string, bufferlist>& pending_attrs);

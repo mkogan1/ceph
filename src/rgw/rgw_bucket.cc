@@ -323,10 +323,6 @@ int rgw_remove_object(const DoutPrefixProvider *dpp, rgw::sal::Store* store, rgw
 {
   RGWObjectCtx rctx(store);
 
-  if (key.instance.empty()) {
-    key.instance = "null";
-  }
-
   std::unique_ptr<rgw::sal::Object> object = bucket->get_object(key);
 
   return object->delete_object(dpp, &rctx, null_yield);
