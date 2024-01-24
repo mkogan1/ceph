@@ -4,12 +4,90 @@ import json
 import os
 import jwt
 import re
+import time
 
 from .config import get_settings
 
+# Constants for operations types:
+UPLOAD_SNAP = 'upload_snap'
+UPLOAD_FILE = 'upload_file'
+DISABLE_SI_MESSAGES = 'disable_si_messages'
+CONFIRM_RESPONSE = 'confirm_response'
+NOT_SUPPORTED = 'unknown_operation'
+
+
+# Constants for operation status
+OPERATION_STATUS_NEW = 'new'
+OPERATION_STATUS_IN_PROGRESS = 'in progress'
+OPERATION_STATUS_COMPLETE = 'complete'
+OPERATION_STATUS_ERROR = 'error'
+OPERATION_STATUS_REQUEST_REJECTED = 'rejected'
+
+#Constants for operations status delivery
+ST_NOT_SENT = 0
+ST_SENT = 1
+
+def confirm_response_event(ceph_cluster_id: str, report_timestamp: float,
+                           tenant_id: str) -> dict:
+    """
+    Return a confirm response event
+    """
+    event_time = datetime.fromtimestamp(report_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    event_time_ms = int(report_timestamp * 1000)
+
+    return {
+        "header": {
+                "event_type": "confirm_response",
+                "event_id": f"IBM_event_RedHatMarine_ceph_{ceph_cluster_id}_{event_time_ms}_confirm_response_event",
+                "event_time": f"{event_time}",
+                "event_time_ms": event_time_ms,
+                "tenant_id": tenant_id,
+        },
+        "body": {
+                "event_transaction_id": "UnSolicited_RedHatMarine_ceph_Request",
+                "event_type": "last_contact",
+                "component": "ceph_operations"
+        }
+    }
+
+def upload_snap_operation_event(ceph_cluster_id: str, report_timestamp: float,
+                                tenant_id: str, operation: dict) -> dict:
+    """
+    Return an event based in the operation passed as parameter
+    """
+    event_time = datetime.fromtimestamp(report_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    event_time_ms = int(report_timestamp * 1000)
+
+    return {
+            "header": {
+                "event_type": "status",
+                "event_id": f"IBM_event_RedHatMarine_ceph_{ceph_cluster_id}_{event_time_ms}_upload_snap_status__event",
+                "event_time": f"{event_time}",
+                "event_time_ms": event_time_ms,
+                "tenant_id": tenant_id,
+            },
+            "body": {
+                "event_transaction_id": "UnSolicited_RedHatMarine_ceph_Request",
+                "product":  "Red Hat Ceph",
+                "component": "ceph_log_upload",
+                "description":  operation['description'],
+                "state" : f"{operation['status']} ({operation['progress']}%)",
+                "complete" : (operation['status'] == OPERATION_STATUS_COMPLETE),
+                "payload": {
+                    "action": "Unsolicited_Storage_Insights_RedHatMarine_ceph_Request",
+                    "description": operation['description'],
+                    "state" : operation['status'],
+                    "progress": operation['progress'],
+                    "complete" : (operation['status'] == OPERATION_STATUS_COMPLETE),
+                    "si_requestid": operation['si_requestid'],
+                }
+            }
+        }
+
 class ReportHeader:
     def collect(report_type: str, ceph_cluster_id: str, ceph_version: str,
-                report_timestamp: float, mgr_module: Any, target_space: str = 'prod') -> dict:
+                report_timestamp: float, mgr_module: Any, target_space: str = 'prod',
+                operation_event_id: str = '') -> dict:
         try:
             id_data = get_settings()
         except Exception as e:
@@ -20,6 +98,11 @@ class ReportHeader:
         report_time = datetime.fromtimestamp(report_timestamp).strftime("%Y-%m-%d %H:%M:%S")
         report_time_ms = int(report_timestamp * 1000)
         local_report_time = datetime.fromtimestamp(report_timestamp).strftime("%a %b %d %H:%M:%S %Z")
+
+        if not operation_event_id:
+            event_id = "IBM_chc_event_RedHatMarine_ceph_{}_{}_report_{}".format(ceph_cluster_id, report_type, report_time_ms)
+        else:
+            event_id = operation_event_id
 
         return {
                 "agent": "RedHat_Marine_firmware_agent",
@@ -32,7 +115,7 @@ class ReportHeader:
                 "asset_vendor": "IBM",
                 "asset_virtual_id": "{}".format(ceph_cluster_id),
                 "country_code": "",
-                "event_id": "IBM_chc_event_RedHatMarine_ceph_{}_{}_report_{}".format(ceph_cluster_id, report_type, report_time_ms),
+                "event_id": event_id,
                 "event_time": "{}".format(report_time),
                 "event_time_ms": report_time_ms,
                 "local_event_time": "{}".format(local_report_time),
@@ -51,15 +134,37 @@ class ReportHeader:
                 "events": []
             }
 
-
-class ReportEvent:
+class ReportEvent():
     def collect(event_type: str, component: str, report_timestamp: float, ceph_cluster_id: str,
                 icn: str, tenant_id: str, description: str, content: dict,
-                mgr_module: Any) -> dict:
+                mgr_module: Any, operation_key: str = "") -> dict:
+
+        # OPERATION STATUS Reports:
+        # ----------------------------------------------------------------------
+        event_data = {}
+        if operation_key != "":
+            try:
+                operation = content["type"]
+                if operation == UPLOAD_SNAP:
+                    event_data = upload_snap_operation_event(ceph_cluster_id,
+                                                             report_timestamp,
+                                                             tenant_id,
+                                                             content)
+                elif operation == CONFIRM_RESPONSE:
+                    event_data = confirm_response_event(ceph_cluster_id,
+                                                        report_timestamp,
+                                                        tenant_id)
+            except Exception:
+                mgr_module.log.error(f'not able to obtain event data: {ex}')
+            return event_data
+
+        # event time data
         event_time = datetime.fromtimestamp(report_timestamp).strftime("%Y-%m-%d %H:%M:%S")
         event_time_ms = int(report_timestamp * 1000)
         local_event_time = datetime.fromtimestamp(report_timestamp).strftime("%a %b %d %H:%M:%S %Z")
 
+        # INVENTORY; CLUSTER STATUS; LAST_CONTACT reports
+        # ----------------------------------------------------------------------
         # Extract jti from JWT. This is another way to identify clusters in addition to the ICN.
         jwt_jti = ""
         try:
@@ -117,7 +222,8 @@ class ReportEvent:
 
         if event_type == 'status':
             event_data["body"]["event_transaction_id"] = "IBM_event_RedHatMarine_ceph_{}_{}_{}_event".format(ceph_cluster_id, event_time_ms, event_type)
-            if component != 'Ceph_alerts':
+
+            if component != 'ceph_alerts':
                 event_data["body"]["state"] =  "{}".format(content['status']['health']['status'])
             else:
                 # if the status event contains alerts we add a boolean in the body to help with analytics
@@ -129,6 +235,12 @@ class ReportEvent:
 
             if tenant_id:
                 event_data["header"]["tenant_id"] = "{}".format(tenant_id)
+
+        if event_type == 'last_contact':
+            # Additional fields to enable response with commands
+            event_data["body"]["context"]["messagetype"] = 1
+            event_data["body"]["enable_response_detail"] = True
+            event_data["body"]["enable_response_detail_filter"] = ["UnSolicited_RedHatMarine_ceph_Request"]
 
         return event_data
 
