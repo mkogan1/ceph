@@ -9974,6 +9974,105 @@ def command_gather_facts(ctx: CephadmContext) -> None:
 
 ##################################
 
+@infer_config
+def command_sos(ctx: CephadmContext):
+    """
+    Execute the sos command
+    returns the pattern of the sos report part files generated
+    in the LOG_DIR folder
+
+    To avoid fill the disk, each execution deletes all previous sos report files
+
+    The original compressed file can be rebuild using:
+    # cat /var/log/ceph/<cluster_fsid>/sosreport* > /tmp/sosreport_case_<xx>.tar.xz
+    """
+
+    def execute(cmd_list) -> tuple[bool, str]:
+        success = True
+        out, err, code = call(ctx, cmd_list, verbosity=CallVerbosity.DEBUG)
+        if err or code:
+            logger.error(f'Failed to execute command <{cmd_list}>:\n{err}')
+            success = False
+        else:
+            logger.debug(f'Executed succesfully command <{cmd_list}>')
+        return success, out
+
+    def remove_files(folder: str, pattern: str) -> None:
+        file_path = ""
+        try:
+            for file_path in filter(os.path.isfile, glob(os.path.join(folder, pattern))):
+                os.remove(file_path)
+        except Exception as ex:
+            logger.error(f'Error removing file {file_path}: {ex}')
+
+    result = 1 # error by default, will be changed if everything ok
+    try:
+        # get silently the cluster fsid
+        cp = read_config(ctx.config)
+        if cp.has_option('global', 'fsid'):
+            fsid = cp.get('global', 'fsid')
+        else:
+            raise Exception('Cannot infer Ceph cluster fsid .SOS report command'
+                            ' aborted')
+
+        # sos report execution
+        cmd_sos = ['sos'] + ctx.parameters
+        success, out = execute(cmd_sos)
+        if not success:
+            raise Exception(f'Error executing command <{cmd_sos}>: {out}')
+
+        file_path_pattern = r'Your sosreport has been generated and saved in:\s+(\S+)'
+        match = re.search(file_path_pattern, out)
+        if not match:
+            raise Exception(f'Cannot locate sos report file in sos command <{cmd_sos}> output: {out}')
+
+        sos_file = match.group(1)
+        sos_file_extension = os.path.splitext(sos_file)[1]
+        timestamp_sos_file = int(time.time() * 1000)
+        if '--case-id' in ctx.parameters:
+            case_id = ctx.parameters[ctx.parameters.index('--case-id') + 1]
+        else:
+            case_id = 'unknown_case_id'
+        prefix = f'sosreport_case_{case_id}_{timestamp_sos_file}_'
+        suffix = f'{sos_file_extension}_part'
+        sos_report_parts_folder = f'{LOG_DIR}/{fsid}'
+
+        # remove previous part files
+        remove_files(sos_report_parts_folder, 'sosreport*')
+
+        # split sos report file in <sos_files_number> parts (10 by default)
+        os.chdir(sos_report_parts_folder)
+        split_cmd = ['split', '-n', f'{ctx.sos_files_number}', sos_file, prefix, '--additional-suffix', suffix]
+        success, out = execute(split_cmd)
+        if not success:
+            raise Exception(f'Error splitting sos report file: <{out}>')
+
+        # remove source sos report (because we already have the
+        # parts in the logs folder)
+        remove_files(os.path.dirname(sos_file), 'sosreport*')
+        # show the info needed to know what are the last sos files
+        print(f'New sos report files can be found in {LOG_DIR}/<fsid>/{prefix}*')
+
+        # If a target provided copy the sos report files to the
+        # destination host
+        if ctx.mgr_target:
+            scp_cmd = f'scp {sos_report_parts_folder}/{prefix}* {ctx.mgr_target}:{sos_report_parts_folder} > /dev/null 2>&1'
+            try:
+                os.system(scp_cmd)
+            except Exception as ex:
+                logger.error(f'Error copying sos files to target: {ex}')
+                return 1
+
+        # everything was ok
+        result = 0
+
+    except Exception as ex:
+        logger.error(f'Failed to execute sos command <{cmd_sos}>:\n {ex}')
+
+    return result
+
+##################################
+
 
 def systemd_target_state(ctx: CephadmContext, target_name: str, subsystem: str = 'ceph') -> bool:
     # TODO: UNITTEST
@@ -10820,6 +10919,24 @@ def _get_parser():
     parser_disk_rescan = subparsers.add_parser(
         'disk-rescan', help='rescan all HBAs to detect new/removed devices')
     parser_disk_rescan.set_defaults(func=command_rescan_disks)
+
+    parser_sos = subparsers.add_parser(
+        'sos', help='Executes the command sos to retrieve node diagnostic information')
+    parser_sos.set_defaults(func=command_sos)
+    parser_sos.add_argument(
+        '--mgr-target',
+        required=False,
+        help='Target host running active ceph manager to copy the sos report generated files')
+    parser_sos.add_argument(
+        '--sos-files-number',
+        type=int,
+        default=10,
+        required=False,
+        help='Number of files to split the sos report command output')
+    parser_sos.add_argument(
+        'parameters',
+        nargs=argparse.REMAINDER,
+        help='parameters for the sos command')
 
     return parser
 
