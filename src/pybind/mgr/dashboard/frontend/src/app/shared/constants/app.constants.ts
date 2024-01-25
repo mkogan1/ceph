@@ -152,6 +152,8 @@ export class ActionLabelsI18n {
   ACTIVATE: string;
   DEACTIVATE: string;
   CONNECT: string;
+  DISCONNECT: string;
+  RECONNECT: string;
 
   constructor() {
     /* Create a new item */
@@ -233,6 +235,8 @@ export class ActionLabelsI18n {
     this.ACTIVATE = $localize`Activate`;
     this.DEACTIVATE = $localize`Deactivate`;
     this.CONNECT = $localize`Connect`;
+    this.DISCONNECT = $localize`Disconnect`;
+    this.RECONNECT = $localize`Reconnect`;
   }
 }
 

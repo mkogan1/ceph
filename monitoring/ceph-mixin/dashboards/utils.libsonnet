@@ -75,7 +75,8 @@ local g = import 'grafonnet/grafana.libsonnet';
                     regex,
                     hide='',
                     multi=false,
-                    allValues=null)::
+                    allValues=null,
+                    current=null)::
     g.template.new(name=name,
                    datasource=datasource,
                    query=query,
@@ -86,7 +87,8 @@ local g = import 'grafonnet/grafana.libsonnet';
                    regex=regex,
                    hide=hide,
                    multi=multi,
-                   allValues=allValues),
+                   allValues=allValues,
+                   current=current),
 
   addAnnotationSchema(builtIn,
                       datasource,
