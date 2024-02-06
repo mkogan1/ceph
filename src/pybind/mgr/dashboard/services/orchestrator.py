@@ -198,6 +198,13 @@ class UpgradeManager(ResourceManager):
         return self.api.upgrade_stop()
 
 
+class HardwareManager(ResourceManager):
+
+    @wait_api_result
+    def common(self, category: str, hostname: Optional[List[str]] = None) -> str:
+        return self.api.node_proxy_common(category, hostname=hostname)
+
+
 class CertStoreManager(ResourceManager):
 
     @wait_api_result
@@ -213,6 +220,7 @@ class CertStoreManager(ResourceManager):
                 ignore_missing_exception: bool = False) -> str:
         return self.api.cert_store_get_key(entity, service_name, hostname,
                                            no_exception_when_missing=ignore_missing_exception)
+
 
 
 class OrchClient(object):
@@ -235,6 +243,7 @@ class OrchClient(object):
         self.osds = OsdManager(self.api)
         self.daemons = DaemonManager(self.api)
         self.upgrades = UpgradeManager(self.api)
+        self.hardware = HardwareManager(self.api)
         self.cert_store = CertStoreManager(self.api)
 
     def available(self, features: Optional[List[str]] = None) -> bool:

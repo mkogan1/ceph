@@ -37,6 +37,7 @@ import { TruncatePipe } from './truncate.pipe';
 import { UpperFirstPipe } from './upper-first.pipe';
 import { OctalToHumanReadablePipe } from './octal-to-human-readable.pipe';
 import { PathPipe } from './path.pipe';
+import { PluralizePipe } from './pluralize.pipe';
 import { XmlPipe } from './xml.pipe';
 import { MbpersecondPipe } from './mbpersecond.pipe';
 
@@ -79,6 +80,7 @@ import { MbpersecondPipe } from './mbpersecond.pipe';
     OsdSummaryPipe,
     OctalToHumanReadablePipe,
     PathPipe,
+    PluralizePipe,
     XmlPipe,
     MbpersecondPipe
   ],
@@ -119,6 +121,7 @@ import { MbpersecondPipe } from './mbpersecond.pipe';
     OsdSummaryPipe,
     OctalToHumanReadablePipe,
     PathPipe,
+    PluralizePipe,
     XmlPipe,
     MbpersecondPipe
   ],
