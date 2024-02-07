@@ -39,6 +39,14 @@ def get_status(mgr: Any) -> dict:
         mgr.log.exception(str(ex))
         return {'exception': str(ex)}
 
+def inventory_get_hardware_status(mgr: Any) -> dict:
+    try:
+        hw_status = mgr.remote('orchestrator', 'node_proxy_summary')
+        return hw_status
+    except Exception as e:
+        mgr.log.exception(str(e))
+        return {'error': str(e)}
+
 def inventory(mgr: Any) -> dict:
     """
     Produce the content for the inventory report
@@ -59,6 +67,7 @@ def inventory(mgr: Any) -> dict:
     inventory["pg_summary"] = mgr.get("pg_summary")
     inventory["service_map"] = mgr.get("service_map")
     inventory["status"] = get_status(mgr)
+    inventory["hardware_status"] = inventory_get_hardware_status(mgr)
 
     return {'inventory': inventory}
 
