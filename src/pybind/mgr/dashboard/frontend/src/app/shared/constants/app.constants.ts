@@ -151,6 +151,7 @@ export class ActionLabelsI18n {
   START_UPGRADE: string;
   ACTIVATE: string;
   DEACTIVATE: string;
+  ATTACH: string;
   CONNECT: string;
   DISCONNECT: string;
   RECONNECT: string;
@@ -234,6 +235,7 @@ export class ActionLabelsI18n {
 
     this.ACTIVATE = $localize`Activate`;
     this.DEACTIVATE = $localize`Deactivate`;
+    this.ATTACH = $localize`Attach`;
     this.CONNECT = $localize`Connect`;
     this.DISCONNECT = $localize`Disconnect`;
     this.RECONNECT = $localize`Reconnect`;
