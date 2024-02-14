@@ -32,7 +32,7 @@
 
       <div class="collapse navbar-collapse"
            [ngClass]="{'show': rightSidebarOpen}">
-        <ng-container *ngIf="clustersMap?.size > 1">
+        <ng-container *ngIf="clustersMap?.size > 1 && environment.build === 'ibm'">
           <div ngbDropdown
                placement="bottom-left"
                class="d-inline-block ms-5">
@@ -114,7 +114,8 @@
       </li>
       <!-- Multi-cluster Dashboard -->
       <li routerLinkActive="active"
-          class="nav-item tc_menuitem_multi_cluster">
+          class="nav-item tc_menuitem_multi_cluster"
+          *ngIf="environment.build === 'ibm'">
         <a (click)="toggleSubMenu('multiCluster')"
            class="nav-link dropdown-toggle"
            [attr.aria-expanded]="displayedSubMenu.multiCluster"
