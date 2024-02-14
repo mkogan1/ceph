@@ -31,6 +31,11 @@ endfunction()
 find_package(ICU 52.0 COMPONENTS uc REQUIRED)
 
 set(librgw_common_srcs
+# moved from librgw_a_srcs
+  rgw_client_io.cc
+  rgw_opa.cc
+  rgw_process.cc
+# end moved
   services/svc_finisher.cc
   services/svc_bi_rados.cc
   services/svc_bilog_rados.cc
@@ -332,7 +337,6 @@ set(rgw_a_srcs
   rgw_appmain.cc
   rgw_asio_client.cc
   rgw_asio_frontend.cc
-  rgw_client_io.cc
   rgw_file.cc
   rgw_frontend.cc
   rgw_http_client_curl.cc
@@ -340,26 +344,14 @@ set(rgw_a_srcs
   rgw_lib.cc
   rgw_loadgen.cc
   rgw_loadgen_process.cc
-  rgw_log.cc
-  rgw_lua_request.cc
-  rgw_opa.cc
   rgw_os_lib.cc
   rgw_period_pusher.cc
-  rgw_process.cc
   rgw_realm_reloader.cc
   rgw_realm_watcher.cc
-  rgw_rest_config.cc
   rgw_rest_info.cc
-  rgw_rest_metadata.cc
-  rgw_rest_ratelimit.cc
-  rgw_rest_sts.cc
   rgw_rest_usage.cc
   rgw_signal.cc
-  rgw_usage.cc
-  rgw_sts.cc
-  driver/rados/rgw_rest_bucket.cc
-  driver/rados/rgw_rest_log.cc
-  driver/rados/rgw_rest_realm.cc)
+  rgw_usage.cc)
 
 gperf_generate(${CMAKE_SOURCE_DIR}/src/rgw/rgw_iam_policy_keywords.gperf
   rgw_iam_policy_keywords.frag.cc)
