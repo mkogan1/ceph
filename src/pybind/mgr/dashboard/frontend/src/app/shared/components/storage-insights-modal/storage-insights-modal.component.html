@@ -152,6 +152,46 @@
           </div>
         </ng-container>
 
+        <legend i18n>IBM Support File Transfer ID Management
+          <cd-helper>The following two fields are used to set the 'IBM Support File Transfer ID Management'
+            credentials needed to allow for automatic Ceph cluster diagnostic uploads (log files, cluster status).
+            This information could be required by Ceph support team
+            to solve a support case. The automatic diagnostic upload only can be triggered on demand and as part of a
+            support case resolution.</cd-helper>
+        </legend>
+        <div class="form-group row">
+          <label class="cd-col-form-label"
+                 for="transferID">
+            <span i18n>Transfer ID</span>
+          </label>
+          <div class="cd-col-form-input">
+            <input type="text"
+                   class="form-control"
+                   id="transferID"
+                   name="transferID"
+                   formControlName="transferID">
+          </div>
+        </div>
+        <div class="form-group row">
+          <label i18n
+                 class="cd-col-form-label"
+                 for="password">Password</label>
+          <div class="cd-col-form-input">
+            <div class="input-group">
+              <input id="password"
+                     class="form-control"
+                     type="password"
+                     autocomplete="new-password"
+                     formControlName="password">
+              <button type="button"
+                      class="btn btn-light"
+                      cdPasswordButton="password">
+              </button>
+              <cd-copy-2-clipboard-button source="password">
+              </cd-copy-2-clipboard-button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="modal-footer">
