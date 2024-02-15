@@ -16,7 +16,7 @@ class CallHome(RESTController):
                        email: str) -> Tuple[int, str, str]:
         try:
             error_code, out, err = mgr.remote('call_home_agent', 'list_tenants', ibm_id, company_name,
-                                                first_name, last_name, email)
+                                              first_name, last_name, email)
             if error_code != 0:
                 raise DashboardException(f'Listing tenants error: {err}')
         except ImportError as ie:

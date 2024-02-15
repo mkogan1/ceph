@@ -74,7 +74,6 @@ export class StorageInsightsModalComponent extends CdForm implements OnInit{
   populateForm() {
     this.action = $localize`Update`;
     this.callHomeService.info().subscribe((data: any) => {
-      console.log(data.IBM_storage_insights)
       this.modalForm.get('ibmId').setValue(data.IBM_storage_insights.owner_ibm_id);
       this.modalForm.get('companyName').setValue(data.IBM_storage_insights.owner_company_name);
       this.modalForm.get('firstName').setValue(data.IBM_storage_insights.owner_first_name);
