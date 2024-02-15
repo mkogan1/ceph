@@ -53,13 +53,12 @@ class ReportHeader:
 
 
 class ReportEvent:
-    def collect(event_type: str, report_timestamp: float, ceph_cluster_id: str,
-                icn: str, tenant_id: str, description: str, fn: Any,
+    def collect(event_type: str, component: str, report_timestamp: float, ceph_cluster_id: str,
+                icn: str, tenant_id: str, description: str, content: dict,
                 mgr_module: Any) -> dict:
         event_time = datetime.fromtimestamp(report_timestamp).strftime("%Y-%m-%d %H:%M:%S")
         event_time_ms = int(report_timestamp * 1000)
         local_event_time = datetime.fromtimestamp(report_timestamp).strftime("%a %b %d %H:%M:%S %Z")
-        content = fn(mgr_module)
 
         # Extract jti from JWT. This is another way to identify clusters in addition to the ICN.
         jwt_jti = ""
@@ -84,7 +83,7 @@ class ReportEvent:
                     "local_event_time": "{}".format(local_event_time)
                 },
                 "body": {
-                    "component": "Ceph",
+                    "component": component,
                     "context": {
                         "origin": 2,
                         "timestamp": event_time_ms,
@@ -118,8 +117,15 @@ class ReportEvent:
 
         if event_type == 'status':
             event_data["body"]["event_transaction_id"] = "IBM_event_RedHatMarine_ceph_{}_{}_{}_event".format(ceph_cluster_id, event_time_ms, event_type)
-            event_data["body"]["state"] =  "{}".format(content['status']['health']['status']),
-            event_data["body"]["complete"] = True,
+            if component != 'Ceph_alerts':
+                event_data["body"]["state"] =  "{}".format(content['status']['health']['status'])
+            else:
+                # if the status event contains alerts we add a boolean in the body to help with analytics
+                event_data["body"]["alert"] =  True
+                # Call Home requires the 'state' attribute in the 'body' section
+                event_data["body"]["state"] = "Ok"
+
+            event_data["body"]["complete"] = True
 
             if tenant_id:
                 event_data["header"]["tenant_id"] = "{}".format(tenant_id)

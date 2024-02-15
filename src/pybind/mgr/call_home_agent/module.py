@@ -21,6 +21,18 @@ from .dataDicts import ReportHeader, ReportEvent
 class SendError(Exception):
     pass
 
+# Prometheus API returns all alerts. We want to send only deltas in the alerts
+# report - i.e. send a *new* alert that has been fired since the last report
+# was sent, and send a “resolved” notification when an alert is removed from
+# the prometheus API.
+# To do so we keep a list of alerts (“sent_alerts”) we have already sent, and
+# use that to create a delta report in generate_alerts_report(). The alert
+# report is not sent if there are no deltas.
+# `ceph callhome reset alerts` zeros out sent_alerts list and therefore the
+# next report will contain the relevant alerts that are fetched from the
+# Prometheus API.
+sent_alerts = {}
+
 def get_status(mgr: Any) -> dict:
     r, outb, outs = mgr.mon_command({
         'prefix': 'status',
@@ -96,9 +108,10 @@ def last_contact(mgr: Any) -> dict:
     return {'last_contact': format(int(time.time()))}
 
 class Report:
-    def __init__(self, report_type: str, description: str, icn: str, owner_tenant_id: str, fn: Callable[[], str], url: str, proxy: str, seconds_interval: int,
+    def __init__(self, report_type: str, component: str, description: str, icn: str, owner_tenant_id: str, fn: Callable[[], str], url: str, proxy: str, seconds_interval: int,
                  mgr_module: Any):
         self.report_type = report_type                # name of the report
+        self.component = component                    # component
         self.icn = icn                                # ICN = IBM Customer Number
         self.owner_tenant_id = owner_tenant_id        # IBM tenant ID
         self.fn = fn                                  # function used to retrieve the data
@@ -117,7 +130,10 @@ class Report:
         else:
             self.last_upload = str(int(last_upload))
 
-    def __str__(self) -> str:
+    def generate_report(self) -> dict:
+        content = self.fn(self.mgr)
+        if content is None:
+            return None
         report = {}
         report_dt = datetime.timestamp(datetime.now())
         try:
@@ -129,23 +145,26 @@ class Report:
                                   self.mgr.target_space)
 
             event_section = ReportEvent.collect(self.report_type,
+                                        self.component,
                                         report_dt,
                                         self.mgr.get('mon_map')['fsid'],
                                         self.icn,
                                         self.owner_tenant_id,
                                         self.description,
-                                        self.fn,
+                                        content,
                                         self.mgr)
 
             report['events'].append(event_section)
             self.last_id = report["event_time_ms"]
 
-            return json.dumps(report)
+            return report
         except Exception as ex:
             raise Exception('<%s> report not available: %s\n%s' % (self.report_type, ex, report))
 
     def filter_report(self, fields_to_remove: list) -> str:
-        filtered_report = json.loads(str(self))
+        filtered_report = self.generate_report()
+        if filtered_report is None:
+            return None
 
         for field in fields_to_remove:
             if field in filtered_report:
@@ -161,6 +180,10 @@ class Report:
                 return ""
         resp = None
         try:
+            report = self.generate_report()
+            if report is None:
+                # the report can tell that it doesnt want to be sent by returning None
+                return None
             if self.proxies:
                 self.mgr.log.info('Sending <%s> report to <%s> (via proxies <%s>)', self.report_type, self.url,
                                   self.proxies)
@@ -168,7 +191,7 @@ class Report:
                 self.mgr.log.info('Sending <%s> report to <%s>', self.report_type, self.url)
             resp = requests.post(url=self.url,
                                  headers={'accept': 'application/json', 'content-type': 'application/json'},
-                                 data=str(self),
+                                 data=json.dumps(report),
                                  proxies=self.proxies)
             resp.raise_for_status()
             self.mgr.log.info(resp.json())
@@ -180,6 +203,82 @@ class Report:
         except Exception as e:
             explanation = resp.text if resp else ""
             raise SendError('Failed to send <%s> to <%s>: %s %s' % (self.report_type, self.url, str(e), explanation))
+
+def alert_uid(alert: dict) -> str:
+    """
+    Retuns a unique string identifying this alert
+    """
+    return json.dumps(alert['labels'], sort_keys=True) + alert['activeAt'] + alert['value']
+
+def is_alert_relevant(alert: dict) -> bool:
+    """
+    Returns True if this alert should be sent, False if it should be filtered out of the report
+    """
+    state = alert.get('state', '')
+    severity = alert.get('labels', {}).get('severity', '')
+
+    return state == 'firing' and severity == 'critical'
+
+def get_prometheus_alerts(mgr):
+    """
+    Returns a list of all the alerts currently active in Prometheus
+    """
+    try:
+        daemon_list = mgr.remote('cephadm', 'list_daemons', service_name='prometheus')
+        if daemon_list.exception_str:
+            raise Exception(f"Alert report: Error finding the Prometheus instance: {daemon_list.exception_str}")
+        if len(daemon_list.result) < 1:
+            raise Exception(f"Alert report: Can't find the Prometheus instance")
+
+        d = daemon_list.result[0]
+        host = d.ip if d.ip else d.hostname  # ip is of type str
+        port = str(d.ports[0]) if d.ports else ""  # ports is a list of ints
+        if not (host and port):
+            raise Exception(f"Can't get Prometheus IP and/or port from manager")
+
+        # Get the alerts
+        resp = {}
+        try:
+            resp = requests.get(f"http://{host}:{port}/api/v1/alerts").json()
+        except Exception as e:
+            raise Exception(f"Error getting alerts from Prometheus at {host}:{port} : {e}")
+
+        if 'data' not in resp or 'alerts' not in resp['data']:
+            raise Exception(f"Prometheus returned a bad reply: {resp}")
+
+        alerts = resp['data']['alerts']
+        return alerts
+    except Exception as e:
+        mgr.log.error(f"Can't fetch alerts from Prometheus: {e}")
+        return [{
+                'labels': {
+                    'alertname': 'callhomeErrorFetchPrometheus',
+                    'severity': 'critical'
+                },
+                'annotations': {
+                    'description': str(e)
+                },
+                'state': 'firing',
+                # 'activeAt' and 'value' are here for alert_uid() to work. they should be '0' so that we won't send this alert again and again
+                'activeAt': '0',
+                'value': '0'
+            }]
+
+def generate_alerts_report(mgr : Any):
+    global sent_alerts
+    # Filter the alert list
+    current_alerts_list = list(filter(is_alert_relevant, get_prometheus_alerts(mgr)))
+
+    current_alerts = {alert_uid(a):a for a in current_alerts_list}
+    # Find all new alerts - alerts that are currently active but were not sent until now (not in sent_alerts)
+    new_alerts = [a for uid, a in current_alerts.items() if uid not in sent_alerts]
+    resolved_alerts = [a for uid, a in sent_alerts.items() if uid not in current_alerts]
+
+    sent_alerts = current_alerts
+    if len(new_alerts) == 0 and len(resolved_alerts) == 0:
+        return None  # This will prevent the report from being sent
+    alerts_to_send = {'new_alerts': new_alerts, 'resolved_alerts': resolved_alerts}
+    return alerts_to_send
 
 class CallHomeAgent(MgrModule):
     MODULE_OPTIONS: List[Option] = [
@@ -216,6 +315,13 @@ class CallHomeAgent(MgrModule):
             min=0,
             default=60 * 5,  # 5 minutes
             desc='Time frequency for the last contact report'
+        ),
+        Option(
+            name='interval_alerts_report_seconds',
+            type='int',
+            min=0,
+            default=60 * 5,  # 5 minutes
+            desc='Time frequency for the alerts report'
         ),
         Option(
             name='customer_email',
@@ -364,6 +470,9 @@ class CallHomeAgent(MgrModule):
         self.interval_last_contact_seconds = int(
             os.environ.get('CHA_INTERVAL_LAST_CONTACT_REPORT_SECONDS',
                            self.get_module_option('interval_last_contact_report_seconds')))  # type: ignore
+        self.interval_alerts_seconds = int(
+            os.environ.get('CHA_INTERVAL_ALERTS_REPORT_SECONDS',
+                           self.get_module_option('interval_alerts_report_seconds')))  # type: ignore
         self.proxy = str(os.environ.get('CHA_PROXY', self.get_module_option('proxy')))
         self.target_space = os.environ.get('CHA_TARGET_SPACE', self.get_module_option('target_space'))
         self.si_web_service_url = os.environ.get('CHA_SI_WEB_SERVICE_URL', self.get_module_option('si_web_service_url'))
@@ -391,6 +500,7 @@ class CallHomeAgent(MgrModule):
 
     def prepare_reports(self):
         self.reports = {'inventory': Report('inventory',
+                                            'Ceph',
                                             'Ceph cluster composition',
                                             self.icn,
                                             self.owner_tenant_id,
@@ -400,6 +510,7 @@ class CallHomeAgent(MgrModule):
                                             self.interval_inventory_seconds,
                                             self),
                         'status': Report('status',
+                                         'Ceph',
                                          'Ceph cluster status and health',
                                          self.icn,
                                          self.owner_tenant_id,
@@ -409,6 +520,7 @@ class CallHomeAgent(MgrModule):
                                          self.interval_status_seconds,
                                          self),
                         'last_contact': Report('last_contact',
+                                               'Ceph',
                                                'Last contact timestamps with Ceph cluster',
                                                self.icn,
                                                self.owner_tenant_id,
@@ -416,7 +528,17 @@ class CallHomeAgent(MgrModule):
                                                self.cha_target_url,
                                                self.proxy,
                                                self.interval_last_contact_seconds,
-                                               self)
+                                               self),
+                        'alerts': Report('status',
+                                         'Ceph_alerts',
+                                         'Ceph cluster alerts',
+                                         self.icn,
+                                         self.owner_tenant_id,
+                                         generate_alerts_report,
+                                         self.cha_target_url,
+                                         self.proxy,
+                                         self.interval_alerts_seconds,
+                                         self)
         }
 
     def config_notify(self) -> None:
@@ -519,17 +641,45 @@ class CallHomeAgent(MgrModule):
         return HandleCommandResult(stdout=f'Remember to disable the '
                                    'call home module')
 
+    @CLIReadCommand('callhome reset alerts')
+    def reset_alerts(self, mock: Optional[bool] = False) -> Tuple[int, str, str]:
+        """
+        Resets the local list of alerts that were sent to Call Home to allow
+        for existing alerts to be resent.
+
+        :param mock: generates a dummy alert
+        """
+        global sent_alerts
+        if mock:
+            # If there are no relevant alerts in the cluster, an "alerts" report will not be sent.
+            # "--mock" is useful in this case, to allow the user to send a dummy "alerts" report to Call Home.
+            mocked_alert = {'labels': {'label': 'test'}, 'activeAt': '42', 'value': '17'}
+            sent_alerts = {alert_uid(mocked_alert): mocked_alert}
+        else:
+            sent_alerts = {}
+        return HandleCommandResult(stdout=f"Sent alerts list has been reset. Next alerts report will send all current alerts.")
+
     @CLIReadCommand('callhome show')
     def print_report_cmd(self, report_type: str) -> Tuple[int, str, str]:
         """
             Prints the report requested.
-            Available reports: inventory, status, last_contact
+            Available reports: inventory, status, last_contact, alerts
             Example:
                 ceph callhome show inventory
-
         """
+        global sent_alerts
         if report_type in self.reports.keys():
-            return HandleCommandResult(stdout=f"{self.reports[report_type].filter_report(['api_key', 'private_key'])}")
+            if report_type == 'alerts':
+                # The "alerts" report only sends alerts that are not in 'sent_alerts', and then updates 'sent_alerts'
+                # with the alerts sent. For 'callhome show' not to affect the regular workflow, we need to restore
+                # 'sent_alerts' to what it was before 'callhome show' generated the alerts report.
+                tmp_sent_alerts = sent_alerts
+            filtered_report = self.reports[report_type].filter_report(['api_key', 'private_key'])
+            if report_type == 'alerts':
+                sent_alerts = tmp_sent_alerts
+            if filtered_report is None:
+                return HandleCommandResult(stdout=f"Report is empty")
+            return HandleCommandResult(stdout=f"{filtered_report}")
         else:
             return HandleCommandResult(stderr='Unknown report type')
 
@@ -537,7 +687,7 @@ class CallHomeAgent(MgrModule):
     def send_report_cmd(self, report_type: str) -> Tuple[int, str, str]:
         """
             Command for sending the report requested.
-            Available reports: inventory, status, last_contact
+            Available reports: inventory, status, last_contact, alerts
             Example:
                 ceph callhome send inventory
         """
@@ -549,7 +699,10 @@ class CallHomeAgent(MgrModule):
         except Exception as ex:
             return HandleCommandResult(stderr=str(ex))
         else:
-            return HandleCommandResult(stdout=f'{report_type} report sent successfully:\n{resp}')
+            if resp == None:
+                return HandleCommandResult(stdout=f'{report_type} report: Nothing to send\n')
+            else:
+                return HandleCommandResult(stdout=f'{report_type} report sent successfully:\n{resp}')
 
 
     @CLIReadCommand('callhome list-tenants')
