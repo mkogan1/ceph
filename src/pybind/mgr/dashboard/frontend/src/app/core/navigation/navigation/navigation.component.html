@@ -118,17 +118,17 @@
           *ngIf="environment.build === 'ibm'">
         <a (click)="toggleSubMenu('multiCluster')"
            class="nav-link dropdown-toggle"
-           [attr.aria-expanded]="displayedSubMenu.multiCluster"
+           [attr.aria-expanded]="displayedSubMenu === 'multiCluster'"
            aria-controls="multi-cluster-nav"
            role="button">
           <ng-container i18n>
-            <i [ngClass]="[icons.sitemap]"></i>
+            <!-- <i [ngClass]="[icons.sitemap]"></i> -->
               Multi-Cluster
           </ng-container>
         </a>
         <ul class="list-unstyled"
             id="multi-cluster-nav"
-            [ngbCollapse]="!displayedSubMenu.multiCluster">
+            [ngbCollapse]="displayedSubMenu !== 'multiCluster'">
           <li routerLinkActive="active"
               class="tc_submenuitem tc_submenuitem_multiCluster_overview">
             <a i18n

@@ -12,6 +12,7 @@ $bg-color: #f4f4f4;
 $bg-color-dark: #161616;
 $bg-text-color: #161616;
 $text-secondary: #c6c6c6;
+$text-disabled: #8d8d8d;
 
 $carbon-primary: #0f62fe;
 
@@ -619,6 +620,18 @@ cd-navigation {
 
       .dropdown-item {
         color: $text-primary;
+
+        .text-secondary {
+          color: $text-secondary !important;
+        }
+
+        &.disabled {
+          color: $text-disabled !important;
+
+          .text-secondary {
+            color: $text-disabled !important;
+          }
+        }
       }
 
       a:hover,
@@ -637,7 +650,17 @@ cd-navigation {
       }
     }
 
-    .dropdown-toggle::after {
+    button.dropdown-toggle::after {
+      border: 0;
+      content: '\f0d7' !important;
+      display: contents;
+      font-family: 'ForkAwesome';
+      font-size: 0.8rem;
+      right: 0;
+    }
+
+
+    a.dropdown-toggle::after {
       content: none !important;
     }
 
