@@ -304,6 +304,12 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             desc='location of alerts to include in prometheus deployments',
         ),
         Option(
+            'grafana_dashboards_path',
+            type='str',
+            default='/etc/grafana/dashboards/ceph-dashboard/',
+            desc='location of dashboards to include in grafana deployments',
+        ),
+        Option(
             'migration_current',
             type='int',
             default=None,
@@ -508,6 +514,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             self.allow_ptrace = False
             self.container_init = True
             self.prometheus_alerts_path = ''
+            self.grafana_dashboards_path = ''
             self.migration_current: Optional[int] = None
             self.config_dashboard = True
             self.manage_etc_ceph_ceph_conf = True

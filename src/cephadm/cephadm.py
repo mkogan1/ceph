@@ -3237,8 +3237,10 @@ def create_daemon_dirs(ctx, fsid, daemon_type, daemon_id, uid, gid,
             makedirs(os.path.join(data_dir_root, config_dir), uid, gid, 0o755)
             makedirs(os.path.join(data_dir_root, config_dir, 'certs'), uid, gid, 0o755)
             makedirs(os.path.join(data_dir_root, config_dir, 'provisioning/datasources'), uid, gid, 0o755)
-            makedirs(os.path.join(data_dir_root, 'data'), uid, gid, 0o755)
+            makedirs(os.path.join(data_dir_root, config_dir, 'provisioning/dashboards'), uid, gid, 0o755)
+            makedirs(os.path.join(data_dir_root, 'data'), uid, gid, 0o472)
             touch(os.path.join(data_dir_root, 'data', 'grafana.db'), uid, gid)
+            recursive_chown(os.path.join(data_dir_root, 'data'), uid, gid)
         elif daemon_type == 'alertmanager':
             data_dir_root = get_data_dir(fsid, ctx.data_dir,
                                          daemon_type, daemon_id)
@@ -3598,6 +3600,7 @@ def get_container_mounts(ctx, fsid, daemon_type, daemon_id,
         elif daemon_type == 'grafana':
             mounts[os.path.join(data_dir, 'etc/grafana/grafana.ini')] = '/etc/grafana/grafana.ini:Z'
             mounts[os.path.join(data_dir, 'etc/grafana/provisioning/datasources')] = '/etc/grafana/provisioning/datasources:Z'
+            mounts[os.path.join(data_dir, 'etc/grafana/provisioning/dashboards')] = '/etc/grafana/provisioning/dashboards:Z'
             mounts[os.path.join(data_dir, 'etc/grafana/certs')] = '/etc/grafana/certs:Z'
             mounts[os.path.join(data_dir, 'data/grafana.db')] = '/var/lib/grafana/grafana.db:Z'
         elif daemon_type == 'alertmanager':
