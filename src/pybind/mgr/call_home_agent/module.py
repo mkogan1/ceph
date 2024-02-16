@@ -12,73 +12,14 @@ import requests
 import asyncio
 import os
 from datetime import datetime
-import uuid
-import glob
-import re
 
 from mgr_module import (Option, CLIReadCommand, CLIWriteCommand, MgrModule,
-                        HandleCommandResult, CommandResult)
+                        HandleCommandResult)
 # from .dataClasses import ReportHeader, ReportEvent
 from .dataDicts import ReportHeader, ReportEvent
 
-# Dict to store operations requested from Call Home Mesh
-operations = {}
-
-# Constants for operations types:
-from .dataDicts import UPLOAD_SNAP, UPLOAD_FILE, DISABLE_SI_MESSAGES, CONFIRM_RESPONSE, NOT_SUPPORTED
-
-# Constants for operation status
-from .dataDicts import OPERATION_STATUS_NEW, OPERATION_STATUS_IN_PROGRESS, \
-                       OPERATION_STATUS_COMPLETE, OPERATION_STATUS_ERROR, \
-                       OPERATION_STATUS_REQUEST_REJECTED
-
-# Constants for operation status delivery
-from .dataDicts import ST_NOT_SENT, ST_SENT
-
-# Constant for store default ceph logs folder
-# Diagnostic files are collected in this folder
-DIAGS_FOLDER = '/var/log/ceph'
-
 class SendError(Exception):
     pass
-
-# Prometheus API returns all alerts. We want to send only deltas in the alerts
-# report - i.e. send a *new* alert that has been fired since the last report
-# was sent, and send a “resolved” notification when an alert is removed from
-# the prometheus API.
-# To do so we keep a list of alerts (“sent_alerts”) we have already sent, and
-# use that to create a delta report in generate_alerts_report(). The alert
-# report is not sent if there are no deltas.
-# `ceph callhome reset alerts` zeros out sent_alerts list and therefore the
-# next report will contain the relevant alerts that are fetched from the
-# Prometheus API.
-sent_alerts = {}
-
-def ceph_command(mgr: Any, srv_type, prefix, srv_spec='', inbuf='', **kwargs):
-    # type: (Any, str, str, Optional[str], str, Any) -> Any
-    #
-    # Note: A simplified version of the function used in dashboard ceph services
-    """
-    :type prefix: str
-    :param srv_type: mon |
-    :param kwargs: will be added to argdict
-    :param srv_spec: typically empty. or something like "<fs_id>:0"
-    :param to_json: if true return as json format
-    """
-    argdict = {
-        "prefix": prefix,
-    }
-    argdict.update({k: v for k, v in kwargs.items() if v is not None})
-    result = CommandResult("")
-    mgr.send_command(result, srv_type, srv_spec, json.dumps(argdict), "", inbuf=inbuf)
-    r, outb, outs = result.wait()
-    if r != 0:
-        mgr.log.error(f"Execution of command '{prefix}' failed. (r={r}, outs=\"{outs}\", kwargs={kwargs})")
-    try:
-        return outb or outs
-    except Exception as ex:
-        mgr.log.error(f"Execution of command '{prefix}' failed: {ex}")
-        return outb
 
 def get_status(mgr: Any) -> dict:
     r, outb, outs = mgr.mon_command({
@@ -145,265 +86,9 @@ def last_contact(mgr: Any) -> dict:
     """
     return {'last_contact': format(int(time.time()))}
 
-def get_operation(key) -> dict:
-    """
-    Retuns the operation data.
-    Used for keep compatibility with the Report class API
-    """
-    return operations[key]
-
-def collect_diagnostic_commands(mgr: Any, operation_key: str) -> str:
-    """
-    Collect information from the cluster
-
-        ceph status
-        ceph health detail
-        ceph osd tree
-        ceph report
-        ceph osd dump
-        ceph df
-
-    """
-    mgr.log.info(f"Operations ({operation_key}): Collecting diagnostics commands")
-    output = ""
-    output += "\nceph status\n" + ceph_command(mgr=mgr, srv_type='mon', prefix='status')
-    output += "\n'ceph health detail\n" + ceph_command(mgr=mgr, srv_type='mon', prefix='health', detail='detail')
-    output += "\nceph osd tree\n" + ceph_command(mgr=mgr, srv_type='mon', prefix='osd tree')
-    output += "\nceph report\n" + ceph_command(mgr=mgr, srv_type='mon', prefix='report')
-    output += "\nceph osd dump\n" + ceph_command(mgr=mgr, srv_type='mon', prefix='osd dump')
-    output += "\nceph df detail\n" + ceph_command(mgr=mgr, srv_type='mon', prefix='df', detail='detail')
-
-    mgr.log.info(f"Operations ({operation_key}): diagnostics commands collected")
-
-    try:
-        cmds_file_prefix = 'ceph_commands_case'
-        # Remove previous commands files
-        for file in glob.glob(f'{DIAGS_FOLDER}/{cmds_file_prefix}*'):
-            os.remove(file)
-        timestamp_sos_file = int(time.time() * 1000)
-        try:
-            case_id = operations[operation_key]['pmr']
-        except KeyError:
-            case_id = "unknown"
-        file_name = f'{cmds_file_prefix}_{case_id}_{timestamp_sos_file}.txt'
-        with open(f'{DIAGS_FOLDER}/{file_name}', 'w') as commands_file:
-            commands_file.write(output)
-        mgr.log.info(f"Operations ({operation_key}): diagnostics commands stored in file {file_name}")
-    except Exception as ex:
-        raise Exception(f"Operations ({operation_key}): Error trying to save the commands file for diagnostics: {ex}")
-
-    return file_name
-def get_best_collect_node(mgr: Any) -> Tuple[str, str]:
-    """
-    Select the best monitor node where to run a sos report command
-    retuns the best monitor node and the active manager
-    """
-    nodes = {}
-    active_manager = ""
-    best_monitor = ""
-
-    # We add all the monitors
-    monitors = mgr.remote('cephadm', 'list_daemons', service_name='mon')
-    if monitors.exception_str:
-        raise Exception(monitors.exception_str)
-
-    for daemon in monitors.result:
-        nodes[daemon.hostname] = 1
-
-    # lets add one point to a monitor if it is a cephadm admin node
-    cluster_nodes = mgr.remote('cephadm', 'get_hosts')
-    if cluster_nodes.exception_str:
-        raise Exception(cluster_nodes.exception_str)
-
-    for host in cluster_nodes.result:
-        if '_admin' in host.labels:
-            try:
-                nodes[host.hostname] += 1
-                break
-            except KeyError:
-                pass
-
-    # get the active mgr.
-    managers = mgr.remote('cephadm', 'list_daemons', service_name='mgr')
-    if managers.exception_str:
-        raise Exception(monitors.exception_str)
-
-    for daemon in managers.result:
-        if daemon.is_active:
-            active_manager = daemon.hostname
-            try:
-                nodes[daemon.hostname] += 1
-            except KeyError:
-                pass
-
-    # get the winner monitor
-    best_monitor = max(nodes, key=nodes.get)
-
-    return best_monitor, active_manager
-
-def collect_sos_report(mgr: Any, operation_key: str) -> str:
-    """
-    SOS report gathered from a Ceph Monitor node
-    Best node to execute the sos command is
-    1. Monitor + admin node + active mgr
-    2. Monitor + admin node
-    3. monitor
-    """
-
-    # Remove previous sos report files:
-    for file in glob.glob(f'{DIAGS_FOLDER}/sosreport_case_*'):
-        os.remove(file)
-
-    # Get the best monitor node to execute the sos report
-    best_mon, active_mgr = get_best_collect_node(mgr)
-    mgr_target = ""
-    if best_mon != active_mgr and active_mgr:
-        mgr_target = f"--mgr-target {active_mgr}"
-    support_case = operations[operation_key]["pmr"]
-    mgr.log.info(f"Operations ({operation_key}): selected host for sos command is {best_mon}, active manager is {active_mgr}")
-
-    # Execute the sos report command
-    sos_cmd_execution = mgr.remote('cephadm', 'sos',
-                                      hostname = best_mon,
-                                      sos_params = f'{mgr_target} report --batch --quiet --case-id {support_case}')
-    mgr.log.info(f"Operations ({operation_key}): sos command executed succesfully")
-    if sos_cmd_execution.exception_str:
-        raise Exception(f"Error trying to get the sos report files for diagnostics(error_code): {sos_cmd_execution.exception_str}")
-
-    # output is like:
-    # ['New sos report files can be found in /var/log/ceph/<fsid>/sosreport_case_124_1706548742636_*']
-    pattern = r'sosreport_case_\S+'
-    matches = re.findall(pattern, sos_cmd_execution.result[0])
-    if matches:
-        mgr.log.info(f"Operations ({operation_key}): sos command files pattern is: {matches[0]}")
-        return matches[0]
-    else:
-        mgr.log.error(f"Operations ({operation_key}): sos report files pattern not found in: {sos_cmd_execution.result[0]}")
-        return ""
-
-def notProcessed(item: dict) -> bool:
-    """
-    Determines if a received <inbound request> containing a si_requestid
-    has been already processed
-    """
-    not_processed = True
-
-    si_requestid = item.get('options', {}).get('si_requestid', '')
-    if si_requestid:
-        not_processed = operations.get(si_requestid, "") == ""
-
-    return not_processed
-
-def add_operation(item: dict, event_id: str = '') -> str:
-    """
-    Add an operation coming from an inbound request to the operation dicts.
-    return the the key to locate the new operation in operations dict
-
-    item = {  'operation': 'upload_snap',
-                'options': {'pmr': 'TS1234567',
-                            'level': '3',
-                            'si_requestid':'2345',
-                            'enable_status':
-                            'true',
-                            'version': 1}
-            }
-
-    Items in the operations dict are like:
-
-    {'2345': {'pmr': 'TS1234567',
-              'level': '3',
-              'si_requestid':'2345',
-              'enable_status': 'true',
-              'version': 1,
-              'type': 'upload_snap',
-              'status': 'new',
-              'description: '',
-              'status_sent': '',
-              'progress': 0,
-              'event_id': 'IBM-RedHatMarine-ceph-368ffc04.....'},
-              'created': 1707818993.8846028
-     '1234' : {....}
-    }
-    """
-
-    key = str(uuid.uuid4())
-
-    # reject requests with no valid structure:
-    if 'operation' not in item or 'options' not in item:
-        operations[key]['type']= NOT_SUPPORTED
-        operations[key]['status'] = OPERATION_STATUS_REQUEST_REJECTED
-        operations[key]['progress'] = 0
-        operations[key]['description'] = f'Operations ({key}): Received unknown operation: {item}'
-        operations[key]['status_sent'] = ST_NOT_SENT
-        operations[key]['event_id'] = event_id
-        return key
-
-    # reject operations not supported
-    if item['operation'] != UPLOAD_SNAP: # Only "upload snap" ops are allowed
-        operations[key] = item['options']
-        operations[key]['type']= item['operation']
-        operations[key]['status'] = OPERATION_STATUS_REQUEST_REJECTED
-        operations[key]['progress'] = 0
-        operations[key]['description'] = f'Operations ({key}): Rejected <{item["operation"]}> operation <{key}>: Operation not supported'
-        operations[key]['status_sent'] = ST_NOT_SENT
-        operations[key]['event_id'] = event_id
-        return key
-
-    # reject UPLOAD SNAP operations without required fields
-    if not ('pmr' in item['options'] and
-            'level' in  item['options'] and
-            'si_requestid' in item['options']):
-        operations[key]['type']= NOT_SUPPORTED
-        operations[key]['status'] = OPERATION_STATUS_REQUEST_REJECTED
-        operations[key]['progress'] = 0
-        operations[key]['description'] = f"Operations ({key}): required fields (pmr, level, si_requestid)\
-              not present in <{item['operation']}> operation: {item}"
-        operations[key]['status_sent'] = ST_NOT_SENT
-        operations[key]['event_id'] = event_id
-        return key
-
-    # reject UPLOAD SNAP operations with same level than other being processed
-    for op_key, op in operations.items():
-        if op['type'] == UPLOAD_SNAP and op['level'] == item['options']['level']:
-            operations[key] = item['options']
-            operations[key]['type']= item['operation']
-            operations[key]['status'] = OPERATION_STATUS_REQUEST_REJECTED
-            operations[key]['progress'] = 0
-            operations[key]['description'] = f"Operations ({key}): <{item['operation']}> operation\
-                 <{item['options']['pmr']}>:There is another operation with identifier {op_key}\
-                    which has the same level and is already being processed"
-            operations[key]['status_sent'] = ST_NOT_SENT
-            operations[key]['event_id'] = event_id
-            return key
-
-    #reject UPLOAD SNAP operations with same si_requestid than other being processed
-    if item['options']['si_requestid'] in operations.keys():
-        operations[key] = item['options']
-        operations[key]['type']= item['operation']
-        operations[key]['status'] = OPERATION_STATUS_REQUEST_REJECTED
-        operations[key]['progress'] = 0
-        operations[key]['description'] = f"Operations ({key}): <{item['operation']}> \
-            operation <{item['options']['si_requestid']}>: operation is being processed now"
-        operations[key]['status_sent'] = ST_NOT_SENT
-        operations[key]['event_id'] = event_id
-        return key
-
-    # Accept valid UPLOAD SNAP operation
-    key = item['options']['si_requestid']
-    operations[key] = item['options']
-    operations[key]['type']= item['operation']
-    operations[key]['status'] = OPERATION_STATUS_NEW
-    operations[key]['progress'] = 0
-    operations[key]['description'] = f'Operations ({key}): Accepted new <{item["operation"]}> \
-        operation <{key}>'
-    operations[key]['status_sent'] = ST_NOT_SENT
-    operations[key]['event_id'] = event_id
-    operations[key]['created'] = time.time()
-    return key
-
 class Report:
-    def __init__(self, report_type: str, component: str, description: str, icn: str, owner_tenant_id: str, fn: Callable[[], str], url: str, proxy: str, seconds_interval: int,
-                 mgr_module: Any, key: str = "", event_id: str = ''):
+    def __init__(self, report_type: str, description: str, icn: str, owner_tenant_id: str, fn: Callable[[], str], url: str, proxy: str, seconds_interval: int,
+                 mgr_module: Any):
         self.report_type = report_type                # name of the report
         self.icn = icn                                # ICN = IBM Customer Number
         self.owner_tenant_id = owner_tenant_id        # IBM tenant ID
@@ -414,8 +99,6 @@ class Report:
         self.description = description
         self.last_id = ''
         self.proxies = {'http': proxy, 'https': proxy} if proxy else {}
-        self.key = key                                # used in operations reports
-        self.event_id = event_id                      # used in operations reports
 
         # Last upload settings
         self.last_upload_option_name = 'report_%s_last_upload' % self.report_type
@@ -425,25 +108,16 @@ class Report:
         else:
             self.last_upload = str(int(last_upload))
 
-    def generate_report(self) -> dict:
+    def __str__(self) -> str:
+        report = {}
+        report_dt = datetime.timestamp(datetime.now())
         try:
-            if self.key:
-                content = self.fn(self.key)
-            else:
-                content = self.fn(self.mgr)
-            if content is None:
-                return None
-
-            report = {}
-            report_dt = datetime.timestamp(datetime.now())
-
             report = ReportHeader.collect(self.report_type,
                                   self.mgr.get('mon_map')['fsid'],
                                   self.mgr.version,
                                   report_dt,
                                   self.mgr,
-                                  self.mgr.target_space,
-                                  self.event_id)
+                                  self.mgr.target_space)
 
             event_section = ReportEvent.collect(self.report_type,
                                         report_dt,
@@ -451,9 +125,8 @@ class Report:
                                         self.icn,
                                         self.owner_tenant_id,
                                         self.description,
-                                        content,
-                                        self.mgr,
-                                        self.key)
+                                        self.fn,
+                                        self.mgr)
 
             report['events'].append(event_section)
             self.last_id = report["event_time_ms"]
@@ -488,9 +161,8 @@ class Report:
                                  headers={'accept': 'application/json', 'content-type': 'application/json'},
                                  data=str(self),
                                  proxies=self.proxies)
-            self.mgr.log.debug(f"Report response: {resp.text}")
             resp.raise_for_status()
-            self.process_response(self.report_type, resp)
+            self.mgr.log.info(resp.json())
             self.last_upload = str(int(time.time()))
             self.mgr.set_store(self.last_upload_option_name, self.last_upload)
             self.mgr.health_checks.pop('CHA_ERROR_SENDING_REPORT', None)
@@ -499,115 +171,6 @@ class Report:
         except Exception as e:
             explanation = resp.text if resp else ""
             raise SendError('Failed to send <%s> to <%s>: %s %s' % (self.report_type, self.url, str(e), explanation))
-
-    def process_response(self, report_type: str, resp: requests.Response) -> None:
-        """
-        Process operations after sending a "report" and receiving a succesful response
-        """
-        try:
-            if report_type == 'last_contact':
-                # retrieve operations from response
-                inbound_requests = resp.json().get('response_state', {}).get('transactions',{}).get('UnSolicited_RedHatMarine_ceph_Request', {}).get('response_object', {}).get('product_request', {}).get('asset_event_detail', {}).get('body', {}).get('inbound_requests', {})
-
-                if inbound_requests:
-                    event_id = resp.json().get('transaction', {}).get('event_id', '')
-                    self.mgr.log.info(f"Operations: New inbound_requests = {inbound_requests} for event_id {event_id}")
-                    # Add the operation to the operations queue
-                    for item in inbound_requests:
-                        if notProcessed(item):
-                            # Add Confirm response operation to operations dict
-                            key = str(uuid.uuid4())
-                            operations[key] = {}
-                            operations[key]['type']= CONFIRM_RESPONSE
-                            operations[key]['status'] = OPERATION_STATUS_COMPLETE
-                            operations[key]['progress'] = 0
-                            operations[key]['description'] = CONFIRM_RESPONSE
-                            operations[key]['status_sent'] = ST_NOT_SENT
-                            operations[key]['event_id'] = event_id
-
-                            self.mgr.log.info(f"Operations: Added confirm response operation for {item}")
-
-                            # Add the operation to operations dict
-                            key = add_operation(item, event_id)
-                            self.mgr.log.info(f"Operations: Added operation {item}")
-        except Exception as ex:
-            self.mgr.log.error(f"Operations: error: {ex} adding {item}")
-
-def alert_uid(alert: dict) -> str:
-    """
-    Retuns a unique string identifying this alert
-    """
-    return json.dumps(alert['labels'], sort_keys=True) + alert['activeAt'] + alert['value']
-
-def is_alert_relevant(alert: dict) -> bool:
-    """
-    Returns True if this alert should be sent, False if it should be filtered out of the report
-    """
-    state = alert.get('state', '')
-    severity = alert.get('labels', {}).get('severity', '')
-
-    return state == 'firing' and severity == 'critical'
-
-def get_prometheus_alerts(mgr):
-    """
-    Returns a list of all the alerts currently active in Prometheus
-    """
-    try:
-        daemon_list = mgr.remote('cephadm', 'list_daemons', service_name='prometheus')
-        if daemon_list.exception_str:
-            raise Exception(f"Alert report: Error finding the Prometheus instance: {daemon_list.exception_str}")
-        if len(daemon_list.result) < 1:
-            raise Exception(f"Alert report: Can't find the Prometheus instance")
-
-        d = daemon_list.result[0]
-        host = d.ip if d.ip else d.hostname  # ip is of type str
-        port = str(d.ports[0]) if d.ports else ""  # ports is a list of ints
-        if not (host and port):
-            raise Exception(f"Can't get Prometheus IP and/or port from manager")
-
-        # Get the alerts
-        resp = {}
-        try:
-            resp = requests.get(f"http://{host}:{port}/api/v1/alerts").json()
-        except Exception as e:
-            raise Exception(f"Error getting alerts from Prometheus at {host}:{port} : {e}")
-
-        if 'data' not in resp or 'alerts' not in resp['data']:
-            raise Exception(f"Prometheus returned a bad reply: {resp}")
-
-        alerts = resp['data']['alerts']
-        return alerts
-    except Exception as e:
-        mgr.log.error(f"Can't fetch alerts from Prometheus: {e}")
-        return [{
-                'labels': {
-                    'alertname': 'callhomeErrorFetchPrometheus',
-                    'severity': 'critical'
-                },
-                'annotations': {
-                    'description': str(e)
-                },
-                'state': 'firing',
-                # 'activeAt' and 'value' are here for alert_uid() to work. they should be '0' so that we won't send this alert again and again
-                'activeAt': '0',
-                'value': '0'
-            }]
-
-def generate_alerts_report(mgr : Any):
-    global sent_alerts
-    # Filter the alert list
-    current_alerts_list = list(filter(is_alert_relevant, get_prometheus_alerts(mgr)))
-
-    current_alerts = {alert_uid(a):a for a in current_alerts_list}
-    # Find all new alerts - alerts that are currently active but were not sent until now (not in sent_alerts)
-    new_alerts = [a for uid, a in current_alerts.items() if uid not in sent_alerts]
-    resolved_alerts = [a for uid, a in sent_alerts.items() if uid not in current_alerts]
-
-    sent_alerts = current_alerts
-    if len(new_alerts) == 0 and len(resolved_alerts) == 0:
-        return None  # This will prevent the report from being sent
-    alerts_to_send = {'new_alerts': new_alerts, 'resolved_alerts': resolved_alerts}
-    return alerts_to_send
 
 class CallHomeAgent(MgrModule):
     MODULE_OPTIONS: List[Option] = [
@@ -753,30 +316,7 @@ class CallHomeAgent(MgrModule):
             default=r'^.+\.icr\.io$',
             desc='Container registry pattern for urls where cephadm credentials(JWT token) are valid'
         ),
-        Option(
-            name='ecurep_url',
-            type='str',
-            default='https://www.secure.ecurep.ibm.com',
-            desc='ECuRep file exchange systems'
-        ),
-        Option(
-            name='ecurep_userid',
-            type='str',
-            default="",
-            desc='Userid obtained from the IBM Transfer ID service'
-        ),
-        Option(
-            name='ecurep_password',
-            type='str',
-            default="",
-            desc='Password obtained from the IBM Transfer ID service'
-        ),
-        Option(
-            name='upload_snap_cooling_window_seconds',
-            type='int',
-            default=720,
-            desc='Discard operations with the same Storage Insigths request id during the cooling window'
-        ),
+
     ]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -839,84 +379,9 @@ class CallHomeAgent(MgrModule):
 
         # Other options not using env vars
         self.valid_container_registry = self.get_module_option('valid_container_registry')
-        self.upload_snap_cooling_window_seconds = self.get_module_option('upload_snap_cooling_window_seconds')
-
-        # ecurep options:
-        self.ecurep_url = self.get_module_option('ecurep_url')
-        self.ecurep_userid = self.get_module_option('ecurep_userid')
-        self.ecurep_password = self.get_module_option('ecurep_password')
-
-    def upload_file(self, op_key: str, file_name: str, chunk_pattern: str = '') -> None:
-        """
-        Upload a file to ecurep.
-        If a chunk_pattern is provided the file is divided in chunks
-        """
-
-        auth = (self.ecurep_userid, self.ecurep_password)
-        if self.owner_company_name == "":
-            owner = "MyCompanyUploadClient"
-        else:
-            owner = self.owner_company_name
-        case_id = operations[op_key]['pmr']
-        si_requestid = operations[op_key]['si_requestid']
-
-        # Get the unique Upload ID for the file
-        try:
-            # 1. Obtain the file id to upload the file
-            ecurep_file_id_url = f'{self.ecurep_url}/app/upload_tid?name={file_name}&client={owner}'
-            self.log.info(f"Operations ({si_requestid}): getting unique upload id from <{ecurep_file_id_url}>")
-            resp = requests.post(url=ecurep_file_id_url, auth=auth)
-            resp.raise_for_status()
-            file_id_for_upload = resp.json().get('id')
-            self.log.info(f"Operations ({si_requestid}): unique id for upload is <{file_id_for_upload}>")
-        except Exception as ex:
-            explanation = resp.text if resp else ""
-            raise SendError(f'Operations ({si_requestid}): Failed to send <{file_name}> to <{ecurep_file_id_url}>: {ex}: {explanation}')
-
-        try:
-            # 2. Upload the file
-            ecurep_file_upload_url = f'{self.ecurep_url}/app/upload_sf/files/{file_id_for_upload}?case_id={case_id}&client={owner}'
-            file_size = 0
-            if chunk_pattern:
-                files_to_upload = (glob.glob(f'{DIAGS_FOLDER}/{chunk_pattern}'))
-                for part in files_to_upload:
-                    file_size += os.path.getsize(part)
-            else:
-                files_to_upload = [f'{DIAGS_FOLDER}/{file_name}']
-                file_size = os.path.getsize(f'{DIAGS_FOLDER}/{file_name}')
-
-            start_byte = 0
-            part_sent = 0
-            for file_path in files_to_upload:
-                chunk_size = os.path.getsize(file_path)
-                with open(file_path, 'rb') as file:
-                    self.log.info(f"Operations ({si_requestid}): uploading file {file_name} to <{ecurep_file_upload_url}>")
-                    req = requests.Request(method = 'POST',
-                                        url = ecurep_file_upload_url,
-                                        headers = {'content-type': 'application/octet-stream',
-                                                    'X-File-Name': file_name,
-                                                    'X-File-Size': f'{file_size}',
-                                                    'Content-Range': f'bytes {start_byte}-{chunk_size + start_byte}/{file_size}'
-                                                    },
-                                        files={'file': file})
-                    self.log.info(f'Operations ({si_requestid}): {file_name} -> bytes {start_byte}-{chunk_size + start_byte}/{file_size}')
-                    prepped = req.prepare()
-                    prepped.headers['content-length'] = f'{chunk_size}'
-                    resp = requests.Session().send(prepped)
-                    resp.raise_for_status()
-                start_byte += chunk_size
-                part_sent += 1
-                if chunk_pattern:
-                    operations[op_key]["progress"] = int(part_sent/len(files_to_upload) * 100)
-                operations[op_key]["description"] = f"file <{file_name}> is being sent"
-                self.send_operation_report(op_key)
-        except Exception as ex:
-            explanation = resp.text if resp else ""
-            raise SendError(f'Operations ({si_requestid}): Failed to send <{file_path}> to <{ecurep_file_upload_url}>: {ex}: {explanation}')
 
     def prepare_reports(self):
         self.reports = {'inventory': Report('inventory',
-                                            'ceph_inventory',
                                             'Ceph cluster composition',
                                             self.icn,
                                             self.owner_tenant_id,
@@ -926,7 +391,6 @@ class CallHomeAgent(MgrModule):
                                             self.interval_inventory_seconds,
                                             self),
                         'status': Report('status',
-                                         'ceph_health',
                                          'Ceph cluster status and health',
                                          self.icn,
                                          self.owner_tenant_id,
@@ -936,7 +400,6 @@ class CallHomeAgent(MgrModule):
                                          self.interval_status_seconds,
                                          self),
                         'last_contact': Report('last_contact',
-                                               'ceph_last_contact',
                                                'Last contact timestamps with Ceph cluster',
                                                self.icn,
                                                self.owner_tenant_id,
@@ -944,17 +407,7 @@ class CallHomeAgent(MgrModule):
                                                self.cha_target_url,
                                                self.proxy,
                                                self.interval_last_contact_seconds,
-                                               self),
-                        'alerts': Report('status',
-                                         'ceph_alerts',
-                                         'Ceph cluster alerts',
-                                         self.icn,
-                                         self.owner_tenant_id,
-                                         generate_alerts_report,
-                                         self.cha_target_url,
-                                         self.proxy,
-                                         self.interval_alerts_seconds,
-                                         self)
+                                               self)
         }
 
     def config_notify(self) -> None:
@@ -975,81 +428,6 @@ class CallHomeAgent(MgrModule):
         """
         try:
             while self.run:
-                await asyncio.sleep(seconds)
-        except asyncio.CancelledError:
-            return
-
-    async def process_operations(self, seconds: int) -> None:
-        """
-            Coroutine to process operations:
-
-            Remove "completed" operations
-            Takes "new" operations moving them to "in progress"
-            Process the operation moving it to "complete" or "error"
-
-            {{'1234': {'pmr': 'TS1234567',
-                       'level': '3',
-                       'enable_status': 'true',
-                       'version': 1,
-                       'status': 0,
-                       'type': 'upload_snap',
-                       'si_requestid': '1234',
-                       'created': 1707818993.8846028}}
-
-        """
-        try:
-            while self.run:
-                try:
-                    self.log.info("Operations: started")
-                    # Clean any operation in final state
-                    for operation_key in list(operations):
-                        self.log.info("Operations: cleaning finished operations")
-                        if operations[operation_key]['status'] in [OPERATION_STATUS_COMPLETE,
-                                                                  OPERATION_STATUS_ERROR,
-                                                                  OPERATION_STATUS_REQUEST_REJECTED] and operations[operation_key]['status_sent'] == ST_SENT:
-
-                            # Do not delete operations inside the upload snap cooling window
-                            if operations[operation_key]['type'] == UPLOAD_SNAP and 'created' in operations[operation_key].keys():
-                               if int(time.time() - operations[operation_key]['created']) <= self.upload_snap_cooling_window_seconds:
-                                   continue
-
-                            self.log.info(f'Operations ({operation_key}): Removed finished  <{operations[operation_key]["type"]}> operation with status <{operations[operation_key]["status"]}>')
-                            del operations[operation_key]
-
-                    # Process rest of operations
-                    self.log.info("Operations: Processing ....")
-                    for operation_key, operation in operations.items():
-
-                        # Pending finished operations
-                        if  operation['status'] in [OPERATION_STATUS_COMPLETE,
-                                                    OPERATION_STATUS_ERROR,
-                                                    OPERATION_STATUS_REQUEST_REJECTED] and operation['status_sent'] == ST_NOT_SENT:
-                            self.log.info("Operations: Processing finished operations ....")
-                            self.send_operation_report(operation_key)
-
-
-                        # Process new operations
-                        if operation["status"] == OPERATION_STATUS_NEW:
-                            self.log.info("Operations: Processing new operations ....")
-                            try:
-                                operation["status"] = OPERATION_STATUS_IN_PROGRESS
-                                self.log.info(f'Operations ({operation_key}):  <{operation["type"]}> operation status is <{operation["status"]}> now>')
-                                commands_file = collect_diagnostic_commands(self, operation_key)
-                                sos_files_pattern = ""
-                                if int(operation["level"]) > 1:
-                                    sos_files_pattern = collect_sos_report(self, operation_key)
-                                self.send_diagnostics(operation_key, commands_file, sos_files_pattern)
-                                self.log.info(f'Operations ({operation_key}): Completed <{operation["type"]}> operation')
-                                operation["status"] = OPERATION_STATUS_COMPLETE
-                            except Exception as ex:
-                                self.log.error(f'Operations ({operation_key}): Error processing <{operation["type"]}> operation: {ex}')
-                                operation["status"] = OPERATION_STATUS_ERROR
-
-                            # if it was ok or not, we always report the state
-                            self.send_operation_report(operation_key)
-                    self.log.info('Operations: Processing operations finished')
-                except Exception as ex:
-                    self.log.error(f"Operations ({operation_key}): error: {ex}")
                 await asyncio.sleep(seconds)
         except asyncio.CancelledError:
             return
@@ -1086,14 +464,10 @@ class CallHomeAgent(MgrModule):
          Launch module coroutines (reports or any other async task)
         """
         try:
-            # tasks for periodic reports
             for report_name, report in self.reports.items():
                 t = self.loop.create_task(self.report_task(report))
                 self.tasks.append(t)
-            # task for process requested operations
-            t = self.loop.create_task(self.process_operations(30))
-            self.tasks.append(t)
-            # create control task to allow to reconfigure reports in 10 seconds
+            # Create control task to allow to reconfigure reports in 10 seconds
             t = self.loop.create_task(self.control_task(10))
             self.tasks.append(t)
             # run the async loop
@@ -1129,39 +503,6 @@ class CallHomeAgent(MgrModule):
         self.clean_coroutines
         self.loop.stop()
         return super().shutdown()
-
-    def send_diagnostics(self, op_key: str, cmd_file_name: str, sos_files_pattern: str) -> None:
-        """
-        """
-        # Send commands file:
-        self.upload_file(op_key, cmd_file_name)
-
-        # Send sos file splitted:
-        sos_file_name = f'{sos_files_pattern[:-2]}.xz_part'
-        self.upload_file(op_key, sos_file_name, sos_files_pattern)
-
-    def send_operation_report(self, key:str) -> None:
-        try:
-            op_report = Report(report_type= f'status',
-                               component = 'ceph_operations',
-                               description=f'operation {operations[key]["type"]}',
-                               icn= self.icn,
-                               owner_tenant_id= self.owner_tenant_id,
-                               fn= get_operation,
-                               url= self.cha_target_url,
-                               proxy= self.proxy,
-                               seconds_interval= 0,
-                               mgr_module = self,
-                               key= key,
-                               event_id= operations[key]["event_id"])
-            op_report.send(force=True)
-            operations[key]['status_sent'] = ST_SENT
-            self.log.info(f'Operations ({key}): {operations[key]["description"]}, status: {operations[key]["status"]}, progress: {operations[key]["progress"]}')
-            return
-        except Exception as ex:
-            self.log.error(f'Operations ({key}): Error sending <{operations[key]["type"]}> \
-                             operation report <{key}>: {ex}')
-            raise(ex)
 
     @CLIReadCommand('callhome stop')
     def stop_cmd(self) -> Tuple[int, str, str]:
@@ -1285,55 +626,3 @@ class CallHomeAgent(MgrModule):
                     'owner_tenant_id': self.owner_tenant_id
                 },
             }))
-
-    @CLIReadCommand('callhome upload diagnostics')
-    def upload_diags(self, support_ticket: str, level: int) ->  Tuple[int, str, str]:
-        """
-        Upload Ceph cluster diagnostics to Ecurep for an specific customer support ticket
-        """
-
-        try:
-            request = {'operation': 'upload_snap',
-                    'options': {'pmr': f'{support_ticket}',
-                                'level': f'{level}',
-                                'si_requestid':f'si_request_{uuid.uuid4()}',
-                                'enable_status': 'true',
-                                'version': 1}
-            }
-            key = add_operation(request)
-
-        except Exception as ex:
-            return HandleCommandResult(stderr=str(ex))
-        else:
-            return HandleCommandResult(stdout=f'{operations[key]}')
-
-    @CLIReadCommand('callhome operations')
-    def list_operations(self) ->  Tuple[int, str, str]:
-        """
-        Show the operations list
-        """
-        try:
-            output = '\n'.join(f'{key}:{value}' for key, value in operations.items())
-        except Exception as ex:
-            return HandleCommandResult(stderr=str(ex))
-        else:
-            return HandleCommandResult(stdout=output)
-
-    @CLIWriteCommand('callhome operations clean')
-    def clean_operations(self, operation_id: str = "") ->  Tuple[int, str, str]:
-        """
-        Remove an operation (if provided operation_id) from the operations list
-        If no operation_id provided clean completelly the operations list
-        """
-        try:
-            if operation_id:
-                if operation_id in operations.keys():
-                    del operations[operation_id]
-            else:
-                operations = {}
-
-            output = json.dumps(operations)
-        except Exception as ex:
-            return HandleCommandResult(stderr=str(ex))
-        else:
-            return HandleCommandResult(stdout=output)
