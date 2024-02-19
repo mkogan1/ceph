@@ -5690,6 +5690,9 @@ class TestSubvolumeSnapshotClones(TestVolumesHelper):
         snapshot = self._generate_random_snapshot_name()
         clone_list =  [f'clone_{i}' for i in range(3)]
 
+        # disable "capped" clones
+        self.config_set('mgr', 'mgr/volumes/snapshot_clone_no_wait', False)
+
         # create subvolume.
         self._fs_cmd("subvolume", "create", self.volname, subvolume, "--mode=777")
 
@@ -5739,6 +5742,9 @@ class TestSubvolumeSnapshotClones(TestVolumesHelper):
 
         # insert delay at the beginning of snapshot clone
         self.config_set('mgr', 'mgr/volumes/snapshot_clone_delay', 5)
+
+        # disable "capped" clones
+        self.config_set('mgr', 'mgr/volumes/snapshot_clone_no_wait', False)
 
         # schedule a clones
         for clone in clone_list:
@@ -5842,6 +5848,9 @@ class TestSubvolumeSnapshotClones(TestVolumesHelper):
 
         # insert delay at the beginning of snapshot clone
         self.config_set('mgr', 'mgr/volumes/snapshot_clone_delay', 15)
+
+        # disable "capped" clones
+        self.config_set('mgr', 'mgr/volumes/snapshot_clone_no_wait', False)
 
         # schedule a clones
         for clone in clone_list:
