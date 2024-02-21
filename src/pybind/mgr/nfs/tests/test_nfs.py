@@ -941,6 +941,9 @@ NFS_CORE_PARAM {
         assert export.clients[0].access_type is None
         assert export.cluster_id == self.cluster_id
 
+    def test_update_export_cephfs(self):
+        self._do_mock_test(self._do_test_update_export_cephfs)
+
     def _do_test_update_export_cephfs(self):
         nfs_mod = Module('nfs', '', '')
         conf = ExportMgr(nfs_mod)
@@ -972,6 +975,7 @@ NFS_CORE_PARAM {
         assert export.fsal.name == "CEPH"
         assert export.fsal.cmount_path == "/"
         assert export.fsal.user_id == "nfs.foo.c"
+        assert export.fsal.cephx_key == "thekeyforclientabc"
         assert export.cluster_id == self.cluster_id
     
     def test_remove_export(self) -> None:

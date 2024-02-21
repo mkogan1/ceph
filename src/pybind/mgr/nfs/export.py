@@ -813,6 +813,9 @@ class ExportMgr:
             log.debug('export %s pseudo %s -> %s',
                       new_export.export_id, old_export.pseudo, new_export.pseudo)
 
+        if old_export.fsal.name == NFS_GANESHA_SUPPORTED_FSALS[0]:
+            self._ensure_cephfs_export_user(new_export)
+
         if old_export.fsal.name == NFS_GANESHA_SUPPORTED_FSALS[1]:
             old_rgw_fsal = cast(RGWFSAL, old_export.fsal)
             new_rgw_fsal = cast(RGWFSAL, new_export.fsal)
