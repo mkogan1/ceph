@@ -888,6 +888,7 @@ class CallHomeAgent(MgrModule):
             owner = self.owner_company_name
         case_id = operations[op_key]['pmr']
         si_requestid = operations[op_key]['si_requestid']
+        resp = None
 
         # Get the unique Upload ID for the file
         try:
@@ -916,22 +917,21 @@ class CallHomeAgent(MgrModule):
 
             start_byte = 0
             part_sent = 0
-            for file_path in files_to_upload:
+            self.log.info(f"Operations ({si_requestid}): uploading file {file_name} to <{ecurep_file_upload_url}>")
+            for file_path in sorted(files_to_upload):
                 chunk_size = os.path.getsize(file_path)
                 with open(file_path, 'rb') as file:
-                    self.log.info(f"Operations ({si_requestid}): uploading file {file_name} to <{ecurep_file_upload_url}>")
-                    req = requests.Request(method = 'POST',
-                                        url = ecurep_file_upload_url,
-                                        headers = {'content-type': 'application/octet-stream',
-                                                    'X-File-Name': file_name,
-                                                    'X-File-Size': f'{file_size}',
-                                                    'Content-Range': f'bytes {start_byte}-{chunk_size + start_byte}/{file_size}'
-                                                    },
-                                        files={'file': file})
-                    self.log.info(f'Operations ({si_requestid}): {file_name} -> bytes {start_byte}-{chunk_size + start_byte}/{file_size}')
-                    prepped = req.prepare()
-                    prepped.headers['content-length'] = f'{chunk_size}'
-                    resp = requests.Session().send(prepped)
+                    if chunk_pattern:
+                        self.log.info(f"Operations ({si_requestid}): uploading part {file_path} to <{ecurep_file_upload_url}>")
+                    resp = requests.post(url = ecurep_file_upload_url,
+                                        data = file.read(),
+                                        headers = {'Content-Type': 'application/octet-stream',
+                                                   'X-File-Name': file_name,
+                                                   'X-File-Size': f'{file_size}',
+                                                   'Content-Range': f'bytes {start_byte}-{chunk_size + start_byte}/{file_size}'
+                                        },
+                    )
+                    self.log.info(f'Operations ({si_requestid}): uploaded {file_name} -> bytes {start_byte}-{chunk_size + start_byte}/{file_size}')
                     resp.raise_for_status()
                 start_byte += chunk_size
                 part_sent += 1
@@ -1166,7 +1166,7 @@ class CallHomeAgent(MgrModule):
         self.upload_file(op_key, cmd_file_name)
 
         # Send sos file splitted:
-        sos_file_name = f'{sos_files_pattern[:-2]}.xz_part'
+        sos_file_name = f'{sos_files_pattern[:-2]}.xz'
         self.upload_file(op_key, sos_file_name, sos_files_pattern)
 
     def send_operation_report(self, key:str) -> None:
@@ -1185,7 +1185,7 @@ class CallHomeAgent(MgrModule):
                                event_id= operations[key]["event_id"])
             op_report.send(force=True)
             operations[key]['status_sent'] = ST_SENT
-            self.log.info(f'Operations ({key}): {operations[key]["description"]}, status: {operations[key]["status"]}, progress: {operations[key]["progress"]}')
+            self.log.info(f'Operations ({key}): call home report sent. description: {operations[key]["description"]}, status: {operations[key]["status"]}, progress: {operations[key]["progress"]}')
             return
         except Exception as ex:
             self.log.error(f'Operations ({key}): Error sending <{operations[key]["type"]}> \
@@ -1390,7 +1390,7 @@ class CallHomeAgent(MgrModule):
                 if operation_id in operations.keys():
                     del operations[operation_id]
             else:
-                operations = {}
+                operations.clear()
 
             output = json.dumps(operations)
         except Exception as ex:
