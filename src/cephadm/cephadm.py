@@ -9988,7 +9988,7 @@ def command_sos(ctx: CephadmContext):
     # cat /var/log/ceph/<cluster_fsid>/sosreport* > /tmp/sosreport_case_<xx>.tar.xz
     """
 
-    def execute(cmd_list) -> tuple[bool, str]:
+    def execute(cmd_list) -> Tuple[bool, str]:
         success = True
         out, err, code = call(ctx, cmd_list, verbosity=CallVerbosity.DEBUG)
         if err or code:
