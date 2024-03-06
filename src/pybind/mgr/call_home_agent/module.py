@@ -101,7 +101,9 @@ def get_status(mgr: Any) -> dict:
 def inventory_get_hardware_status(mgr: Any) -> dict:
     try:
         hw_status = mgr.remote('orchestrator', 'node_proxy_summary')
-        return hw_status
+        if hw_status.exception_str:
+            raise Exception(hw_status.exception_str)
+        return hw_status.result
     except Exception as e:
         mgr.log.exception(str(e))
         return {'error': str(e)}
