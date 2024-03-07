@@ -1211,11 +1211,13 @@ public:
     bool is_expired = obj_has_expired(dpp, oc.cct, oc.effective_mtime, expiration,
 				      exp_time);
     auto size_check_p = pass_size_limit_checks(dpp, oc);
+    auto newer_noncurrent_p = (oc.num_noncurrent > oc.op.newer_noncurrent);
 
     ldpp_dout(dpp, 20) << __func__ << "(): key=" << o.key << ": is_expired="
 		       << is_expired << " " << ": num_noncurrent="
 		       << oc.num_noncurrent << " size_check_p: "
-		       << size_check_p << " "
+		       << size_check_p << " newer_noncurrent_p: "
+		       << newer_noncurrent_p << " "
 		       << oc.wq->thr_name() << dendl;
 
     return is_expired &&

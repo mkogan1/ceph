@@ -262,11 +262,19 @@ public:
   }
 
   uint64_t get_size_gt() const {
-    return  uint64_t(std::stoull(size_gt));
+    uint64_t sz{0};
+    try {
+      sz = uint64_t(std::stoull(size_gt));
+    } catch (...) {}
+    return sz;
   }
 
   uint64_t get_size_lt() const {
-    return  uint64_t(std::stoull(size_lt));
+    uint64_t sz{0};
+    try {
+      sz = uint64_t(std::stoull(size_lt));
+    } catch (...) {}
+    return sz;
   }
 
   bool has_flags() const {
@@ -480,7 +488,7 @@ struct lc_op
   bool dm_expiration{false};
   int expiration{0};
   int noncur_expiration{0};
-  int newer_noncurrent{0};
+  uint64_t newer_noncurrent{0};
   int mp_expiration{0};
   boost::optional<uint64_t> size_gt;
   boost::optional<uint64_t> size_lt;

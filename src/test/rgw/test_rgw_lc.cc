@@ -139,18 +139,18 @@ TEST(TestLCConfigurationDecoder, XMLDoc4)
 
 static const char *xmldoc_5 =
 R"(<Rule>
-        <ID>expire-size-rule</ID>
+        <ID>expire-gt</ID>
+        <Expiration>
+            <Days>365</Days>
+        </Expiration>
         <Filter>
            <And>
-              <Prefix></Prefix>
-              <ObjectSizeGreaterThan>1024</ObjectSizeGreaterThan>
-              <ObjectSizeLessThan>65536</ObjectSizeGreaterThan>
+           <Prefix></Prefix>
+           <ObjectSizeGreaterThan>1024</ObjectSizeGreaterThan>
+           <ObjectSizeLessThan>65536</ObjectSizeLessThan>
            </And>
         </Filter>
         <Status>Enabled</Status>
-       <Expiration>
-            <Days>365</Days>
-       </Expiration>
     </Rule>
 )";
 
@@ -158,10 +158,11 @@ TEST(TestLCConfigurationDecoder, XMLDoc5)
 {
   RGWXMLDecoder::XMLParser parser;
   ASSERT_TRUE(parser.init());
-  ASSERT_TRUE(parser.parse(xmldoc_5, strlen(xmldoc_5), 1));
+  auto result1 = parser.parse(xmldoc_5, strlen(xmldoc_5), 1);
+  ASSERT_TRUE(result1);
   LCRule_S3 rule;
-  auto result = RGWXMLDecoder::decode_xml("Rule", rule, &parser, true);
-  ASSERT_TRUE(result);
+  auto result2 = RGWXMLDecoder::decode_xml("Rule", rule, &parser, true);
+  ASSERT_TRUE(result2);
   /* check results */
   ASSERT_TRUE(rule.is_enabled());
   const auto& expiration = rule.get_expiration();
