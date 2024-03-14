@@ -18,6 +18,8 @@ scrape_configs:
     - targets:
 {% for mgr in mgr_scrape_list %}
       - '{{ mgr }}'
+      labels:
+        instance: 'ceph_cluster'
 {% endfor %}
 
 {% if nodes %}
