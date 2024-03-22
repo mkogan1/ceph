@@ -6647,10 +6647,17 @@ void RGWCompleteMultipart::execute(optional_yield y)
     ldpp_dout(this, 0) << "WARNING: failed to remove object " << meta_obj << dendl;
   }
 
+  r = s->object->get_obj_attrs(s->yield, this);
+  if (r < 0) {
+    ldpp_dout(this, 0) << __func__ << "() ERROR: get_obj_attrs() returned ret=" << r << dendl;
+  }
+
+  etag = s->object->get_attrs()[RGW_ATTR_ETAG].to_str();
+
   // send request to notification manager
-  int ret = res->publish_commit(this, ofs, upload->get_mtime(), etag, target_obj->get_instance());
-  if (ret < 0) {
-    ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
+  r = res->publish_commit(this, ofs, upload->get_mtime(), etag, target_obj->get_instance());
+  if (r < 0) {
+    ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << r << dendl;
     // too late to rollback operation, hence op_ret is not set here
   }
 } // RGWCompleteMultipart::execute
@@ -6703,8 +6710,6 @@ void RGWCompleteMultipart::complete()
       ldpp_dout(this, 0) << "WARNING: failed to unlock " << *serializer.get() << dendl;
     }
   }
-
-  etag = s->object->get_attrs()[RGW_ATTR_ETAG].to_str();
 
   send_response();
 }
