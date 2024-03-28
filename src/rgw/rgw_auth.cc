@@ -914,6 +914,9 @@ void rgw::auth::RoleApplier::modify_request_state(const DoutPrefixProvider *dpp,
   for (auto& it : token_attrs.token_claims) {
     s->token_claims.emplace_back(it);
   }
+  if (is_system_request) {
+    s->system_request = true;
+  }
 }
 
 struct AnonymousEngineFixit : public rgw::auth::Completer {
