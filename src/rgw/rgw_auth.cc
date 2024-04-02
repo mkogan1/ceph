@@ -921,7 +921,7 @@ void rgw::auth::RoleApplier::modify_request_state(const DoutPrefixProvider *dpp,
 
 struct AnonymousEngineFixit : public rgw::auth::Completer {
 //  AnonymousEngineFixit() { }
-  bool complete() override { return false; }
+  bool complete() override { return true; }
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s_rw) override {
     if (! s_rw->account_name.empty()) {
       s_rw->bucket_tenant = s_rw->account_name;
