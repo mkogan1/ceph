@@ -9,26 +9,23 @@ from call_home_agent.module import Report
 TEST_JWT_TOKEN = r"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJ0ZXN0IiwiaWF0IjoxNjkxNzUzNDM5LCJqdGkiOiIwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAwMTIzNDU2Nzg5MCJ9.0F66k81_PmKoSd9erQoxnq73760SXs8WQTd3s8pqEFY\\"
 EXPECTED_JTI = '01234567890123456789001234567890'
 
-JWT_REG_CREDS = {"url": "test.icr.io", "username": "test_username", "password": TEST_JWT_TOKEN}
-PLAIN_REG_CREDS = {"url": "test.icr.io", "username": "test_username", "password": "plain_password"}
+JWT_REG_CREDS_DICT = {"url": "test.icr.io", "username": "test_username", "password": TEST_JWT_TOKEN}
+JWT_REG_CREDS =json.dumps(JWT_REG_CREDS_DICT)
+PLAIN_PASSWORD_REG_CREDS_DICT = {"url": "test.icr.io", "username": "test_username", "password": "plain_password"}
+
 
 def fake_content(mgr):
     return {'inventory': {}}
 
-def mock_get_store(key: str, default_value: str=""):
-    if key == "mgr/cephadm/registry_credentials":
-            return JWT_REG_CREDS
-    else:
-        return None
-
 def get_test_manager():
     test_mgr = MagicMock()
     test_mgr.get = Mock(return_value={'fsid': '12345'})
-    test_mgr.get_store = MagicMock(side_effect=mock_get_store)
+    test_mgr.get_store = MagicMock(return_value=None)
 
     test_mgr.version = "1"
     test_mgr.target_space = "dev"
-    test_mgr.valid_container_registry = r"^.+\.icr\.io$"
+    test_mgr.valid_container_registry = r"^.+\.icr\.io"
+    test_mgr.send_command = Mock(return_value=JWT_REG_CREDS)
     return test_mgr
 
 class TestReport(unittest.TestCase):
@@ -52,9 +49,13 @@ class TestReport(unittest.TestCase):
                             15,
                             testMgr)
 
-    def test_content(self):
+    @patch('call_home_agent.dataDicts.ceph_command')
+    def test_content(self, mock_ceph_command):
+
         """ Verify if some strategic fields contains the right info
         """
+        mock_ceph_command.return_value = JWT_REG_CREDS
+
         report = json.loads(str(self.report))
 
         # header fields
@@ -81,36 +82,25 @@ class TestReport(unittest.TestCase):
         # event payload not empty
         self.assertEqual(event['body']['payload']['content'], fake_content(MagicMock()))
 
-    def test_jti_from_jwt(self):
+    @patch('call_home_agent.dataDicts.ceph_command')
+    def test_jti_from_jwt(self, mock_ceph_command):
         """ Extract jwt unique identifier from container registry
         JWT user password
         """
+        mock_ceph_command.return_value = JWT_REG_CREDS
         report = json.loads(str(self.report))
         event = report['events'][0]
         self.assertEqual(event['body']['payload']['jti'], EXPECTED_JTI)
 
-    def test_jti_from_jwt_not_available(self):
+    @patch('call_home_agent.dataDicts.ceph_command')
+    def test_jti_from_jwt_not_available(self, mock_ceph_command):
         """ Not able to extract jwt unique identifier from container registry
             JWT user password.
             Or the registry url is not the expected one
         """
-        def mock_get_store_bad_password(key: str, default_value: str=""):
-            if key == "mgr/cephadm/registry_credentials":
-                return {"url": "test.icr.io", "username": "test_username", "password": "plain_password"}
-
-            else:
-                return None
-
-        def mock_get_store_bad_url(key: str, default_value: str=""):
-            if key == "mgr/cephadm/registry_credentials":
-                return {"url": "test.icr.io.test", "username": "test_username", "password": TEST_JWT_TOKEN }
-
-            else:
-                return None
-
         # password is not a JWT token
         testMgr = get_test_manager()
-        testMgr.get_store = MagicMock(side_effect=mock_get_store_bad_password)
+        mock_ceph_command.return_value = json.dumps(PLAIN_PASSWORD_REG_CREDS_DICT)
         report = Report('inventory',
                         'Ceph cluster composition',
                         'AB54321',
@@ -120,12 +110,13 @@ class TestReport(unittest.TestCase):
                         "",
                         15,
                         testMgr)
-        report_dict = json.loads(str(report))
+        report_dict = json.loads(str(self.report))
         event = report_dict['events'][0]
         self.assertEqual(event['body']['payload']['jti'], "")
 
         # Url does not match the accepted registry url pattern
-        testMgr.get_store = MagicMock(side_effect=mock_get_store_bad_url)
+        JWT_REG_CREDS_DICT['url'] = "quay.io/user"
+        mock_ceph_command.return_value = json.dumps(JWT_REG_CREDS_DICT)
         report = Report('inventory',
                         'Ceph cluster composition',
                         'AB54321',
@@ -135,10 +126,29 @@ class TestReport(unittest.TestCase):
                         "",
                         15,
                         testMgr)
-        report_dict = json.loads(str(report))
+        report_dict = json.loads(str(self.report))
         event = report_dict['events'][0]
         self.assertEqual(event['body']['payload']['jti'], "")
 
+    @patch('call_home_agent.dataDicts.ceph_command')
+    def test_valid_registry_urls_for_jti(self, mock_ceph_command):
+        testMgr = get_test_manager()
+        test_credentials = JWT_REG_CREDS_DICT
+        for test_url in ["cp.icr.io", "cp.icr.io/cp", "cp.stg.icr.io", "cp.stg.icr.io/cp"]:
+            test_credentials["url"] = test_url
+            mock_ceph_command.return_value = json.dumps(test_credentials)
+            report = Report('inventory',
+                            'Ceph cluster composition',
+                            'AB54321',
+                            'ibm_tenant_id',
+                            fake_content,
+                            "http://chesurl.com",
+                            "",
+                            15,
+                            testMgr)
+            report_dict = json.loads(str(self.report))
+            event = report_dict['events'][0]
+            self.assertEqual(event['body']['payload']['jti'], EXPECTED_JTI)
 
     @patch('requests.post')
     def test_send(self, mock_post):
@@ -149,9 +159,11 @@ class TestReport(unittest.TestCase):
         self.assertGreaterEqual(int(self.report.last_upload), t)
 
     @patch('requests.post')
-    def test_communication_error(self, mock_post):
+    @patch('call_home_agent.dataDicts.ceph_command')
+    def test_communication_error(self, mock_ceph_cmd, mock_post):
         """Any kind of error executing the "POST" will be raised
         """
+        mock_ceph_cmd.return_value = {}
         mock_post.side_effect=Exception('COM Error')
         self.report.interval = 60
         self.report.last_upload = str(int(time.time()) - 90)
@@ -170,10 +182,12 @@ class TestReport(unittest.TestCase):
         mock_post.assert_not_called()
 
     @patch('requests.post')
-    def test_not_time_to_send_but_forced(self, mock_post):
+    @patch('call_home_agent.dataDicts.ceph_command')
+    def test_not_time_to_send_but_forced(self, mock_ceph_cmd, mock_post):
         """A report only can be sent when the time to send the report arrives,
            except if you force the operation
         """
+        mock_ceph_cmd.return_value = {}
         self.report.interval = 60
         self.report.last_upload = str(int(time.time()))
         self.report.send(force=True)

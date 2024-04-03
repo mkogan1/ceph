@@ -1,9 +1,11 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 import json
 import os
 import jwt
 import re
+import time
+from mgr_module import CommandResult
 
 from .config import get_settings
 
@@ -63,17 +65,27 @@ class ReportEvent:
 
         # Extract jti from JWT. This is another way to identify clusters in addition to the ICN.
         jwt_jti = ""
-        try:
-            user_jwt_password = r"{}".format(mgr_module.get_store("mgr/cephadm/registry_credentials")["password"])
-            registry_url = mgr_module.get_store("mgr/cephadm/registry_credentials")["url"]
-            if re.match(mgr_module.valid_container_registry, registry_url):
-                jwt_jti = jwt.decode(user_jwt_password, options={"verify_signature": False})["jti"]
-            else:
-                mgr_module.log.error("<jti> not extracted from JWT token because "
-                                     "url for registry credentials does not "
-                                     "match with the expected one")
-        except Exception as ex:
-            mgr_module.log.error("not able to extract <jti> from JWT token: {}".format(ex))
+        reg_credentials_str = ceph_command(mgr=mgr_module, srv_type='mon',
+                                           prefix='config-key get',
+                                           key='mgr/cephadm/registry_credentials')
+        if reg_credentials_str:
+            jti_token_fail = ""
+            try:
+                reg_credentials = json.loads(reg_credentials_str)
+                user_jwt_password = r"{}".format(reg_credentials['password'])
+                registry_url = reg_credentials['url']
+                if re.match(mgr_module.valid_container_registry, registry_url):
+                    jwt_jti = jwt.decode(user_jwt_password, options={
+                                        "verify_signature": False})["jti"]
+                    mgr_module.log.info("JWT jti field extracted succesfully")
+                else:
+                    jti_token_fail = f"url for registry credentials stored in <mgr/cephadm/registry_url> does not match with the expected ones <{mgr_module.valid_container_registry}>"
+            except Exception as ex:
+                jti_token_fail = str(ex)
+
+            if jti_token_fail:
+                mgr_module.log.warning(
+                    f"not able to extract <jti> from JWT token, a valid not empty jti token is required in <mgr/cephadm/registry_password> field password: {jti_token_fail}")
 
         event_data = {
                 "header": {
@@ -126,3 +138,28 @@ class ReportEvent:
 
         return event_data
 
+def ceph_command(mgr: Any, srv_type, prefix, srv_spec='', inbuf='', **kwargs):
+    # type: (Any, str, str, Optional[str], str, Any) -> Any
+    #
+    # Note: A simplified version of the function used in dashboard ceph services
+    """
+    :type prefix: str
+    :param srv_type: mon |
+    :param kwargs: will be added to argdict
+    :param srv_spec: typically empty. or something like "<fs_id>:0"
+    :param to_json: if true return as json format
+    """
+    argdict = {
+        "prefix": prefix,
+    }
+    argdict.update({k: v for k, v in kwargs.items() if v is not None})
+    result = CommandResult("")
+    mgr.send_command(result, srv_type, srv_spec, json.dumps(argdict), "", inbuf=inbuf)
+    r, outb, outs = result.wait()
+    if r != 0:
+        mgr.log.error(f"Execution of command '{prefix}' failed. (r={r}, outs=\"{outs}\", kwargs={kwargs})")
+    try:
+        return outb or outs
+    except Exception as ex:
+        mgr.log.error(f"Execution of command '{prefix}' failed: {ex}")
+        return outb

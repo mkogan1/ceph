@@ -5,7 +5,7 @@ Authors:
     Juan Miguel Olmo Martinez <jolmomar@ibm.com>
 """
 
-from typing import List, Any, Tuple, Dict, Optional, Set, Callable
+from typing import List, Any, Tuple, Dict, Optional, Callable
 import time
 import json
 import requests
@@ -313,7 +313,7 @@ class CallHomeAgent(MgrModule):
         Option(
             name='valid_container_registry',
             type='str',
-            default=r'^.+\.icr\.io$',
+            default=r'^.+\.icr\.io',
             desc='Container registry pattern for urls where cephadm credentials(JWT token) are valid'
         ),
 
