@@ -791,6 +791,7 @@ class TestMonitoring:
                         }
                     }),
                     use_current_daemon_image=False,
+<<<<<<< HEAD
                 )
 
     @pytest.mark.parametrize(
@@ -1050,6 +1051,8 @@ class TestMonitoring:
                         }
                     }),
                     use_current_daemon_image=False,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                 )
 
     @patch("cephadm.serve.CephadmServe._run_cephadm")
@@ -1714,6 +1717,7 @@ class TestMonitoring:
                         },
                     }),
                     use_current_daemon_image=False,
+<<<<<<< HEAD
                 )
 
     @patch("cephadm.serve.CephadmServe._run_cephadm")
@@ -1965,6 +1969,8 @@ class TestMonitoring:
                         },
                     }),
                     use_current_daemon_image=False,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                 )
 
     @patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
@@ -2138,7 +2144,11 @@ spec:
                             },
                             "config_blobs": {},
                         }),
+<<<<<<< HEAD
                         use_current_daemon_image=False,
+=======
+                        use_current_daemon_image=True,
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     )
 
 
@@ -3795,7 +3805,10 @@ class TestJaeger:
                         },
                         "config_blobs": config,
                     }),
+<<<<<<< HEAD
                     error_ok=True,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
 
@@ -3836,7 +3849,10 @@ class TestJaeger:
                         },
                         "config_blobs": es_config,
                     }),
+<<<<<<< HEAD
                     error_ok=True,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
                 with with_service(cephadm_module, collector_spec):
@@ -3865,7 +3881,10 @@ class TestJaeger:
                             },
                             "config_blobs": collector_config,
                         }),
+<<<<<<< HEAD
                         error_ok=True,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                         use_current_daemon_image=False,
                     )
 
@@ -3906,7 +3925,10 @@ class TestJaeger:
                         },
                         "config_blobs": collector_config,
                     }),
+<<<<<<< HEAD
                     error_ok=True,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
                 with with_service(cephadm_module, agent_spec):
@@ -3935,7 +3957,10 @@ class TestJaeger:
                             },
                             "config_blobs": agent_config,
                         }),
+<<<<<<< HEAD
                         error_ok=True,
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                         use_current_daemon_image=False,
                     )
 
@@ -4177,7 +4202,11 @@ class TestSMB:
                     ['_orch', 'deploy'],
                     [],
                     stdin=json.dumps(expected),
+<<<<<<< HEAD
                     use_current_daemon_image=False
+=======
+                    use_current_daemon_image=False,
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                 )
 
     @patch("cephadm.module.CephadmOrchestrator.get_unique_name")
@@ -4251,6 +4280,7 @@ class TestSMB:
                     ['_orch', 'deploy'],
                     [],
                     stdin=json.dumps(expected),
+<<<<<<< HEAD
                     use_current_daemon_image=False
                 )
 
@@ -4967,5 +4997,7 @@ class TestMgmtGateway:
                     ['_orch', 'deploy'],
                     [],
                     stdin=json.dumps(expected),
+=======
+>>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
