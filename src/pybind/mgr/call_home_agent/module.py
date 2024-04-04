@@ -35,6 +35,8 @@ from .dataDicts import OPERATION_STATUS_NEW, OPERATION_STATUS_IN_PROGRESS, \
 # Constants for operation status delivery
 from .dataDicts import ST_NOT_SENT, ST_SENT
 
+from .config import get_settings
+
 # Constant for store default ceph logs folder
 # Diagnostic files are collected in this folder
 DIAGS_FOLDER = '/var/log/ceph'
@@ -868,7 +870,22 @@ class CallHomeAgent(MgrModule):
         If a chunk_pattern is provided the file is divided in chunks
         """
 
-        auth = (self.ecurep_userid, self.ecurep_password)
+        # We first consider the module options to allow for flexible
+        # workarounds should we need them, otherwise we load the default keys
+        if self.ecurep_userid and self.ecurep_password:
+            ecurep_userid = self.ecurep_userid
+            ecurep_password = self.ecurep_password
+        else:
+            try:
+                id_data = get_settings()
+                # bail out early when the keys are missing
+                ecurep_userid = id_data['ecurep_transfer_id']
+                ecurep_password = id_data['ecurep_password']
+            except Exception as e:
+                self.log.error(f"Error loading ECuRep keys: {e}")
+                raise
+
+        auth = (ecurep_userid, ecurep_password)
         if self.owner_company_name == "":
             owner = "MyCompanyUploadClient"
         else:
