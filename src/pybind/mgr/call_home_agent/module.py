@@ -789,7 +789,7 @@ class CallHomeAgent(MgrModule):
         Option(
             name='upload_snap_cooling_window_seconds',
             type='int',
-            default=720,
+            default=86400,
             desc='Discard operations with the same Storage Insigths request id during the cooling window'
         ),
     ]
