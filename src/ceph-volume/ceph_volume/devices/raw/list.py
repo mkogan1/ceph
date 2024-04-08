@@ -42,7 +42,7 @@ def _get_bluestore_info(dev):
         if oj[dev]['description'] == 'main':
             whoami = oj[dev]['whoami']
             r.update({
-                'type': oj[dev]['type'],
+                'type': oj[dev].get('type', 'bluestore'),
                 'osd_id': int(whoami),
                 'ceph_fsid': oj[dev]['ceph_fsid'],
                 'device': dev,
