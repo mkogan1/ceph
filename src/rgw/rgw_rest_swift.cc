@@ -448,7 +448,6 @@ int RGWListBucket_ObjStore_SWIFT::get_params(optional_yield y)
 }
 
 static void dump_container_metadata(req_state *,
-                                    const rgw::sal::Bucket*,
                                     const std::optional<RGWStorageStats>& stats,
                                     const RGWQuotaInfo&,
                                     const RGWBucketWebsiteConf&);
@@ -459,7 +458,7 @@ void RGWListBucket_ObjStore_SWIFT::send_response()
   map<string, bool>::iterator pref_iter = common_prefixes.begin();
 
   dump_start(s);
-  dump_container_metadata(s, s->bucket.get(), stats, quota.bucket_quota,
+  dump_container_metadata(s, stats, quota.bucket_quota,
                           s->bucket->get_info().website_conf);
 
   s->formatter->open_array_section_with_attrs("container",
@@ -559,7 +558,6 @@ next:
 } // RGWListBucket_ObjStore_SWIFT::send_response
 
 static void dump_container_metadata(req_state *s,
-                                    const rgw::sal::Bucket* bucket,
                                     const std::optional<RGWStorageStats>& stats,
                                     const RGWQuotaInfo& quota,
                                     const RGWBucketWebsiteConf& ws_conf)
@@ -684,7 +682,7 @@ void RGWStatBucket_ObjStore_SWIFT::send_response()
 {
   if (op_ret >= 0) {
     op_ret = STATUS_NO_CONTENT;
-    dump_container_metadata(s, bucket.get(), stats, quota.bucket_quota,
+    dump_container_metadata(s, stats, quota.bucket_quota,
                             s->bucket->get_info().website_conf);
   }
 
@@ -2641,7 +2639,7 @@ RGWOp* RGWSwiftWebsiteHandler::get_ws_listing_op()
       /* Generate the header now. */
       set_req_state_err(s, op_ret);
       dump_errno(s);
-      dump_container_metadata(s, s->bucket.get(), stats, quota.bucket_quota,
+      dump_container_metadata(s, stats, quota.bucket_quota,
                               s->bucket->get_info().website_conf);
       end_header(s, this, "text/html");
       if (op_ret < 0) {
