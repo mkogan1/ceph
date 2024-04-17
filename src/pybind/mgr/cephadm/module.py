@@ -713,6 +713,10 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         self.offline_watcher.start()
 
         self.last_stray_daemon_check: Optional[datetime.datetime] = None
+        # Maps daemon names to timestamps (creation/removal time) for recently created or
+        # removed daemons. Daemons are added to the dict upon creation or removal and cleared
+        # as part of the handling of stray daemons
+        self.recently_altered_daemons: Dict[str, datetime.datetime] = {}
 
     def shutdown(self) -> None:
         self.log.debug('shutdown')
