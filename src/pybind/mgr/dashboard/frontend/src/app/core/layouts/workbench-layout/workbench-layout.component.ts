@@ -3,6 +3,8 @@ import { Router } from '@angular/router';
 
 import { Subscription } from 'rxjs';
 import { MultiClusterService } from '~/app/shared/api/multi-cluster.service';
+import { Permissions } from '~/app/shared/models/permissions';
+import { AuthStorageService } from '~/app/shared/services/auth-storage.service';
 
 import { FaviconService } from '~/app/shared/services/favicon.service';
 import { SummaryService } from '~/app/shared/services/summary.service';
@@ -10,8 +12,6 @@ import { TaskManagerService } from '~/app/shared/services/task-manager.service';
 import { TelemetryNotificationService } from '../../../shared/services/telemetry-notification.service';
 import { MotdNotificationService } from '~/app/shared/services/motd-notification.service';
 import _ from 'lodash';
-import { AuthStorageService } from '~/app/shared/services/auth-storage.service';
-import { Permissions } from '~/app/shared/models/permissions';
 import { environment } from '../../../../environments/environment.ibm';
 import { CallHomeNotificationService } from '~/app/shared/services/call-home-notification.service';
 import { StorageInsightsNotificationService } from '~/app/shared/services/storage-insights-notification.service';
@@ -47,8 +47,10 @@ export class WorkbenchLayoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
-    this.subs.add(this.multiClusterService.startPolling());
-    this.subs.add(this.multiClusterService.startClusterTokenStatusPolling());
+    if (this.permissions.configOpt.read) {
+      this.subs.add(this.multiClusterService.startPolling());
+      this.subs.add(this.multiClusterService.startClusterTokenStatusPolling());
+    }
     this.subs.add(this.summaryService.startPolling());
     this.subs.add(this.taskManagerService.init(this.summaryService));
 
