@@ -359,6 +359,11 @@ class TestMisc(CephFSTestCase):
         td3.join()
         self.mount_a.run_shell(["rm", "-rf", dir_path])
 
+    def test_ceph_tell_for_unknown_cephname_type(self):
+        with self.assertRaises(CommandFailedError) as ce:
+            self.run_ceph_cmd('tell', 'cephfs.c', 'something')
+        self.assertEqual(ce.exception.exitstatus, 1)
+
 
 @classhook('_add_session_client_evictions')
 class TestSessionClientEvict(CephFSTestCase):
@@ -436,7 +441,7 @@ class TestSessionClientEvict(CephFSTestCase):
             setattr(cls, 'test_session' + t, create_test(t, ['session']))
             setattr(cls, 'test_client' + t, create_test(t, ['client']))
 
-        
+
 class TestCacheDrop(CephFSTestCase):
     CLIENTS_REQUIRED = 1
 
