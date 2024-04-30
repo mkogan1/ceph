@@ -1,4 +1,5 @@
 local g = import 'grafonnet/grafana.libsonnet';
+local pieChartPanel = import 'piechart_panel.libsonnet';
 
 {
   dashboardSchema(title,
@@ -123,21 +124,6 @@ local g = import 'grafonnet/grafana.libsonnet';
                      sparklineShow=sparklineShow,
                      thresholds=thresholds),
 
-  addPieChartSchema(aliasColors,
-                    datasource,
-                    description,
-                    legendType,
-                    pieType,
-                    title,
-                    valueName)::
-    g.pieChartPanel.new(aliasColors=aliasColors,
-                        datasource=datasource,
-                        description=description,
-                        legendType=legendType,
-                        pieType=pieType,
-                        title=title,
-                        valueName=valueName),
-
   addTableSchema(datasource, description, sort, styles, title, transform)::
     g.tablePanel.new(datasource=datasource,
                      description=description,
@@ -170,4 +156,37 @@ local g = import 'grafonnet/grafana.libsonnet';
       unit: unit,
       valueMaps: valueMaps,
     },
+
+  pieChartPanel(
+    title,
+    description='',
+    datasource=null,
+    gridPos={},
+    displayMode='table',
+    placement='bottom',
+    showLegend=true,
+    displayLabels=[],
+    tooltip={},
+    pieType='pie',
+    values=[],
+    colorMode='auto',
+    overrides=[],
+    reduceOptions={}
+  )::
+    pieChartPanel.new(
+      title,
+      description=description,
+      datasource=datasource,
+      gridPos=gridPos,
+      displayMode=displayMode,
+      placement=placement,
+      showLegend=showLegend,
+      displayLabels=displayLabels,
+      tooltip=tooltip,
+      pieType=pieType,
+      values=values,
+      colorMode=colorMode,
+      overrides=overrides,
+      reduceOptions=reduceOptions
+    ),
 }

@@ -37,14 +37,6 @@ local u = import 'utils.libsonnet';
         .addTargets(
           [u.addTargetSchema(expr, legendFormat1)]
         ) + { gridPos: { x: x, y: y, w: w, h: h } };
-      local OsdOverviewPieChartPanel(alias, description, title) =
-        u.addPieChartSchema(alias,
-                            '$datasource',
-                            description,
-                            'Under graph',
-                            'pie',
-                            title,
-                            'current');
       local OsdOverviewSingleStatPanel(colors,
                                        format,
                                        title,
@@ -210,15 +202,11 @@ local u = import 'utils.libsonnet';
             true
           )
         ) + { gridPos: { x: 20, y: 0, w: 4, h: 8 } },
-        OsdOverviewPieChartPanel(
-          {}, '', 'OSD Types Summary'
-        )
+        u.pieChartPanel('OSD Types Summary', '', '$datasource', { x: 0, y: 8, w: 4, h: 8 }, 'table', 'bottom', true, ['percent'], { mode: 'single', sort: 'none' }, 'pie', ['percent', 'value'], 'palette-classic')
         .addTarget(
           u.addTargetSchema('count by (device_class) (ceph_osd_metadata)', '{{device_class}}')
-        ) + { gridPos: { x: 0, y: 8, w: 4, h: 8 } },
-        OsdOverviewPieChartPanel(
-          { 'Non-Encrypted': '#E5AC0E' }, '', 'OSD Objectstore Types'
-        )
+        ),
+        u.pieChartPanel('OSD Objectstore Types', '', '$datasource', { x: 4, y: 8, w: 4, h: 8 }, 'table', 'bottom', true, ['percent'], { mode: 'single', sort: 'none' }, 'pie', ['percent', 'value'], 'palette-classic')
         .addTarget(
           u.addTargetSchema(
             'count(ceph_bluefs_wal_total_bytes)', 'bluestore', 'time_series', 2
@@ -228,10 +216,8 @@ local u = import 'utils.libsonnet';
           u.addTargetSchema(
             'absent(ceph_bluefs_wal_total_bytes)*count(ceph_osd_metadata)', 'filestore', 'time_series', 2
           )
-        ) + { gridPos: { x: 4, y: 8, w: 4, h: 8 } },
-        OsdOverviewPieChartPanel(
-          {}, 'The pie chart shows the various OSD sizes used within the cluster', 'OSD Size Summary'
-        )
+        ),
+        u.pieChartPanel('OSD Size Summary', 'The pie chart shows the various OSD sizes used within the cluster', '$datasource', { x: 8, y: 8, w: 4, h: 8 }, 'table', 'bottom', true, ['percent'], { mode: 'single', sort: 'none' }, 'pie', ['percent', 'value'], 'palette-classic')
         .addTarget(u.addTargetSchema(
           'count(ceph_osd_stat_bytes < 1099511627776)', '<1TB', 'time_series', 2
         ))
@@ -258,7 +244,7 @@ local u = import 'utils.libsonnet';
         ))
         .addTarget(u.addTargetSchema(
           'count(ceph_osd_stat_bytes >= 13194139533312)', '<12TB+', 'time_series', 2
-        )) + { gridPos: { x: 8, y: 8, w: 4, h: 8 } },
+        )),
         g.graphPanel.new(bars=true,
                          datasource='$datasource',
                          title='Distribution of PGs per OSD',

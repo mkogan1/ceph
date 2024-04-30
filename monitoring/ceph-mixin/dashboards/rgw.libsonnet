@@ -595,15 +595,51 @@ local u = import 'utils.libsonnet';
             ),
           ]
         ),
-        u.addPieChartSchema(
-          {
-            GETs: '#7eb26d',
-            'Other (HEAD,POST,DELETE)': '#447ebc',
-            PUTs: '#eab839',
-            Requests: '#3f2b5b',
-            Failures: '#bf1b00',
-          }, '$datasource', '', 'Under graph', 'pie', 'Workload Breakdown', 'current'
-        )
+        u.pieChartPanel('Workload Breakdown',
+                        '',
+                        '$datasource',
+                        { x: 20, y: 1, w: 4, h: 8 },
+                        'table',
+                        'bottom',
+                        true,
+                        [],
+                        { mode: 'single', sort: 'none' },
+                        'pie',
+                        ['percent', 'value'],
+                        'palette-classic',
+                        overrides=[
+                          {
+                            matcher: { id: 'byName', options: 'Failures' },
+                            properties: [
+                              { id: 'color', value: { mode: 'fixed', fixedColor: '#bf1b00' } },
+                            ],
+                          },
+                          {
+                            matcher: { id: 'byName', options: 'GETs' },
+                            properties: [
+                              { id: 'color', value: { mode: 'fixed', fixedColor: '#7eb26d' } },
+                            ],
+                          },
+                          {
+                            matcher: { id: 'byName', options: 'Other (HEAD,POST,DELETE)' },
+                            properties: [
+                              { id: 'color', value: { mode: 'fixed', fixedColor: '#447ebc' } },
+                            ],
+                          },
+                          {
+                            matcher: { id: 'byName', options: 'PUTs' },
+                            properties: [
+                              { id: 'color', value: { mode: 'fixed', fixedColor: '#eab839' } },
+                            ],
+                          },
+                          {
+                            matcher: { id: 'byName', options: 'Requests' },
+                            properties: [
+                              { id: 'color', value: { mode: 'fixed', fixedColor: '#3f2b5b' } },
+                            ],
+                          },
+                        ],
+                        reduceOptions={ values: false, calcs: ['lastNotNull'], fields: '' })
         .addTarget(u.addTargetSchema(
           'rate(ceph_rgw_failed_req[30s]) * on (instance_id) group_left (ceph_daemon) ceph_rgw_metadata{ceph_daemon=~"$rgw_servers"}',
           'Failures {{ceph_daemon}}'
@@ -619,7 +655,7 @@ local u = import 'utils.libsonnet';
         .addTarget(u.addTargetSchema(
           '(\n    rate(ceph_rgw_req[30s]) -\n    (rate(ceph_rgw_get[30s]) + rate(ceph_rgw_put[30s]))\n) * on (instance_id) group_left (ceph_daemon) ceph_rgw_metadata{ceph_daemon=~"$rgw_servers"}',
           'Other (DELETE,LIST) {{ceph_daemon}}'
-        )) + { gridPos: { x: 20, y: 1, w: 4, h: 8 } },
+        ))
       ]),
   },
 }
