@@ -1029,10 +1029,12 @@ void AsioFrontend::accept(Listener& l, boost::system::error_code ec)
         handle_connection(context, env, stream, timeout, header_limit,
                           conn->buffer, true, pause_mutex, scheduler.get(),
                           ec, yield);
-        if (!ec) {
+
+        if (!ec || ec == http::error::end_of_stream) {
           // ssl shutdown (ignoring errors)
           stream.async_shutdown(yield[ec]);
         }
+
         conn->socket.shutdown(tcp::socket::shutdown_both, ec);
       }, make_stack_allocator());
   } else {
