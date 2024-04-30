@@ -217,35 +217,263 @@ local u = import 'utils.libsonnet';
           3,
           3
         ),
-        u.addTableSchema(
-          '$datasource',
-          '',
-          { col: 5, desc: true },
-          [
-            PoolOverviewStyle('', 'Time', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('', 'instance', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('', 'job', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('Pool Name', 'name', 'string', 'short', null, [], []),
-            PoolOverviewStyle('Pool ID', 'pool_id', 'hidden', 'none', null, [], []),
-            PoolOverviewStyle('Compression Factor', 'Value #A', 'number', 'none', null, [], []),
-            PoolOverviewStyle('% Used', 'Value #D', 'number', 'percentunit', 'value', ['70', '85'], []),
-            PoolOverviewStyle('Usable Free', 'Value #B', 'number', 'bytes', null, [], []),
-            PoolOverviewStyle('Compression Eligibility', 'Value #C', 'number', 'percent', null, [], []),
-            PoolOverviewStyle('Compression Savings', 'Value #E', 'number', 'bytes', null, [], []),
-            PoolOverviewStyle('Growth (5d)', 'Value #F', 'number', 'bytes', 'value', ['0', '0'], []),
-            PoolOverviewStyle('IOPS', 'Value #G', 'number', 'none', null, [], []),
-            PoolOverviewStyle('Bandwidth', 'Value #H', 'number', 'Bps', null, [], []),
-            PoolOverviewStyle('', '__name__', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('', 'type', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('', 'compression_mode', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('Type', 'description', 'string', 'short', null, [], []),
-            PoolOverviewStyle('Stored', 'Value #J', 'number', 'bytes', null, [], []),
-            PoolOverviewStyle('', 'Value #I', 'hidden', 'short', null, [], []),
-            PoolOverviewStyle('Compression', 'Value #K', 'string', 'short', null, [], [{ text: 'ON', value: '1' }]),
+        u.addTableExtended(
+          datasource='${datasource}',
+          title='Pool Overview',
+          gridPosition={ h: 6, w: 24, x: 0, y: 3 },
+          options={
+            footer: {
+              fields: '',
+              reducer: ['sum'],
+              countRows: false,
+              enablePagination: false,
+              show: false,
+            },
+            frameIndex: 1,
+            showHeader: true,
+          },
+          custom={ align: 'auto', cellOptions: { type: 'auto' }, filterable: true, inspect: false },
+          thresholds={
+            mode: 'absolute',
+            steps: [
+              { color: 'green', value: null },
+              { color: 'red', value: 80 },
+            ],
+          },
+          overrides=[
+            {
+              matcher: { id: 'byName', options: 'Time' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'instance' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'job' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'name' },
+              properties: [
+                { id: 'displayName', value: 'Pool Name' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'pool_id' },
+              properties: [
+                { id: 'displayName', value: 'Pool ID' },
+                { id: 'unit', value: 'none' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #A' },
+              properties: [
+                { id: 'displayName', value: 'Compression Factor' },
+                { id: 'unit', value: 'none' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #D' },
+              properties: [
+                { id: 'displayName', value: '% Used' },
+                { id: 'unit', value: 'percentunit' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.cellOptions', value: { type: 'color-text' } },
+                {
+                  id: 'thresholds',
+                  value: {
+                    mode: 'absolute',
+                    steps: [
+                      {
+                        color: 'rgba(245, 54, 54, 0.9)',
+                        value: null,
+                      },
+                      {
+                        color: 'rgba(237, 129, 40, 0.89)',
+                        value: 70,
+                      },
+                      {
+                        color: 'rgba(50, 172, 45, 0.97)',
+                        value: 85,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #B' },
+              properties: [
+                { id: 'displayName', value: 'Usable Free' },
+                { id: 'unit', value: 'bytes' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #C' },
+              properties: [
+                { id: 'displayName', value: 'Compression Eligibility' },
+                { id: 'unit', value: 'percent' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #E' },
+              properties: [
+                { id: 'displayName', value: 'Compression Savings' },
+                { id: 'unit', value: 'bytes' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #F' },
+              properties: [
+                { id: 'displayName', value: 'Growth (5d)' },
+                { id: 'unit', value: 'bytes' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.cellOptions', value: { type: 'color-text' } },
+                {
+                  id: 'thresholds',
+                  value: {
+                    mode: 'absolute',
+                    steps: [
+                      {
+                        color: 'rgba(245, 54, 54, 0.9)',
+                        value: null,
+                      },
+                      {
+                        color: 'rgba(237, 129, 40, 0.89)',
+                        value: 70,
+                      },
+                      {
+                        color: 'rgba(50, 172, 45, 0.97)',
+                        value: 85,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #G' },
+              properties: [
+                { id: 'displayName', value: 'IOPS' },
+                { id: 'unit', value: 'none' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #H' },
+              properties: [
+                { id: 'displayName', value: 'Bandwidth' },
+                { id: 'unit', value: 'Bps' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: '__name__' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'type' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'compression_mode' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'description' },
+              properties: [
+                { id: 'displayName', value: 'Type' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #J' },
+              properties: [
+                { id: 'displayName', value: 'Stored' },
+                { id: 'unit', value: 'bytes' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #I' },
+              properties: [
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value #K' },
+              properties: [
+                { id: 'displayName', value: 'Compression' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+              ],
+            },
           ],
-          'Pool Overview',
-          'table'
+          pluginVersion='10.4.0'
         )
+        .addTransformations([
+          {
+            id: 'merge',
+            options: {},
+          },
+          {
+            id: 'seriesToRows',
+            options: {},
+          },
+          {
+            id: 'organize',
+            options: {
+              excludeByName: {
+                Time: true,
+                'Value #A': true,
+                instance: true,
+                job: true,
+                pool_id: true,
+                'Value #B': false,
+                'Value #C': true,
+                __name__: true,
+                compression_mode: true,
+                type: true,
+                'Value #I': true,
+                'Value #K': true,
+                'Value #D': false,
+                'Value #E': true,
+                cluster: true,
+              },
+              indexByName: {},
+              renameByName: {},
+              includeByName: {},
+            },
+          },
+        ])
         .addTargets(
           [
             u.addTargetSchema(
@@ -315,7 +543,7 @@ local u = import 'utils.libsonnet';
             ),
             u.addTargetSchema('', 'L', '', '', null),
           ]
-        ) + { gridPos: { x: 0, y: 3, w: 24, h: 6 } },
+        ),
         PoolOverviewGraphPanel(
           'Top $topk Client IOPS by Pool',
           'This chart shows the sum of read and write IOPS from all clients by pool',

@@ -235,19 +235,67 @@ local u = import 'utils.libsonnet';
           8,
           7
         ),
-        u.addTableSchema(
-          '$datasource',
-          '',
-          { col: 3, desc: true },
-          [
-            RgwOverviewStyle('Pool', 'pool', 'string', 'short'),
-            RgwOverviewStyle('Image', 'image', 'string', 'short'),
-            RgwOverviewStyle('IOPS', 'Value', 'number', 'iops'),
-            RgwOverviewStyle('', '/.*/', 'hidden', 'short'),
+        u.addTableExtended(
+          datasource='${datasource}',
+          title='Highest IOPS',
+          description='RBD per-image IO statistics are disabled by default.\n\nPlease refer to https://docs.ceph.com/en/latest/mgr/prometheus/#rbd-io-statistics for information about how to enable those optionally.',
+          gridPosition={ h: 7, w: 8, x: 0, y: 7 },
+          options={
+            footer: {
+              fields: '',
+              reducer: ['sum'],
+              countRows: false,
+              enablePagination: false,
+              show: false,
+            },
+            frameIndex: 1,
+            showHeader: true,
+          },
+          custom={ align: 'null', cellOptions: { type: 'auto' }, filterable: true, inspect: false },
+          thresholds={
+            mode: 'absolute',
+            steps: [
+              { color: 'green', value: null },
+              { color: 'red', value: 80 },
+            ],
+          },
+          overrides=[
+            {
+              matcher: { id: 'byName', options: 'pool' },
+              properties: [
+                { id: 'displayName', value: 'Pool' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'image' },
+              properties: [
+                { id: 'displayName', value: 'Image' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value' },
+              properties: [
+                { id: 'displayName', value: 'IOPS' },
+                { id: 'unit', value: 'iops' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
           ],
-          'Highest IOPS',
-          'table'
+          pluginVersion='10.4.0'
         )
+        .addTransformations([
+          {
+            id: 'merge',
+            options: { reducers: [] },
+          },
+        ])
         .addTarget(
           u.addTargetSchema(
             'topk(10, (sort((irate(ceph_rbd_write_ops[30s]) + on (image, pool, namespace) irate(ceph_rbd_read_ops[30s])))))',
@@ -256,20 +304,68 @@ local u = import 'utils.libsonnet';
             1,
             true
           )
-        ) + { gridPos: { x: 0, y: 7, w: 8, h: 7 } },
-        u.addTableSchema(
-          '$datasource',
-          '',
-          { col: 3, desc: true },
-          [
-            RgwOverviewStyle('Pool', 'pool', 'string', 'short'),
-            RgwOverviewStyle('Image', 'image', 'string', 'short'),
-            RgwOverviewStyle('Throughput', 'Value', 'number', 'Bps'),
-            RgwOverviewStyle('', '/.*/', 'hidden', 'short'),
+        ),
+        u.addTableExtended(
+          datasource='${datasource}',
+          title='Highest Throughput',
+          description='RBD per-image IO statistics are disabled by default.\n\nPlease refer to https://docs.ceph.com/en/latest/mgr/prometheus/#rbd-io-statistics for information about how to enable those optionally.',
+          gridPosition={ h: 7, w: 8, x: 8, y: 7 },
+          options={
+            footer: {
+              fields: '',
+              reducer: ['sum'],
+              countRows: false,
+              enablePagination: false,
+              show: false,
+            },
+            frameIndex: 1,
+            showHeader: true,
+          },
+          custom={ align: 'null', cellOptions: { type: 'auto' }, filterable: true, inspect: false },
+          thresholds={
+            mode: 'absolute',
+            steps: [
+              { color: 'green', value: null },
+              { color: 'red', value: 80 },
+            ],
+          },
+          overrides=[
+            {
+              matcher: { id: 'byName', options: 'pool' },
+              properties: [
+                { id: 'displayName', value: 'Pool' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'image' },
+              properties: [
+                { id: 'displayName', value: 'Image' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value' },
+              properties: [
+                { id: 'displayName', value: 'Throughput' },
+                { id: 'unit', value: 'Bps' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
           ],
-          'Highest Throughput',
-          'table'
+          pluginVersion='10.4.0'
         )
+        .addTransformations([
+          {
+            id: 'merge',
+            options: { reducers: [] },
+          },
+        ])
         .addTarget(
           u.addTargetSchema(
             'topk(10, sort(sum(irate(ceph_rbd_read_bytes[30s]) + irate(ceph_rbd_write_bytes[30s])) by (pool, image, namespace)))',
@@ -278,20 +374,68 @@ local u = import 'utils.libsonnet';
             1,
             true
           )
-        ) + { gridPos: { x: 8, y: 7, w: 8, h: 7 } },
-        u.addTableSchema(
-          '$datasource',
-          '',
-          { col: 3, desc: true },
-          [
-            RgwOverviewStyle('Pool', 'pool', 'string', 'short'),
-            RgwOverviewStyle('Image', 'image', 'string', 'short'),
-            RgwOverviewStyle('Latency', 'Value', 'number', 'ns'),
-            RgwOverviewStyle('', '/.*/', 'hidden', 'short'),
+        ),
+        u.addTableExtended(
+          datasource='${datasource}',
+          title='Highest Latency',
+          description='RBD per-image IO statistics are disabled by default.\n\nPlease refer to https://docs.ceph.com/en/latest/mgr/prometheus/#rbd-io-statistics for information about how to enable those optionally.',
+          gridPosition={ h: 7, w: 8, x: 16, y: 7 },
+          options={
+            footer: {
+              fields: '',
+              reducer: ['sum'],
+              countRows: false,
+              enablePagination: false,
+              show: false,
+            },
+            frameIndex: 1,
+            showHeader: true,
+          },
+          custom={ align: 'null', cellOptions: { type: 'auto' }, filterable: true, inspect: false },
+          thresholds={
+            mode: 'absolute',
+            steps: [
+              { color: 'green', value: null },
+              { color: 'red', value: 80 },
+            ],
+          },
+          overrides=[
+            {
+              matcher: { id: 'byName', options: 'pool' },
+              properties: [
+                { id: 'displayName', value: 'Pool' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'image' },
+              properties: [
+                { id: 'displayName', value: 'Image' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value' },
+              properties: [
+                { id: 'displayName', value: 'Latency' },
+                { id: 'unit', value: 'ns' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
           ],
-          'Highest Latency',
-          'table'
+          pluginVersion='10.4.0'
         )
+        .addTransformations([
+          {
+            id: 'merge',
+            options: { reducers: [] },
+          },
+        ])
         .addTarget(
           u.addTargetSchema(
             'topk(10,\n  sum(\n    irate(ceph_rbd_write_latency_sum[30s]) / clamp_min(irate(ceph_rbd_write_latency_count[30s]), 1) +\n    irate(ceph_rbd_read_latency_sum[30s]) / clamp_min(irate(ceph_rbd_read_latency_count[30s]), 1)\n  ) by (pool, image, namespace)\n)',
@@ -300,7 +444,7 @@ local u = import 'utils.libsonnet';
             1,
             true
           )
-        ) + { gridPos: { x: 16, y: 7, w: 8, h: 7 } },
+        )
       ]),
   },
 }

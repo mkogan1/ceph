@@ -135,23 +135,74 @@ local u = import 'utils.libsonnet';
             ),
           ],
         ),
-        u.addTableSchema(
-          '$datasource',
-          "This table shows the osd's that are delivering the 10 highest read latencies within the cluster",
-          { col: 2, desc: true },
-          [
-            OsdOverviewStyle('OSD ID', 'ceph_daemon', 'string', 'short'),
-            OsdOverviewStyle('Latency (ms)', 'Value', 'number', 'none'),
-            OsdOverviewStyle('', '/.*/', 'hidden', 'short'),
+        u.addTableExtended(
+          datasource='${datasource}',
+          title='Highest READ Latencies',
+          gridPosition={ h: 8, w: 4, x: 8, y: 0 },
+          options={
+            footer: {
+              fields: '',
+              reducer: ['sum'],
+              countRows: false,
+              enablePagination: false,
+              show: false,
+            },
+            frameIndex: 1,
+            showHeader: true,
+          },
+          custom={ align: 'null', cellOptions: { type: 'auto' }, filterable: true, inspect: false },
+          thresholds={
+            mode: 'absolute',
+            steps: [
+              { color: 'green', value: null },
+              { color: 'red', value: 80 },
+            ],
+          },
+          overrides=[
+            {
+              matcher: { id: 'byName', options: 'ceph_daemon' },
+              properties: [
+                { id: 'displayName', value: 'OSD ID' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value' },
+              properties: [
+                { id: 'displayName', value: 'Latency (ms)' },
+                { id: 'unit', value: 'none' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
           ],
-          'Highest READ Latencies',
-          'table'
+            pluginVersion='10.4.0'
         )
+        .addTransformations([
+          {
+            id: 'merge',
+            options: { reducers: [] },
+          },
+          {
+            id: 'organize',
+            options: {
+              excludeByName: {
+                Time: true,
+                cluster: true,
+              },
+              indexByName: {},
+              renameByName: {},
+              includeByName: {},
+            },
+          },
+        ])
         .addTarget(
           u.addTargetSchema(
             'topk(10,\n  (sort(\n    (irate(ceph_osd_op_r_latency_sum[1m]) / on (ceph_daemon) irate(ceph_osd_op_r_latency_count[1m]) * 1000)\n  ))\n)\n\n', '', 'table', 1, true
           )
-        ) + { gridPos: { x: 8, y: 0, w: 4, h: 8 } },
+        ),
         OsdOverviewGraphPanel(
           {
             '@95%ile write': '#e0752d',
@@ -179,20 +230,79 @@ local u = import 'utils.libsonnet';
             ),
           ],
         ),
-        u.addTableSchema(
-          '$datasource',
-          "This table shows the osd's that are delivering the 10 highest write latencies within the cluster",
-          { col: 2, desc: true },
-          [
-            OsdOverviewStyle(
-              'OSD ID', 'ceph_daemon', 'string', 'short'
-            ),
-            OsdOverviewStyle('Latency (ms)', 'Value', 'number', 'none'),
-            OsdOverviewStyle('', '/.*/', 'hidden', 'short'),
+        u.addTableExtended(
+          datasource='${datasource}',
+          title='Highest WRITE Latencies',
+          description="This table shows the osd's that are delivering the 10 highest write latencies within the cluster",
+          gridPosition={ h: 8, w: 4, x: 20, y: 0 },
+          options={
+            footer: {
+              fields: '',
+              reducer: ['sum'],
+              countRows: false,
+              enablePagination: false,
+              show: false,
+            },
+            frameIndex: 1,
+            showHeader: true,
+          },
+          custom={ align: 'null', cellOptions: { type: 'auto' }, filterable: true, inspect: false },
+          thresholds={
+            mode: 'absolute',
+            steps: [
+              { color: 'green', value: null },
+              { color: 'red', value: 80 },
+            ],
+          },
+          overrides=[
+            {
+              matcher: { id: 'byName', options: 'ceph_daemon' },
+              properties: [
+                { id: 'displayName', value: 'OSD ID' },
+                { id: 'unit', value: 'short' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value' },
+              properties: [
+                { id: 'displayName', value: 'Latency (ms)' },
+                { id: 'unit', value: 'none' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
+            {
+              matcher: { id: 'byName', options: 'Value' },
+              properties: [
+                { id: 'mappings', value: [{ type: 'value', options: { NaN: { text: '0.00', index: 0 } } }] },
+                { id: 'unit', value: 'none' },
+                { id: 'decimals', value: 2 },
+                { id: 'custom.align', value: null },
+              ],
+            },
           ],
-          'Highest WRITE Latencies',
-          'table'
+          pluginVersion='10.4.0'
         )
+        .addTransformations([
+          {
+            id: 'merge',
+            options: { reducers: [] },
+          },
+          {
+            id: 'organize',
+            options: {
+              excludeByName: {
+                Time: true,
+                cluster: true,
+              },
+              indexByName: {},
+              renameByName: {},
+              includeByName: {},
+            },
+          },
+        ])
         .addTarget(
           u.addTargetSchema(
             'topk(10,\n  (sort(\n    (irate(ceph_osd_op_w_latency_sum[1m]) / on (ceph_daemon) irate(ceph_osd_op_w_latency_count[1m]) * 1000)\n  ))\n)\n\n',
@@ -201,7 +311,7 @@ local u = import 'utils.libsonnet';
             1,
             true
           )
-        ) + { gridPos: { x: 20, y: 0, w: 4, h: 8 } },
+        ),
         u.pieChartPanel('OSD Types Summary', '', '$datasource', { x: 0, y: 8, w: 4, h: 8 }, 'table', 'bottom', true, ['percent'], { mode: 'single', sort: 'none' }, 'pie', ['percent', 'value'], 'palette-classic')
         .addTarget(
           u.addTargetSchema('count by (device_class) (ceph_osd_metadata)', '{{device_class}}')
