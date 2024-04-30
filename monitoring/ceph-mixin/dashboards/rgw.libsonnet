@@ -20,7 +20,7 @@ local u = import 'utils.libsonnet';
         .addTargets(
           [u.addTargetSchema('sum by (source_zone) (rate(%s[30s]))' % rgwMetric,
                              '{{source_zone}}')]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: formatY1, custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'RGW Sync Overview',
@@ -143,7 +143,7 @@ local u = import 'utils.libsonnet';
         )
         .addTargets(
           [u.addTargetSchema(expr1, legendFormat1)]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: formatY1, custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'RGW Overview',
@@ -475,7 +475,7 @@ local u = import 'utils.libsonnet';
                            '$datasource')
         .addTargets(
           [u.addTargetSchema(expr1, legendFormat1), u.addTargetSchema(expr2, legendFormat2)]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: formatY1, custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'RGW Instance Detail',

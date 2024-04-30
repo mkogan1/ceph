@@ -37,7 +37,7 @@ local u = import 'utils.libsonnet';
           [u.addTargetSchema(
             expr, legendFormat
           )]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'short', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'Host Overview',
@@ -285,7 +285,7 @@ local u = import 'utils.libsonnet';
                            '$datasource')
         .addTargets(
           [u.addTargetSchema(expr, legendFormat)]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'short', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'Host Details',

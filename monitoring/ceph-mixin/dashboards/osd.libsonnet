@@ -36,7 +36,7 @@ local u = import 'utils.libsonnet';
                            '$datasource')
         .addTargets(
           [u.addTargetSchema(expr, legendFormat1)]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'short', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
       local OsdOverviewSingleStatPanel(colors,
                                        format,
                                        title,
@@ -258,7 +258,7 @@ local u = import 'utils.libsonnet';
                          nullPointMode='null as zero')
         .addTarget(u.addTargetSchema(
           'ceph_osd_numpg\n', 'PGs per OSD', 'time_series', 1, true
-        )) + { gridPos: { x: 12, y: 8, w: 8, h: 8 } },
+        )) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'short', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: 12, y: 8, w: 8, h: 8 } },
         OsdOverviewSingleStatPanel(
           ['#d44a3a', '#299c46'],
           'percentunit',
@@ -328,7 +328,7 @@ local u = import 'utils.libsonnet';
                               legendFormat1),
             u.addTargetSchema(expr2, legendFormat2),
           ]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: formatY1, custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'OSD device details',
@@ -504,7 +504,7 @@ local u = import 'utils.libsonnet';
         .addTarget(u.addTargetSchema(
           'label_replace(irate(node_disk_io_time_seconds_total[1m]), "instance", "$1", "instance", "([^:.]*).*") and on (instance, device) label_replace(label_replace(ceph_disk_occupation_human{ceph_daemon=~"$osd"}, "device", "$1", "device", "/dev/(.*)"), "instance", "$1", "instance", "([^:.]*).*")',
           '{{device}} on {{instance}}'
-        )) + { gridPos: { x: 18, y: 11, w: 6, h: 9 } },
+        )) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'percentunit', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: 18, y: 11, w: 6, h: 9 } },
       ]),
   },
 }

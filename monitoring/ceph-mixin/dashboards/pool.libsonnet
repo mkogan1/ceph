@@ -76,7 +76,7 @@ local u = import 'utils.libsonnet';
         .addTargets(
           [u.addTargetSchema(expr,
                              legendFormat)]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'short', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'Ceph Pools Overview',
@@ -413,7 +413,7 @@ local u = import 'utils.libsonnet';
                            '$datasource')
         .addTargets(
           [u.addTargetSchema(expr, legendFormat)]
-        ) + { gridPos: { x: x, y: y, w: w, h: h } };
+        ) + { type: 'timeseries' } + { fieldConfig: { defaults: { unit: 'short', custom: { fillOpacity: 8, showPoints: 'never' } } } } + { gridPos: { x: x, y: y, w: w, h: h } };
 
       u.dashboardSchema(
         'Ceph Pool Details',
