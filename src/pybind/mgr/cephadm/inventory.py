@@ -835,6 +835,7 @@ class HostCache():
         self.loading_osdspec_preview = set()  # type: Set[str]
         self.last_client_files: Dict[str, Dict[str, Tuple[str, int, int, int]]] = {}
         self.registry_login_queue: Set[str] = set()
+        self.custom_logrotate_write_queue: Set[str] = set()
 
         self.scheduled_daemon_actions: Dict[str, Dict[str, str]] = {}
 
@@ -894,6 +895,7 @@ class HostCache():
                 if 'last_coredumpctl_override' in j:
                     self.last_coredumpctl_override[host] = CoredumpctlOverrides.from_json(j['last_coredumpctl_override'])
                 self.registry_login_queue.add(host)
+                self.custom_logrotate_write_queue.add(host)
                 self.scheduled_daemon_actions[host] = j.get('scheduled_daemon_actions', {})
                 self.metadata_up_to_date[host] = j.get('metadata_up_to_date', False)
 
@@ -1035,6 +1037,7 @@ class HostCache():
         self.network_refresh_queue.append(host)
         self.osdspec_previews_refresh_queue.append(host)
         self.registry_login_queue.add(host)
+        self.custom_logrotate_write_queue.add(host)
         self.last_client_files[host] = {}
 
     def refresh_all_host_info(self, host):
@@ -1043,6 +1046,7 @@ class HostCache():
         self.last_host_check.pop(host, None)
         self.daemon_refresh_queue.append(host)
         self.registry_login_queue.add(host)
+        self.custom_logrotate_write_queue.add(host)
         self.device_refresh_queue.append(host)
         self.last_facts_update.pop(host, None)
         self.osdspec_previews_refresh_queue.append(host)
@@ -1071,6 +1075,9 @@ class HostCache():
 
     def distribute_new_registry_login_info(self) -> None:
         self.registry_login_queue = set(self.mgr.inventory.keys())
+
+    def distribute_custom_logrotate_config(self) -> None:
+        self.custom_logrotate_write_queue = set(self.mgr.inventory.keys())
 
     def save_host(self, host: str) -> None:
         j: Dict[str, Any] = {
@@ -1607,6 +1614,14 @@ class HostCache():
             return False
         if host in self.registry_login_queue:
             self.registry_login_queue.remove(host)
+            return True
+        return False
+
+    def host_needs_custom_logrotate_file(self, host: str) -> bool:
+        if host in self.mgr.offline_hosts:
+            return False
+        if host in self.custom_logrotate_write_queue:
+            self.custom_logrotate_write_queue.remove(host)
             return True
         return False
 
