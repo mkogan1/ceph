@@ -1006,8 +1006,8 @@ int BlueFS::_check_new_allocations(const bluefs_fnode_t& fnode,
     auto id = e.bdev;
     bool fail = false;
     ceph_assert(id < dev_count);
-
-    apply_for_bitset_range(e.offset, e.length, alloc_size[id], used_blocks[id],
+    uint32_t granularity = bdev[id]->get_block_size();
+    apply_for_bitset_range(e.offset, e.length, granularity, used_blocks[id],
       [&](uint64_t pos, boost::dynamic_bitset<uint64_t> &bs) {
         if (bs.test(pos)) {
           fail = true;
@@ -1029,29 +1029,16 @@ int BlueFS::_check_new_allocations(const bluefs_fnode_t& fnode,
 int BlueFS::_verify_alloc_granularity(
   __u8 id, uint64_t offset, uint64_t length, const char *op)
 {
-  if ((offset & (alloc_size[id] - 1)) ||
-      (length & (alloc_size[id] - 1))) {
+  uint32_t granularity = alloc_size[id];
+  if (is_shared_alloc(id)) {
+    granularity = bdev[id]->get_block_size();
+  }
+  if ((offset & (granularity - 1)) ||
+      (length & (granularity - 1))) {
     derr << __func__ << " " << op << " of " << (int)id
 	 << ":0x" << std::hex << offset << "~" << length << std::dec
 	 << " does not align to alloc_size 0x"
 	 << std::hex << alloc_size[id] << std::dec << dendl;
-    // be helpful
-    auto need = alloc_size[id];
-    while (need && ((offset & (need - 1)) ||
-		    (length & (need - 1)))) {
-      need >>= 1;
-    }
-    if (need) {
-      const char *which;
-      if (id == BDEV_SLOW ||
-	  (id == BDEV_DB && !bdev[BDEV_SLOW])) {
-	which = "bluefs_shared_alloc_size";
-      } else {
-	which = "bluefs_alloc_size";
-      }
-      derr << "work-around by setting " << which << " = " << need
-	   << " for this OSD" << dendl;
-    }
     return -EFAULT;
   }
   return 0;
@@ -1094,7 +1081,10 @@ int BlueFS::_replay(bool noop, bool to_stdout)
     if (cct->_conf->bluefs_log_replay_check_allocations) {
       for (size_t i = 0; i < MAX_BDEV; ++i) {
 	if (alloc_size[i] != 0 && bdev[i] != nullptr) {
-	  used_blocks[i].resize(round_up_to(bdev[i]->get_size(), alloc_size[i]) / alloc_size[i]);
+          // let's use minimal allocation unit we can have
+          uint32_t granularity = bdev[i]->get_block_size();
+          //hmm... on 32TB/4K drive this would take 1GB RAM!!!
+          used_blocks[i].resize(round_up_to(bdev[i]->get_size(), granularity) / granularity);
 	}
       }
     }
@@ -1432,7 +1422,8 @@ int BlueFS::_replay(bool noop, bool to_stdout)
 						      "OP_FILE_UPDATE"); r < 0) {
 		  return r;
 		}
-                apply_for_bitset_range(e.offset, e.length, alloc_size[id],
+		uint32_t granularity = bdev[id]->get_block_size();
+                apply_for_bitset_range(e.offset, e.length, granularity,
 				       used_blocks[id],
                   [&](uint64_t pos, boost::dynamic_bitset<uint64_t> &bs) {
                     ceph_assert(bs.test(pos));
@@ -1487,8 +1478,8 @@ int BlueFS::_replay(bool noop, bool to_stdout)
               for (auto e : fnode_extents) {
                 auto id = e.bdev;
                 bool fail = false;
-
-                apply_for_bitset_range(e.offset, e.length, alloc_size[id], used_blocks[id],
+		uint32_t granularity = bdev[id]->get_block_size();
+                apply_for_bitset_range(e.offset, e.length, granularity, used_blocks[id],
                   [&](uint64_t pos, boost::dynamic_bitset<uint64_t> &bs) {
                     if (!bs.test(pos)) {
                       fail = true;
