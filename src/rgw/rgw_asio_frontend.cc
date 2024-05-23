@@ -1075,11 +1075,25 @@ void AsioFrontend::stop()
   ldout(ctx(), 4) << "frontend initiating shutdown..." << dendl;
 
   going_down = true;
+  const bool graceful_stop{ g_ceph_context->_conf->rgw_graceful_stop };
+  if (graceful_stop) {
+    // reject new connections immediately
+    boost::system::error_code ec;
+    for (auto& l : listeners) {
+      l.acceptor.close(ec);
+    }
+    ldout(ctx(), 4) << "frontend waiting for outstanding requests to complete..." << dendl;
+    pause();
+  }
 
   boost::system::error_code ec;
   // close all listeners
   for (auto& listener : listeners) {
     listener.acceptor.close(ec);
+  }
+  if (graceful_stop) {
+    ldout(ctx(), 4) << "frontend outstanding requests have completed" << dendl;
+    unpause();
   }
   // close all connections
   connections.close(ec);
