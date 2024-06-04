@@ -132,7 +132,7 @@
     "stylelint": "13.13.1",
     "stylelint-config-sass-guidelines": "7.1.0",
     "stylelint-declaration-use-variable": "1.7.3",
-    "table": "6.8.0",
+    "table": "6.8.2",
     "transifex-i18ntool": "1.1.0",
     "ts-node": "9.0.0",
     "typescript": "4.9.5"
