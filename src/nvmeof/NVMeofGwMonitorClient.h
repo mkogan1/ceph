@@ -34,13 +34,19 @@ private:
   std::string group;
   std::string gateway_address;
   std::string monitor_address;
-  std::string server_key;
   std::string server_cert;
+  std::string client_key;
   std::string client_cert;
   epoch_t     osdmap_epoch; // last awaited osdmap_epoch
   epoch_t     gwmap_epoch;  // last received gw map epoch
   std::chrono::time_point<std::chrono::steady_clock>
               last_map_time; // used to panic on disconnect
+
+  // init gw ssl opts
+  void init_gw_ssl_opts();
+
+  // returns gateway grpc credentials
+  std::shared_ptr<grpc::ChannelCredentials> gw_creds();
 
 protected:
   ceph::async::io_context_pool poolctx;
