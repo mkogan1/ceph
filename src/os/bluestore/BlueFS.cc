@@ -1030,7 +1030,10 @@ int BlueFS::_verify_alloc_granularity(
   __u8 id, uint64_t offset, uint64_t length, const char *op)
 {
   uint32_t granularity = alloc_size[id];
-  if (is_shared_alloc(id)) {
+  if (is_shared_alloc(id) ||
+      /*When shared not set, and SLOW not defined then we renamed SLOW to DB.*/
+      /*^ This happens when we use CBT with bluefs-export or bluefs-log-dump.*/
+      (shared_alloc_id == unsigned(-1) && !bdev[BDEV_SLOW] && id == BDEV_DB)) {
     granularity = bdev[id]->get_block_size();
   }
   if ((offset & (granularity - 1)) ||
