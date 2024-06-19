@@ -684,6 +684,10 @@ class TestMonitoring:
 
                 scrape_configs:
                   - job_name: 'ceph'
+                    relabel_configs:
+                    - source_labels: [instance]
+                      target_label: instance
+                      replacement: 'ceph_cluster'
                     honor_labels: true
                     http_sd_configs:
                     - url: http://[::1]:8765/sd/prometheus/sd-config?service=mgr-prometheus
@@ -808,6 +812,10 @@ class TestMonitoring:
 
                 scrape_configs:
                   - job_name: 'ceph'
+                    relabel_configs:
+                    - source_labels: [instance]
+                      target_label: instance
+                      replacement: 'ceph_cluster'
                     scheme: https
                     tls_config:
                       ca_file: mgr_prometheus_cert.pem
