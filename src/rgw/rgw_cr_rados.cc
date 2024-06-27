@@ -931,14 +931,14 @@ int RGWAsyncRemoveObj::_send_request(const DoutPrefixProvider *dpp)
     del_op.params.versioning_status = BUCKET_VERSIONED;
   }
 
-  del_op->params.olh_epoch = versioned_epoch;
-  del_op->params.marker_version_id = marker_version_id;
-  del_op->params.obj_owner.set_id(rgw_user(owner));
-  del_op->params.obj_owner.set_name(owner_display_name);
-  del_op->params.mtime = timestamp;
-  del_op->params.high_precision_time = true;
-  del_op->params.zones_trace = &zones_trace;
-  del_op->params.null_verid = false;
+  del_op.params.olh_epoch = versioned_epoch;
+  del_op.params.marker_version_id = marker_version_id;
+  del_op.params.obj_owner.set_id(rgw_user(owner));
+  del_op.params.obj_owner.set_name(owner_display_name);
+  del_op.params.mtime = timestamp;
+  del_op.params.high_precision_time = true;
+  del_op.params.zones_trace = &zones_trace;
+  del_op.params.null_verid = false;
 
   ret = del_op.delete_obj(null_yield, dpp);
   if (ret < 0) {

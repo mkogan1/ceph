@@ -5738,7 +5738,8 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y, const DoutPrefixProvi
         return r;
       }
       result.delete_marker = dirent.is_delete_marker();
-      r = store->unlink_obj_instance(dpp, target->get_ctx(), target->get_bucket_info(), obj, params.olh_epoch, y, params.null_verid, params.zones_trace);
+      r = store->unlink_obj_instance(dpp, target->get_ctx(), target->get_bucket_info(), obj, params.olh_epoch,
+                                     y, params.bilog_flags, params.null_verid, params.zones_trace);
       if (r < 0) {
         return r;
       }
@@ -7630,7 +7631,7 @@ int RGWRados::bucket_index_unlink_instance(const DoutPrefixProvider *dpp,
                                            const rgw_obj& obj_instance,
                                            const string& op_tag, const string& olh_tag,
                                            uint64_t olh_epoch,
-                                           bool null_verid,
+                                           uint16_t bilog_flags,
                                            rgw_zone_set *_zones_trace)
 {
   rgw_rados_ref ref;
@@ -7655,7 +7656,7 @@ int RGWRados::bucket_index_unlink_instance(const DoutPrefixProvider *dpp,
 		      op.assert_exists(); // bucket index shard must exist
 		      cls_rgw_guard_bucket_resharding(op, -ERR_BUSY_RESHARDING);
 		      cls_rgw_bucket_unlink_instance(op, key, op_tag,
-						     olh_tag, olh_epoch, svc.zone->need_to_log_data(), null_verid, zones_trace);
+						     olh_tag, olh_epoch, svc.zone->need_to_log_data(), bilog_flags, zones_trace);
                       return rgw_rados_operate(dpp, ref.pool.ioctx(), ref.obj.oid, &op, null_yield);
                     });
   if (r < 0) {
@@ -8184,7 +8185,7 @@ int RGWRados::set_olh(const DoutPrefixProvider *dpp, RGWObjectCtx& obj_ctx, RGWB
 }
 
 int RGWRados::unlink_obj_instance(const DoutPrefixProvider *dpp, RGWObjectCtx& obj_ctx, RGWBucketInfo& bucket_info, const rgw_obj& target_obj,
-                                  uint64_t olh_epoch, optional_yield y, bool null_verid, rgw_zone_set *zones_trace)
+                                  uint64_t olh_epoch, optional_yield y,  uint16_t bilog_flags, bool null_verid, rgw_zone_set *zones_trace)
 {
   string op_tag;
 
@@ -8216,7 +8217,13 @@ int RGWRados::unlink_obj_instance(const DoutPrefixProvider *dpp, RGWObjectCtx& o
 
     string olh_tag(state->olh_tag.c_str(), state->olh_tag.length());
 
-    ret = bucket_index_unlink_instance(dpp, bucket_info, target_obj, op_tag, olh_tag, olh_epoch, null_verid, zones_trace);
+    if (null_verid) {
+      bilog_flags = bilog_flags | RGW_BILOG_FLAG_VERSIONED_OP | RGW_BILOG_NULL_VERSION;
+    } else {
+      bilog_flags = bilog_flags | RGW_BILOG_FLAG_VERSIONED_OP;
+    }
+
+    ret = bucket_index_unlink_instance(dpp, bucket_info, target_obj, op_tag, olh_tag, olh_epoch, bilog_flags, zones_trace);
     if (ret < 0) {
       olh_cancel_modification(dpp, bucket_info, *state, olh_obj, op_tag, y);
       ldpp_dout(dpp, 20) << "bucket_index_unlink_instance() target_obj=" << target_obj << " returned " << ret << dendl;
