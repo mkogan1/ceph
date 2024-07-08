@@ -24,7 +24,7 @@ class NFSService(CephService):
     TYPE = 'nfs'
     DEFAULT_EXPORTER_PORT = 9587
 
-    def ranked(self) -> bool:
+    def ranked(self, spec: ServiceSpec) -> bool:
         return True
 
     def fence(self, daemon_id: str) -> None:
