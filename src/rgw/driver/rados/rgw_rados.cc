@@ -6625,17 +6625,29 @@ int RGWRados::set_attrs(const DoutPrefixProvider *dpp, RGWObjectCtx* rctx, RGWBu
       bufferlist acl_bl;
       if (iter = attrs.find(RGW_ATTR_ACL); iter != attrs.end()) {
         acl_bl = iter->second;
+      } else if (iter = state->attrset.find(RGW_ATTR_ACL);
+                 iter != state->attrset.end()) {
+        acl_bl = iter->second;
       }
       std::string etag;
       if (iter = attrs.find(RGW_ATTR_ETAG); iter != attrs.end()) {
+        etag = rgw_bl_str(iter->second);
+      } else if (iter = state->attrset.find(RGW_ATTR_ETAG);
+                 iter != state->attrset.end()) {
         etag = rgw_bl_str(iter->second);
       }
       std::string content_type;
       if (iter = attrs.find(RGW_ATTR_CONTENT_TYPE); iter != attrs.end()) {
         content_type = rgw_bl_str(iter->second);
+      } else if (iter = state->attrset.find(RGW_ATTR_CONTENT_TYPE);
+                 iter != state->attrset.end()) {
+        content_type = rgw_bl_str(iter->second);
       }
       string storage_class;
       if (iter = attrs.find(RGW_ATTR_STORAGE_CLASS); iter != attrs.end()) {
+        storage_class = rgw_bl_str(iter->second);
+      } else if (iter = state->attrset.find(RGW_ATTR_STORAGE_CLASS);
+                 iter != state->attrset.end()) {
         storage_class = rgw_bl_str(iter->second);
       }
       int64_t poolid = ioctx.get_id();
