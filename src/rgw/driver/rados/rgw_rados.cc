@@ -4782,6 +4782,10 @@ int RGWRados::copy_obj(RGWObjectCtx& src_obj_ctx,
     (*src_rule != dest_placement) ||
     (src_pool != dest_pool);
 
+  if (!copy_data && read_filter && read_filter->need_copy_data()) {
+    copy_data = true;
+  }
+
   bool copy_first = false;
   if (amanifest) {
     if (!amanifest->has_tail()) {
@@ -5026,6 +5030,13 @@ int RGWRados::copy_obj_data(RGWObjectCtx& obj_ctx,
   ret = processor.process({}, ofs);
   if (ret < 0) {
     return ret;
+  }
+  if (read_filter) {
+    ret = read_filter->set_compression_attribute();
+    if (ret < 0) {
+      ldpp_dout(dpp, 0) << "ERROR: failed to set compression attributes" << dendl;
+      return ret;
+    }
   }
 
   string etag;

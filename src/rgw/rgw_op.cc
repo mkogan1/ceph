@@ -5618,9 +5618,10 @@ public:
       return -EIO;
     }
     uint64_t read_len = bl_len;
-    int ret = processor->process(std::move(bl), ofs);
+    bufferlist copy;
+    bl.begin(bl_ofs).copy(bl_len, copy);
+    int ret = processor->process(std::move(copy), ofs);
     if (ret < 0) return ret;
-    ret = bl.length();
     ofs += read_len;
     return read_len;
   };
@@ -5687,6 +5688,7 @@ class RGWCOE_make_filter_pipeline : public rgw::sal::ObjectFilter {
   req_state *s;			// destination only, not for source!
   std::unique_ptr<rgw::sal::DataProcessor> encrypt;
   boost::optional<RGWPutObj_Compress> compressor;
+  CompressorRef plugin;
 public:
   RGWCOE_make_filter_pipeline(req_state *_s, DoutPrefixProvider *_dpp,
       map<string, bufferlist> &_a, bool _skip_decrypt,
@@ -5702,7 +5704,7 @@ public:
         !cct->_conf->rgw_crypt_require_ssl
             || rgw_transport_is_secure(cct, *env),
         env),
-      s(_s) {
+      s(_s), plugin(nullptr) {
   };
   int get_decrypt_filter(std::unique_ptr<RGWGetObj_Filter> *filter,
       RGWGetObj_Filter* cb,
@@ -5742,7 +5744,7 @@ public:
     return res;
   }
 
-  int set_compression_attribute(CompressorRef& plugin) {
+  int set_compression_attribute() override {
     if (compressor && compressor->is_compressed()) {
       ceph::bufferlist tmp;
       RGWCompressionInfo cs_info;
@@ -5750,7 +5752,7 @@ public:
       // plugin exists when the compressor does
       // coverity[dereference:SUPPRESS]
       cs_info.compression_type = plugin->get_type_name();
-      cs_info.orig_size = s->obj_size;
+      cs_info.orig_size = obj_size;
       cs_info.compressor_message = compressor->get_compressor_message();
       cs_info.blocks = std::move(compressor->get_compression_blocks());
       encode(cs_info, tmp);
@@ -5810,6 +5812,8 @@ public:
       object->set_obj_size(cs_info.orig_size);		// XXX where?
       decompress.emplace(cct, &cs_info, partial_content, filter);
       filter = &*decompress;
+ldpp_dout(dpp, 0) << "TEMP: end_x=" << end_x << " obj_size=" << obj_size << dendl;
+      end_x = obj_size;
     }
     // decrypt
     filter->fixup_range(ofs_x, end_x);
@@ -5849,7 +5853,6 @@ public:
     // a zonegroup feature is required...
     const auto& zonegroup = obj_ctx.get_driver()->get_zone()->get_zonegroup();
     const bool compress_encrypted = zonegroup.supports(rgw::zone_features::compress_encrypted);
-    CompressorRef plugin;
     const auto& compression_type = obj_ctx.get_driver()->get_compression_type(dest_placement);
     if (compression_type != "none" &&
 	(encrypt == nullptr || compress_encrypted)) {
@@ -5864,7 +5867,6 @@ public:
         s->object->set_compressed();
       }
     }
-    set_compression_attribute(plugin);
     return filter;
   };
   int get_error() override {
@@ -5878,6 +5880,9 @@ public:
       requested_sc.append(iter->second);
     }
   };
+  bool need_copy_data() override {
+    return rgw_need_copy_data( src_attrs, s );
+  }
 };
 
 void RGWCopyObj::execute(optional_yield y)

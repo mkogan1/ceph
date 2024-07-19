@@ -238,3 +238,5 @@ static inline std::string get_str_attribute(std::map<std::string, bufferlist>& a
 }
 
 int rgw_remove_sse_s3_bucket_key(req_state *s);
+bool rgw_need_copy_data( std::map<std::string, ceph::bufferlist>& src_attrs,
+                    req_state *s);
