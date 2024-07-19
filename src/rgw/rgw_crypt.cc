@@ -923,6 +923,16 @@ struct CryptAttributes {
   }
 };
 
+static inline const std::string rgw_str_find(const std::map<std::string,
+                                               ceph::bufferlist>& attrs,
+                                             const std::string &name) {
+  auto i = attrs.find(name);
+  if (i != attrs.end()) {
+    return rgw_bl_str(i->second);
+  }
+  return std::string();
+}
+
 std::string fetch_bucket_key_id(req_state *s)
 {
   auto kek_iter = s->bucket_attrs.find(RGW_ATTR_BUCKET_ENCRYPTION_KEY_ID);
@@ -1534,6 +1544,66 @@ int rgw_remove_sse_s3_bucket_key(req_state *s)
     ldpp_dout(s, 0) << "ERROR: Unable to remove KEK ID: " << saved_key << " got " << res << dendl;
   }
   return res;
+}
+
+// dry run of "rgw_s3_prepare_encrypt" to map
+// critical s3 encryption parameters to internal mappings.
+// This is for use by rgw_need_copy_data, to determine if it is
+// necessary to use copy_obj_data().  Only collects the data
+// necessary to determine compatibility; no need for the rest.
+static int dummy_prepare_encrypt(req_state* s,
+                           std::map<std::string, ceph::bufferlist>& attrs)
+{
+  CryptAttributes crypt_attributes { s };
+
+  std::string_view req_sse_ca =
+      crypt_attributes.get(X_AMZ_SERVER_SIDE_ENCRYPTION_CUSTOMER_ALGORITHM);
+  if (! req_sse_ca.empty()) {
+    if (req_sse_ca != "AES256") {
+//  The requested encryption algorithm is not valid, must be AES256.
+      return -ERR_INVALID_ENCRYPTION_ALGORITHM;
+    }
+    set_attr(attrs, RGW_ATTR_CRYPT_MODE, "SSE-C-AES256");
+    return 0;
+  }
+
+  /* AMAZON server side encryption with KMS (key management service) */
+  std::string_view req_sse =
+      crypt_attributes.get(X_AMZ_SERVER_SIDE_ENCRYPTION);
+  if (! req_sse.empty()) {
+    if (req_sse == "aws:kms") {
+      set_attr(attrs, RGW_ATTR_CRYPT_MODE, "SSE-KMS");
+      return 0;
+    } else if (req_sse != "AES256") {
+//  ERROR: Invalid value for header x-amz-server-side-encryption
+      return -EINVAL;
+    }
+    set_attr(attrs, RGW_ATTR_CRYPT_MODE, "AES256");
+//    set_attr(attrs, RGW_ATTR_CRYPT_KEYID, key_id);
+    return 0;
+  } else if (s->cct->_conf->rgw_crypt_default_encryption_key != "") {
+    set_attr(attrs, RGW_ATTR_CRYPT_MODE, "RGW-AUTO");
+  }
+  return 0;
+}
+
+// When copying an object, if it is encrypted, only when the key is the
+// same can we just copy the data.  Otherwise, must do the decrypt/re-encrypt
+// loop.  This routine determines when the original and proposed
+// encryption requires that we re-encrypt the object.
+
+bool rgw_need_copy_data( std::map<std::string, ceph::bufferlist>& src_attrs,
+  req_state* s) {
+  std::map<std::string, ceph::bufferlist> enc_attrs;
+  int err = dummy_prepare_encrypt( s, enc_attrs );
+  if (err) {
+    return true;
+  }
+  std::string src_mode = get_str_attribute(src_attrs, RGW_ATTR_CRYPT_MODE);
+  std::string enc_mode = get_str_attribute(enc_attrs, RGW_ATTR_CRYPT_MODE);
+
+  bool r = src_mode != "" || enc_mode !=  "";
+  return r;
 }
 
 /*********************************************************************
