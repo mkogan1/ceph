@@ -48,6 +48,7 @@ import { NvmeofNamespacesListComponent } from './nvmeof-namespaces-list/nvmeof-n
 import { NvmeofNamespacesFormComponent } from './nvmeof-namespaces-form/nvmeof-namespaces-form.component';
 import { NvmeofInitiatorsListComponent } from './nvmeof-initiators-list/nvmeof-initiators-list.component';
 import { NvmeofInitiatorsFormComponent } from './nvmeof-initiators-form/nvmeof-initiators-form.component';
+import { environment } from '~/environments/environment';
 
 import {
   ButtonModule,
@@ -323,6 +324,11 @@ const routes: Routes = [
     ]
   }
 ];
+
+if (environment.build !== 'ibm') {
+  const nvmeofIndex = routes.findIndex((route) => route.path === 'nvmeof');
+  routes.splice(nvmeofIndex, 1);
+}
 
 @NgModule({
   imports: [BlockModule, RouterModule.forChild(routes)]

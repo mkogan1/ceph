@@ -18,25 +18,26 @@
        routerLink="/services">
        Cluster->Services</a>
   </cd-alert-panel>
-  <cd-table-actions class="btn-group mb-4 me-2"
-                    [permission]="permissions.rgw"
-                    [selection]="selection"
-                    [tableActions]="multisiteReplicationActions">
-  </cd-table-actions>
-  <cd-table-actions *ngIf="showMigrateAndReplicationActions"
-                    class="btn-group mb-4 me-2 secondary"
-                    [permission]="permissions.rgw"
-                    [btnColor]="'light'"
-                    [selection]="selection"
-                    [tableActions]="migrateTableAction">
-  </cd-table-actions>
-  <cd-table-actions *ngIf="!showMigrateAndReplicationActions"
-                    class="btn-group mb-4 me-2"
-                    [permission]="permissions.rgw"
-                    [selection]="selection"
-                    [tableActions]="createTableActions"
-                    [primaryDropDown]="true">
-  </cd-table-actions>
+  <span *ngIf="!showMigrateAndReplicationActions; else migrateAndReplicationActionTpl">
+    <cd-table-actions class="btn-group mb-4 me-2"
+                      [permission]="permission"
+                      [selection]="selection"
+                      [tableActions]="createTableActions">
+    </cd-table-actions>
+  </span>
+  <ng-template #migrateAndReplicationActionTpl>
+    <cd-table-actions class="btn-group mb-4 me-2"
+                      [permission]="permission"
+                      [selection]="selection"
+                      [tableActions]="multisiteReplicationActions">
+    </cd-table-actions>
+    <cd-table-actions class="btn-group mb-4 me-2 secondary"
+                      [permission]="permission"
+                      [btnColor]="'light'"
+                      [selection]="selection"
+                      [tableActions]="migrateTableAction">
+    </cd-table-actions>
+  </ng-template>
   <cd-table-actions class="btn-group mb-4 me-2"
                     [permission]="permissions.rgw"
                     [btnColor]="'light'"
@@ -53,7 +54,8 @@
 <div class="card">
   <div class="card-header"
        data-testid="rgw-multisite-details-header"
-       i18n>Topology Viewer</div>
+       i18n>Topology Viewer
+  </div>
   <div class="row">
     <div class="col-sm-6 col-lg-6 tree-container">
       <i *ngIf="loadingIndicator"
