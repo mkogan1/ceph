@@ -796,6 +796,12 @@ options:
   desc: Set GZIP data format within Qatzip when using QAT compressor
   long_desc: QZ_DEFLATE_GZIP_EXT data format is in DEFLATE wrapped by Intel QAT Gzip extension header and footer; QZ_DEFLATE_RAW data format is in raw DEFLATE without any additional header(This data format only support compression, decompression will fallback to software).
   default: QZ_DEFLATE_GZIP_EXT
+- name: qat_decompressor_data_fmt_raw
+  type: bool
+  level: advanced
+  desc: Enable RAW GZIP data format within Qatzip when using QAT dompressor
+  long_desc: Data that will be written with QZ_DEFLATE_GZIP_EXT will not be able to be read when the qat_decompressor_data_fmt_raw=true is enabled, (A QAT error would occur)
+  default: false
 - name: qat_compressor_busy_polling
   type: bool
   level: advanced

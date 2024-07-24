@@ -207,8 +207,18 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
 {
 #ifdef HAVE_QATZIP
   // QAT can only decompress with existing header, only for 'QZ_DEFLATE_GZIP_EXT'
+  // std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): if (QZ_DEFLATE_GZIP_EXT)" << std::endl;
+  // if (qat_enabled && (compressor_message.has_value() && *compressor_message == GZIP_WRAPPER + MAX_WBITS ))
+  // if (qat_enabled && (!compressor_message || *compressor_message == GZIP_WRAPPER + MAX_WBITS ) && g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt")[11] == 'G')
+  // if (qat_enabled && (!compressor_message || *compressor_message == GZIP_WRAPPER + MAX_WBITS ) && (g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt").compare("QZ_DEFLATE_GZIP_EXT") == 0 || g_ceph_context->_conf.get_val<bool>("qat_decompressor_data_fmt_raw")))
   if (qat_enabled && (compressor_message.has_value() && *compressor_message == GZIP_WRAPPER + MAX_WBITS ) && g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt")[11] == 'G')
     return qat_accel.decompress(p, compressed_size, out, compressor_message);
+  // std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): if (QZ_DEFLATE_RAW)" << std::endl;
+    // if (qat_enabled && (!compressor_message || *compressor_message == ZLIB_DEFAULT_WIN_SIZE ) && g_ceph_context->_conf.get_val<std::string>("qat_decompressor_data_fmt_raw").compare("QZ_DEFLATE_RAW") == 0)
+  // if (qat_enabled && (!compressor_message || *compressor_message == GZIP_WRAPPER + MAX_WBITS ) && g_ceph_context->_conf.get_val<std::string>("qat_decompressor_data_fmt_raw").compare("QZ_DEFLATE_RAW") == 0)
+  //   return qat_accel.decompress(p, compressed_size, out, compressor_message);
+  // abort();
+  // std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): !if (QZ_DEFLATE_???)" << std::endl;
 #endif
 
   int ret;
