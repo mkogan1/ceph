@@ -150,6 +150,7 @@ bool QatAccel::init(const std::string &alg) {
 }
 
 int QatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message) {
+  dout(20) << "QAT compress" << dendl;
   auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
@@ -190,6 +191,7 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
 		 size_t compressed_len,
 		 bufferlist &dst,
 		 std::optional<int32_t> compressor_message) {
+  dout(20) << "QAT decompress" << dendl;
   auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
