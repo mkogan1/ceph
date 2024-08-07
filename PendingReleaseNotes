@@ -80,6 +80,38 @@
   metadata and data pool names to be used for creating the volume. If either
   is not passed or if either is a non-empty pool, the command will abort.
 
+* RADOS: A new command, `ceph osd rm-pg-upmap-primary-all`, has been added that allows
+  users to clear all pg-upmap-primary mappings in the osdmap when desired.
+  Related trackers:
+   - https://tracker.ceph.com/issues/67179
+   - https://tracker.ceph.com/issues/66867
+
+* RADOS: The default plugin for erasure coded pools has been changed
+  from Jerasure to ISA-L. Clusters created on T or later releases will
+  use ISA-L as the default plugin when creating a new pool. Clusters that upgrade
+  to the T release will continue to use their existing default values.
+  The default values can be overriden by creating a new erasure code profile and
+  selecting it when creating a new pool.
+  ISA-L is recommended for new pools because the Jerasure library is
+  no longer maintained.
+
+>=19.2.1
+
+* CephFS: Command `fs subvolume create` now allows tagging subvolumes through option
+  `--earmark` with a unique identifier needed for NFS or SMB services. The earmark
+  string for a subvolume is empty by default. To remove an already present earmark,
+  an empty string can be assigned to it. Additionally, commands
+  `ceph fs subvolume earmark set`, `ceph fs subvolume earmark get` and
+  `ceph fs subvolume earmark rm` have been added to set, get and remove earmark from a given subvolume.
+* RADOS: Add ``messenger dump`` command to retrieve runtime information
+  on connections, sockets, and kernel TCP stats from the messenger.
+* RGW: deleted buckets are automatically cleaned up as part of trimming process.
+  DeleteBucket will start returning 409 BucketNotEmpty errors until empty
+  on all zones when sync policy is enabled.
+  `radosgw-admin bucket list-deleted` lists such buckets.
+
+* RADOS: A performance botteneck in the balancer mgr module has been fixed.
+  Related Tracker: https://tracker.ceph.com/issues/68657
 
 >=19.0.0
 
