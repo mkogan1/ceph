@@ -7015,11 +7015,7 @@ void RGWDeleteMultiObj::execute(optional_yield y)
 	          continue;
           }
         }
-        send_partial_response(*iter, false, "", -EACCES);
-	      continue;
-      }
-
-      if ((identity_policy_res == Effect::Pass && e == Effect::Pass && !acl_allowed)) {
+      } else if ((identity_policy_res == Effect::Pass && e == Effect::Pass && !acl_allowed)) {
 	      send_partial_response(*iter, false, "", -EACCES);
 	      continue;
       }
