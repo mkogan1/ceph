@@ -6366,7 +6366,7 @@ rgw::auth::s3::STSEngine::authenticate(
       this request */
     std::unique_ptr<rgw::sal::User> user;
     const std::string access_key_id(_access_key_id);
-    if (driver->get_user_by_access_key(dpp, access_key_id, y, &user) < 0) {
+    if (store->get_user_by_access_key(dpp, access_key_id, y, &user) < 0) {
         ldpp_dout(dpp, 5) << "error reading user info, uid=" << access_key_id
                 << " can't authenticate" << dendl;
         return result_t::reject(-ERR_INVALID_ACCESS_KEY);
