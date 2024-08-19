@@ -15,6 +15,7 @@ import boto
 import boto.s3.connection
 from boto.s3.website import WebsiteConfiguration
 from boto.s3.cors import CORSConfiguration
+from botocore.exceptions import ClientError
 
 from nose.tools import eq_ as eq
 from nose.tools import assert_not_equal, assert_equal, assert_true, assert_false
@@ -2266,7 +2267,6 @@ def test_replication_status():
     log.info("checking that ReplicationStatus update did not write a bilog")
     bilog = bilog_list(zone.zone, bucket.name)
     assert(len(bilog) == 0)
->>>>>>> 8fd247c281e (rgw: implement x-amz-replication-status for PENDING & COMPLETED)
 
     bucket = primary.create_bucket(gen_bucket_name())
     log.debug('created bucket=%s', bucket.name)
@@ -3918,6 +3918,7 @@ def test_copy_object_different_bucket():
     
     zonegroup_bucket_checkpoint(zonegroup_conns, dest_bucket.name)
 
+<<<<<<< HEAD
 
 def test_bucket_location_constraint():
     zonegroup = realm.master_zonegroup()
@@ -4443,3 +4444,23 @@ def test_bucket_delete_with_sync_policy_object_prefix():
     remove_sync_policy_group(c1, "sync-group")
 
     return
+
+def test_bucket_create_location_constraint():
+    for zonegroup in realm.current_period.zonegroups:
+        zonegroup_conns = ZonegroupConns(zonegroup)
+        for zg in realm.current_period.zonegroups:
+            z = zonegroup_conns.rw_zones[0]
+            bucket_name = gen_bucket_name()
+            if zg.name == zonegroup.name:
+                # my zonegroup should pass
+                z.s3_client.create_bucket(Bucket=bucket_name, CreateBucketConfiguration={'LocationConstraint': zg.name})
+                # check bucket location
+                response = z.s3_client.get_bucket_location(Bucket=bucket_name)
+                assert_equal(response['LocationConstraint'], zg.name)
+            else:
+                # other zonegroup should fail with 400
+                e = assert_raises(ClientError,
+                                  z.s3_client.create_bucket,
+                                    Bucket=bucket_name,
+                                    CreateBucketConfiguration={'LocationConstraint': zg.name})
+                assert e.response['ResponseMetadata']['HTTPStatusCode'] == 400
