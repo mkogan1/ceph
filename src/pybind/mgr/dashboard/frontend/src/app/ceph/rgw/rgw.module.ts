@@ -221,13 +221,19 @@ const routes: Routes = [
   },
   {
     path: 'multisite',
-    component: RgwMultisiteDetailsComponent,
     data: { breadcrumbs: 'Multi-site' },
     children: [
       { path: '', redirectTo: 'configuration', pathMatch: 'full' },
       {
         path: 'configuration',
-        component: RgwMultisiteDetailsComponent
+        component: RgwMultisiteDetailsComponent,
+        children: [
+          {
+            path: 'setup-multisite-replication',
+            component: RgwMultisiteWizardComponent,
+            outlet: 'modal'
+          }
+        ]
       },
       {
         path: 'sync-policy',
@@ -249,28 +255,6 @@ const routes: Routes = [
             outlet: 'modal'
           }
         ]
-      }
-    ]
-  },
-  {
-    path: 'nfs',
-    canActivateChild: [FeatureTogglesGuardService, ModuleStatusGuardService],
-    data: {
-      moduleStatusGuardConfig: {
-        uiApiPath: 'nfs-ganesha',
-        redirectTo: 'error',
-        section: 'nfs-ganesha',
-        section_info: 'NFS GANESHA',
-        header: 'NFS-Ganesha is not configured'
-      },
-      breadcrumbs: 'NFS'
-    },
-    children: [
-      { path: '', component: RgwMultisiteDetailsComponent },
-      {
-        path: 'setup-multisite-replication',
-        component: RgwMultisiteWizardComponent,
-        outlet: 'modal'
       }
     ]
   },
