@@ -225,21 +225,24 @@ class IngressService(CephService):
                 'default_server_opts': server_opts,
                 'health_check_interval': spec.health_check_interval or '2s',
                 'v4v6_flag': v4v6_flag,
+                'qat_support': spec.haproxy_qat_support,
             }
         )
-        config_files = {
+        final_config: Dict[str, Any] = {
             'files': {
                 "haproxy.cfg": haproxy_conf,
             }
         }
-
         if spec.ssl_cert:
-            config_files['files']['haproxy.pem'] = spec.ssl_cert
+            ssl_cert = spec.ssl_cert
+            if isinstance(ssl_cert, list):
+                ssl_cert = '\n'.join(ssl_cert)
+            final_config['files']['haproxy.pem'] = ssl_cert
 
-        if spec.ssl_key:
-            config_files['files']['haproxy.pem.key'] = spec.ssl_key
+        if spec.haproxy_qat_support:
+            final_config['qat_support'] = True
 
-        return config_files, self.get_haproxy_dependencies(self.mgr, spec)
+        return final_config, sorted(deps)
 
     def keepalived_prepare_create(
             self,
