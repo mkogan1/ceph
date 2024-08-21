@@ -16,3 +16,4 @@ werkzeug
 natsort
 bcrypt
 pyjwt
+zstandard
