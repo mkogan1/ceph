@@ -191,6 +191,7 @@
         <cds-sidenav-item route="/block/nvmeof"
                           [useRouter]="true"
                           title="NVMe/TCP"
+                          *ngIf="environment.build === 'ibm'"
                           i18n-title><span i18n>NVMe/TCP</span></cds-sidenav-item>
       </cds-sidenav-menu>
       <!-- Object Storage -->
