@@ -441,6 +441,19 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             desc='Default timeout applied to cephadm commands run directly on '
             'the host (in seconds)'
         ),
+        Option(
+            'ssh_keepalive_interval',
+            type='int',
+            default=7,
+            desc='How often ssh connections are checked for liveness'
+        ),
+        Option(
+            'ssh_keepalive_count_max',
+            type='int',
+            default=3,
+            desc='How many times ssh connections can fail liveness checks '
+            'before the host is marked offline'
+        ),
     ]
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -518,6 +531,8 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             self.cgroups_split = True
             self.log_refresh_metadata = False
             self.default_cephadm_command_timeout = 0
+            self.ssh_keepalive_interval = 0
+            self.ssh_keepalive_count_max = 0
 
         self.notify(NotifyType.mon_map, None)
         self.config_notify()
