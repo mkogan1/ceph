@@ -225,6 +225,7 @@ also remove a key. Options include:
 - ``--secret-key=<key>`` manually specifies a S3 secret key or a Swift secret key.
 - ``--gen-access-key`` automatically generates a random S3 access key.
 - ``--gen-secret`` automatically generates a random S3 secret key or a random Swift secret key.
+- ``--generate-key`` create user with or without credentials. If sets to false, then user cannot set ``gen-secret/gen-access-key/access-key/secret-key``
 
 An example how to add a specified S3 key pair for a user. ::
 

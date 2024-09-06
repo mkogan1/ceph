@@ -205,6 +205,7 @@
                                specify secret key
      --gen-access-key          generate random access key (for S3)
      --gen-secret              generate random secret key
+     --generate-key                    create user with or without credentials
      --key-type=<type>         key type, options are: swift, s3
      --temp-url-key[-2]=<key>  temp url key
      --access=<access>         Set access permissions for sub-user, should be one
