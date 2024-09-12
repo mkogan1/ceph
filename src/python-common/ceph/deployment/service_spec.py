@@ -1616,6 +1616,10 @@ class NvmeofServiceSpec(ServiceSpec):
         self.qos_timeslice_in_usecs = qos_timeslice_in_usecs
         #: ``notifications_interval`` read SPDK notifications interval, in seconds
         self.notifications_interval = notifications_interval
+        if not self.tgt_cmd_extra_args:
+            self.tgt_cmd_extra_args = '--cpumask=0xF'
+        elif '--cpumask' not in self.tgt_cmd_extra_args:
+            self.tgt_cmd_extra_args = self.tgt_cmd_extra_args + ' --cpumask=0xF'
         #: ``discovery_addr`` address of the discovery service
         self.discovery_addr = discovery_addr
         #: ``discovery_addr_map`` per node address map of the discovery service
