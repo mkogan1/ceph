@@ -3,3 +3,4 @@ overrides:
     log-ignorelist:
       - OSD_DOWN
       - osd.*is down
+      - osds down
