@@ -590,14 +590,14 @@ def collect_sos_report(mgr: Any, operation_key: str) -> str:
         raise Exception(f"Error trying to get the sos report files for diagnostics(error_code): {sos_cmd_execution.exception_str}")
 
     # output is like:
-    # ['New sos report files can be found in /var/log/ceph/<fsid>/sosreport_case_124_1706548742636_*']
+    # 'New sos report files can be found in /var/log/ceph/<fsid>/sosreport_case_124_1706548742636_*'
     pattern = r'sosreport_case_\S+'
-    matches = re.findall(pattern, sos_cmd_execution.result[0])
+    matches = re.findall(pattern, sos_cmd_execution.result)
     if matches:
         mgr.log.info(f"Operations ({operation_key}): sos command files pattern is: {matches[0]}")
         result = matches[0]
     else:
-        mgr.log.error(f"Operations ({operation_key}): sos report files pattern not found in: {sos_cmd_execution.result[0]}")
+        mgr.log.error(f"Operations ({operation_key}): sos report files pattern not found in: {sos_cmd_execution.result}")
         result = ""
 
     # If there is any issue executing the command, the output will be like:
@@ -606,7 +606,7 @@ def collect_sos_report(mgr: Any, operation_key: str) -> str:
     # New sos report files can be found in /var/log/ceph/<fsid>/sosreport_case_TS015034298_1709809018376_*']
     # in this case, we leave a warning in the log about the issue
     pattern = r'^Issue executing.*'
-    matches = re.findall(pattern, sos_cmd_execution.result[0])
+    matches = re.findall(pattern, sos_cmd_execution.result)
     if matches:
          mgr.log.warn(f"Operations ({operation_key}): review sos command execution in {best_mon}: {matches[0]}")
 
@@ -1515,6 +1515,13 @@ class CallHomeAgent(MgrModule):
 
     def send_operation_report(self, key:str) -> None:
         try:
+            # Use a counter to make event_id unique for each operation
+            counter = 0
+            try:
+                counter = operations[key]["counter"]
+            except KeyError:
+                operations[key]["counter"] = counter
+
             op_report = Report(report_type= f'status',
                                component = 'ceph_operations',
                                description=f'operation {operations[key]["type"]}',
@@ -1526,9 +1533,10 @@ class CallHomeAgent(MgrModule):
                                seconds_interval= 0,
                                mgr_module = self,
                                key= key,
-                               event_id= operations[key]["event_id"])
+                               event_id= f'{operations[key]["event_id"]}-{counter}')
             op_report.send(force=True)
             operations[key]['status_sent'] = ST_SENT
+            operations[key]['counter'] += 1
             self.log.info(f'Operations ({key}): call home report sent. description: {operations[key]["description"]}, status: {operations[key]["status"]}, progress: {operations[key]["progress"]}')
             return
         except Exception as ex:
