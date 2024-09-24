@@ -282,7 +282,9 @@ cd-form-button-panel {
 
 /* Password Change form on login */
 cd-login-password-form {
-  form {
+  form,
+  h2,
+  h4 {
     margin-left: 0 !important;
   }
 
@@ -645,6 +647,10 @@ cd-about {
       margin-left: -52rem !important;
       width: 62%;
     }
+  }
+
+  dd {
+    padding-left: 0 !important;
   }
 }
 
@@ -1149,6 +1155,10 @@ h3 {
 
 // cluster expansion wizard
 cd-create-cluster {
+  .img-fluid {
+    height: auto !important;
+  }
+
   .blank-page {
     margin-top: -10rem;
   }
