@@ -3743,7 +3743,6 @@ int BlueFS::truncate(FileWriter *h, uint64_t offset)/*_WF_L*/
   if (offset > fnode.size) {
     ceph_abort_msg("truncate up not supported");
   }
-
   _flush_bdev(h);
   {
     std::lock_guard ll(log.lock);
@@ -3780,7 +3779,6 @@ int BlueFS::truncate(FileWriter *h, uint64_t offset)/*_WF_L*/
     if (changed_extents) {
       fnode.size = offset;
       fnode.reset_delta();
-      fnode.recalc_allocated();
       log.t.op_file_update(fnode);
       // sad, but is_dirty must be set to signal flushing of the log
       h->file->is_dirty = true;
