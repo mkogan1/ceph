@@ -444,6 +444,7 @@ private:
   // (4) TODO reconnect on connection errors
   // (5) TODO cleanup timedout callbacks
   void run() noexcept {
+    ceph_pthread_setname("kafka_manager");
     while (!stopped) {
 
       // publish all messages in the queue
@@ -531,9 +532,6 @@ public:
       // This is to prevent rehashing so that iterators are not invalidated 
       // when a new connection is added.
       connections.max_load_factor(10.0);
-      // give the runner thread a name for easier debugging
-      const auto rc = ceph_pthread_setname(runner.native_handle(), "kafka_manager");
-      ceph_assert(rc==0);
   }
 
   // non copyable
