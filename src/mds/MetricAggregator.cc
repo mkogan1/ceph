@@ -33,6 +33,7 @@ int MetricAggregator::init() {
   dout(10) << dendl;
 
   pinger = std::thread([this]() {
+      ceph_pthread_setname("mds-ping");
       std::unique_lock locker(lock);
       while (!stopping) {
         ping_all_active_ranks();
