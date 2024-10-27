@@ -8,7 +8,7 @@
 #include "include/ceph_assert.h"
 
 #include "include/types.h"
-#include "rgw_common.h"
+// #include "rgw_common.h"
 #include "rgw_tools.h"
 
 #include "rgw_string.h"

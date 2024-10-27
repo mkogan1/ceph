@@ -12,6 +12,7 @@
  *
  */
 
+#include "rgw_common.h"
 #include "common/dout.h"
 #include "common/errno.h"
 #include "rgw_realm_watcher.h"

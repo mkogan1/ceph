@@ -5,6 +5,7 @@
 
 #include "common/errno.h"
 
+#include "rgw_common.h"
 #include "rgw_zone.h"
 #include "rgw_realm_watcher.h"
 #include "rgw_meta_sync_status.h"

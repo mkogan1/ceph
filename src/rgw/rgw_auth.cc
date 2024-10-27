@@ -143,6 +143,7 @@ int load_account_and_policies(const DoutPrefixProvider* dpp,
   if (!info.account_id.empty()) {
     account.emplace();
     rgw::sal::Attrs attrs; // ignored
+    std::clog << "// !!!! ERROR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): rgw::sal::Attrs attrs; // ignored" << std::endl;  // << user->get_id()
     RGWObjVersionTracker objv; // ignored
     int r = driver->load_account_by_id(dpp, y, info.account_id,
                                        *account, attrs, objv);
@@ -1020,8 +1021,8 @@ ACLOwner rgw::auth::LocalApplier::get_aclowner() const
     owner.id = account->id;
     owner.display_name = account->name;
   } else {
-    owner.id = user_info.user_id;
-    owner.display_name = user_info.display_name;
+    owner.id = user->get()->get_info().user_id;
+    owner.display_name = user->get()->get_info().display_name;
   }
   return owner;
 }
@@ -1030,7 +1031,7 @@ uint32_t rgw::auth::LocalApplier::get_perms_from_aclspec(const DoutPrefixProvide
 {
   // match acl grants to the specific user id
   uint32_t mask = rgw_perms_from_aclspec_default_strategy(
-      user_info.user_id.to_str(), aclspec, dpp);
+      user->get()->get_info().user_id.to_str(), aclspec, dpp);
 
   if (account) {
     // account users also match acl grants to the account id. in aws, grantees
@@ -1044,28 +1045,28 @@ uint32_t rgw::auth::LocalApplier::get_perms_from_aclspec(const DoutPrefixProvide
 
 bool rgw::auth::LocalApplier::is_admin_of(const rgw_owner& o) const
 {
-  return user_info.admin || user_info.system;
+  return user->get()->get_info().admin || user->get()->get_info().system;
 }
 
 bool rgw::auth::LocalApplier::is_owner_of(const rgw_owner& o) const
 {
-  return match_owner(o, user_info.user_id, account);
+  return match_owner(o, user->get()->get_info().user_id, account);
 }
 
 bool rgw::auth::LocalApplier::is_identity(const Principal& p) const {
   if (p.is_wildcard()) {
     return true;
   } else if (p.is_account()) {
-    return match_account_or_tenant(account, user_info.user_id.tenant,
+    return match_account_or_tenant(account, user->get()->get_info().user_id.tenant,
                                    p.get_account());
   } else if (p.is_user()) {
     // account users can match both account- and tenant-based arns
     if (account && p.get_account() == account->id) {
-      return match_principal(user_info.path, user_info.display_name,
+      return match_principal(user->get()->get_info().path, user->get()->get_info().display_name,
                              subuser, p.get_id());
     } else {
-      return p.get_account() == user_info.user_id.tenant
-          && match_principal(user_info.path, user_info.user_id.id,
+      return p.get_account() == user->get()->get_info().user_id.tenant
+          && match_principal(user->get()->get_info().path, user->get()->get_info().user_id.id,
                              subuser, p.get_id());
     }
   }
@@ -1073,11 +1074,11 @@ bool rgw::auth::LocalApplier::is_identity(const Principal& p) const {
 }
 
 void rgw::auth::LocalApplier::to_str(std::ostream& out) const {
-  out << "rgw::auth::LocalApplier(acct_user=" << user_info.user_id
-      << ", acct_name=" << user_info.display_name
+  out << "rgw::auth::LocalApplier(acct_user=" << user->get()->get_info().user_id
+      << ", acct_name=" << user->get()->get_info().display_name
       << ", subuser=" << subuser
       << ", perm_mask=" << get_perm_mask()
-      << ", is_admin=" << static_cast<bool>(user_info.admin) << ")";
+      << ", is_admin=" << static_cast<bool>(user->get()->get_info().admin) << ")";
 }
 
 uint32_t rgw::auth::LocalApplier::get_perm_mask(const std::string& subuser_name,
@@ -1102,7 +1103,7 @@ void rgw::auth::LocalApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWU
 {
   /* Load the account that belongs to the authenticated identity. An extra call
    * to RADOS may be safely skipped in this case. */
-  user_info = this->user_info;
+  user_info = this->user->get()->get_info();
 }
 
 void rgw::auth::LocalApplier::modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const
@@ -1267,11 +1268,14 @@ rgw::auth::AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, const re
   } else {
     RGWUserInfo user_info;
     rgw_get_anon_user(user_info);
-
-    auto apl = \
-      apl_factory->create_apl_local(cct, s, user_info, std::nullopt, {},
-                                    rgw::auth::LocalApplier::NO_SUBUSER,
-                                    std::nullopt, rgw::auth::LocalApplier::NO_ACCESS_KEY);
-    return result_t::grant(std::move(apl));
+    //MK-TODO//
+    // rgw::sal::Driver* driver = s->user->get_driver(); // Ensure driver is defined
+    // std::unique_ptr<rgw::sal::User> user = driver->get_user(user_info.user_id);
+    // user->get_info() = user_info;
+    // auto apl = \
+    //   apl_factory->create_apl_local(cct, s, &user, std::nullopt, {},
+    //                                 rgw::auth::LocalApplier::NO_SUBUSER,
+    //                                 std::nullopt, rgw::auth::LocalApplier::NO_ACCESS_KEY);
+    // return result_t::grant(std::move(apl));
   }
 }

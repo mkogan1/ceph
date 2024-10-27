@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "include/compat.h"
+#include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_zone.h"
 #include "rgw_coroutine.h"

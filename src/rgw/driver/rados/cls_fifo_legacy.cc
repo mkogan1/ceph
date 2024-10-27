@@ -31,6 +31,7 @@
 #include "cls/fifo/cls_fifo_types.h"
 #include "cls/fifo/cls_fifo_ops.h"
 
+#include "rgw_common.h"
 #include "cls_fifo_legacy.h"
 
 namespace rgw::cls::fifo {

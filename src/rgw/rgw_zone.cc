@@ -5,6 +5,7 @@
 
 #include "common/errno.h"
 
+#include "rgw_common.h"
 #include "rgw_zone.h"
 #include "rgw_sal_config.h"
 #include "rgw_sync.h"

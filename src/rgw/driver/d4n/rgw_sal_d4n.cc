@@ -13,6 +13,7 @@
  *
  */
 
+#include "rgw_common.h"
 #include "rgw_sal_d4n.h"
 
 namespace rgw { namespace sal {

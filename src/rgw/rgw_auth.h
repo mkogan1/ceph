@@ -15,6 +15,9 @@
 
 #include "rgw_common.h"
 #include "rgw_web_idp.h"
+#include "rgw_zone.h"
+#include "rgw_tools.h"
+#include "rgw_sal.h"
 
 #define RGW_USER_ANON_ID "anonymous"
 
@@ -690,7 +693,8 @@ class LocalApplier : public IdentityApplier {
   using aclspec_t = rgw::auth::Identity::aclspec_t;
 
 protected:
-  const RGWUserInfo user_info;
+  const std::unique_ptr<rgw::sal::User> *user;
+  // const rgw_user user_id;
   const std::optional<RGWAccountInfo> account;
   const std::vector<IAM::Policy> policies;
   const std::string subuser;
@@ -705,18 +709,20 @@ public:
   static const std::string NO_ACCESS_KEY;
 
   LocalApplier(CephContext* const cct,
-               const RGWUserInfo& user_info,
+               std::unique_ptr<rgw::sal::User> *user,
                std::optional<RGWAccountInfo> account,
                std::vector<IAM::Policy> policies,
                std::string subuser,
                const std::optional<uint32_t>& perm_mask,
                const std::string access_key_id)
-    : user_info(user_info),
+    : user(user),
+    // : user_id(user->get()->get_info().user_id),
       account(std::move(account)),
       policies(std::move(policies)),
       subuser(std::move(subuser)),
       perm_mask(perm_mask.value_or(RGW_PERM_INVALID)),
       access_key_id(access_key_id) {
+    std::clog << "// OKOK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): " << std::endl;
   }
 
   ACLOwner get_aclowner() const override;
@@ -726,7 +732,8 @@ public:
   bool is_identity(const Principal& p) const override;
   uint32_t get_perm_mask() const override {
     if (this->perm_mask == RGW_PERM_INVALID) {
-      return get_perm_mask(subuser, user_info);
+      return get_perm_mask(subuser, user->get()->get_info());
+      // return get_perm_mask(subuser, user);
     } else {
       return this->perm_mask;
     }
@@ -734,11 +741,11 @@ public:
   void to_str(std::ostream& out) const override;
   void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override; /* out */
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;
-  uint32_t get_identity_type() const override { return user_info.type; }
+  uint32_t get_identity_type() const override { return user->get()->get_info().type; }
   std::string get_acct_name() const override { return {}; }
   std::string get_subuser() const override { return subuser; }
   const std::string& get_tenant() const override {
-    return user_info.user_id.tenant;
+    return user->get()->get_info().user_id.tenant;
   }
   const std::optional<RGWAccountInfo>& get_account() const override {
     return account;
@@ -750,7 +757,7 @@ public:
     virtual ~Factory() {}
     virtual aplptr_t create_apl_local(CephContext* cct,
                                       const req_state* s,
-                                      const RGWUserInfo& user_info,
+                                      std::unique_ptr<rgw::sal::User> *user,
                                       std::optional<RGWAccountInfo> account,
                                       std::vector<IAM::Policy> policies,
                                       const std::string& subuser,

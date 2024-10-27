@@ -2,6 +2,7 @@
 // vim: ts=8 sw=2 smarttab ft=cpp
 
 #include "svc_bi_rados.h"
+#include "rgw_tools.h"
 #include "svc_bilog_rados.h"
 #include "svc_zone.h"
 

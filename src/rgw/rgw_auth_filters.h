@@ -245,6 +245,7 @@ public:
       driver(driver),
       args(s->info.args),
       is_system(boost::logic::indeterminate) {
+    std::clog << "// OKOKOK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): " << std::endl;
   }
 
   void to_str(std::ostream& out) const override;
@@ -293,6 +294,17 @@ void SysReqApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo
         effective_owner->display_name = user->get_display_name();
       }
     }
+  } else {
+    std::clog << "// xxxx " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): COMMENTED!" << std::endl;
+    // attrs are needed for rate limiting
+    // try {
+    //   int ret = s->user->read_attrs(dpp, y);
+    //   if (ret != 0) {
+    //     ldpp_dout(dpp, 0) << "couldn't get user attrs: user_id=" << s->user->get_id() << ", ret=" << ret << dendl;
+    //   }
+    // } catch (const std::exception& e) {
+    //   ldpp_dout(dpp, -1) << "Error reading User Attrs: " << e.what() << dendl;
+    // }
   }
 }
 
@@ -316,6 +328,7 @@ SysReqApplier<T> add_sysreq(CephContext* const cct,
 			    rgw::sal::Driver* driver,
                             const req_state* const s,
                             T&& t) {
+  std::clog << "// OKOK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): " << std::endl;
   return SysReqApplier<T>(cct, driver, s, std::forward<T>(t));
 }
 
