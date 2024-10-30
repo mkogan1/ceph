@@ -5415,6 +5415,9 @@ int RGWRados::restore_obj_from_cloud(RGWLCCloudTierCtx& tier_ctx,
       attrs[RGW_ATTR_CLOUD_TIER_CONFIG] = t_tier;
     }
 
+    // The temporary cloud restore object should not sync to other site
+    log_op = false;
+
   } else { // permanent restore
     {
       bufferlist bl;
@@ -5424,6 +5427,7 @@ int RGWRados::restore_obj_from_cloud(RGWLCCloudTierCtx& tier_ctx,
       attrs[RGW_ATTR_RESTORE_TYPE] = std::move(bl);
       ldpp_dout(dpp, 20) << "Permanent restore, object:" << dest_obj << dendl;
     }
+    log_op = true;
   }
 
   {
