@@ -25,6 +25,7 @@
 
 #include "rgw_asio_thread.h"
 #include "rgw_cksum.h"
+#include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_zone.h"
 #include "rgw_cache.h"

@@ -599,6 +599,27 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
     }
   }
 
+  // We don't need user policies in case of STS token returned by AssumeRole,
+  // hence the check for user type
+  std::clog << "// xx " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): COMMENTED! s->user->get_id()=" << s->user->get_id() << std::endl;
+  // if (! s->user->get_id().empty() && s->auth.identity->get_identity_type() != TYPE_ROLE) {
+  //   try {
+  //     // We need the attrs for rate limiting
+  //     ret = s->user->read_attrs(dpp, y);
+  //     if (ret != 0) {
+  //       ldpp_dout(dpp, 0) << "couldn't get user attrs: user_id=" << s->user->get_id() << ", ret=" << ret << dendl;
+  //       if (ret == -ENOENT)
+  //         ret = 0;
+  //       else ret = -EACCES;
+  //     }
+  //   } catch (const std::exception& e) {
+  //     ldpp_dout(dpp, -1) << "Error reading User Attrs: " << e.what() << dendl;
+  //     if (!s->system_request) {
+  //       ret = -EACCES;
+  //     }
+  //   }
+  // }
+
   try {
     s->iam_policy = get_iam_policy_from_attr(s->cct, s->bucket_attrs, s->bucket_tenant);
   } catch (const std::exception& e) {

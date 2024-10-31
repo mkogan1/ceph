@@ -50,6 +50,7 @@
 #include "include/rados/librados.hpp"
 #include "rgw_public_access.h"
 #include "rgw_sal_fwd.h"
+// #include "rgw_sal.h"
 #include "rgw_hex.h"
 
 namespace ceph {
@@ -1244,7 +1245,7 @@ struct req_init_state {
   std::string src_bucket;
 };
 
-#include "rgw_auth.h"
+// #include "rgw_auth.h"
 
 class RGWObjectCtx;
 
@@ -1511,6 +1512,9 @@ struct rgw_cache_entry_info {
 
   rgw_cache_entry_info() : gen(0) {}
 };
+
+// #include "rgw_sal.h"
+#include "rgw_auth.h"
 
 inline std::ostream& operator<<(std::ostream& out, const rgw_obj &o) {
   return out << o.bucket.name << ":" << o.get_oid();

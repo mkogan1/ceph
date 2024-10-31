@@ -22,6 +22,7 @@
 #include "common/errno.h"
 //#include "common/dout.h"
 
+#include "rgw_common.h"
 #include "rgw_sal.h"
 #include "rgw_sal_rados.h"
 #include "driver/rados/config/store.h"

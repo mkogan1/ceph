@@ -6462,12 +6462,15 @@ rgw::auth::s3::LocalEngine::authenticate(
   /* get the user info */
   std::unique_ptr<rgw::sal::User> user;
   const std::string access_key_id(_access_key_id);
+  std::clog << "  >>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): access_key_id=" << access_key_id << std::endl;
   /* TODO(rzarzynski): we need to have string-view taking variant. */
   if (driver->get_user_by_access_key(dpp, access_key_id, y, &user) < 0) {
       ldpp_dout(dpp, 5) << "error reading user info, uid=" << access_key_id
               << " can't authenticate" << dendl;
       return result_t::reject(-ERR_INVALID_ACCESS_KEY);
   }
+  // this->user = user.get();  // MK-TODO//
+  std::clog << "  >>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): user=" << user << std::endl;
   //TODO: Uncomment, when we have a migration plan in place.
   /*else {
     if (s->user->type != TYPE_RGW) {
@@ -6494,9 +6497,9 @@ rgw::auth::s3::LocalEngine::authenticate(
 
   /* Ignore signature for HTTP OPTIONS */
   if (s->op_type == RGW_OP_OPTIONS_CORS) {
-    s->user->set_attrs(user->get_attrs());
+    //CB// s->user->set_attrs(user->get_attrs());
     auto apl = apl_factory->create_apl_local(
-        cct, s, user->get_info(), std::move(account), std::move(policies),
+        cct, s, &user, std::move(account), std::move(policies),
         k.subuser, std::nullopt, access_key_id);
     return result_t::grant(std::move(apl), completer_factory(k.key));
   }
@@ -6516,10 +6519,38 @@ rgw::auth::s3::LocalEngine::authenticate(
     return result_t::reject(-ERR_SIGNATURE_NO_MATCH);
   }
 
-  s->user->set_attrs(user->get_attrs());
+  // s->user->set_attrs(user->get_attrs());  //MK-OLD_PR//
+  // std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): user->read_attrs(dpp, y);  user=" << user << std::endl;
+  // ret = user->read_attrs(dpp, y);
+  // if (ret != 0) {
+  //   std::clog << "// ERR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): user->read_attrs(dpp, y);  ret=" << ret << std::endl;
+  //   // abort();
+  // }
+
+
+  // std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): user->read_attrs(dpp, y);  user=" << user << std::endl;
+  // ret = user->read_attrs(dpp, y);
+  // if (ret != 0) {
+  //   std::clog << "// ERR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): user->read_attrs(dpp, y);  ret=" << ret << std::endl;
+  //   // abort();
+  // }
+
+
+  //CB// s->user->set_attrs(user->get_attrs());
+  std::clog << "  >>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): apl_factory->create_apl_local() >>  user=" << user << std::endl;
   auto apl = apl_factory->create_apl_local(
-      cct, s, user->get_info(), std::move(account), std::move(policies),
+      cct, s, &user, std::move(account), std::move(policies),
       k.subuser, std::nullopt, access_key_id);
+  std::clog << "  <<< OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): apl_factory->create_apl_local() <<  user=" << user << std::endl;
+  
+  // std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): s->user->read_attrs(dpp, y);  s->user=" << s->user << std::endl;
+  //x// s->user = std::move(user);
+  // ret = s->user->read_attrs(dpp, y);
+  // if (ret != 0) {
+  //   std::clog << "// OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): s->user->read_attrs(dpp, y);  ret=" << ret << std::endl;
+  //   // abort();
+  // }
+
   return result_t::grant(std::move(apl), completer_factory(k.key));
 }
 
@@ -6725,10 +6756,10 @@ rgw::auth::s3::STSEngine::authenticate(
       return result_t::deny(-EPERM);
     }
 
-    s->user->set_attrs(user->get_attrs());
+    //CB// s->user->set_attrs(user->get_attrs());
     string subuser;
     auto apl = local_apl_factory->create_apl_local(
-        cct, s, user->get_info(), std::move(account), std::move(policies),
+        cct, s, &user, std::move(account), std::move(policies),
         subuser, token.perm_mask, std::string(_access_key_id));
     return result_t::grant(std::move(apl), completer_factory(token.secret_access_key));
   }

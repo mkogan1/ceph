@@ -1,8 +1,9 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 
+// #include "rgw_zone.h"
+#include "rgw_common.h"
 #include "rgw_period_history.h"
-#include "rgw_zone.h"
 
 #include "include/ceph_assert.h"
 

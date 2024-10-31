@@ -16,6 +16,7 @@
 #include <fmt/format.h>
 #include "common/errno.h"
 #include "rgw_sync_checkpoint.h"
+#include "rgw_common.h"
 #include "rgw_sal_rados.h"
 #include "rgw_bucket_sync.h"
 #include "rgw_data_sync.h"

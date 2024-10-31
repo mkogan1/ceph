@@ -12,6 +12,7 @@
  *
  */
 
+#include "rgw_common.h"
 #include "rgw_zone.h"
 #include "store.h"
 
