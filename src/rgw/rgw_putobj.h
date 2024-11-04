@@ -16,6 +16,7 @@
 #pragma once
 
 #include "include/buffer.h"
+#include "rgw_common.h"
 #include "rgw_sal.h"
 
 namespace rgw::putobj {

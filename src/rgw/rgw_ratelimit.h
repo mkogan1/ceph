@@ -116,6 +116,7 @@ class RateLimiterEntry {
       increase_tokens(curr_timestamp, ratelimit_info);
       if (is_read)
       {
+        std::clog << "     // WARN:" << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): ratelimit_info->max_read_ops=" << ratelimit_info->max_read_ops << std::endl;
         return should_rate_limit_read(ratelimit_info->max_read_ops, ratelimit_info->max_read_bytes);
       }
       return should_rate_limit_write(ratelimit_info->max_write_ops, ratelimit_info->max_write_bytes);
@@ -194,6 +195,7 @@ class RateLimiter {
     };
 
     bool should_rate_limit(const char *method, const std::string& key, ceph::coarse_real_time curr_timestamp, const RGWRateLimitInfo* ratelimit_info) {
+      std::clog << "    // WARN:" << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): ratelimit_info->max_read_ops=" << ratelimit_info->max_read_ops << std::endl;
       if (key.empty() || key.length() == 1 || !ratelimit_info->enabled)
       {
         return false;

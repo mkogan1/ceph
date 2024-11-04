@@ -15,6 +15,9 @@
 
 #include "rgw_common.h"
 #include "rgw_web_idp.h"
+#include "rgw_zone.h"
+#include "rgw_tools.h"
+#include "rgw_sal.h"
 
 #define RGW_USER_ANON_ID "anonymous"
 
@@ -139,7 +142,7 @@ public:
    *
    * XXX: be aware that the "account" term refers to rgw_user. The naming
    * is legacy. */
-  virtual void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const = 0; /* out */
+  virtual void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const = 0; /* out */
 
   /* Apply any changes to request state. This method will be most useful for
    * TempURL of Swift API. */
@@ -484,7 +487,7 @@ public:
 
   bool is_identity(const Principal& p) const override;
 
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override;
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override;
 
   uint32_t get_identity_type() const override {
     return TYPE_WEB;
@@ -656,7 +659,7 @@ public:
 
   uint32_t get_perm_mask() const override { return info.perm_mask; }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override; /* out */
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override; /* out */
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;
   void write_ops_log_entry(rgw_log_entry& entry) const override;
   uint32_t get_identity_type() const override { return info.acct_type; }
@@ -683,14 +686,18 @@ public:
 
 
 /* rgw::auth::LocalApplier targets those auth engines that base on the data
- * enclosed in the RGWUserInfo control structure. As a side effect of doing
+ * enclosed in the rgw::sal::User control structure. As a side effect of doing
  * the authentication process, they must have it loaded. Leveraging this is
  * a way to avoid unnecessary calls to underlying RADOS store. */
 class LocalApplier : public IdentityApplier {
   using aclspec_t = rgw::auth::Identity::aclspec_t;
 
 protected:
-  const RGWUserInfo user_info;
+  // const RGWUserInfo user_info;
+  // std::unique_ptr<rgw::sal::User>* user;  //MK-XXX//
+  // const std::unique_ptr<rgw::sal::User> user;
+  // mutable std::unique_ptr<rgw::sal::User> user;
+  mutable std::unique_ptr<rgw::sal::User> user;
   const std::optional<RGWAccountInfo> account;
   const std::vector<IAM::Policy> policies;
   const std::string subuser;
@@ -705,18 +712,26 @@ public:
   static const std::string NO_ACCESS_KEY;
 
   LocalApplier(CephContext* const cct,
-               const RGWUserInfo& user_info,
+               // const RGWUserInfo& user_info,
+               std::unique_ptr<rgw::sal::User>* puser,
                std::optional<RGWAccountInfo> account,
                std::vector<IAM::Policy> policies,
                std::string subuser,
                const std::optional<uint32_t>& perm_mask,
                const std::string access_key_id)
-    : user_info(user_info),
+    // : user_info(user_info),
+    // : user_id(user->get()->get_info().user_id),
+    // : user(std::move(*puser)),  //MK-TODO//
+    // : user(std::make_unique<rgw::sal::User>(*puser)),  //MK-TODO//
+    // : user(std::unique_ptr<rgw::sal::User>(new rgw::sal::User(*puser))),  //MK-TODO//
+    // : user(unique_ptr(std::unique_ptr<rgw::sal::User> &&)(*puser)),
+    : user(std::move(*puser)),
       account(std::move(account)),
       policies(std::move(policies)),
       subuser(std::move(subuser)),
       perm_mask(perm_mask.value_or(RGW_PERM_INVALID)),
       access_key_id(access_key_id) {
+    std::clog << "    >>> OKOK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): user=" << user << ", *puser=" << *puser << std::endl;
   }
 
   ACLOwner get_aclowner() const override;
@@ -726,19 +741,20 @@ public:
   bool is_identity(const Principal& p) const override;
   uint32_t get_perm_mask() const override {
     if (this->perm_mask == RGW_PERM_INVALID) {
-      return get_perm_mask(subuser, user_info);
+      // return get_perm_mask(subuser, user);
+      return get_perm_mask(subuser, user.get()->get_info());
     } else {
       return this->perm_mask;
     }
   }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override; /* out */
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override; /* out */
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;
-  uint32_t get_identity_type() const override { return user_info.type; }
+  uint32_t get_identity_type() const override { return user.get()->get_info().type; }
   std::string get_acct_name() const override { return {}; }
   std::string get_subuser() const override { return subuser; }
   const std::string& get_tenant() const override {
-    return user_info.user_id.tenant;
+    return user.get()->get_info().user_id.tenant;
   }
   const std::optional<RGWAccountInfo>& get_account() const override {
     return account;
@@ -750,7 +766,7 @@ public:
     virtual ~Factory() {}
     virtual aplptr_t create_apl_local(CephContext* cct,
                                       const req_state* s,
-                                      const RGWUserInfo& user_info,
+                                      std::unique_ptr<rgw::sal::User>* puser,
                                       std::optional<RGWAccountInfo> account,
                                       std::vector<IAM::Policy> policies,
                                       const std::string& subuser,
@@ -772,6 +788,7 @@ public:
   };
   struct TokenAttrs {
     rgw_user user_id;
+    //x//std::unique_ptr<rgw::sal::User>* user;
     std::string token_policy;
     std::string role_session_name;
     std::vector<std::string> token_claims;
@@ -803,7 +820,7 @@ public:
     return RGW_PERM_NONE; 
   }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override; /* out */
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override; /* out */
   uint32_t get_identity_type() const override { return TYPE_ROLE; }
   std::string get_acct_name() const override { return {}; }
   std::string get_subuser() const override { return {}; }

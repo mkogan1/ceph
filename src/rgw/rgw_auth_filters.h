@@ -117,8 +117,9 @@ public:
     return get_decoratee().get_account();
   }
 
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override {  /* out */
-    return get_decoratee().load_acct_info(dpp, user_info);
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override {  /* out */
+    // return get_decoratee().load_acct_info(dpp, user_info);
+    return get_decoratee().load_acct_info(dpp, puser);
   }
 
   void modify_request_state(const DoutPrefixProvider* dpp, req_state * s) const override {     /* in/out */
@@ -152,7 +153,7 @@ public:
   }
 
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override;   /* out */
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override;   /* out */
 };
 
 /* static declaration: UNKNOWN_ACCT will be an empty rgw_user that is a result
@@ -169,23 +170,23 @@ void ThirdPartyAccountApplier<T>::to_str(std::ostream& out) const
 }
 
 template <typename T>
-void ThirdPartyAccountApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const
+void ThirdPartyAccountApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const
 {
   if (UNKNOWN_ACCT == acct_user_override) {
     /* There is no override specified by the upper layer. This means that we'll
      * load the account owned by the authenticated identity (aka auth_user). */
-    DecoratedApplier<T>::load_acct_info(dpp, user_info);
+    DecoratedApplier<T>::load_acct_info(dpp, puser);
   } else if (DecoratedApplier<T>::is_owner_of(acct_user_override)) {
     /* The override has been specified but the account belongs to the authenticated
      * identity. We may safely forward the call to a next stage. */
-    DecoratedApplier<T>::load_acct_info(dpp, user_info);
+    DecoratedApplier<T>::load_acct_info(dpp, puser);
   } else if (this->is_anonymous()) {
     /* If the user was authed by the anonymous engine then scope the ANON user
      * to the correct tenant */
     if (acct_user_override.tenant.empty())
-      user_info.user_id = rgw_user(acct_user_override.id, RGW_USER_ANON_ID);
+      puser->get()->get_info().user_id = rgw_user(acct_user_override.id, RGW_USER_ANON_ID);
     else
-      user_info.user_id = rgw_user(acct_user_override.tenant, RGW_USER_ANON_ID);
+      puser->get()->get_info().user_id = rgw_user(acct_user_override.tenant, RGW_USER_ANON_ID);
   } else {
     /* Compatibility mechanism for multi-tenancy. For more details refer to
      * load_acct_info method of rgw::auth::RemoteApplier. */
@@ -196,7 +197,8 @@ void ThirdPartyAccountApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, 
       user = driver->get_user(tenanted_uid);
 
       if (user->load_user(dpp, null_yield) >= 0) {
-	user_info = user->get_info();
+	// puser->get()->get_info() = user->get_info();
+        puser = &user;  //MK-TODO//
         /* Succeeded. */
         return;
       }
@@ -213,7 +215,8 @@ void ThirdPartyAccountApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, 
         throw ret;
       }
     }
-    user_info = user->get_info();
+    // puser->get()->get_info() = user->get_info();
+    puser = &user;  //MK-TODO//
   }
 }
 
@@ -245,10 +248,11 @@ public:
       driver(driver),
       args(s->info.args),
       is_system(boost::logic::indeterminate) {
+    std::clog << "// OKOKOK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): " << std::endl;
   }
 
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const override;   /* out */
+  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override;   /* out */
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;       /* in/out */
 
   ACLOwner get_aclowner() const override {
@@ -271,11 +275,12 @@ void SysReqApplier<T>::to_str(std::ostream& out) const
 }
 
 template <typename T>
-void SysReqApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const
+void SysReqApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const
 {
-  DecoratedApplier<T>::load_acct_info(dpp, user_info);
-  is_system = user_info.system;
+  DecoratedApplier<T>::load_acct_info(dpp, puser);
+  is_system = puser->get()->get_info().system;
 
+  std::clog << "// xxxx " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): *puser=" << *puser << ", is_system=" << is_system.value << std::endl;
   if (is_system) {
     //ldpp_dout(dpp, 20) << "system request" << dendl;
 
@@ -291,8 +296,20 @@ void SysReqApplier<T>::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo
           throw -EACCES;
         }
         effective_owner->display_name = user->get_display_name();
+        // user->read_attrs(dpp, null_yield);
       }
     }
+  } else {
+    std::clog << "// xxxx " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): COMMENTED!" << std::endl;
+    // attrs are needed for rate limiting
+    // try {
+    //   int ret = user->read_attrs(dpp, null_yield);
+    //   if (ret != 0) {
+    //     ldpp_dout(dpp, 0) << "couldn't get user attrs: user_id=" << user->get_id() << ", ret=" << ret << dendl;
+    //   }
+    // } catch (const std::exception& e) {
+    //   ldpp_dout(dpp, -1) << "Error reading User Attrs: " << e.what() << dendl;
+    // }
   }
 }
 
@@ -300,8 +317,10 @@ template <typename T>
 void SysReqApplier<T>::modify_request_state(const DoutPrefixProvider* dpp, req_state* const s) const
 {
   if (boost::logic::indeterminate(is_system)) {
-    RGWUserInfo unused_info;
-    load_acct_info(dpp, unused_info);
+    // RGWUserInfo unused_info;
+    // load_acct_info(dpp, unused_info);
+    std::unique_ptr<rgw::sal::User> unused_user;  //MK// //MK-TODO// //!!!//
+    load_acct_info(dpp, &unused_user);
   }
 
   if (is_system) {
@@ -316,6 +335,7 @@ SysReqApplier<T> add_sysreq(CephContext* const cct,
 			    rgw::sal::Driver* driver,
                             const req_state* const s,
                             T&& t) {
+  std::clog << "// OKOK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): " << std::endl;
   return SysReqApplier<T>(cct, driver, s, std::forward<T>(t));
 }
 

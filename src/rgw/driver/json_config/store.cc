@@ -12,6 +12,7 @@
  *
  */
 
+#include "rgw_common.h"
 #include <system_error>
 #include "include/buffer.h"
 #include "common/errno.h"
