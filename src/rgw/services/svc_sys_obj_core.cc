@@ -19,6 +19,7 @@ int RGWSI_SysObj_Core_GetObjState::get_rados_obj(const DoutPrefixProvider *dpp,
   if (!has_rados_obj) {
     if (obj.oid.empty()) {
       ldpp_dout(dpp, 0) << "ERROR: obj.oid is empty" << dendl;
+      std::clog << "       >>> ERR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): ERROR: obj.oid is empty" << std::endl;
       return -EINVAL;
     }
 
@@ -39,6 +40,7 @@ int RGWSI_SysObj_Core::get_rados_obj(const DoutPrefixProvider *dpp,
 {
   if (obj.oid.empty()) {
     ldpp_dout(dpp, 0) << "ERROR: obj.oid is empty" << dendl;
+    std::clog << "       >>> ERROR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): ERROR: obj.oid is empty" << std::endl;
     return -EINVAL;
   }
 

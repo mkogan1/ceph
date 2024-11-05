@@ -5,6 +5,7 @@
 #include <sstream>
 #include <chrono>
 
+#include "rgw_common.h"
 #include "rgw_zone.h"
 #include "driver/rados/rgw_bucket.h"
 #include "rgw_asio_thread.h"

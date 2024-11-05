@@ -554,6 +554,7 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
 			     s->bucket_acl, s->bucket->get_key(), y);
 
     s->bucket_owner = s->bucket_acl.get_owner();
+    //MK-NAK-FLOW// std::clog << "X=====>>>>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): s->user=" << s->user << ", s->bucket_owner.id=" << s->bucket_owner.id << std::endl;
     acct_acl_user = &s->bucket_owner;
 
     s->zonegroup_endpoint = rgw::get_zonegroup_endpoint(zonegroup);
@@ -598,6 +599,35 @@ int rgw_build_bucket_policies(const DoutPrefixProvider *dpp, rgw::sal::Driver* d
       return ret;
     }
   }
+
+  // We don't need user policies in case of STS token returned by AssumeRole,
+  // hence the check for user type
+  std::clog << "// xx " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): COMMENTED! s->user->get_id()=" << s->user->get_id() << std::endl;
+  // if (! s->user->get_id().empty() && s->auth.identity->get_identity_type() != TYPE_ROLE) {
+  //   try {
+  //     // We need the attrs for rate limiting
+  //     ret = s->user->read_attrs(dpp, y);
+  //     if (ret != 0) {
+  //       ldpp_dout(dpp, 0) << "couldn't get user attrs: user_id=" << s->user->get_id() << ", ret=" << ret << dendl;
+  //       if (ret == -ENOENT)
+  //         ret = 0;
+  //       else ret = -EACCES;
+  //     }
+  //   } catch (const std::exception& e) {
+  //     ldpp_dout(dpp, -1) << "Error reading User Attrs: " << e.what() << dendl;
+  //     if (!s->system_request) {
+  //       ret = -EACCES;
+  //     }
+  //   }
+  // }
+  RGWRateLimitInfo ratelimit_info;
+  s->user->load_user(dpp, null_yield);
+  auto iter = s->user->get_attrs().find(RGW_ATTR_RATELIMIT);
+  if(iter != s->user->get_attrs().end()) {
+    bufferlist& bl = iter->second; auto biter = bl.cbegin(); decode(ratelimit_info, biter);
+  }
+  std::clog << " // xx " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): ratelimit_info.max_read_ops=" << ratelimit_info.max_read_ops << std::endl;
+
 
   try {
     s->iam_policy = get_iam_policy_from_attr(s->cct, s->bucket_attrs, s->bucket_tenant);
@@ -1492,7 +1522,7 @@ static int get_owner_quota_info(DoutPrefixProvider* dpp,
   return std::visit(fu2::overload(
       [&] (const rgw_user& uid) {
         auto user = driver->get_user(uid);
-        int r = user->load_user(dpp, y);
+        int r = user->load_user(dpp, y);  //MK-XXX//
         if (r >= 0) {
           quotas = user->get_info().quota;
         }
@@ -1530,6 +1560,7 @@ int RGWOp::init_quota()
   RGWQuota user_quotas;
 
   // consult the bucket owner's quota
+  std::clog << "        >>> ERROR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): get_owner_quota_info() >> s->user=" << s->user << ", s->bucket_owner.id=" << s->bucket_owner.id << std::endl;
   int r = get_owner_quota_info(this, s->yield, driver,
                                s->bucket_owner.id, user_quotas);
   if (r < 0) {
@@ -3671,6 +3702,9 @@ void RGWCreateBucket::execute(optional_yield y)
   }
 
   s->bucket_owner = policy.get_owner();
+  //MK-!!!//
+  std::clog << "X=====>>>>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): s->user=" << s->user << ", s->bucket_owner.id=" << s->bucket_owner.id << std::endl;
+  //MK-!!!//
   createparams.owner = s->bucket_owner.id;
 
   buffer::list aclbl;

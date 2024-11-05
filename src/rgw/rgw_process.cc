@@ -94,8 +94,10 @@ void RGWProcess::RGWWQ::_process(RGWRequest *req, ThreadPool::TPHandle &) {
 bool rate_limit(rgw::sal::Driver* driver, req_state* s) {
   // we dont want to limit health check or system or admin requests
   const auto& is_admin_or_system = s->user->get_info();
-  if ((s->op_type ==  RGW_OP_GET_HEALTH_CHECK) || is_admin_or_system.admin || is_admin_or_system.system)
+  if ((s->op_type ==  RGW_OP_GET_HEALTH_CHECK) || is_admin_or_system.admin || is_admin_or_system.system) {
+    std::clog << "      >>> ERROR " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): s->op_type ==  RGW_OP_GET_HEALTH_CHECK) || is_admin_or_system.admin || is_admin_or_system.system" << std::endl;
     return false;
+  }
   std::string userfind;
   RGWRateLimitInfo global_user;
   RGWRateLimitInfo global_bucket;
@@ -132,6 +134,8 @@ bool rate_limit(rgw::sal::Driver* driver, req_state* s) {
   }
   bool limit_bucket = false;
   bool limit_user = s->ratelimit_data->should_rate_limit(method, s->ratelimit_user_name, s->time, user_ratelimit);
+  std::clog << "=====>>>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): s->user=" << s->user << ", limit_user=" << limit_user << std::endl;
+
 
   if(!rgw::sal::Bucket::empty(s->bucket.get()))
   {
@@ -199,6 +203,7 @@ int rgw_process_authenticated(RGWHandler_REST * const handler,
   }
 
   ldpp_dout(op, 2) << "init op" << dendl;
+  std::clog << "=====>>>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): op->init_processing() : s->user=" << s->user << std::endl;
   ret = op->init_processing(y);
   if (ret < 0) {
     return ret;
@@ -245,6 +250,7 @@ int rgw_process_authenticated(RGWHandler_REST * const handler,
   op->pre_exec();
 
   ldpp_dout(op, 2) << "check rate limiting" << dendl;
+  std::clog << "=====>>>> OK " << __FILE__ << " #" << __LINE__ << " | " << __func__ << "(): check rate limiting : s->user=" << s->user << std::endl;
   if (rate_limit(driver, s)) {
     return -ERR_RATE_LIMITED;
   }
