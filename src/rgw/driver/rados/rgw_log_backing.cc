@@ -4,6 +4,7 @@
 #include "cls/log/cls_log_client.h"
 #include "cls/version/cls_version_client.h"
 
+#include "rgw_common.h"
 #include "rgw_log_backing.h"
 #include "rgw_tools.h"
 #include "cls_fifo_legacy.h"

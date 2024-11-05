@@ -25,6 +25,8 @@
 #include "rgw_lua.h"
 #include "rgw_notify_event_type.h"
 #include "rgw_req_context.h"
+// #include "rgw_zone.h"
+// #include "rgw_tools.h"
 #include "include/random.h"
 
 // FIXME: following subclass dependencies
