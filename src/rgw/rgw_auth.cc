@@ -295,7 +295,7 @@ static auto transform_old_authinfo(const RGWUserInfo& user,
     }
 
     void load_acct_info(const DoutPrefixProvider* dpp,
-                        RGWUserInfo& user_info) const override {
+                        std::unique_ptr<rgw::sal::User>* puser) const override {
       // noop, this user info was passed in on construction
     }
 
@@ -523,7 +523,7 @@ rgw::auth::Strategy::apply(const DoutPrefixProvider *dpp, const rgw::auth::Strat
 
       /* Account used by a given RGWOp is decoupled from identity employed
        * in the authorization phase (RGWOp::verify_permissions). */
-      applier->load_acct_info(dpp, s->user->get_info());
+      applier->load_acct_info(dpp, &s->user);
       s->perm_mask = applier->get_perm_mask();
 
       /* This is the single place where we pass req_state as a pointer
@@ -631,7 +631,7 @@ void rgw::auth::WebIdentityApplier::create_account(const DoutPrefixProvider* dpp
   user_info = user->get_info();
 }
 
-void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const {
+void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const {
   rgw_user federated_user;
   federated_user.id = this->sub;
   federated_user.tenant = role_tenant;
@@ -640,9 +640,9 @@ void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp
   if (account) {
     // we don't need shadow users for account roles because bucket ownership,
     // quota, and stats are tracked by the account instead of the user
-    user_info.user_id = std::move(federated_user);
-    user_info.display_name = user_name;
-    user_info.type = TYPE_WEB;
+    puser->get()->get_info().user_id = std::move(federated_user);
+    puser->get()->get_info().display_name = user_name;
+    puser->get()->get_info().type = TYPE_WEB;
     return;
   }
 
@@ -651,7 +651,7 @@ void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp
   //Check in oidc namespace
   if (user->load_user(dpp, null_yield) >= 0) {
     /* Succeeded. */
-    user_info = user->get_info();
+    puser->get()->get_info() = user->get_info();
     return;
   }
 
@@ -659,7 +659,7 @@ void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp
   //Check for old users which wouldn't have been created in oidc namespace
   if (user->load_user(dpp, null_yield) >= 0) {
     /* Succeeded. */
-    user_info = user->get_info();
+    puser->get()->get_info() = user->get_info();
     return;
   }
 
@@ -684,7 +684,7 @@ void rgw::auth::WebIdentityApplier::load_acct_info(const DoutPrefixProvider* dpp
   }
 
   ldpp_dout(dpp, 0) << "NOTICE: couldn't map oidc federated user " << federated_user << dendl;
-  create_account(dpp, federated_user, this->user_name, user_info);
+  create_account(dpp, federated_user, this->user_name, puser->get()->get_info());
 }
 
 void rgw::auth::WebIdentityApplier::modify_request_state(const DoutPrefixProvider *dpp, req_state* s) const
@@ -936,7 +936,7 @@ void rgw::auth::RemoteApplier::write_ops_log_entry(rgw_log_entry& entry) const
 }
 
 /* TODO(rzarzynski): we need to handle display_name changes. */
-void rgw::auth::RemoteApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const      /* out */
+void rgw::auth::RemoteApplier::load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const      /* out */
 {
   /* It's supposed that RGWRemoteAuthApplier tries to load account info
    * that belongs to the authenticated identity. Another policy may be
@@ -975,7 +975,7 @@ void rgw::auth::RemoteApplier::load_acct_info(const DoutPrefixProvider* dpp, RGW
       (void) load_account_and_policies(dpp, null_yield, driver, user->get_info(),
                                        user->get_attrs(), account, policies);
 
-      user_info = std::move(user->get_info());
+      puser->get()->get_info() = std::move(user->get_info());
       owner_acct_user = std::move(tenanted_uid);
       return;
     }
@@ -990,13 +990,13 @@ void rgw::auth::RemoteApplier::load_acct_info(const DoutPrefixProvider* dpp, RGW
     (void) load_account_and_policies(dpp, null_yield, driver, user->get_info(),
                                      user->get_attrs(), account, policies);
 
-    user_info = std::move(user->get_info());
+    puser->get()->get_info() = std::move(user->get_info());
     owner_acct_user = acct_user;
     return;
   }
 
   ldpp_dout(dpp, 0) << "NOTICE: couldn't map swift user " << acct_user << dendl;
-  create_account(dpp, acct_user, implicit_tenant, user_info);
+  create_account(dpp, acct_user, implicit_tenant, puser->get()->get_info());
 
   /* Succeeded if we are here (create_account() hasn't throwed). */
 }
@@ -1098,11 +1098,12 @@ uint32_t rgw::auth::LocalApplier::get_perm_mask(const std::string& subuser_name,
   }
 }
 
-void rgw::auth::LocalApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const /* out */
+void rgw::auth::LocalApplier::load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const /* out */
 {
   /* Load the account that belongs to the authenticated identity. An extra call
    * to RADOS may be safely skipped in this case. */
-  user_info = this->user_info;
+  puser->reset(this->muser.release());
+  //MK-TODO// //MK-!!!//
 }
 
 void rgw::auth::LocalApplier::modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const
@@ -1119,6 +1120,22 @@ void rgw::auth::LocalApplier::write_ops_log_entry(rgw_log_entry& entry) const
   if (account) {
     entry.account_id = account->id;
   }
+}
+
+rgw::auth::LocalApplier::LocalApplier(CephContext* const cct,
+                                      std::unique_ptr<rgw::sal::User>* puser,
+                                      std::optional<RGWAccountInfo> account,
+                                      std::vector<IAM::Policy> policies,
+                                      std::string subuser,
+                                      const std::optional<uint32_t>& perm_mask,
+                                      const std::string access_key_id)
+  : user_info(puser->get()->get_info()),
+    muser(std::move(*puser)),
+    account(std::move(account)),
+    policies(std::move(policies)),
+    subuser(std::move(subuser)),
+    perm_mask(perm_mask.value_or(RGW_PERM_INVALID)),
+    access_key_id(access_key_id) {
 }
 
 ACLOwner rgw::auth::RoleApplier::get_aclowner() const
@@ -1183,10 +1200,10 @@ bool rgw::auth::RoleApplier::is_identity(const Principal& p) const {
   return false;
 }
 
-void rgw::auth::RoleApplier::load_acct_info(const DoutPrefixProvider* dpp, RGWUserInfo& user_info) const /* out */
+void rgw::auth::RoleApplier::load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const /* out */
 {
   /* Load the user id */
-  user_info.user_id = this->token_attrs.user_id;
+  puser->get()->get_info().user_id = this->token_attrs.user_id;
 }
 
 void rgw::auth::RoleApplier::write_ops_log_entry(rgw_log_entry& entry) const
@@ -1267,9 +1284,11 @@ rgw::auth::AnonymousEngine::authenticate(const DoutPrefixProvider* dpp, const re
   } else {
     RGWUserInfo user_info;
     rgw_get_anon_user(user_info);
-
+    //MK-!!!//
+    std::unique_ptr<rgw::sal::User> user = s->user->clone();
+    user->get_info() = user_info;
     auto apl = \
-      apl_factory->create_apl_local(cct, s, user_info, std::nullopt, {},
+      apl_factory->create_apl_local(cct, s, &user, std::nullopt, {},
                                     rgw::auth::LocalApplier::NO_SUBUSER,
                                     std::nullopt, rgw::auth::LocalApplier::NO_ACCESS_KEY);
     return result_t::grant(std::move(apl));
