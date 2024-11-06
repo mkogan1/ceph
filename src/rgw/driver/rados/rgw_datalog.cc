@@ -15,6 +15,7 @@
 #include "cls/fifo/cls_fifo_types.h"
 #include "cls/log/cls_log_client.h"
 
+#include "rgw_common.h"
 #include "cls_fifo_legacy.h"
 #include "rgw_bucket_layout.h"
 #include "rgw_datalog.h"

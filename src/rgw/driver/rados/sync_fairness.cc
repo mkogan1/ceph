@@ -12,6 +12,7 @@
  * Foundation.  See file COPYING.
  */
 
+#include "rgw_common.h"
 #include <mutex>
 #include <random>
 #include <vector>

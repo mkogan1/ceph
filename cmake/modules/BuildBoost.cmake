@@ -171,7 +171,7 @@ function(do_build_boost root_dir version)
     set(source_dir
       URL ${boost_url}
       URL_HASH SHA256=${boost_sha256}
-      DOWNLOAD_NO_PROGRESS 1)
+      DOWNLOAD_NO_PROGRESS 0)
   endif()
   # build all components in a single shot
   include(ExternalProject)
