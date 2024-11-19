@@ -6808,7 +6808,6 @@ void RGWAbortMultipart::execute(optional_yield y)
   string upload_id;
   string meta_oid;
   upload_id = s->info.args.get("uploadId");
-  rgw_obj meta_obj;
   RGWMPObj mp;
 
   if (upload_id.empty() || rgw::sal::RGWObject::empty(s->object.get()))
@@ -6821,8 +6820,21 @@ void RGWAbortMultipart::execute(optional_yield y)
   if (op_ret < 0)
     return;
 
+  std::unique_ptr<rgw::sal::RGWObject> meta_obj;
+  meta_obj = s->bucket->get_object(rgw_obj_key(meta_oid, string(), mp_ns));
+
+  int max_lock_secs_mp =
+    s->cct->_conf.get_val<int64_t>("rgw_mp_lock_max_time");
+  utime_t dur(max_lock_secs_mp, 0);
+  auto serializer = meta_obj->get_serializer(this, "RGWCompleteMultipart");
+  op_ret = serializer->try_lock(this, dur, y);
+  if (op_ret < 0) {
+    return;
+  }
+  
   RGWObjectCtx *obj_ctx = static_cast<RGWObjectCtx *>(s->obj_ctx);
   op_ret = abort_multipart_upload(this, store, s->cct, obj_ctx, s->bucket->get_info(), mp);
+  serializer->unlock();
 }
 
 int RGWListMultipart::verify_permission(optional_yield y)
