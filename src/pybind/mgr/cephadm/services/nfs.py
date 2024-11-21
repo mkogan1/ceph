@@ -105,7 +105,8 @@ class NFSService(CephService):
         cls,
         mgr: "CephadmOrchestrator",
         spec: Optional[ServiceSpec] = None,
-        daemon_type: Optional[str] = None
+        daemon_type: Optional[str] = None,
+        hostname: Optional[str] = None
     ) -> List[str]:
         deps: List[str] = []
         if not spec:

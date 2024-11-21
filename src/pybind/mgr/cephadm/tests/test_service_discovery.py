@@ -67,8 +67,9 @@ class FakeIngressServiceSpec:
 
 
 class FakeServiceSpec:
-    def __init__(self, port):
+    def __init__(self, port, service_type: Optional[str] = ''):
         self.monitor_port = port
+        self.service_type = service_type
 
     def metrics_exporter_port(self):
         # TODO: for smb only

@@ -25,7 +25,8 @@ class IngressService(CephService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         if daemon_type == 'haproxy':
             return IngressService.get_haproxy_dependencies(mgr, spec)
         elif daemon_type == 'keepalived':
@@ -263,7 +264,7 @@ class IngressService(CephService):
         if spec.haproxy_qat_support:
             final_config['qat_support'] = True
 
-        return final_config, sorted(deps)
+        return final_config, self.get_haproxy_dependencies(self.mgr, spec)
 
     def keepalived_prepare_create(
             self,

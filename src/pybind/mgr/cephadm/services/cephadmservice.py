@@ -1,9 +1,9 @@
 import errno
 import json
 import logging
+import random
 import re
 import socket
-import random
 import string
 import time
 from abc import ABCMeta, abstractmethod
@@ -277,7 +277,8 @@ class CephadmService(metaclass=ABCMeta):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         return []
 
     def __init__(self, mgr: "CephadmOrchestrator"):
@@ -1014,8 +1015,35 @@ class RgwService(CephService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
 
+        if daemon_type == 'haproxy':
+            # haproxy concentrator daemon. Deps are rgw daemons deployed on the same host
+            # that we put in as the backend servers in the haproxy config
+            assert spec is not None
+            assert hostname is not None
+            daemons = mgr.cache.get_daemons_by_service(spec.service_name())
+            deps = []
+            for d in daemons:
+                if (
+                    d.daemon_type == 'rgw'
+                    and d.ports
+                    and d.hostname == hostname
+                ):
+                    deps.extend([
+                        str(d.name()),
+                        d.ip or str(utils.resolve_ip(mgr.inventory.get_addr(str(d.hostname)))),
+                        str(d.ports[0])
+                    ])
+            return sorted(deps)
+        elif daemon_type and daemon_type != 'rgw':
+            # we should only be getting rgw or concentrator daemons here
+            raise OrchestratorError(
+                f'RGWService was asked for deps for unexpected daemon type: {daemon_type}'
+            )
+
+        # if we're here, it's a normal rgw daemon
         deps = []
         rgw_spec = cast(RGWSpec, spec)
         ssl_cert = getattr(rgw_spec, 'rgw_frontend_ssl_certificate', None)
@@ -1025,6 +1053,15 @@ class RgwService(CephService):
             deps.append(f'ssl-cert:{str(utils.md5_hash(ssl_cert))}')
 
         return sorted(deps)
+
+    def per_host_daemon_type(self, spec: Optional[ServiceSpec] = None) -> Optional[str]:
+        if spec:
+            rgw_spec = cast(RGWSpec, spec)
+            if getattr(rgw_spec, 'concentrator', None) == 'haproxy':
+                # if we are doing a concentrator setup, we need to deploy one
+                # haproxy daemon on each host that will receive RGW daemons
+                return 'haproxy'
+        return None
 
     def set_realm_zg_zone(self, spec: RGWSpec) -> None:
         assert self.TYPE == spec.service_type
@@ -1093,6 +1130,9 @@ class RgwService(CephService):
         self.mgr.trigger_connect_dashboard_rgw()
 
     def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
+        if self.is_concentrator_daemon_spec(daemon_spec):
+            return self.concentrator_prepare_create(daemon_spec)
+
         assert self.TYPE == daemon_spec.daemon_type
         rgw_id, _ = daemon_spec.daemon_id, daemon_spec.host
         spec = cast(RGWSpec, self.mgr.spec_store[daemon_spec.service_name].spec)
@@ -1532,7 +1572,8 @@ class CephExporterService(CephService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
 
         deps = [f'secure_monitoring_stack:{mgr.secure_monitoring_stack}']
         deps += mgr.cache.get_daemons_by_types(['mgmt-gateway'])
@@ -1617,7 +1658,8 @@ class CephadmAgent(CephService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         agent = mgr.http_server.agent
         return sorted(
             [
