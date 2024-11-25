@@ -494,6 +494,7 @@ class SpecStore():
             for key_attr in [
                 'server_key',
                 'client_key',
+                'encryption_key',
             ]:
                 key = getattr(nvmeof_spec, key_attr, None)
                 if key:
