@@ -72,7 +72,7 @@ class STSAuthStrategy : public rgw::auth::Strategy,
                             RoleApplier::Role role,
                             RoleApplier::TokenAttrs token_attrs) const override {
     auto apl = rgw::auth::add_sysreq(cct, driver, s,
-      rgw::auth::RoleApplier(cct, std::move(role), std::move(token_attrs)));
+      rgw::auth::RoleApplier(cct, driver, std::move(role), std::move(token_attrs)));
     return aplptr_t(new decltype(apl)(std::move(apl)));
   }
 
