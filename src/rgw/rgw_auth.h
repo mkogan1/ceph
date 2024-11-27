@@ -139,7 +139,8 @@ public:
    *
    * XXX: be aware that the "account" term refers to rgw_user. The naming
    * is legacy. */
-  virtual void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const = 0; /* out */
+  //MK// virtual void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const = 0; /* out */
+  virtual auto load_acct_info(const DoutPrefixProvider* dpp) const -> std::unique_ptr<rgw::sal::User> = 0; /* out */
 
   /* Apply any changes to request state. This method will be most useful for
    * TempURL of Swift API. */
@@ -484,7 +485,7 @@ public:
 
   bool is_identity(const Principal& p) const override;
 
-  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override;
+  auto load_acct_info(const DoutPrefixProvider* dpp) const -> std::unique_ptr<rgw::sal::User> override;
 
   uint32_t get_identity_type() const override {
     return TYPE_WEB;
@@ -656,7 +657,7 @@ public:
 
   uint32_t get_perm_mask() const override { return info.perm_mask; }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override; /* out */
+  auto load_acct_info(const DoutPrefixProvider* dpp) const -> std::unique_ptr<rgw::sal::User> override; /* out */
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;
   void write_ops_log_entry(rgw_log_entry& entry) const override;
   uint32_t get_identity_type() const override { return info.acct_type; }
@@ -726,7 +727,7 @@ public:
     }
   }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override; /* out */
+  auto load_acct_info(const DoutPrefixProvider* dpp) const -> std::unique_ptr<rgw::sal::User> override; /* out */
   void modify_request_state(const DoutPrefixProvider* dpp, req_state* s) const override;
   uint32_t get_identity_type() const override { return user_info.type; }
   std::string get_acct_name() const override { return {}; }
@@ -773,15 +774,20 @@ public:
     std::vector<std::pair<std::string, std::string>> principal_tags;
   };
 protected:
+  CephContext* const cct;
+  rgw::sal::Driver* driver;
   Role role;
   TokenAttrs token_attrs;
 
 public:
 
   RoleApplier(CephContext* const cct,
+               rgw::sal::Driver* driver,
                const Role& role,
                const TokenAttrs& token_attrs)
-    : role(role),
+    : cct(cct),
+      driver(driver),
+      role(role),
       token_attrs(token_attrs) {}
 
   ACLOwner get_aclowner() const override;
@@ -797,7 +803,7 @@ public:
     return RGW_PERM_NONE; 
   }
   void to_str(std::ostream& out) const override;
-  void load_acct_info(const DoutPrefixProvider* dpp, std::unique_ptr<rgw::sal::User>* puser) const override; /* out */
+  auto load_acct_info(const DoutPrefixProvider* dpp) const -> std::unique_ptr<rgw::sal::User> override; /* out */
   uint32_t get_identity_type() const override { return TYPE_ROLE; }
   std::string get_acct_name() const override { return {}; }
   std::string get_subuser() const override { return {}; }
