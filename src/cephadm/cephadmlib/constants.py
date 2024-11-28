@@ -2,7 +2,7 @@
 
 # Default container images -----------------------------------------------------
 DEFAULT_IMAGE = 'quay.io/ceph/ceph:v19'
-DEFAULT_IMAGE_IS_MAIN = True
+DEFAULT_IMAGE_IS_MAIN = False
 DEFAULT_IMAGE_RELEASE = 'tentacle'
 DEFAULT_REGISTRY = 'quay.io'  # normalize unqualified digests to this
 # ------------------------------------------------------------------------------
