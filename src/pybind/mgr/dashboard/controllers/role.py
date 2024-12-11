@@ -140,6 +140,4 @@ class Role(RESTController):
 @UIRouter('/scope', SecurityScope.USER)
 class Scope(RESTController):
     def list(self):
-        all_scopes = SecurityScope.all_scopes()
-        all_scopes.remove('iscsi')
-        return all_scopes
+        return SecurityScope.all_scopes()
