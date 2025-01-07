@@ -3823,7 +3823,7 @@ options:
   - osd_memory_cache_min
   - osd_memory_base
   - osd_memory_target_autotune
-  min: 896_M
+  min: 512_M
   flags:
   - runtime
 - name: osd_memory_target_autotune
@@ -3853,7 +3853,7 @@ options:
     amount of memory in bytes the OSD will need.  This is used to help
     the autotuner estimate the expected aggregate memory consumption of
     the caches.
-  default: 768_M
+  default: 448_M
   see_also:
   - bluestore_cache_autotune
   flags:
@@ -3883,10 +3883,10 @@ options:
     When TCMalloc and cache autotuning are enabled, set the minimum
     amount of memory used for caches. Note: Setting this value too
     low can result in significant cache thrashing.
-  default: 128_M
+  default: 64_M
   see_also:
   - bluestore_cache_autotune
-  min: 128_M
+  min: 64_M
   flags:
   - runtime
 - name: osd_memory_cache_resize_interval
