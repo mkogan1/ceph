@@ -1589,7 +1589,7 @@ int BlueFS::_replay(bool noop, bool to_stdout)
 		   << " fnode=" << fnode
 		   << " delta=" << delta
 		   << dendl;
-	      ceph_assert(delta.offset == fnode.allocated);
+	      ceph_assert(delta.offset == fnode.allocated || delta.extents.empty());
 	    }
 	    if (cct->_conf->bluefs_log_replay_check_allocations) {
               int r = _check_allocations(fnode,
