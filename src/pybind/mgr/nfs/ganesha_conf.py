@@ -5,6 +5,7 @@ from mgr_module import NFS_GANESHA_SUPPORTED_FSALS
 
 from .exception import NFSInvalidOperation, FSNotFound
 from .utils import check_fs
+from .qos_conf import QOS, RawBlock
 
 if TYPE_CHECKING:
     from nfs.module import Module
@@ -51,27 +52,6 @@ def _validate_sec_type(sec_type: str) -> None:
     if not isinstance(sec_type, str) or sec_type not in valid_sec_types:
         raise NFSInvalidOperation(
             f"SecType {sec_type} invalid, valid types are {valid_sec_types}")
-
-
-class RawBlock():
-    def __init__(self, block_name: str, blocks: List['RawBlock'] = [], values: Dict[str, Any] = {}):
-        if not values:  # workaround mutable default argument
-            values = {}
-        if not blocks:  # workaround mutable default argument
-            blocks = []
-        self.block_name = block_name
-        self.blocks = blocks
-        self.values = values
-
-    def __eq__(self, other: Any) -> bool:
-        if not isinstance(other, RawBlock):
-            return False
-        return self.block_name == other.block_name and \
-            self.blocks == other.blocks and \
-            self.values == other.values
-
-    def __repr__(self) -> str:
-        return f'RawBlock({self.block_name!r}, {self.blocks!r}, {self.values!r})'
 
 
 class GaneshaConfParser:
@@ -376,6 +356,7 @@ class Export:
             fsal: FSAL,
             clients: Optional[List[Client]] = None,
             sectype: Optional[List[str]] = None,
+            qos_block: Optional[QOS] = None,
             kmip_key_id: Optional[str] = None) -> None:
         self.export_id = export_id
         self.path = path
@@ -390,6 +371,7 @@ class Export:
         self.transports = transports
         self.clients: List[Client] = clients or []
         self.sectype = sectype
+        self.qos_block = qos_block
         self.kmip_key_id = kmip_key_id
 
     @classmethod
@@ -399,6 +381,10 @@ class Export:
 
         client_blocks = [b for b in export_block.blocks
                          if b.block_name == "CLIENT"]
+
+        qos_block = [b for b in export_block.blocks
+                     if b.block_name == "qos_block"]
+        qos_block = QOS.from_qos_block(qos_block[0]) if qos_block else None
 
         protocols = export_block.values.get('protocols')
         if not isinstance(protocols, list):
@@ -433,7 +419,9 @@ class Export:
                    [Client.from_client_block(client)
                     for client in client_blocks],
                    sectype=sectype,
-                   kmip_key_id=export_block.values.get('kmip_key_id'))
+                   qos_block=qos_block,
+                   kmip_key_id=export_block.values.get('kmip_key_id')
+                   )
 
     def to_export_block(self) -> RawBlock:
         # if kmip_key_id is present, it should be first line of export block
@@ -461,10 +449,16 @@ class Export:
             client.to_client_block()
             for client in self.clients
         ]
+        if self.qos_block:
+            result.blocks.append(self.qos_block.to_qos_block())
         return result
 
     @classmethod
     def from_dict(cls, export_id: int, ex_dict: Dict[str, Any]) -> 'Export':
+        if ex_dict.get('qos_block'):
+            qos_block = QOS.from_dict(ex_dict.get('qos_block', {}))
+        else:
+            qos_block = None
         return cls(export_id,
                    ex_dict.get('path', '/'),
                    ex_dict['cluster_id'],
@@ -477,7 +471,9 @@ class Export:
                    FSAL.from_dict(ex_dict.get('fsal', {})),
                    [Client.from_dict(client) for client in ex_dict.get('clients', [])],
                    sectype=ex_dict.get("sectype"),
-                   kmip_key_id=ex_dict.get('kmip_key_id'))
+                   qos_block=qos_block,
+                   kmip_key_id=ex_dict.get('kmip_key_id')
+                   )
 
     def to_dict(self) -> Dict[str, Any]:
         values = {
@@ -495,6 +491,8 @@ class Export:
         }
         if self.sectype:
             values['sectype'] = self.sectype
+        if self.qos_block:
+            values['qos_block'] = self.qos_block.to_dict()
         if self.kmip_key_id:
             values['kmip_key_id'] = self.kmip_key_id
         return values

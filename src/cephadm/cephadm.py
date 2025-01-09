@@ -209,6 +209,7 @@ from cephadmlib.listing_updaters import (
     VersionStatusUpdater,
 )
 from cephadmlib.container_lookup import infer_local_ceph_image, identify
+from ceph.utils import with_units_to_int
 
 
 FuncT = TypeVar('FuncT', bound=Callable)
@@ -4713,6 +4714,12 @@ def _add_deploy_parser_args(
         help='Additional entrypoint arguments to apply to deamon'
     )
     parser_deploy.add_argument(
+        '--limit-core-infinity',
+        action='store_true',
+        default=False,
+        help='Set LimitCORE=infinity in ceph unit files'
+     )
+    parser_deploy.add_argument(
         '--skip-restart-for-reconfig',
         action='store_true',
         default=False,
@@ -4735,10 +4742,6 @@ def _name_opts(parser: argparse.ArgumentParser) -> None:
         '--infer-name',
         '-i',
         help='daemon name search (type[.partial_id])',
-        '--limit-core-infinity',
-        action='store_true',
-        default=False,
-        help='Set LimitCORE=infinity in ceph unit files'
     )
 
 
