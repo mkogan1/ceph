@@ -3742,6 +3742,15 @@ Then run the following:
             if not mgmt_gw_daemons:
                 raise OrchestratorError("The 'oauth2-proxy' service depends on the 'mgmt-gateway' service, but it is not configured.")
 
+        if spec.service_type == 'nvmeof':
+            spec = cast(NvmeofServiceSpec, spec)
+            assert spec.pool is not None, "Pool cannot be None for nvmeof services"
+            try:
+                self._check_pool_exists(spec.pool, spec.service_name())
+            except OrchestratorError as e:
+                self.log.debug(f"{e}")
+                raise
+
         if spec.placement.count is not None:
             if spec.service_type in ['mon', 'mgr']:
                 if spec.placement.count > max(5, host_count):
