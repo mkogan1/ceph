@@ -826,6 +826,24 @@ def write_new(
     os.rename(tempname, destination)
 
 
+def unlink_file(
+    path: Union[str, Path],
+    missing_ok: bool = False,
+    ignore_errors: bool = False,
+) -> None:
+    """Wrapper around unlink that can either ignore missing files or all
+    errors.
+    """
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        if not missing_ok and not ignore_errors:
+            raise
+    except Exception:
+        if not ignore_errors:
+            raise
+
+
 def populate_files(config_dir, config_files, uid, gid):
     # type: (str, Dict, int, int) -> None
     """create config files for different services"""
@@ -4588,6 +4606,18 @@ WantedBy=ceph-{fsid}.target
 
     return u
 
+
+def update_base_ceph_unit_file(
+    ctx: CephadmContext,
+    fsid: str,
+) -> None:
+    unit = get_unit_file(ctx, fsid, limit_core_infinity=limit_core_infinity)
+    default_unit_file = f'{ctx.unit_dir}/ceph-{fsid}@.service'
+    with write_new(default_unit_file, perms=None) as f:
+        f.write(unit)
+    call_throws(ctx, ['systemctl', 'daemon-reload'])
+
+
 ##################################
 
 
@@ -7277,6 +7307,80 @@ def command_unit(ctx):
         desc=''
     )
     return code
+
+##################################
+
+
+def write_coredumpctl_override_drop_in(
+    dest: IO,
+    ctx: CephadmContext,
+    max_coredump_size: str,
+) -> None:
+    lines = [
+        '# created by cephadm',
+        '[Coredump]',
+        f'ProcessSizeMax={max_coredump_size}',
+        f'ExternalSizeMax={max_coredump_size}',
+    ]
+    dest.write('\n'.join(lines))
+
+
+def set_coredump_overrides(
+    ctx: CephadmContext, fsid: str, max_coredump_size: str
+) -> None:
+    """
+    Override coredumpctl settings
+    """
+    coredump_overrides_dir = Path('/etc/systemd/coredump.conf.d')
+    coredump_override_path = Path(coredump_overrides_dir).joinpath(
+        f'90-cephadm-{fsid}-coredumps-overrides.conf'
+    )
+
+    if coredump_override_path.exists():
+        coredump_override_content = read_file([str(coredump_override_path)])
+        if (
+            f'ProcessSizeMax={max_coredump_size}' in coredump_override_content
+            and f'ExternalSizeMax={max_coredump_size}'
+            in coredump_override_content
+        ):
+            logger.info(
+                f'{str(coredump_override_path)} already has sizes set to {max_coredump_size}, skipping...'
+            )
+            return
+
+    if not coredump_overrides_dir.is_dir():
+        coredump_overrides_dir.mkdir(parents=True, exist_ok=True)
+
+    with write_new(coredump_override_path, perms=None) as coredumpctl_override_fh:
+        write_coredumpctl_override_drop_in(
+            coredumpctl_override_fh, ctx, max_coredump_size=max_coredump_size
+        )
+
+    logger.info(
+        f'Set coredump max sizes in {str(coredump_override_path)} to {max_coredump_size}. '
+        'Restarting systemd-coredump.socket'
+    )
+    call_throws(ctx, ['systemctl', 'restart', 'systemd-coredump.socket'])
+    logger.info('systemd-coredump.socket restarted successfully')
+
+
+def remove_coredump_overrides(ctx: CephadmContext, fsid: str) -> None:
+    """
+    Remove drop-in file for setting coredump max size
+    """
+    coredump_overrides_path = Path(
+        f'/etc/systemd/coredump.conf.d/90-cephadm-{fsid}-coredumps-overrides.conf'
+    )
+    unlink_file(coredump_overrides_path, missing_ok=True)
+
+
+def command_set_coredump_overrides(ctx: CephadmContext) -> None:
+    if not ctx.cleanup:
+        set_coredump_overrides(ctx, ctx.fsid, ctx.coredump_max_size)
+        update_base_ceph_unit_file(ctx, ctx.fsid)
+    else:
+        remove_coredump_overrides(ctx, ctx.fsid)
+        update_base_ceph_unit_file(ctx, ctx.fsid)
 
 ##################################
 
@@ -10930,6 +11034,30 @@ def _get_parser():
         default='-',
         nargs='?',
         help='Configuration input source file',
+    )
+
+    parser_set_coredump_overrides = subparsers_orch.add_parser(
+        'set-coredump-overrides',
+        help='override coredumpctl max coredump process and external size'
+    )
+    parser_set_coredump_overrides.set_defaults(func=command_set_coredump_overrides)
+    parser_set_coredump_overrides.add_argument(
+        '--fsid',
+        required=True,
+        help='cluster fsid'
+    )
+    parser_set_coredump_overrides.add_argument(
+        '--coredump-max-size',
+        required=False,
+        default='32G',
+        help='custom max coredump size to set. Should be string including unit (e.g. 32G)'
+    )
+    parser_set_coredump_overrides.add_argument(
+        '--cleanup',
+        required=False,
+        default=False,
+        action='store_true',
+        help='Remove max coredump size drop-in and LimitCORE=infinity from unit file'
     )
 
     parser_check_host = subparsers.add_parser(
