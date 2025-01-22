@@ -1443,6 +1443,8 @@ class RgwService(CephService):
             ssl_cert = '\n'.join(ssl_cert)
         if ssl_cert:
             deps.append(str(utils.md5_hash(ssl_cert)))
+        if hasattr(rgw_spec, 'rgw_exit_timeout_secs') and rgw_spec.rgw_exit_timeout_secs:
+            config['rgw_exit_timeout_secs'] = rgw_spec.rgw_exit_timeout_secs
         return config, deps
 
     def get_active_ports(self, service_name: str) -> List[int]:
