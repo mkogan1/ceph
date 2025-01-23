@@ -4223,7 +4223,7 @@ def deploy_daemon_units(
 
     # systemd
     install_base_units(ctx, fsid)
-    unit = get_unit_file(ctx, fsid)
+    unit = get_unit_file(ctx, fsid, limit_core_infinity=ctx.limit_core_infinity)
     unit_file = 'ceph-%s@.service' % (fsid)
     with write_new(ctx.unit_dir + '/' + unit_file, perms=None) as f:
         f.write(unit)
@@ -4553,8 +4553,8 @@ def install_base_units(ctx, fsid):
 """ % (fsid, ' '.join(targets), '|'.join(targets)))
 
 
-def get_unit_file(ctx, fsid):
-    # type: (CephadmContext, str) -> str
+def get_unit_file(ctx, fsid, limit_core_infinity=False):
+    # type: (CephadmContext, str, Optional[bool]) -> str
     extra_args = ''
     if isinstance(ctx.container_engine, Podman):
         extra_args = ('ExecStartPre=-/bin/rm -f %t/%n-pid %t/%n-cid\n'
@@ -4588,6 +4588,7 @@ ExecStart=/bin/bash {data_dir}/{fsid}/%i/unit.run
 ExecStop=-/bin/bash -c 'bash {data_dir}/{fsid}/%i/unit.stop'
 ExecStopPost=-/bin/bash {data_dir}/{fsid}/%i/unit.poststop
 KillMode=none
+{limit_core_infinity_setting}
 Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=200
@@ -4602,7 +4603,8 @@ WantedBy=ceph-{fsid}.target
            extra_args=extra_args,
            # if docker, we depend on docker.service
            docker_after=' docker.service' if docker else '',
-           docker_requires='Requires=docker.service\n' if docker else '')
+           docker_requires='Requires=docker.service\n' if docker else '',
+           limit_core_infinity_setting='LimitCORE=infinity' if limit_core_infinity else '')
 
     return u
 
@@ -4610,6 +4612,7 @@ WantedBy=ceph-{fsid}.target
 def update_base_ceph_unit_file(
     ctx: CephadmContext,
     fsid: str,
+    limit_core_infinity: Optional[bool] = False
 ) -> None:
     unit = get_unit_file(ctx, fsid, limit_core_infinity=limit_core_infinity)
     default_unit_file = f'{ctx.unit_dir}/ceph-{fsid}@.service'
@@ -7377,10 +7380,10 @@ def remove_coredump_overrides(ctx: CephadmContext, fsid: str) -> None:
 def command_set_coredump_overrides(ctx: CephadmContext) -> None:
     if not ctx.cleanup:
         set_coredump_overrides(ctx, ctx.fsid, ctx.coredump_max_size)
-        update_base_ceph_unit_file(ctx, ctx.fsid)
+        update_base_ceph_unit_file(ctx, ctx.fsid, limit_core_infinity=True)
     else:
         remove_coredump_overrides(ctx, ctx.fsid)
-        update_base_ceph_unit_file(ctx, ctx.fsid)
+        update_base_ceph_unit_file(ctx, ctx.fsid, limit_core_infinity=False)
 
 ##################################
 
@@ -10448,6 +10451,12 @@ def _add_deploy_parser_args(
         default=[],
         help='Additional entrypoint arguments to apply to deamon'
     )
+    parser_deploy.add_argument(
+        '--limit-core-infinity',
+        action='store_true',
+        default=False,
+        help='Set LimitCORE=infinity in ceph unit files'
+    )
 
 
 def _get_parser():
@@ -10590,6 +10599,17 @@ def _get_parser():
         action='store_true',
         default=CONTAINER_INIT,
         help=argparse.SUPPRESS)
+    parser_adopt.add_argument(
+        '--no-cgroups-split',
+        action='store_true',
+        default=False,
+        help='Do not run containers with --cgroups=split (currently only relevant when using podman)')
+    parser_adopt.add_argument(
+        '--limit-core-infinity',
+        action='store_true',
+        default=False,
+        help='Set LimitCORE=infinity in generated ceph unit files'
+    )
 
     parser_rm_daemon = subparsers.add_parser(
         'rm-daemon', help='remove daemon instance')
@@ -10959,6 +10979,11 @@ def _get_parser():
         '--deploy-cephadm-agent',
         action='store_true',
         help='deploy the cephadm-agent')
+    parser_bootstrap.add_argument(
+        '--limit-core-infinity',
+        action='store_true',
+        help='Set LimitCORE=infinity in ceph unit files'
+    )
 
     parser_bootstrap.add_argument(
         '--call-home-icn',
