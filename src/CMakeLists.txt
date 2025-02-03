@@ -950,6 +950,12 @@ if(WITH_NVMEOF_GATEWAY_MONITOR_CLIENT)
     nvmeof/NVMeofGwMonitorClient.cc)
   add_executable(ceph-nvmeof-monitor-client ${ceph_nvmeof_monitor_client_srcs})
   add_dependencies(ceph-nvmeof-monitor-client ceph-common)
+  # absl is installed as grpc build dependency on RPM based systems
+  # Also isolate this flag to specific targets which needs this package
+  if(EXISTS "/etc/redhat-release" OR EXISTS "/etc/fedora-release")
+    target_compile_definitions(ceph-nvmeof-monitor-client PRIVATE HAVE_ABSEIL)
+    target_compile_definitions(ceph-mon PRIVATE HAVE_ABSEIL)
+  endif()
   target_link_libraries(ceph-nvmeof-monitor-client
     client
     mon
