@@ -8488,6 +8488,9 @@ def _rm_cluster(ctx: CephadmContext, keep_logs: bool, zap_osds: bool) -> None:
         for p in sysctl_dir.glob(f'90-ceph-{ctx.fsid}-*.conf'):
             p.unlink()
 
+    # cleanup coredumpctl overrides
+    remove_coredump_overrides(ctx, ctx.fsid)
+
     # cleanup remaining ceph directories
     ceph_dirs = [f'/run/ceph/{ctx.fsid}', f'/tmp/cephadm-{ctx.fsid}', f'/var/run/ceph/{ctx.fsid}']
     for dd in ceph_dirs:
