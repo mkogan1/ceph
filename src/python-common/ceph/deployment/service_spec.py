@@ -1309,6 +1309,7 @@ class RGWSpec(ServiceSpec):
                  concentrator_monitor_port: Optional[int] = None,
                  concentrator_monitor_user: Optional[str] = None,
                  concentrator_monitor_password: Optional[str] = None,
+                 wildcard_enabled: Optional[bool] = False,
                  ):
         assert service_type == 'rgw', service_type
 
@@ -1361,6 +1362,7 @@ class RGWSpec(ServiceSpec):
         self.rgw_bucket_counters_cache_size = rgw_bucket_counters_cache_size
         #: Used to make RGW not do multisite replication so it can dedicate to IO
         self.disable_multisite_sync_traffic = disable_multisite_sync_traffic
+<<<<<<< HEAD
         #: Attributes for <zone-name>.rgw.buckets.data pool created in rgw realm bootstrap command
         self.data_pool_attributes = data_pool_attributes
         #: Whether we should generate a cert/key for the user if not provided
@@ -1377,6 +1379,9 @@ class RGWSpec(ServiceSpec):
         # password to use for monitoring concnetrator
         self.concentrator_monitor_password = concentrator_monitor_password
         self._set_concentrator_defaults()
+=======
+        self.wildcard_enabled = wildcard_enabled
+>>>>>>> 3c24753af0b (cephadm: Ensure wildcard SAN is included in RGW self-signed certs)
 
     def get_port_start(self) -> List[int]:
         ports = self.get_port()
