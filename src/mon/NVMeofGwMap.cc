@@ -63,6 +63,8 @@ int  NVMeofGwMap::cfg_add_gw(const NvmeGwId &gw_id, const NvmeGroupKey& group_ke
             Created_gws[group_key][gw_id] = gw_created;
             Created_gws[group_key][gw_id].performed_full_startup = true;
             dout(4) << __func__ << "Created GWS:  " << Created_gws  <<  dendl;
+            Created_gws[group_key][gw_id].sm_state[1] = GW_STATES_PER_AGROUP_E::GW_WAIT_BLOCKLIST_CMPL;
+            start_timer(gw_id, group_key, 1, 10); //start Blocklist timeout
             return 0;
         }
     }
@@ -500,7 +502,7 @@ void NVMeofGwMap::fsm_handle_to_expired(const NvmeGwId &gw_id, const NvmeGroupKe
       ceph_assert(grp_owner_found);// when  GW group owner is deleted the fbk gw is put to standby
     }
     else if(fbp_gw_state.sm_state[grpid] == GW_STATES_PER_AGROUP_E::GW_WAIT_BLOCKLIST_CMPL){
-        dout(1) << " Expired GW_WAIT_FAILOVER_PREPARED timer from GW " << gw_id << " ANA groupId: "<< grpid << dendl;
+        dout(1) << " Expired GW_WAIT_BLOCKLIST_COMPLETION timer from GW " << gw_id << " ANA groupId: "<< grpid << dendl;
         ceph_assert(false);
     }
     if (map_modified) validate_gw_map(group_key);
