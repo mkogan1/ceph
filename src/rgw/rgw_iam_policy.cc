@@ -163,6 +163,7 @@ static const actpair actpairs[] =
  { "iam:GetOIDCProvider", iamGetOIDCProvider},
  { "iam:ListOIDCProviders", iamListOIDCProviders},
  { "iam:AddClientIdToOIDCProvider", iamAddClientIdToOIDCProvider},
+ { "iam:RemoveCientIdFromOIDCProvider", iamRemoveClientIdFromOIDCProvider},
  { "iam:UpdateOIDCProviderThumbprint", iamUpdateOIDCProviderThumbprint},
  { "iam:TagRole", iamTagRole},
  { "iam:ListRoleTags", iamListRoleTags},
@@ -1574,6 +1575,9 @@ const char* action_bit_string(uint64_t action) {
 
   case iamAddClientIdToOIDCProvider:
     return "iam:AddClientIdToOIDCProvider";
+
+  case iamRemoveClientIdFromOIDCProvider:
+    return "iam:RemoveClientIdFromOIDCProvider";
 
   case iamUpdateOIDCProviderThumbprint:
     return "iam:UpdateOIDCProviderThumbprint";
