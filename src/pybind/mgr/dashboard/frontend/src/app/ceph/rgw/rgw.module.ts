@@ -92,6 +92,7 @@ import { RgwBucketTieringFormComponent } from './rgw-bucket-tiering-form/rgw-buc
 import { RgwBucketLifecycleListComponent } from './rgw-bucket-lifecycle-list/rgw-bucket-lifecycle-list.component';
 import { RgwRateLimitComponent } from './rgw-rate-limit/rgw-rate-limit.component';
 import { RgwRateLimitDetailsComponent } from './rgw-rate-limit-details/rgw-rate-limit-details.component';
+import { NfsClusterComponent } from '../nfs/nfs-cluster/nfs-cluster.component';
 
 @NgModule({
   imports: [
@@ -347,7 +348,7 @@ const routes: Routes = [
       breadcrumbs: 'NFS'
     },
     children: [
-      { path: '', component: NfsListComponent },
+      { path: '', component: NfsClusterComponent },
       {
         path: URLVerbs.CREATE,
         component: NfsFormComponent,
