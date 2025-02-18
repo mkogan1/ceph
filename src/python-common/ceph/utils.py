@@ -169,6 +169,21 @@ def http_req(hostname: str = '',
         raise
 
 
+_TRUE_VALS = {'y', 'yes', 't', 'true', 'on', '1'}
+_FALSE_VALS = {'n', 'no', 'f', 'false', 'off', '0'}
+
+
+def strtobool(value: str) -> bool:
+    """Convert a string to a boolean value.
+    Based on a simlilar function once available at distutils.util.strtobool.
+    """
+    if value.lower() in _TRUE_VALS:
+        return True
+    if value.lower() in _FALSE_VALS:
+        return False
+    raise ValueError(f'invalid truth value {value!r}')
+
+
 def bytes_to_human(num: float, mode: str = 'decimal') -> str:
     """Convert a bytes value into it's human-readable form.
 

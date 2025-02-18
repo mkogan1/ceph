@@ -17,7 +17,7 @@ from ceph.fs.earmarking import EarmarkTopScope
 import cephfs
 
 from mgr_util import CephFSEarmarkResolver
-from rados import TimedOut, ObjectNotFound, LIBRADOS_ALL_NSPACES
+from rados import TimedOut, ObjectNotFound, Rados, LIBRADOS_ALL_NSPACES
 
 from object_format import ErrorResponse
 from orchestrator import NoOrchestrator
@@ -28,14 +28,14 @@ from .ganesha_conf import (
     Export,
     GaneshaConfParser,
     RGWFSAL,
-    format_block,
-    QOS,
-    QOSParams)
-from .export_utils import export_qos_checks, export_block_qos_checks
+    format_block)
+from .qos_conf import QOS, QOSBandwidthControl
+from .export_utils import export_qos_bw_checks, export_dict_qos_checks
 from .exception import NFSException, NFSInvalidOperation, FSNotFound, NFSObjectNotFound
 from .utils import (
     CONF_PREFIX,
     EXPORT_PREFIX,
+    USER_CONF_PREFIX,
     NonFatalError,
     export_obj_name,
     conf_obj_name,
@@ -860,10 +860,7 @@ class ExportMgr:
 
         # check QOS
         if new_export_dict.get('qos_block'):
-            qos_block = new_export_dict.get('qos_block')
-            if qos_block:
-                qos_block = dict(qos_block)
-            export_block_qos_checks(cluster_id, self.mgr, qos_block)
+            export_dict_qos_checks(cluster_id, self.mgr, dict(new_export_dict.get('qos_block', {})))
 
         self.exports[cluster_id].remove(old_export)
 
@@ -883,13 +880,11 @@ class ExportMgr:
                 exports_count += 1
         return exports_count
 
-    def update_export_qos(self,
-                          cluster_id: str,
-                          pseudo_path: str,
-                          enable_qos: bool,
-                          enable_bw_ctrl: bool,
-                          combined_bw_ctrl: bool,
-                          **kwargs: Any) -> None:
+    def update_export_qos_bw(self,
+                             cluster_id: str,
+                             pseudo_path: str,
+                             enable_qos: bool,
+                             bw_obj: QOSBandwidthControl) -> None:
         """Update Export QOS block"""
         export = self._fetch_export(cluster_id, pseudo_path)
         if not export:
@@ -897,30 +892,21 @@ class ExportMgr:
         # if qos_block does not exists in export create one else update existing block
         if not export.qos_block:
             log.debug(f"Creating new QOS block for export {pseudo_path} of cluster {cluster_id}")
-            export.qos_block = QOS(enable_qos=enable_qos,
-                                   enable_bw_ctrl=enable_bw_ctrl,
-                                   combined_bw_ctrl=combined_bw_ctrl,
-                                   **kwargs)
+            export.qos_block = QOS(enable_qos=enable_qos, bw_obj=bw_obj)
         else:
-            log.debug("Updating existing QOS block of export {pseudo_path} of cluster {cluster_id}")
+            log.debug(f"Updating existing QOS block of export {pseudo_path} of cluster {cluster_id}")
             export.qos_block.enable_qos = enable_qos
-            export.qos_block.enable_bw_ctrl = enable_bw_ctrl
-            export.qos_block.combined_bw_ctrl = combined_bw_ctrl
-            if kwargs:
-                export.qos_block.update_bandwidths(**kwargs)
-            else:
-                export.qos_block.update_bandwidths('0', '0', '0', '0', '0', '0')
+            export.qos_block.bw_obj = bw_obj
 
         self.exports[cluster_id].remove(export)
         self._update_export(cluster_id, export, False)
         log.debug(f"Successfully updated QOS bandwidth control config for export {pseudo_path} of cluster {cluster_id}")
 
-    def enable_export_qos(self,
-                          cluster_id: str,
-                          pseudo_path: str,
-                          combined_bw_ctrl: bool,
-                          **kwargs: Any
-                          ) -> None:
+    def enable_export_qos_bw(self,
+                             cluster_id: str,
+                             pseudo_path: str,
+                             bw_obj: QOSBandwidthControl
+                             ) -> None:
         """
         There are 2 cases to consider, based on QOS type set on cluster level
         1. If combined bandwith control is disabled
@@ -936,13 +922,8 @@ class ExportMgr:
         try:
             self._validate_cluster_id(cluster_id)
             assert pseudo_path
-            # need to create dict with actual parameters
-            params = {}
-            for key in kwargs:
-                params[QOSParams[key].value] = kwargs[key]
-            export_qos_checks(cluster_id, self.mgr, combined_bw_ctrl=combined_bw_ctrl, **params)
-
-            self.update_export_qos(cluster_id, pseudo_path, True, True, combined_bw_ctrl, **kwargs)
+            export_qos_bw_checks(cluster_id, self.mgr, bw_obj=bw_obj)
+            self.update_export_qos_bw(cluster_id, pseudo_path, True, bw_obj)
         except Exception as e:
             log.exception(f"Setting NFS-Ganesha QOS bandwidth control config failed for {pseudo_path} of {cluster_id}")
             raise ErrorResponse.wrap(e)
@@ -958,11 +939,11 @@ class ExportMgr:
             log.exception(f"Failed to get QOS configuration for {pseudo_path} of {cluster_id}")
             raise ErrorResponse.wrap(e)
 
-    def disable_export_qos(self, cluster_id: str, pseudo_path: str) -> None:
+    def disable_export_qos_bw(self, cluster_id: str, pseudo_path: str) -> None:
         try:
             self._validate_cluster_id(cluster_id)
             assert pseudo_path
-            self.update_export_qos(cluster_id, pseudo_path, False, False, False)
+            self.update_export_qos_bw(cluster_id, pseudo_path, False, QOSBandwidthControl())
         except Exception as e:
             log.exception(f"Setting NFS-Ganesha QOS bandwidth control Config failed for {pseudo_path} of {cluster_id}")
             raise ErrorResponse.wrap(e)
