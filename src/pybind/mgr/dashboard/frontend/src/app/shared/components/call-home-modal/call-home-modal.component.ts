@@ -4,13 +4,16 @@ import { MgrModuleService } from '../../api/mgr-module.service';
 import { NotificationService } from '../../services/notification.service';
 import { NotificationType } from '../../enum/notification-type.enum';
 import { BlockUI, NgBlockUI } from 'ng-block-ui';
-import { timer } from 'rxjs';
-import { CallHomeNotificationService } from '../../services/call-home-notification.service';
+import { BehaviorSubject, Observable } from 'rxjs';
 import { CdFormGroup } from '../../forms/cd-form-group';
 import { FormControl, Validators } from '@angular/forms';
 import { CallHomeService } from '../../api/call-home.service';
 import { CdForm } from '../../forms/cd-form';
 import { TextToDownloadService } from '../../services/text-to-download.service';
+import { ConnectivityStatus } from '../../models/call-home.model';
+import { switchMap } from 'rxjs/operators';
+import { Icons } from '../../enum/icons.enum';
+import { CallHomeNotificationService } from '../../services/call-home-notification.service';
 
 @Component({
   selector: 'cd-call-home-modal',
@@ -26,16 +29,21 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
   callHomeForm: CdFormGroup;
   isConfigured = false;
   title = $localize`Configure IBM Call Home`;
+  callHomeStatus$: Observable<ConnectivityStatus>;
+  callHomeStatusSubject = new BehaviorSubject<ConnectivityStatus>(null);
+  callHomeRefreshLoading = false;
 
   report: any;
+
+  icons = Icons;
 
   constructor(
     public activeModal: NgbActiveModal,
     private mgrModuleService: MgrModuleService,
     private notificationService: NotificationService,
-    private callHomeNotificationService: CallHomeNotificationService,
     private callHomeSerive: CallHomeService,
-    private textToDownloadService: TextToDownloadService
+    private textToDownloadService: TextToDownloadService,
+    private callHomeNotificationService: CallHomeNotificationService
   ) {
     super();
   }
@@ -49,6 +57,10 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
       }
       this.loadingReady();
     });
+    this.callHomeStatus$ = this.callHomeStatusSubject.pipe(
+      switchMap(() => this.callHomeSerive.status())
+    );
+    this.callHomeStatusSubject.next(null);
   }
 
   createForm() {
@@ -61,7 +73,7 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
       address: new FormControl(null),
       companyName: new FormControl(null),
       countryCode: new FormControl(null, [Validators.required]),
-      licenseAgrmt: new FormControl(false, [Validators.requiredTrue])
+      licenseAgrmt: new FormControl(null, [Validators.required])
     });
   }
 
@@ -78,6 +90,10 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
   }
 
   submit() {
+    if (this.callHomeForm.errors) {
+      this.callHomeForm.setErrors({ cdSubmitButton: true });
+      return;
+    }
     const customerNumber = this.callHomeForm.getValue('customerNumber');
     const firstName = this.callHomeForm.getValue('firstName');
     const lastName = this.callHomeForm.getValue('lastName');
@@ -99,69 +115,38 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
         customer_country_code: countryCode
       })
       .subscribe({
+        next: () => this.callHome(),
         error: () => this.callHomeForm.setErrors({ cdSubmitButton: true }),
-        complete: () => this.callHome()
+        complete: () => this.callHomeNotificationService.setVisibility(false)
       });
   }
 
   callHome(enable = true) {
-    const fnWaitUntilReconnected = () => {
-      timer(2000).subscribe(() => {
-        // Trigger an API request to check if the connection is
-        // re-established.
-        this.mgrModuleService.list().subscribe(
-          () => {
-            // Resume showing the notification toasties.
-            this.notificationService.suspendToasties(false);
-            // Unblock the whole UI.
-            this.blockUI.stop();
-            // Reload the data table content.
-            if (enable) {
-              this.notificationService.show(
-                NotificationType.success,
-                $localize`Activated IBM Call Home Agent`
-              );
-              this.callHomeNotificationService.setVisibility(false);
-              this.activeModal.close();
-            } else {
-              this.notificationService.show(
-                NotificationType.success,
-                $localize`Deactivated IBM Call Home Agent`
-              );
-              this.activeModal.close();
-            }
-          },
-          () => {
-            fnWaitUntilReconnected();
-          }
-        );
-      });
-    };
+    this.mgrModuleService.updateModuleState(
+      'call_home_agent',
+      !enable,
+      null,
+      '',
+      enable ? $localize`Activated IBM Call Home Agent`
+       : $localize`Deactivated IBM Call Home Agent`,
+      false,
+      this.activeModal
+    );
 
-    if (enable) {
-      this.mgrModuleService.enable('call_home_agent').subscribe(
-        () => undefined,
-        () => {
-          // Suspend showing the notification toasties.
-          this.notificationService.suspendToasties(true);
-          // Block the whole UI to prevent user interactions until
-          // the connection to the backend is reestablished
-          this.blockUI.start($localize`Reconnecting, please wait ...`);
-          fnWaitUntilReconnected();
-        }
-      );
-    } else {
-      this.mgrModuleService.disable('call_home_agent').subscribe(
-        () => undefined,
-        () => {
-          // Suspend showing the notification toasties.
-          this.notificationService.suspendToasties(true);
-          // Block the whole UI to prevent user interactions until
-          // the connection to the backend is reestablished
-          this.blockUI.start($localize`Reconnecting, please wait ...`);
-          fnWaitUntilReconnected();
-        }
-      );
-    }
+    if (!enable) this.callHomeNotificationService.setVisibility(true);
+  }
+
+  testConnectivity() {
+    this.callHomeRefreshLoading = true;
+    this.callHomeSerive.testConnectivity().subscribe({
+      complete: () => {
+        this.notificationService.show(
+          NotificationType.success,
+          $localize`Refreshed call home connectivity status.`
+        );
+        this.callHomeStatusSubject.next(null);
+        this.callHomeRefreshLoading = false;
+      }
+    });
   }
 }

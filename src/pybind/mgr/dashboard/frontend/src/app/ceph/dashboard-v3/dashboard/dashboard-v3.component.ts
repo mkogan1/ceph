@@ -39,6 +39,11 @@ import {
   IscsiMap,
   PgStateCount
 } from '~/app/shared/models/health.interface';
+import { OsdSettings } from '~/app/shared/models/osd-settings';
+import { CallHomeService } from '~/app/shared/api/call-home.service';
+import { ConnectivityStatus } from '~/app/shared/models/call-home.model';
+import { NotificationService } from '~/app/shared/services/notification.service';
+import { NotificationType } from '~/app/shared/enum/notification-type.enum';
 
 @Component({
   selector: 'cd-dashboard-v3',
@@ -48,6 +53,17 @@ import {
 export class DashboardV3Component extends PrometheusListHelper implements OnInit, OnDestroy {
   telemetryURL = 'https://telemetry-public.ceph.com/';
   origin = window.location.origin;
+  osdSettingsService: any;
+  osdSettings = new OsdSettings();
+  interval = new Subscription();
+  capacityService: any;
+  capacity: any;
+  healthData$: Observable<Object>;
+  callHomeStatus$: Observable<ConnectivityStatus>;
+  callHomeStatusSubject = new BehaviorSubject<ConnectivityStatus>(null);
+
+  callHomeRefreshLoading = false;
+
   icons = Icons;
 
   permissions: Permissions;
@@ -118,7 +134,9 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
     private mgrModuleService: MgrModuleService,
     private refreshIntervalService: RefreshIntervalService,
     public prometheusAlertService: PrometheusAlertService,
-    private hardwareService: HardwareService
+    private hardwareService: HardwareService,
+    private callHomeService: CallHomeService,
+    private notificationService: NotificationService
   ) {
     super(prometheusService);
     this.permissions = this.authStorageService.getPermissions();
@@ -140,6 +158,14 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
         )
       );
       this.managedByConfig$ = this.settingsService.getValues('MANAGED_BY_CLUSTERS');
+      this.callHomeStatus$ = this.callHomeStatusSubject.pipe(
+        switchMap(() => this.callHomeService.getCallHomeStatus().pipe(
+          switchMap((status: boolean) => {
+            if (status) return this.callHomeService.status()
+            return of(null)
+          })
+        ))
+      );
     }
 
     this.loadInventories();
@@ -301,6 +327,22 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
         this.iscsiMap = data?.num_iscsi_gateways;
         this.hostsCount = data?.num_hosts;
         this.enabledFeature$ = this.featureToggles.get();
+      }
+    });
+  }
+
+  testConnectivity(showNotification = true) {
+    this.callHomeRefreshLoading = true;
+    this.callHomeService.testConnectivity().subscribe({
+      complete: () => {
+        if (showNotification) {
+          this.notificationService.show(
+            NotificationType.success,
+            $localize`Refreshed call home connectivity status.`
+          );
+        }
+        this.callHomeStatusSubject.next(null);
+        this.callHomeRefreshLoading = false;
       }
     });
   }
