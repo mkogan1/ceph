@@ -89,6 +89,8 @@ import { StorageInsightsNotificationComponent } from './storage-insights-notific
 // Icons
 import InfoIcon from '@carbon/icons/es/information/16';
 import CopyIcon from '@carbon/icons/es/copy/32';
+import { CallHomeConnectionInfoComponent } from './call-home-connection-info/call-home-connection-info.component';
+import { CallHomeConnectivityStatusComponent } from './call-home-connectivity-status/call-home-connectivity-status.component';
 
 @NgModule({
   imports: [
@@ -128,7 +130,7 @@ import CopyIcon from '@carbon/icons/es/copy/32';
     ComboBoxModule,
     ProgressIndicatorModule,
     BaseChartDirective
-  ],
+],
   declarations: [
     SparklineComponent,
     HelperComponent,
@@ -174,7 +176,10 @@ import CopyIcon from '@carbon/icons/es/copy/32';
     CallHomeModalComponent,
     CallHomeNotificationComponent,
     StorageInsightsModalComponent,
-    StorageInsightsNotificationComponent
+    StorageInsightsNotificationComponent,
+    ProgressComponent,
+    CallHomeConnectionInfoComponent,
+    CallHomeConnectivityStatusComponent
   ],
   providers: [provideCharts(withDefaultRegisterables())],
   exports: [
@@ -217,7 +222,10 @@ import CopyIcon from '@carbon/icons/es/copy/32';
     CardGroupComponent,
     CallHomeModalComponent,
     CallHomeNotificationComponent,
-    StorageInsightsNotificationComponent
+    StorageInsightsNotificationComponent,
+    ProgressComponent,
+    CallHomeConnectionInfoComponent,
+    CallHomeConnectivityStatusComponent
   ]
 })
 export class ComponentsModule {
