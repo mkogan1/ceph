@@ -4,7 +4,7 @@ from .template import SubvolumeOpType
 
 from .versions import loaded_subvolumes
 
-def create_subvol(mgr, fs, vol_spec, group, subvolname, size, isolate_nspace, pool, mode, uid, gid, earmark, normalization):
+def create_subvol(mgr, fs, vol_spec, group, subvolname, size, isolate_nspace, pool, mode, uid, gid, earmark, normalization, case_insensitive):
     """
     create a subvolume (create a subvolume with the max known version).
 
@@ -19,10 +19,11 @@ def create_subvol(mgr, fs, vol_spec, group, subvolname, size, isolate_nspace, po
     :param gid: the group identifier
     :param earmark: metadata string to identify if subvolume is associated with nfs/smb
     :param normalization: the unicode normalization form to use (nfd, nfc, nfkd or nfkc)
+    :param case_insensitive: whether to make the subvolume case insensitive or not
     :return: None
     """
     subvolume = loaded_subvolumes.get_subvolume_object_max(mgr, fs, vol_spec, group, subvolname)
-    subvolume.create(size, isolate_nspace, pool, mode, uid, gid, earmark, normalization)
+    subvolume.create(size, isolate_nspace, pool, mode, uid, gid, earmark, normalization, case_insensitive)
 
 
 def create_clone(mgr, fs, vol_spec, group, subvolname, pool, source_volume, source_subvolume, snapname):
