@@ -40,7 +40,8 @@
       <div class="cds--btn cds--btn--icon-only cds--header__action">
         <cd-dashboard-help></cd-dashboard-help>
       </div>
-      <div class="cds--btn cds--btn--icon-only cds--header__action">
+      <div class="cds--btn cds--btn--icon-only cds--header__action"
+           *ngIf="permissions.user.read">
         <cd-administration></cd-administration>
       </div>
       <div class="cds--btn cds--btn--icon-only cds--header__action">
@@ -95,7 +96,7 @@
         <!-- Multi-cluster Dashboard -->
         <cds-sidenav-menu title="Multi-Cluster"
                           i18n-title
-                          *ngIf="environment.build === 'ibm'">
+                          *ngIf="permissions.configOpt.read && environment.build === 'ibm'">
           <svg cdsIcon="edge-cluster"
                icon
                size="20"></svg>

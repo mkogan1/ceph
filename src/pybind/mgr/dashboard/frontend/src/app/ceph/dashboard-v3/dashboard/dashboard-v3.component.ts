@@ -30,6 +30,7 @@ import { CallHomeService } from '~/app/shared/api/call-home.service';
 import { ConnectivityStatus } from '~/app/shared/models/call-home.model';
 import { NotificationService } from '~/app/shared/services/notification.service';
 import { NotificationType } from '~/app/shared/enum/notification-type.enum';
+import { OsdSettings } from '~/app/shared/models/osd-settings';
 
 @Component({
   selector: 'cd-dashboard-v3',
@@ -39,7 +40,7 @@ import { NotificationType } from '~/app/shared/enum/notification-type.enum';
 export class DashboardV3Component extends PrometheusListHelper implements OnInit, OnDestroy {
   detailsCardData: DashboardDetails = {};
   osdSettingsService: any;
-  osdSettings: any;
+  osdSettings = new OsdSettings();
   interval = new Subscription();
   permissions: Permissions;
   enabledFeature$: FeatureTogglesMap$;
@@ -124,7 +125,8 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
     );
     this.interval = this.refreshIntervalService.intervalData$.subscribe(() => {
       this.getHealth();
-      this.getCapacityCardData();
+      this.getCapacity();
+      if (this.permissions.configOpt.read) this.getOsdSettings();
       if (this.hardwareEnabled) this.hardwareSubject.next([]);
     });
     this.getPrometheusData(this.prometheusService.lastHourDateObject);
@@ -181,16 +183,19 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
     );
   }
 
-  getCapacityCardData() {
-    this.osdSettingsService = this.osdService
-      .getOsdSettings()
-      .pipe(take(1))
-      .subscribe((data: any) => {
-        this.osdSettings = data;
-      });
+  private getCapacity() {
     this.capacityService = this.healthService.getClusterCapacity().subscribe((data: any) => {
       this.capacity = data;
     });
+  }
+
+  private getOsdSettings() {
+    this.osdSettingsService = this.osdService
+      .getOsdSettings()
+      .pipe(take(1))
+      .subscribe((data: OsdSettings) => {
+        this.osdSettings = data;
+      });
   }
 
   public getPrometheusData(selectedTime: any) {
