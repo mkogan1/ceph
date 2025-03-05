@@ -57,6 +57,7 @@ import { SmbJoinAuthFormComponent } from './ceph/smb/smb-join-auth-form/smb-join
 import { SmbUsersgroupsFormComponent } from './ceph/smb/smb-usersgroups-form/smb-usersgroups-form.component';
 import { environment } from '~/environments/environment';
 import { NfsClusterComponent } from './ceph/nfs/nfs-cluster/nfs-cluster.component';
+import { NfsClusterFormComponent } from './ceph/nfs/nfs-cluster-form/nfs-cluster-form.component';
 
 @Injectable()
 export class PerformanceCounterBreadcrumbsResolver extends BreadcrumbsResolver {
@@ -420,12 +421,17 @@ const routes: Routes = [
             children: [
               { path: '', component: NfsClusterComponent },
               {
+                path: `${URLVerbs.EDIT}/:cluster_id`,
+                component: NfsClusterFormComponent,
+                data: { breadcrumbs: ActionLabels.EDIT }
+              },
+              {
                 path: `${URLVerbs.CREATE}/:fs_name/:subvolume_group`,
                 component: NfsFormComponent,
                 data: { breadcrumbs: ActionLabels.CREATE }
               },
               {
-                path: `${URLVerbs.CREATE}`,
+                path: `${URLVerbs.CREATE}/:cluster_id`,
                 component: NfsFormComponent,
                 data: { breadcrumbs: ActionLabels.CREATE }
               },
