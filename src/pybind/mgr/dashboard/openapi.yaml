@@ -12942,6 +12942,11 @@ paths:
         required: true
         schema:
           type: string
+      - default: 'true'
+        in: query
+        name: purge_objects
+        schema:
+          type: string
       - allowEmptyValue: true
         in: query
         name: daemon_name
