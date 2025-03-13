@@ -1,5 +1,22 @@
 >=20.0.0
 
+* RGW: The User Account feature introduced in Squid provides first-class support for
+  IAM APIs and policy. Our preliminary STS support was instead based on tenants, and
+  exposed some IAM APIs to admins only. This tenant-level IAM functionality is now
+  deprecated in favor of accounts. While we'll continue to support the tenant feature
+  itself for namespace isolation, the following features will be removed no sooner
+  than the V release:
+    * tenant-level IAM APIs like CreateRole, PutRolePolicy and PutUserPolicy,
+    * use of tenant names instead of accounts in IAM policy documents,
+    * interpretation of IAM policy without cross-account policy evaluation,
+    * S3 API support for cross-tenant names such as `Bucket='tenant:bucketname'`
+* RGW: Lua scripts will not run against health checks.
+* RGW: For compatibility with AWS S3, LastModified timestamps are now truncated
+  to the second. Note that during upgrade, users may observe these timestamps
+  moving backwards as a result.
+* RGW: IAM policy evaluation now supports conditions ArnEquals and ArnLike, along
+  with their Not and IfExists variants.
+
 * RBD: All Python APIs that produce timestamps now return "aware" `datetime`
   objects instead of "naive" ones (i.e. those including time zone information
   instead of those not including it).  All timestamps remain to be in UTC but
