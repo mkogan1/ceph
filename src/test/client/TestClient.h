@@ -126,6 +126,9 @@ public:
     int walk(std::string_view path, struct walk_dentry_result* result, const UserPerm& perms, bool followsym=true) {
       return Client::walk(path, result, perms, followsym);
     }
+    std::pair<uint64_t, uint64_t> get_copy_metrics() {
+     return {total_io_copy_ops, total_io_copy_size};
+    }
 
     bool encrypt(const UserPerm& myperm) {
       if (!fscrypt_enabled || fse->encrypted) {
