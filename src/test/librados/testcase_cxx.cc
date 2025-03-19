@@ -7,6 +7,7 @@
 #include <thread>
 
 #include <errno.h>
+#include <fmt/format.h>
 #include "test_cxx.h"
 #include "test_shared.h"
 #include "include/scope_guard.h"
