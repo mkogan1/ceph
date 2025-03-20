@@ -1654,7 +1654,6 @@ int execute_status(const po::variables_map &vm,
         }
         std::cout << std::endl;
       }
-      std::cout << std::endl;
     }
 
     // dump per-image status
