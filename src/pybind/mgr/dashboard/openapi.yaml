@@ -11436,6 +11436,11 @@ paths:
         name: owner
         schema:
           type: string
+      - allowEmptyValue: true
+        in: query
+        name: tenant
+        schema:
+          type: string
       responses:
         '200':
           content:
@@ -11471,6 +11476,8 @@ paths:
                   default: ''
                   type: string
                 owner:
+                  type: string
+                tenant:
                   type: string
               type: object
       responses:
