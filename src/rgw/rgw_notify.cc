@@ -503,7 +503,7 @@ public:
             throw(err);
           }
         });
-        const auto rc = ceph_pthread_setname(workers.back().native_handle(), 
+        const auto rc = ceph_pthread_setname(
           (WORKER_THREAD_NAME+std::to_string(worker_id)).c_str());
         ceph_assert(rc == 0);
       }
