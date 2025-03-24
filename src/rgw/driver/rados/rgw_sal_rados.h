@@ -370,7 +370,7 @@ class RadosObject : public StoreObject {
     public:
       RadosDeleteOp(RadosObject* _source);
 
-      virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y) override;
+      virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y, const bool force = false) override;
     };
 
     RadosObject(RadosStore *_st, const rgw_obj_key& _k)
@@ -402,7 +402,8 @@ class RadosObject : public StoreObject {
       rados_ctx->invalidate(get_obj());
     }
     virtual int delete_object(const DoutPrefixProvider* dpp,
-			      optional_yield y, bool prevent_versioning) override;
+			      optional_yield y, bool prevent_versioning,
+			      const bool force = false) override;
     virtual int delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
 			       bool keep_index_consistent, optional_yield y) override;
     virtual int copy_object(User* user,

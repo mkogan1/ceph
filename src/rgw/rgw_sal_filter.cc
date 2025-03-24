@@ -852,9 +852,10 @@ int FilterBucket::abort_multiparts(const DoutPrefixProvider* dpp, CephContext* c
 
 int FilterObject::delete_object(const DoutPrefixProvider* dpp,
 				optional_yield y,
-				bool prevent_versioning)
+				bool prevent_versioning,
+				const bool force)
 {
-  return next->delete_object(dpp, y, prevent_versioning);
+  return next->delete_object(dpp, y, prevent_versioning, force);
 }
 
 int FilterObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate,
@@ -1093,11 +1094,12 @@ int FilterObject::FilterReadOp::iterate(const DoutPrefixProvider* dpp, int64_t o
 }
 
 int FilterObject::FilterDeleteOp::delete_obj(const DoutPrefixProvider* dpp,
-					   optional_yield y)
+					     optional_yield y,
+					     const bool force)
 {
   /* Copy params into next */
   next->params = params;
-  int ret = next->delete_obj(dpp, y);
+  int ret = next->delete_obj(dpp, y, force);
   /* Copy result back */
   result = next->result;
   return ret;

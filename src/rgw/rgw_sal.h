@@ -210,6 +210,7 @@ enum AttrsMod {
   ATTRSMOD_MERGE   = 2
 };
 
+
 // a simple streaming data processing abstraction
 /**
  * @brief A simple streaming data processing abstraction
@@ -963,7 +964,7 @@ class Object {
       virtual ~DeleteOp() = default;
 
       /** Delete the object */
-      virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y) = 0;
+      virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y, bool force = false) = 0;
     };
 
     Object() {}
@@ -972,7 +973,8 @@ class Object {
     /** Shortcut synchronous delete call for common deletes */
     virtual int delete_object(const DoutPrefixProvider* dpp,
 			      optional_yield y,
-			      bool prevent_versioning = false) = 0;
+			      bool prevent_versioning = false,
+			      bool force = false) = 0;
     /** Asynchronous delete call */
     virtual int delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
 			       bool keep_index_consistent, optional_yield y) = 0;

@@ -567,7 +567,7 @@ protected:
         public:
           DBDeleteOp(DBObject* _source);
 
-          virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y) override;
+	  virtual int delete_obj(const DoutPrefixProvider* dpp, optional_yield y, const bool force_ignored = false) override;
       };
 
       DBObject() = default;
@@ -585,8 +585,9 @@ protected:
       DBObject(DBObject& _o) = default;
 
       virtual int delete_object(const DoutPrefixProvider* dpp,
-          optional_yield y,
-          bool prevent_versioning = false) override;
+				optional_yield y,
+				bool prevent_versioning = false,
+				const bool force_ignored = false) override;
       virtual int delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate, Completions* aio,
           bool keep_index_consistent, optional_yield y) override;
       virtual int copy_object(User* user,

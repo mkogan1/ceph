@@ -815,7 +815,8 @@ namespace rgw::sal {
     parent_op(&op_target)
   { }
 
-  int DBObject::DBDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y)
+  // note: force is ignored in dbstore
+  int DBObject::DBDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y, const bool force_ignored)
   {
     parent_op.params.bucket_owner = params.bucket_owner.get_id();
     parent_op.params.versioning_status = params.versioning_status;
@@ -842,7 +843,7 @@ namespace rgw::sal {
     return ret;
   }
 
-  int DBObject::delete_object(const DoutPrefixProvider* dpp, optional_yield y, bool prevent_versioning)
+int DBObject::delete_object(const DoutPrefixProvider* dpp, optional_yield y, bool prevent_versioning, const bool force_ignore)
   {
     DB::Object del_target(store->getDB(), bucket->get_info(), get_obj());
     DB::Object::Delete del_op(&del_target);

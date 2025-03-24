@@ -2257,7 +2257,7 @@ RadosObject::RadosDeleteOp::RadosDeleteOp(RadosObject *_source) :
 	parent_op(&op_target)
 { }
 
-int RadosObject::RadosDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y)
+int RadosObject::RadosDeleteOp::delete_obj(const DoutPrefixProvider* dpp, optional_yield y, const bool force)
 {
   parent_op.params.bucket_owner = params.bucket_owner.get_id();
   parent_op.params.versioning_status = params.versioning_status;
@@ -2275,19 +2275,21 @@ int RadosObject::RadosDeleteOp::delete_obj(const DoutPrefixProvider* dpp, option
   parent_op.params.parts_accounted_size = params.parts_accounted_size;
   parent_op.params.null_verid = params.null_verid;
 
-  int ret = parent_op.delete_obj(y, dpp);
-  if (ret < 0)
+  int ret = parent_op.delete_obj(y, dpp, force);
+  if (ret < 0) {
     return ret;
+  }
 
   result.delete_marker = parent_op.result.delete_marker;
   result.version_id = parent_op.result.version_id;
 
   return ret;
-}
+} // RadosObject::RadosDeleteOp::delete_obj
 
 int RadosObject::delete_object(const DoutPrefixProvider* dpp,
 			       optional_yield y,
-			       bool prevent_versioning)
+			       bool prevent_versioning,
+			       const bool force)
 {
   RGWRados::Object del_target(store->getRados(), bucket->get_info(), *rados_ctx, get_obj());
   RGWRados::Object::Delete del_op(&del_target);
@@ -2295,7 +2297,7 @@ int RadosObject::delete_object(const DoutPrefixProvider* dpp,
   del_op.params.bucket_owner = bucket->get_info().owner;
   del_op.params.versioning_status = prevent_versioning ? 0 : bucket->get_info().versioning_status();
 
-  return del_op.delete_obj(y, dpp);
+  return del_op.delete_obj(y, dpp, force);
 }
 
 int RadosObject::delete_obj_aio(const DoutPrefixProvider* dpp, RGWObjState* astate,
