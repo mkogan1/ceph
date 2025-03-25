@@ -1442,15 +1442,27 @@ class RGWSpec(ServiceSpec):
         self.rgw_bucket_counters_cache = rgw_bucket_counters_cache
         #: Used to set number of entries in each cache of bucket counters
         self.rgw_bucket_counters_cache_size = rgw_bucket_counters_cache_size
-        #: Whether we should generate a cert/key for the user if not provided
-        self.generate_cert = generate_cert
-        #: Used to make RGW not do multisite replication so it can dedicate to IO
-        self.disable_multisite_sync_traffic = disable_multisite_sync_traffic
-        self.wildcard_enabled = wildcard_enabled
-        #: Attributes for <zone-name>.rgw.buckets.data pool created in rgw realm bootstrap command
-        self.data_pool_attributes = data_pool_attributes
         #: How long the RGW will wait to try and complete client requests when told to shut down
         self.rgw_exit_timeout_secs = rgw_exit_timeout_secs
+        #: Used to make RGW not do multisite replication so it can dedicate to IO
+        self.disable_multisite_sync_traffic = disable_multisite_sync_traffic
+        #: Attributes for <zone-name>.rgw.buckets.data pool created in rgw realm bootstrap command
+        self.data_pool_attributes = data_pool_attributes
+        #: Whether we should generate a cert/key for the user if not provided
+        self.generate_cert = generate_cert
+        # type of "concentrator", a daemon to be deployed on the host with
+        # the RGW daemons to handle local load balancing. Currently only supports haproxy
+        self.concentrator: Optional[str] = concentrator
+        # port concentrator should bind to to handle IO traffic
+        self.concentrator_frontend_port = concentrator_frontend_port
+        # monitoring port for the concentrator
+        self.concentrator_monitor_port = concentrator_monitor_port
+        # username to use for monitoring concentrator
+        self.concentrator_monitor_user = concentrator_monitor_user
+        # password to use for monitoring concnetrator
+        self.concentrator_monitor_password = concentrator_monitor_password
+        self._set_concentrator_defaults()
+        self.wildcard_enabled = wildcard_enabled
 
     def get_port_start(self) -> List[int]:
         ports = self.get_port()
