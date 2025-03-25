@@ -125,6 +125,14 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
         )
       );
       this.managedByConfig$ = this.settingsService.getValues('MANAGED_BY_CLUSTERS');
+      this.callHomeStatus$ = this.callHomeStatusSubject.pipe(
+        switchMap(() => this.callHomeService.getCallHomeStatus().pipe(
+          switchMap((status: boolean) => {
+            if (status) return this.callHomeService.status()
+            return of(null)
+          })
+        ))
+      );
     }
     this.interval = this.refreshIntervalService.intervalData$.subscribe(() => {
       this.getHealth();
@@ -136,14 +144,6 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
     this.getDetailsCardData();
     this.getTelemetryReport();
     this.prometheusAlertService.getAlerts(true);
-    this.callHomeStatus$ = this.callHomeStatusSubject.pipe(
-      switchMap(() => this.callHomeService.getCallHomeStatus().pipe(
-        switchMap((status: boolean) => {
-          if (status) return this.callHomeService.status()
-          return of(null)
-        })
-      ))
-    );
   }
 
   getTelemetryText(): string {

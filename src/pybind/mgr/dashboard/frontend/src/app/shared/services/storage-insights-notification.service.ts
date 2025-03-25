@@ -3,6 +3,7 @@ import { Observable, BehaviorSubject, Subscription, of } from 'rxjs';
 import { mergeMap, tap } from 'rxjs/operators';
 import { StorageInsightsService } from '../api/storage-insights.service';
 import { environment } from '~/environments/environment';
+import { AuthStorageService } from './auth-storage.service';
 
 @Injectable({
   providedIn: 'root'
@@ -16,9 +17,12 @@ export class StorageInsightsNotificationService implements OnDestroy {
   update: EventEmitter<boolean> = new EventEmitter<boolean>();
 
   private subscription: Subscription;
-  constructor(private storageInsightsService: StorageInsightsService) {
+  constructor(
+    private storageInsightsService: StorageInsightsService,
+    private authStorageService: AuthStorageService
+  ) {
     this.remindLaterOn$ = this.remindLaterOnSource.asObservable();
-    if (this.environment.build === 'ibm') {
+    if (this.environment.build === 'ibm' && this.authStorageService.getPermissions().configOpt.read) {
       this.subscription = of(true)
         .pipe(
           mergeMap(() =>
