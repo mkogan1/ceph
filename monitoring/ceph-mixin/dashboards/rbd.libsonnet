@@ -70,7 +70,7 @@ local g = import 'grafonnet/grafana.libsonnet';
     .addTemplate(
       $.addTemplateSchema('image',
                           '$datasource',
-                          'label_values(ceph_rbd_read_ops{%(matchers)s, pool="$pool"}, image)' % $.matchers(),
+                          'label_values(ceph_rbd_read_ops{%(matchers)s pool="$pool"}, image)' % $.matchers(),
                           1,
                           false,
                           0,
