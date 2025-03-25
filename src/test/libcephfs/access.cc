@@ -113,7 +113,6 @@ TEST(AccessTest, Path) {
   string good = get_unique_dir();
   string good_slash = get_unique_dir("good_slash") + "/";
   string bad = get_unique_dir();
->>>>>>> 516b0999f5b (test/libcephfs: add test case for slash tailing path for access)
   string user = "libcephfs_path_test." + stringify(rand());
   struct ceph_mount_info *admin;
   ASSERT_EQ(0, ceph_create(&admin, NULL));
