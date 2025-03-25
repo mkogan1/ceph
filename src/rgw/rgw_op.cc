@@ -4692,7 +4692,7 @@ void RGWPutObj::execute(optional_yield y)
 		    computed_ck,
 		    (!!expected_ck) ? expected_ck : "(checksum unavailable)");
 
-      op_ret = -ERR_INVALID_REQUEST;
+      op_ret = -ERR_BAD_DIGEST;
       return;
     }
   }
@@ -5002,7 +5002,7 @@ void RGWPostObj::execute(optional_yield y)
 		      cksum->to_armor(),
 		      cksum_filter->expected(*s->info.env));
 
-        op_ret = -ERR_INVALID_REQUEST;
+        op_ret = -ERR_BAD_DIGEST;
         return;
       }
     }
@@ -7299,7 +7299,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
 		      "{} content checksum mismatch"
 		      "\n\tcalculated={} != \n\texpected={}",
 		      hdr_cksum.header_name(), armored_cksum, supplied_cksum);
-	op_ret = -ERR_INVALID_REQUEST;
+	op_ret = -ERR_BAD_DIGEST;
 	return;
       }
     }
