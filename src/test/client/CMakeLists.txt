@@ -5,7 +5,6 @@ if(${WITH_CEPHFS})
     ops.cc
     nonblocking.cc
     commands.cc
-    syncio.cc
     zerocopy.cc
     )
   target_link_libraries(ceph_test_client
