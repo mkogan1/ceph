@@ -4263,7 +4263,8 @@ class Firewalld(object):
         # type: () -> bool
         self.cmd = find_executable('firewall-cmd')
         if not self.cmd:
-            logger.debug('firewalld does not appear to be present')
+            if not ('skip_firewalld' in self.ctx and self.ctx.skip_firewalld):
+                logger.debug('firewalld does not appear to be present')
             return False
         (enabled, state, _) = check_unit(self.ctx, 'firewalld.service')
         if not enabled:
@@ -4279,7 +4280,8 @@ class Firewalld(object):
     def enable_service_for(self, daemon_type):
         # type: (str) -> None
         if not self.available:
-            logger.debug('Not possible to enable service <%s>. firewalld.service is not available' % daemon_type)
+            if not ('skip_firewalld' in self.ctx and self.ctx.skip_firewalld):
+                logger.debug('Not possible to enable service <%s>. firewalld.service is not available' % daemon_type)
             return
 
         if daemon_type == 'mon':
@@ -4307,7 +4309,8 @@ class Firewalld(object):
     def open_ports(self, fw_ports):
         # type: (List[int]) -> None
         if not self.available:
-            logger.debug('Not possible to open ports <%s>. firewalld.service is not available' % fw_ports)
+            if not ('skip_firewalld' in self.ctx and self.ctx.skip_firewalld):
+                logger.debug('Not possible to open ports <%s>. firewalld.service is not available' % fw_ports)
             return
 
         if not self.cmd:
@@ -4328,7 +4331,8 @@ class Firewalld(object):
     def close_ports(self, fw_ports):
         # type: (List[int]) -> None
         if not self.available:
-            logger.debug('Not possible to close ports <%s>. firewalld.service is not available' % fw_ports)
+            if not ('skip_firewalld' in self.ctx and self.ctx.skip_firewalld):
+                logger.debug('Not possible to close ports <%s>. firewalld.service is not available' % fw_ports)
             return
 
         if not self.cmd:
