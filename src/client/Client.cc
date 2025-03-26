@@ -18369,6 +18369,23 @@ void Client::set_cap_epoch_barrier(epoch_t e)
   cap_epoch_barrier = e;
 }
 
+int Client::get_perf_counters(bufferlist *outbl) {
+  RWRef_t iref_reader(initialize_state, CLIENT_INITIALIZED);
+  if (!iref_reader.is_state_satisfied()) {
+    return -ENOTCONN;
+  }
+
+  ceph::bufferlist inbl;
+  std::ostringstream err;
+  std::vector<std::string> cmd{
+    "{\"prefix\": \"perf dump\"}",
+    "{\"format\": \"json\"}"
+  };
+
+  ldout(cct, 10) << __func__ << ": perf cmd=" << cmd << dendl;
+  return cct->get_admin_socket()->execute_command(cmd, inbl, err, outbl);
+}
+
 const char** Client::get_tracked_conf_keys() const
 {
 #define KEYS \

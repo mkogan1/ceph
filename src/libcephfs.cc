@@ -2720,3 +2720,14 @@ extern "C" int get_inode_flags(struct ceph_mount_info *cmount, int fd, int* file
 
   return cmount->get_client()->get_inode_flags(fd, file_attr_out);
 }
+
+extern "C" int ceph_get_perf_counters(struct ceph_mount_info *cmount, char **perf_dump) {
+  bufferlist outbl;
+  int r = cmount->get_client()->get_perf_counters(&outbl);
+  if (r != 0) {
+    return r;
+  }
+
+  do_out_buffer(outbl, perf_dump, NULL);
+  return outbl.length();
+}
