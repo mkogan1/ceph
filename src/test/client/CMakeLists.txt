@@ -6,7 +6,6 @@ if(${WITH_CEPHFS})
     ops.cc
     nonblocking.cc
     commands.cc
-    syncio.cc
     fscrypt_conf.cc
     zerocopy.cc
     )
