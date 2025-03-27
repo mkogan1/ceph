@@ -906,6 +906,36 @@ bool DataScan::valid_ino(inodeno_t ino) const
     || ino == CEPH_INO_LOST_AND_FOUND;
 }
 
+struct link_info_t {
+  inodeno_t dirino;
+  frag_t frag;
+  string name;
+  version_t version;
+  int nlink;
+  bool is_dir;
+  map<snapid_t, SnapInfo> snaps;
+  link_info_t() : version(0), nlink(0), is_dir(false) {}
+  link_info_t(inodeno_t di, frag_t df, const string& n, const CInode::inode_const_ptr& i) :
+    dirino(di), frag(df), name(n),
+    version(i->version), nlink(i->nlink), is_dir(S_IFDIR & i->mode) {}
+  dirfrag_t dirfrag() const {
+    return dirfrag_t(dirino, frag);
+  }
+  void print(std::ostream& os) const {
+    os << "link_info_t(diri=" << dirino << "." << frag << " name=" << name << " v=" << version << " l=" << nlink << ")";
+  }
+  bool operator==(const link_info_t& o) const {
+    return dirino == o.dirino
+           && frag == o.frag
+           && name == o.name;
+  }
+};
+
+std::ostream& operator<<(std::ostream& os, const link_info_t& o) {
+  o.print(os);
+  return os;
+}
+
 int DataScan::scan_links()
 {
   MetadataDriver *metadata_driver = dynamic_cast<MetadataDriver*>(driver);
@@ -920,30 +950,6 @@ int DataScan::scan_links()
   snapid_t last_snap = 1;
   snapid_t snaprealm_v2_since = 2;
 
-  struct link_info_t {
-    inodeno_t dirino;
-    frag_t frag;
-    string name;
-    version_t version;
-    int nlink;
-    bool is_dir;
-    map<snapid_t, SnapInfo> snaps;
-    link_info_t() : version(0), nlink(0), is_dir(false) {}
-    link_info_t(inodeno_t di, frag_t df, const string& n, const CInode::inode_const_ptr& i) :
-      dirino(di), frag(df), name(n),
-      version(i->version), nlink(i->nlink), is_dir(S_IFDIR & i->mode) {}
-    dirfrag_t dirfrag() const {
-      return dirfrag_t(dirino, frag);
-    }
-    void print(std::ostream& os) const {
-      os << "link_info_t(diri=" << dirino << "." << frag << " name=" << name << " v=" << version << " l=" << nlink << ")";
-    }
-    bool operator==(const link_info_t& o) const {
-      return dirino == o.dirino
-             && frag == o.frag
-             && name == o.name;
-    }
-  };
   map<inodeno_t, list<link_info_t> > dup_primaries;
   map<inodeno_t, link_info_t> bad_nlink_inos;
   multimap<inodeno_t, link_info_t> injected_inos;
