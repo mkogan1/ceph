@@ -53,7 +53,7 @@ export class SmbUsersgroupsFormComponent extends CdForm implements OnInit, OnDes
   ) {
     super();
     this.editing = this.router.url.startsWith(`${USERSGROUPS_URL}/${URLVerbs.EDIT}`);
-    this.resource = $localize`users and groups access resource`;
+    this.resource = $localize`users and groups`;
     effect(() => {
       const formData = this.uploadedData();
       if (formData) {
@@ -61,6 +61,7 @@ export class SmbUsersgroupsFormComponent extends CdForm implements OnInit, OnDes
         this.hideUploader = true;
       }
     });
+    this.resource = $localize`users and groups`;
   }
 
   ngOnInit() {
