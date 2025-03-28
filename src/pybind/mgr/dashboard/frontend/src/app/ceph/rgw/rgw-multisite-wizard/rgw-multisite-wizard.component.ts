@@ -26,6 +26,7 @@ import {
   STEP_TITLES_MULTI_CLUSTER_CONFIGURED,
   STEP_TITLES_SINGLE_CLUSTER
 } from './multisite-wizard-steps.enum';
+import { environment } from '~/environments/environment';
 
 @Component({
   selector: 'cd-rgw-multisite-wizard',
@@ -53,6 +54,7 @@ export class RgwMultisiteWizardComponent extends BaseModal implements OnInit {
   rgwEndpoints: { value: any[]; options: any[]; messages: any };
   executingTask: ExecutingTask;
   setupCompleted = false;
+  environment = environment;
 
   constructor(
     private wizardStepsService: WizardStepsService,
