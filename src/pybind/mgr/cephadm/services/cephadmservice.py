@@ -1167,11 +1167,27 @@ class RgwService(CephService):
         # configure frontend
         args = []
         ftype = spec.rgw_frontend_type or "beast"
+
+        # pick ip RGW should bind to
+        ip_to_bind_to = ''
+        if spec.only_bind_port_on_networks and spec.networks:
+            assert daemon_spec.host is not None
+            ip_to_bind_to = self.mgr.get_first_matching_network_ip(daemon_spec.host, spec) or ''
+            if ip_to_bind_to:
+                daemon_spec.port_ips = {str(port): ip_to_bind_to}
+            else:
+                logger.warning(
+                    f'Failed to find ip in {spec.networks} for host {daemon_spec.host}. '
+                    f'{daemon_spec.name()} will bind to all IPs'
+                )
+        elif daemon_spec.ip:
+            ip_to_bind_to = daemon_spec.ip
+
         if ftype == 'beast':
             if spec.ssl:
-                if daemon_spec.ip:
+                if ip_to_bind_to:
                     args.append(
-                        f"ssl_endpoint={build_url(host=daemon_spec.ip, port=port).lstrip('/')}")
+                        f"ssl_endpoint={build_url(host=ip_to_bind_to, port=port).lstrip('/')}")
                 else:
                     args.append(f"ssl_port={port}")
                 if spec.generate_cert:
@@ -1179,15 +1195,15 @@ class RgwService(CephService):
                 else:
                     args.append(f"ssl_certificate=config://rgw/cert/{spec.service_name()}")
             else:
-                if daemon_spec.ip:
-                    args.append(f"endpoint={build_url(host=daemon_spec.ip, port=port).lstrip('/')}")
+                if ip_to_bind_to:
+                    args.append(f"endpoint={build_url(host=ip_to_bind_to, port=port).lstrip('/')}")
                 else:
                     args.append(f"port={port}")
         elif ftype == 'civetweb':
             if spec.ssl:
-                if daemon_spec.ip:
+                if ip_to_bind_to:
                     # note the 's' suffix on port
-                    args.append(f"port={build_url(host=daemon_spec.ip, port=port).lstrip('/')}s")
+                    args.append(f"port={build_url(host=ip_to_bind_to, port=port).lstrip('/')}s")
                 else:
                     args.append(f"port={port}s")  # note the 's' suffix on port
                 if spec.generate_cert:
@@ -1195,8 +1211,8 @@ class RgwService(CephService):
                 else:
                     args.append(f"ssl_certificate=config://rgw/cert/{spec.service_name()}")
             else:
-                if daemon_spec.ip:
-                    args.append(f"port={build_url(host=daemon_spec.ip, port=port).lstrip('/')}")
+                if ip_to_bind_to:
+                    args.append(f"port={build_url(host=ip_to_bind_to, port=port).lstrip('/')}")
                 else:
                     args.append(f"port={port}")
         else:
