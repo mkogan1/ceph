@@ -4146,6 +4146,13 @@ options:
   desc: Enables checks for allocations consistency during log replay
   default: true
   with_legacy: true
+- name: bluefs_log_replay_remove_zombie_files
+  type: bool
+  level: advanced
+  desc: BlueFS refuses to mount if zombie files are present.
+    When option is on (true) detected zombie files are ignored (will be purged on bluefs log compaction).
+  default: false
+  with_legacy: true
 - name: bluefs_replay_recovery
   type: bool
   level: dev

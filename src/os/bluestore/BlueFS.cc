@@ -1761,12 +1761,24 @@ int BlueFS::_replay(bool noop, bool to_stdout)
 
   if (!noop) {
     // verify file link counts are all >0
-    for (auto& p : nodes.file_map) {
-      if (p.second->refs == 0 &&
-	  p.second->fnode.ino > 1) {
-	derr << __func__ << " file with link count 0: " << p.second->fnode
-	     << dendl;
-	return -EIO;
+    bool all_ok = true;
+    auto p = nodes.file_map.begin();
+    while (p != nodes.file_map.end()) {
+      if (p->second->refs == 0 &&
+          p->second->fnode.ino > 1) {
+        derr << __func__ << " file with link count 0: " << p->second->fnode
+          << dendl;
+        all_ok = false;
+        p = nodes.file_map.erase(p);
+      } else {
+        ++p;
+      }
+    }
+    if (!all_ok) {
+      if (cct->_conf->bluefs_log_replay_remove_zombie_files) {
+        derr << __func__ << " zombie file(s) ignored = removed" << dendl;
+      } else {
+        return -EIO;
       }
     }
   }
