@@ -93,7 +93,6 @@ RGWObjState::RGWObjState(const RGWObjState& rhs) : obj (rhs.obj) {
     data = rhs.data;
   }
   prefetch_data = rhs.prefetch_data;
-  keep_tail = rhs.keep_tail;
   is_olh = rhs.is_olh;
   objv_tracker = rhs.objv_tracker;
   pg_ver = rhs.pg_ver;
@@ -448,4 +447,5 @@ int Object::range_to_ofs(uint64_t obj_size, int64_t &ofs, int64_t &end)
   }
   return 0;
 }
+
 } // namespace rgw::sal
