@@ -64,7 +64,8 @@ import {
   RadioModule,
   SelectModule,
   UIShellModule,
-  TreeviewModule
+  TreeviewModule,
+  TabsModule
 } from 'carbon-components-angular';
 
 // Icons
@@ -98,7 +99,8 @@ import Reset from '@carbon/icons/es/reset/32';
     NumberModule,
     ModalModule,
     DatePickerModule,
-    ComboBoxModule
+    ComboBoxModule,
+    TabsModule
   ],
   declarations: [
     RbdListComponent,
