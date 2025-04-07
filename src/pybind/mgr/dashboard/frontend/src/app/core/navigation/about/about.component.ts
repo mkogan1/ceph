@@ -25,6 +25,7 @@ export class AboutComponent implements OnInit, OnDestroy {
   projectConstants: typeof AppConstants;
   hostAddr: string;
   copyright: string;
+  version: string;
 
   constructor(
     public activeModal: NgbActiveModal,
@@ -40,11 +41,8 @@ export class AboutComponent implements OnInit, OnDestroy {
     this.hostAddr = window.location.hostname;
     this.modalVariables = this.setVariables();
     this.subs = this.summaryService.subscribe((summary) => {
-      const version = summary.version.replace('ceph version ', '').split(' ');
+      this.versionNumber = summary.version.startsWith('ceph version') ? summary.version.replace('ceph version ', '').split(' ')[0] : summary.version;
       this.hostAddr = summary.mgr_host.replace(/(^\w+:|^)\/\//, '').replace(/\/$/, '');
-      this.versionNumber = version[0];
-      this.versionHash = version[1];
-      this.versionName = version.slice(2, version.length).join(' ');
     });
   }
 
