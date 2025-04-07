@@ -206,111 +206,23 @@ input:-webkit-autofill {
 
 // About modal branding
 cd-about {
-  .about-container {
+  .cds--modal-container {
     background: fixed;
     background-color: $bg-color-dark !important;
-    height: 40rem;
     margin: 0;
     width: 50rem;
     background-image: none !important;
-  }
 
-  .modal-header {
-    padding-bottom: 0 !important;
-    padding-top: 0.5rem !important;
-  }
-
-  .modal-body {
-    padding-left: 40px !important;
-
-    img {
-      height: 96px !important;
-      width: 96px !important;
-    }
-  }
-
-  button {
-    font-size: unset !important;
-  }
-
-  .close {
-    font-size: unset !important;
-    font-weight: 100 !important;
-    text-shadow: none !important;
-  }
-
-  button::after {
-    content: '\f00d' !important;
-    font-size: 1rem !important;
-  }
-
-  h3 {
-    // @include carbon--type-style('productive-heading-04');
-    position: relative;
-    visibility: hidden;
-
-    strong {
-      display: none;
-    }
-  }
-
-  h3::after {
-    content: 'IBM Storage Ceph';
-    font-size: unset !important;
-    position: absolute;
-    visibility: visible;
-    width: 150%;
-  }
-
-  .product-versions {
-    // @include carbon--type-style('body-short-02');
-    // color: $text-secondary !important;
-    margin-bottom: 1rem !important;
-
-    strong {
-      font-size: unset !important;
-      font-weight: 400 !important;
+    .cds--modal-content {
+      overflow-y: hidden;
     }
 
-    span {
-      margin-left: -16.3rem !important;
+    footer {
+      height: 100px;
     }
-  }
 
-  dt {
-    // @include carbon--type-style('body-short-02');
-    // color: $text-secondary !important;
-    font-weight: 300 !important;
-    line-height: 1.5;
-  }
-
-  dd {
-    // @include carbon--type-style('body-short-02');
-    // color: $text-secondary !important;
-    font-weight: 300 !important;
-    line-height: 1.5;
-  }
-
-  .modal-footer {
-    // color: $text-secondary !important;
-    margin-top: 0 !important;
-    padding: 0 !important;
-
-    .text-left {
-      display: flex;
-
-      .copyright {
-        display: flex;
-        margin-left: 2.3rem;
-        margin-top: 4.5rem;
-        width: 100%;
-      }
-
-      .licence {
-        line-height: 1.2rem;
-        margin-left: -49.5rem;
-        width: 62%;
-      }
+    button svg{
+      fill: vv.$white;
     }
   }
 }

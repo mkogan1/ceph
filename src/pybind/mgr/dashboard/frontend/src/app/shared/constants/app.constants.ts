@@ -18,6 +18,7 @@ export class AppConstants {
   public static readonly cephLogo = environment.build === 'ibm'
       ? 'assets/StorageCeph_dark_theme.svg'
       : 'assets/Logo-RedHat-Hat-Color-RGB.png';
+  public static readonly defaultUser = 'dashboard';
 }
 
 export enum URLVerbs {

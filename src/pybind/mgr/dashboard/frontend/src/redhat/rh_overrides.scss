@@ -553,13 +553,18 @@ cd-about {
   }
 }
 
-.about-container {
+.cds--modal-container  {
   background: url('/assets/redhat_new_background.svg') no-repeat !important;
   background-position: left bottom !important;
   font-size: 1rem;
   margin-left: -10rem;
   text-shadow: none !important;
   width: 70rem !important;
+
+
+  .cds--modal-close {
+    background-color: transparent !important;
+  }
 
   .modal-header {
     background-color: transparent !important;
@@ -602,7 +607,7 @@ cd-about {
     width: 150%;
   }
 
-  .modal-body {
+  .header-content {
     img {
       background: url('../assets/Logo-RedHat-A-Reverse-RGB.svg') no-repeat;
       background-size: 150px;
@@ -610,10 +615,6 @@ cd-about {
       padding-right: 150px;
       padding-top: 36px;
       width: 0;
-    }
-
-    strong {
-      font-size: larger !important;
     }
   }
 
@@ -627,6 +628,7 @@ cd-about {
     strong {
       font-size: medium !important;
       margin-right: 16.7rem !important;
+      font-weight: bold !important;
     }
   }
 
