@@ -152,6 +152,7 @@ class NFSService(CephService):
                 "enable_nlm": str(spec.enable_nlm).lower(),
                 "cluster_id": self.mgr._cluster_fsid,
                 "kmip_addrs": spec.kmip_host_list if add_kmip_block else None,
+                "enable_virtual_server": str(spec.enable_virtual_server).lower()
             }
             if spec.enable_haproxy_protocol:
                 context["haproxy_hosts"] = self._haproxy_hosts()

@@ -69,6 +69,7 @@ class NFSCluster:
             kmip_key: Optional[str] = None,
             kmip_ca_cert: Optional[str] = None,
             kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
+            enable_virtual_server: bool = False
     ) -> None:
         if not port:
             port = 2049   # default nfs port
@@ -105,7 +106,8 @@ class NFSCluster:
                                   kmip_cert=kmip_cert,
                                   kmip_key=kmip_key,
                                   kmip_ca_cert=kmip_ca_cert,
-                                  kmip_host_list=kmip_host_list)
+                                  kmip_host_list=kmip_host_list,
+                                  enable_virtual_server=enable_virtual_server)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
             ispec = IngressSpec(service_type='ingress',
@@ -127,7 +129,8 @@ class NFSCluster:
                                   kmip_cert=kmip_cert,
                                   kmip_key=kmip_key,
                                   kmip_ca_cert=kmip_ca_cert,
-                                  kmip_host_list=kmip_host_list)
+                                  kmip_host_list=kmip_host_list,
+                                  port=port, enable_virtual_server=enable_virtual_server)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
         log.debug("Successfully deployed nfs daemons with cluster id %s and placement %s",
@@ -155,6 +158,7 @@ class NFSCluster:
             kmip_key: Optional[str] = None,
             kmip_ca_cert: Optional[str] = None,
             kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
+            enable_virtual_server: bool = False,
     ) -> None:
         try:
             if virtual_ip:
@@ -178,8 +182,18 @@ class NFSCluster:
             self.create_empty_rados_obj(cluster_id)
 
             if cluster_id not in available_clusters(self.mgr):
-                self._call_orch_apply_nfs(cluster_id, placement, virtual_ip, ingress_mode, port,
-                                          kmip_cert, kmip_key, kmip_ca_cert, kmip_host_list)
+                self._call_orch_apply_nfs(
+                    cluster_id,
+                    placement,
+                    virtual_ip,
+                    ingress_mode,
+                    port,
+                    kmip_cert,
+                    kmip_key,
+                    kmip_ca_cert,
+                    kmip_host_list,
+                    enable_virtual_server
+                )
                 return
             raise NonFatalError(f"{cluster_id} cluster already exists")
         except Exception as e:

@@ -1226,6 +1226,7 @@ class NFSServiceSpec(ServiceSpec):
                  kmip_key: Optional[str] = None,
                  kmip_ca_cert: Optional[str] = None,
                  kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
+                 enable_virtual_server: bool = False,
                  ):
         assert service_type == 'nfs'
         super(NFSServiceSpec, self).__init__(
@@ -1252,6 +1253,7 @@ class NFSServiceSpec(ServiceSpec):
                     self.kmip_host_list.append(host_obj)
                 else:
                     raise SpecValidationError(f'kmip_host_list contains an invalid element: {host_obj}.')
+        self.enable_virtual_server = enable_virtual_server
 
     def get_port_start(self) -> List[int]:
         if self.port:

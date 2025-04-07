@@ -137,7 +137,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                 ingress_mode: Optional[IngressType] = None,
                                 port: Optional[int] = None,
                                 inbuf: Optional[str] = None,
-                                ) -> None:
+                                enable_virtual_server: bool = False) -> None:
         """Create an NFS Cluster"""
         kmip_cert = kmip_key = kmip_ca_cert = kmip_host_list = None
         if inbuf:
@@ -151,7 +151,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                            virtual_ip=virtual_ip, ingress=ingress,
                                            ingress_mode=ingress_mode, port=port,
                                            kmip_cert=kmip_cert, kmip_key=kmip_key,
-                                           kmip_ca_cert=kmip_ca_cert, kmip_host_list=kmip_host_list)
+                                           kmip_ca_cert=kmip_ca_cert, kmip_host_list=kmip_host_list,
+                                           enable_virtual_server=enable_virtual_server)
 
     @CLICommand('nfs cluster rm', perm='rw')
     @object_format.EmptyResponder()
