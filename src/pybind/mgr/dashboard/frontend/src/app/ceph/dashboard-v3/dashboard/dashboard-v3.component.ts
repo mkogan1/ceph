@@ -178,9 +178,14 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
     });
     this.subs.add(
       this.summaryService.subscribe((summary) => {
-        const version = summary.version.replace('ceph version ', '').split(' ');
-        this.detailsCardData.cephVersion =
-          version[0] + ' ' + version.slice(2, version.length).join(' ');
+        if (summary.version.startsWith('ceph version')) {
+          const version = summary.version.replace('ceph version ', '').split(' ');
+          this.detailsCardData.cephVersion =
+            version[0] + ' ' + version.slice(2, version.length).join(' ');
+        }
+        else {
+          this.detailsCardData.cephVersion  = summary.version;
+        }
       })
     );
   }
