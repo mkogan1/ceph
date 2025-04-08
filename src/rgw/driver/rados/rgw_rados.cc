@@ -5324,16 +5324,16 @@ int RGWRados::restore_obj_from_cloud(RGWLCCloudTierCtx& tier_ctx,
   }
   boost::optional<RGWPutObj_Compress> compressor;
   CompressorRef plugin;
+  dest_placement.storage_class = tier_ctx.restore_storage_class;
   RGWRadosPutObj cb(dpp, cct, plugin, compressor, &processor, progress_cb, progress_data,
                     [&](map<string, bufferlist> obj_attrs) {
                       // XXX: do we need filter() like in fetch_remote_obj() cb
-  //                    int ret = 0;
                       dest_placement.inherit_from(dest_bucket_info.placement_rule);
                       /* For now we always restore to STANDARD storage-class.
                        * Later we will add support to take restore-target-storage-class
                        * for permanent restore
                        */
-                      dest_placement.storage_class = RGW_STORAGE_CLASS_STANDARD;
+//                      dest_placement.storage_class = RGW_STORAGE_CLASS_STANDARD;
 
                       processor.set_tail_placement(dest_placement);
 
@@ -5458,7 +5458,7 @@ int RGWRados::restore_obj_from_cloud(RGWLCCloudTierCtx& tier_ctx,
     // set tier-config only for temp restored objects, as
     // permanent copies will no more be considered as regular objects
     {
-      t.append("cloud-s3");
+      t.append(tier_ctx.tier_type);
       encode(tier_config, t_tier);
       attrs[RGW_ATTR_CLOUD_TIER_TYPE] = t;
       attrs[RGW_ATTR_CLOUD_TIER_CONFIG] = t_tier;
