@@ -5329,12 +5329,6 @@ int RGWRados::restore_obj_from_cloud(RGWLCCloudTierCtx& tier_ctx,
                     [&](map<string, bufferlist> obj_attrs) {
                       // XXX: do we need filter() like in fetch_remote_obj() cb
                       dest_placement.inherit_from(dest_bucket_info.placement_rule);
-                      /* For now we always restore to STANDARD storage-class.
-                       * Later we will add support to take restore-target-storage-class
-                       * for permanent restore
-                       */
-//                      dest_placement.storage_class = RGW_STORAGE_CLASS_STANDARD;
-
                       processor.set_tail_placement(dest_placement);
 
                       ret = processor.prepare(rctx.y);
@@ -5363,9 +5357,18 @@ int RGWRados::restore_obj_from_cloud(RGWLCCloudTierCtx& tier_ctx,
   real_time set_mtime;
   std::map<std::string, std::string> headers;
   ldpp_dout(dpp, 20) << "Fetching from cloud, object:" << dest_obj << dendl;
-  ret = rgw_cloud_tier_get_object(tier_ctx, false,  headers,
+  if (tier_config.tier_placement.tier_type == "cloud-s3-glacier") {
+    ldpp_dout(dpp, 20) << "Restoring  object:" << dest_obj << " from the cloud" << dendl;
+    RGWZoneGroupTierS3Glacier& glacier_params = tier_config.tier_placement.s3_glacier;
+    ret = rgw_cloud_tier_restore_object(tier_ctx, headers,
+                                &set_mtime, etag, accounted_size,
+                                attrs, days, glacier_params, &cb);
+  } else {
+    ldpp_dout(dpp, 20) << "Fetching  object:" << dest_obj << "from the cloud" <<  dendl;
+    ret = rgw_cloud_tier_get_object(tier_ctx, false,  headers,
                                 &set_mtime, etag, accounted_size,
                                 attrs, &cb);
+  }
 
   if (ret < 0) { 
     ldpp_dout(dpp, 20) << "Fetching from cloud failed, object:" << dest_obj << dendl;
