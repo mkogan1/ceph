@@ -17,7 +17,6 @@ import { SummaryService } from '~/app/shared/services/summary.service';
 })
 export class AboutComponent implements OnInit, OnDestroy {
   modalVariables: any;
-  versionNumber: string;
   versionHash: string;
   versionName: string;
   subs: Subscription;
@@ -26,6 +25,7 @@ export class AboutComponent implements OnInit, OnDestroy {
   hostAddr: string;
   copyright: string;
   version: string;
+  upstreamVersion: string;
 
   constructor(
     public activeModal: NgbActiveModal,
@@ -41,7 +41,8 @@ export class AboutComponent implements OnInit, OnDestroy {
     this.hostAddr = window.location.hostname;
     this.modalVariables = this.setVariables();
     this.subs = this.summaryService.subscribe((summary) => {
-      this.versionNumber = summary.version.startsWith('ceph version') ? summary.version.replace('ceph version ', '').split(' ')[0] : summary.version;
+      this.upstreamVersion = summary.upstream_version.replace('ceph version ', '').split(' ')[0];
+      this.version = summary.version;
       this.hostAddr = summary.mgr_host.replace(/(^\w+:|^)\/\//, '').replace(/\/$/, '');
     });
   }

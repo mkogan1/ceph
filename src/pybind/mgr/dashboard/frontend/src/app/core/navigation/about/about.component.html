@@ -14,15 +14,14 @@
       <strong>{{ projectConstants.projectName }}</strong>
     </h3>
     <div class="product-versions">
-      <strong>Release</strong>
-      <br>
-      {{ versionNumber }}
-      <br>
+      <strong>Release</strong> {{ version }}
     </div>
     <br>
     <dl>
       <dt>Version</dt>
-      <dd>{{ versionNumber }}</dd>
+      <dd>{{ version }}</dd>
+      <dt>Upstream Version</dt>
+      <dd>{{ upstreamVersion }}</dd>
       <dt>Ceph Manager</dt>
       <dd>{{ hostAddr }}</dd>
       <dt>User</dt>
