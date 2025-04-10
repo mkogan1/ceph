@@ -1865,6 +1865,14 @@ class RgwMultisite:
         else:
             self.update_period()
 
+    def modify_retain_head(self, tier_config: dict) -> List[str]:
+        tier_config_items = []
+        for key, value in tier_config.items():
+            if isinstance(value, bool):
+                value = str(value).lower()
+            tier_config_items.append(f'{key}={value}')
+        return tier_config_items
+
     def add_placement_targets(self, zonegroup_name: str, placement_targets: List[Dict]):
         rgw_add_placement_cmd = ['zonegroup', 'placement', 'add']
         STANDARD_STORAGE_CLASS = "STANDARD"
@@ -1883,9 +1891,7 @@ class RgwMultisite:
             ):
                 tier_config = placement_target.get('tier_config', {})
                 if tier_config:
-                    tier_config_items = (
-                        f'{key}={value}' for key, value in tier_config.items()
-                    )
+                    tier_config_items = self.modify_retain_head(tier_config)
                     tier_config_str = ','.join(tier_config_items)
                     cmd_add_placement_options += [
                         '--tier-type', 'cloud-s3', '--tier-config', tier_config_str
@@ -1958,9 +1964,7 @@ class RgwMultisite:
             ):
                 tier_config = placement_target.get('tier_config', {})
                 if tier_config:
-                    tier_config_items = (
-                        f'{key}={value}' for key, value in tier_config.items()
-                    )
+                    tier_config_items = self.modify_retain_head(tier_config)
                     tier_config_str = ','.join(tier_config_items)
                     cmd_add_placement_options += [
                         '--tier-type', 'cloud-s3', '--tier-config', tier_config_str
