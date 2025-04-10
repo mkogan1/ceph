@@ -345,7 +345,7 @@ struct RGWZone {
       sync_from_all(true) {}
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(7, 1, bl);
+    ENCODE_START(8, 1, bl);
     encode(name, bl);
     encode(endpoints, bl);
     encode(log_meta, bl);
@@ -362,7 +362,7 @@ struct RGWZone {
   }
 
   void decode(bufferlist::const_iterator& bl) {
-    DECODE_START(7, bl);
+    DECODE_START(8, bl);
     decode(name, bl);
     if (struct_v < 4) {
       id = name;
@@ -388,6 +388,9 @@ struct RGWZone {
     }
     if (struct_v >= 7) {
       decode(redirect_zone, bl);
+    }
+    if (struct_v >= 8) {
+      decode(supported_features, bl);
     }
     DECODE_FINISH(bl);
   }
