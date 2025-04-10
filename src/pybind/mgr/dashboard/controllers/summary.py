@@ -117,7 +117,8 @@ class Summary(BaseController):
             'have_mon_connection': mgr.have_mon_connection(),
             'executing_tasks': executing_tasks,
             'finished_tasks': finished_tasks,
-            'version': os.getenv("DOWNSTREAM_VERSION", None) or mgr.version
+            'upstream_version': mgr.version,
+            'version': os.getenv("DOWNSTREAM_VERSION", ''),
         }
         if self._has_permissions(Permission.READ, Scope.RBD_MIRRORING):
             result['rbd_mirroring'] = self._rbd_mirroring()
