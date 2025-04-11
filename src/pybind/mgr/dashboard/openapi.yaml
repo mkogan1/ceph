@@ -16653,9 +16653,6 @@ paths:
                     - warnings
                     - errors
                     type: object
-                  upstream_version:
-                    description: ''
-                    type: string
                   version:
                     description: ''
                     type: string

@@ -31,6 +31,7 @@ import { ConnectivityStatus } from '~/app/shared/models/call-home.model';
 import { NotificationService } from '~/app/shared/services/notification.service';
 import { NotificationType } from '~/app/shared/enum/notification-type.enum';
 import { OsdSettings } from '~/app/shared/models/osd-settings';
+import { getVersionAndRelease } from '~/app/shared/helpers/utils';
 
 @Component({
   selector: 'cd-dashboard-v3',
@@ -178,14 +179,8 @@ export class DashboardV3Component extends PrometheusListHelper implements OnInit
     });
     this.subs.add(
       this.summaryService.subscribe((summary) => {
-        if (summary.version) {
-          this.detailsCardData.cephVersion  = summary.version;
-        }
-        else {
-          const version = summary.version.replace('ceph version ', '').split(' ');
-          this.detailsCardData.cephVersion =
-            version[0] + ' ' + version.slice(2, version.length).join(' ');
-        }
+        const {release} = getVersionAndRelease(summary.version);
+        this.detailsCardData.cephVersion = release;
       })
     );
   }
