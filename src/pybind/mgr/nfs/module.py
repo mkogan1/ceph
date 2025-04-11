@@ -358,6 +358,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
     def _cmd_cluster_qos_ops_disable(self, cluster_id: str) -> None:
         """Disable NFS cluster QOS IOPS control"""
         return self.nfs.disable_cluster_qos_ops(cluster_id)
+
     def cluster_info(self, cluster_id: Optional[str] = None) -> Dict[str, Any]:
         return self.nfs.show_nfs_cluster_info(cluster_id=cluster_id)
 
