@@ -5,8 +5,8 @@ import { detect } from 'detect-browser';
 import { Subscription } from 'rxjs';
 
 import { UserService } from '~/app/shared/api/user.service';
-import { AppConstants, USER, VERSION_PREFIX } from '~/app/shared/constants/app.constants';
-import { LocalStorage } from '~/app/shared/enum/local-storage-enum';
+import { AppConstants } from '~/app/shared/constants/app.constants';
+import { getVersionAndRelease } from '~/app/shared/helpers/utils';
 import { Permission } from '~/app/shared/models/permissions';
 import { AuthStorageService } from '~/app/shared/services/auth-storage.service';
 import { SummaryService } from '~/app/shared/services/summary.service';
@@ -18,15 +18,13 @@ import { SummaryService } from '~/app/shared/services/summary.service';
 })
 export class AboutComponent implements OnInit, OnDestroy {
   modalVariables: any;
-  versionHash: string;
-  versionName: string;
   subs: Subscription;
   userPermission: Permission;
   projectConstants: typeof AppConstants;
   hostAddr: string;
   copyright: string;
   version: string;
-  upstreamVersion: string;
+  release: string;
 
   constructor(
     public activeModal: NgbActiveModal,
@@ -42,8 +40,9 @@ export class AboutComponent implements OnInit, OnDestroy {
     this.hostAddr = window.location.hostname;
     this.modalVariables = this.setVariables();
     this.subs = this.summaryService.subscribe((summary) => {
-      this.upstreamVersion = summary.upstream_version.replace('ceph version ', '').split(' ')[0];
-      this.version = summary.version;
+      const {release, version} = getVersionAndRelease(summary.version);
+      this.release = release;
+      this.version = version.split(' ')[0];
       this.hostAddr = summary.mgr_host.replace(/(^\w+:|^)\/\//, '').replace(/\/$/, '');
     });
   }
