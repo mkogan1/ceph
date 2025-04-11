@@ -150,7 +150,7 @@ QOS {
     enable_bw_control = true;
     combined_rw_bw_control = false;
     qos_type = 3;
-    max_export_write_bw = 1000000;
+    max_export_write_bw = 2000000;
     max_export_read_bw = 2000000;
     max_client_write_bw = 3000000;
     max_client_read_bw = 4000000;
@@ -164,7 +164,7 @@ QOS_BLOCK {
     enable_qos = true;
     enable_bw_control = true;
     combined_rw_bw_control = false;
-    max_export_write_bw = 1000000;
+    max_export_write_bw = 2000000;
     max_export_read_bw = 2000000;
     max_client_write_bw = 3000000;
     max_client_read_bw = 4000000;
@@ -181,7 +181,7 @@ QOS_BLOCK {
         "max_client_read_bw": "4.0MB",
         "max_client_write_bw": "3.0MB",
         "max_export_read_bw": "2.0MB",
-        "max_export_write_bw": "1.0MB",
+        "max_export_write_bw": "2.0MB",
         "qos_type": "PerShare_PerClient",
         "enable_iops_control": False
     }
@@ -193,9 +193,10 @@ QOS_BLOCK {
         "max_client_read_bw": "4.0MB",
         "max_client_write_bw": "3.0MB",
         "max_export_read_bw": "2.0MB",
-        "max_export_write_bw": "1.0MB",
+        "max_export_write_bw": "2.0MB",
         "enable_iops_control": False
     }
+
 
     class RObject(object):
         def __init__(self, key: str, raw: str) -> None:
@@ -1318,7 +1319,7 @@ NFS_CORE_PARAM {
         assert qos.enable_qos == True
         assert qos.bw_obj.enable_bw_ctrl == True
         assert isinstance(qos.qos_type, QOSType)
-        assert qos.bw_obj.export_writebw == 1000000
+        assert qos.bw_obj.export_writebw == 2000000
         assert qos.bw_obj.export_readbw == 2000000
         assert qos.bw_obj.client_writebw == 3000000
         assert qos.bw_obj.client_readbw == 4000000
@@ -1327,7 +1328,7 @@ NFS_CORE_PARAM {
         assert qos.enable_qos == True
         assert qos.bw_obj.enable_bw_ctrl == True
         assert qos.qos_type is None
-        assert qos.bw_obj.export_writebw == 1000000
+        assert qos.bw_obj.export_writebw == 2000000
         assert qos.bw_obj.export_readbw == 2000000
         assert qos.bw_obj.client_writebw == 3000000
         assert qos.bw_obj.client_readbw == 4000000
