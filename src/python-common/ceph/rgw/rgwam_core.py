@@ -502,7 +502,7 @@ class RGWAM:
             raise RGWAMException('failed to create zone', e)
 
     def create_system_user(self, realm, zonegroup, zone):
-        def _create_user():
+        try:
             sys_user_info = self.user_op().create(
                 zone,
                 zonegroup,
@@ -512,12 +512,8 @@ class RGWAM:
             )
             sys_user = RGWUser(sys_user_info)
             logging.info(f'Created system user: {sys_user.uid} on'
-                         '{realm.name}/{zonegroup.name}/{zone.name}')
+                         f'{realm.name}/{zonegroup.name}/{zone.name}')
             return sys_user
-
-
-        try:
-            _create_user()
         except RGWAMException as e:
             if e.retcode == -errno.EEXIST:
                 # You get this error (EEXIST) when the user already exists. This
