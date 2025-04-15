@@ -2522,11 +2522,14 @@ void RGWCreateBucket_ObjStore_S3::send_response()
     } else {
       /* n.b., EEXIST is mapped to HTTP error 409, BucketAlreadyExists, but ERR_BUCKET_EXISTS is not */
       op_ret = -EEXIST;
+      /* https://repost.aws/knowledge-center/s3-error-bucket-already-exists */
+      s->err.message = "BucketAlreadyExists";
     }
   }
 
-  if (op_ret)
+  if (op_ret) {
     set_req_state_err(s, op_ret);
+  }
   dump_errno(s);
   end_header(s);
 
