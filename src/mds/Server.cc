@@ -6254,11 +6254,10 @@ void Server::handle_client_setvxattr(const MDRequestRef& mdr, CInode *cur)
     client_t exclude_ct = mdr->get_client();
     mdcache->broadcast_quota_to_client(cur, exclude_ct, true);
   } else if (name == "ceph.quiesce.block"sv) {
-    bool val;
-    try {
-      val = boost::lexical_cast<bool>(value);
-    } catch (boost::bad_lexical_cast const&) {
-      dout(10) << "bad vxattr value, unable to parse bool for " << name << dendl;
+    std::string errstr;
+    bool val = strict_strtob(value, &errstr);
+    if (!errstr.empty()) {
+      dout(10) << "bad vxattr value, unable to parse bool for " << name << ": " << errstr << dendl;
       respond_to_request(mdr, -EINVAL);
       return;
     }
@@ -6316,7 +6315,13 @@ void Server::handle_client_setvxattr(const MDRequestRef& mdr, CInode *cur)
 	}
         value = "0";
       }
-      val = boost::lexical_cast<bool>(value);
+      std::string errstr;
+      val = strict_strtob(value, &errstr);
+      if (!errstr.empty()) {
+        dout(10) << "bad vxattr value, unable to parse bool for " << name << ": " << errstr << dendl;
+        respond_to_request(mdr, -EINVAL);
+        return;
+      }
     } catch (boost::bad_lexical_cast const&) {
       dout(10) << "bad vxattr value, unable to parse bool for " << name << dendl;
       respond_to_request(mdr, -EINVAL);
@@ -6465,7 +6470,13 @@ void Server::handle_client_setvxattr(const MDRequestRef& mdr, CInode *cur)
 	}
         value = "0";
       }
-      val = boost::lexical_cast<bool>(value);
+      std::string errstr;
+      val = strict_strtob(value, &errstr);
+      if (!errstr.empty()) {
+        dout(10) << "bad vxattr value, unable to parse bool for " << name << ": " << errstr << dendl;
+        respond_to_request(mdr, -EINVAL);
+        return;
+      }
     } catch (boost::bad_lexical_cast const&) {
       dout(10) << "bad vxattr value, unable to parse bool for " << name << dendl;
       respond_to_request(mdr, -EINVAL);
@@ -6533,11 +6544,10 @@ void Server::handle_client_setvxattr(const MDRequestRef& mdr, CInode *cur)
       return;
     }
 
-    bool val;
-    try {
-      val = boost::lexical_cast<bool>(value);
-    } catch (boost::bad_lexical_cast const&) {
-      dout(10) << "bad vxattr value, unable to parse bool for " << name << dendl;
+    std::string errstr;
+    bool val = strict_strtob(value, &errstr);
+    if (!errstr.empty()) {
+      dout(10) << "bad vxattr value, unable to parse bool for " << name << ": " << errstr << dendl;
       respond_to_request(mdr, -EINVAL);
       return;
     }
