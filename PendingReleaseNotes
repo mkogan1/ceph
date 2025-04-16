@@ -99,6 +99,10 @@
   headers only when the `read-stats` querystring is explicitly included in the
   API request.
 
+* RBD: Moving an image that is a member of a group to trash is no longer
+  allowed.  `rbd trash mv` command now behaves the same way as `rbd rm` in this
+  scenario.
+
 >=19.2.1
 
 * CephFS: Command `fs subvolume create` now allows tagging subvolumes through option
