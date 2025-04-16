@@ -461,8 +461,8 @@ const routes: Routes = [
             children: [
               { path: '', component: SmbClusterListComponent },
               {
-                path: 'clusters',
-                data: { breadcrumbs: 'Clusters' },
+                path: 'cluster',
+                data: { breadcrumbs: 'Cluster' },
                 children: [
                   { path: '', component: SmbClusterListComponent },
                   {

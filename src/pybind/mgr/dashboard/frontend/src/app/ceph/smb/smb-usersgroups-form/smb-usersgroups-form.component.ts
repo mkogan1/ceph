@@ -20,7 +20,7 @@ import { FinishedTask } from '~/app/shared/models/finished-task';
 import { TaskWrapperService } from '~/app/shared/services/task-wrapper.service';
 import { Group, SMBCluster, SMBUsersGroups, User, USERSGROUPS_RESOURCE } from '../smb.model';
 import { Location } from '@angular/common';
-import { USERSGROUPS_URL } from '../smb-usersgroups-list/smb-usersgroups-list.component';
+import { USERSGROUPS_PATH } from '../smb-usersgroups-list/smb-usersgroups-list.component';
 import { CdValidators } from '~/app/shared/forms/cd-validators';
 
 @Component({
@@ -52,7 +52,7 @@ export class SmbUsersgroupsFormComponent extends CdForm implements OnInit, OnDes
     private location: Location
   ) {
     super();
-    this.editing = this.router.url.startsWith(`${USERSGROUPS_URL}/${URLVerbs.EDIT}`);
+    this.editing = this.router.url.startsWith(`/${USERSGROUPS_PATH}/${URLVerbs.EDIT}`);
     this.resource = $localize`users and groups`;
     effect(() => {
       const formData = this.uploadedData();
@@ -70,6 +70,7 @@ export class SmbUsersgroupsFormComponent extends CdForm implements OnInit, OnDes
     this.createForm();
     if (this.editing) {
       this.action = this.actionLabels.UPDATE;
+      this.form.get('usersGroupsId').disable();
       let editingUsersGroupId: string;
       this.route.params.subscribe((params: { usersGroupsId: string }) => {
         editingUsersGroupId = params.usersGroupsId;
@@ -149,9 +150,8 @@ export class SmbUsersgroupsFormComponent extends CdForm implements OnInit, OnDes
     };
 
     const self = this;
-    const BASE_URL = 'smb/standalone/';
 
-    let taskUrl = `${BASE_URL}${this.editing ? URLVerbs.EDIT : URLVerbs.CREATE}`;
+    let taskUrl = `${USERSGROUPS_PATH}/${this.editing ? URLVerbs.EDIT : URLVerbs.CREATE}`;
     this.taskWrapperService
       .wrapTaskAroundCall({
         task: new FinishedTask(taskUrl, {

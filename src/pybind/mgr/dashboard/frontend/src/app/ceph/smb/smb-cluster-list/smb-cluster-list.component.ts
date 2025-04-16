@@ -4,7 +4,7 @@ import { BehaviorSubject, Observable, of } from 'rxjs';
 
 import _ from 'lodash';
 
-import { ActionLabelsI18n } from '~/app/shared/constants/app.constants';
+import { ActionLabelsI18n, URLVerbs } from '~/app/shared/constants/app.constants';
 import { TableComponent } from '~/app/shared/datatable/table/table.component';
 import { CdTableAction } from '~/app/shared/models/cd-table-action';
 import { CdTableColumn } from '~/app/shared/models/cd-table-column';
@@ -24,12 +24,13 @@ import { DeleteConfirmationModalComponent } from '~/app/shared/components/delete
 import { TaskWrapperService } from '~/app/shared/services/task-wrapper.service';
 import { FinishedTask } from '~/app/shared/models/finished-task';
 
-const BASE_URL = 'cephfs/smb/clusters';
+export const CLUSTER_PATH = 'cephfs/smb/cluster';
+
 @Component({
   selector: 'cd-smb-cluster-list',
   templateUrl: './smb-cluster-list.component.html',
   styleUrls: ['./smb-cluster-list.component.scss'],
-  providers: [{ provide: URLBuilderService, useValue: new URLBuilderService(BASE_URL) }]
+  providers: [{ provide: URLBuilderService, useValue: new URLBuilderService(CLUSTER_PATH) }]
 })
 export class SmbClusterListComponent extends ListWithDetails implements OnInit {
   @ViewChild('table', { static: true })
@@ -116,11 +117,10 @@ export class SmbClusterListComponent extends ListWithDetails implements OnInit {
     this.modalService.show(DeleteConfirmationModalComponent, {
       itemDescription: $localize`Cluster`,
       itemNames: [cluster_id],
-      actionDescription: $localize`delete`,
       submitActionObservable: () =>
         this.taskWrapper
           .wrapTaskAroundCall({
-            task: new FinishedTask('smb/cluster/delete', {
+            task: new FinishedTask(`${CLUSTER_PATH}/${URLVerbs.DELETE}`, {
               cluster_id: cluster_id
             }),
             call: this.smbService.deleteCluster(cluster_id)
