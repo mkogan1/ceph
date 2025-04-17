@@ -4,6 +4,7 @@
 #ifndef CEPHFS_MIRROR_PEER_REPLAYER_H
 #define CEPHFS_MIRROR_PEER_REPLAYER_H
 
+#include <stack>
 #include "common/Formatter.h"
 #include "common/Thread.h"
 #include "mds/FSMap.h"
