@@ -1032,15 +1032,11 @@ int DaosObject::transition_to_cloud(
 
 int DaosObject::restore_obj_from_cloud(Bucket* bucket,
           rgw::sal::PlacementTier* tier,
-          rgw_placement_rule& placement_rule,
-			    rgw_bucket_dir_entry& o,
-			    CephContext* cct,
-          RGWObjTier& tier_config,
-          uint64_t olh_epoch,
+	  CephContext* cct,
           std::optional<uint64_t> days,
+	  bool& in_progress,
           const DoutPrefixProvider* dpp, 
-          optional_yield y,
-          uint32_t flags)
+          optional_yield y)
 {
   return DAOS_NOT_IMPLEMENTED_LOG(dpp);
 }
@@ -2322,6 +2318,12 @@ int DaosStore::cluster_stat(RGWClusterStat& stats) {
 }
 
 std::unique_ptr<Lifecycle> DaosStore::get_lifecycle(void) {
+  DAOS_NOT_IMPLEMENTED_LOG(nullptr);
+  return 0;
+}
+
+std::unique_ptr<Restore> DaosStore::get_restore(const int n_objs,
+				const std::vector<std::string_view>& obj_names) {
   DAOS_NOT_IMPLEMENTED_LOG(nullptr);
   return 0;
 }

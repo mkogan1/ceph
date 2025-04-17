@@ -3334,6 +3334,11 @@ std::unique_ptr<Lifecycle> MotrStore::get_lifecycle(void)
   return 0;
 }
 
+std::unique_ptr<Restore> MotrStore::get_restore(const int n_objs,
+			const std::vector<std::string_view>& obj_names) {
+  return 0;
+}
+
 std::unique_ptr<Notification> MotrStore::get_notification(Object* obj, Object* src_obj, req_state* s,
     rgw::notify::EventType event_type, optional_yield y, const string* object_name)
 {
