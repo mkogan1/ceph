@@ -231,6 +231,7 @@ export class NfsRateLimitComponent implements OnInit {
     fields.forEach((field) => {
       this.rateLimitForm?.get(field)?.setValue(this.formatterService.toBytes(data?.[field]));
     });
+    this.ngDataReady.emit();
   }
 
   rateLimitBytesMaxSizeValidator(control: AbstractControl): ValidationErrors | null {
