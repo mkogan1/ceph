@@ -1,7 +1,6 @@
 import sys
 
 if sys.version_info[0:2] == (3, 6):
-    print("using vendor")
     from cephadmlib._vendor import dataclasses
 else:
     import dataclasses
