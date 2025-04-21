@@ -66,7 +66,7 @@ class Report:
                 "asset_type": "RedHatMarine",
                 "asset_vendor": "IBM",
                 "asset_virtual_id": self.agent.ceph_cluster_id,
-                "country_code": "",
+                "country_code": self.agent.customer_country_code,
                 "event_id": report_event_id,
                 "event_time": report_times.time,
                 "event_time_ms": report_times.time_ms,
@@ -172,6 +172,7 @@ class EventGeneric(Event):
                 "request_time": report_times.time_ms,
                 "content": {},  # will be filled later
                 "ibm_customer_number": self.agent.icn,
+                "customer_country_code": self.agent.customer_country_code,
                 "product_id_list" : [
                     ['5900-AVA', 'D0CYVZX'],
                     ['5900-AVA', 'D0CYWZX'],
