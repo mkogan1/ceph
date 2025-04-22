@@ -66,14 +66,13 @@ struct connection_t {
   int status = STATUS_OK;
   CephContext* const cct;
   CallbackList callbacks;
-  const std::string broker;
+  const std::string brokers;
   const bool use_ssl;
   const bool verify_ssl; // TODO currently iognored, not supported in librdkafka v0.11.6
   const boost::optional<std::string> ca_location;
   const std::string user;
   const std::string password;
   const boost::optional<std::string> mechanism;
-  const boost::optional<std::string> brokers;
   utime_t timestamp = ceph_clock_now();
 
   // cleanup of all internal connection resource
@@ -101,11 +100,11 @@ struct connection_t {
     std::for_each(callbacks.begin(), callbacks.end(), [this](auto& cb_tag) {
         cb_tag.cb(status);
         ldout(cct, 20) << "Kafka destroy: invoking callback with tag=" << cb_tag.tag << 
-          " for: " << broker << dendl;
+          " for: " << brokers << dendl;
       });
     callbacks.clear();
     delivery_tag = 1;
-    ldout(cct, 20) << "Kafka destroy: complete for: " << broker << dendl;
+    ldout(cct, 20) << "Kafka destroy: complete for: " << brokers << dendl;
   }
 
   bool is_ok() const {
@@ -113,13 +112,12 @@ struct connection_t {
   }
 
   // ctor for setting immutable values
-  connection_t(CephContext* _cct, const std::string& _broker, bool _use_ssl, bool _verify_ssl, 
+  connection_t(CephContext* _cct, const std::string& _brokers, bool _use_ssl, bool _verify_ssl, 
           const boost::optional<const std::string&>& _ca_location,
           const std::string& _user, const std::string& _password, 
-	  const boost::optional<const std::string&>& _mechanism,
-	  const boost::optional<const std::string&>& _brokers) :
-      cct(_cct), broker(_broker), use_ssl(_use_ssl), verify_ssl(_verify_ssl), ca_location(_ca_location), user(_user), password(_password), 
-      mechanism(_mechanism), brokers(_brokers) {}                                                                                                                                                        
+	  const boost::optional<const std::string&>& _mechanism) :
+      cct(_cct), brokers(_brokers), use_ssl(_use_ssl), verify_ssl(_verify_ssl), ca_location(_ca_location), user(_user), password(_password), 
+      mechanism(_mechanism) {}                                                                                                                                                        
 
   // dtor also destroys the internals
   ~connection_t() {
@@ -220,11 +218,7 @@ bool new_producer(connection_t* conn) {
   if (rd_kafka_conf_set(conn->temp_conf, "message.timeout.ms", 
         std::to_string(message_timeout).c_str(), errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) goto conf_error;
   // get list of brokers based on the bootstrap broker/s
-  if (conn->brokers) {
-    if (rd_kafka_conf_set(conn->temp_conf, "bootstrap.servers", conn->brokers->c_str(), errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) goto conf_error;
-  } else {
-    if (rd_kafka_conf_set(conn->temp_conf, "bootstrap.servers", conn->broker.c_str(), errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) goto conf_error;
-  }
+  if (rd_kafka_conf_set(conn->temp_conf, "bootstrap.servers", conn->brokers.c_str(), errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) goto conf_error;
 
   if (conn->use_ssl) {
     if (!conn->user.empty()) {
@@ -548,7 +542,7 @@ public:
   }
 
   // connect to a broker, or reuse an existing connection if already connected
-  bool connect(std::string& broker,
+  bool connect(std::string& conn_name,
           const std::string& url, 
           bool use_ssl,
           bool verify_ssl,
@@ -562,16 +556,14 @@ public:
 
     std::string user;
     std::string password;
-    if (!parse_url_authority(url, broker, user, password)) {
+    if (!parse_url_authority(url, conn_name, user, password)) {
       // TODO: increment counter
       ldout(cct, 1) << "Kafka connect: URL parsing failed" << dendl;
       return false;
     }
-    std::string broker_list;
     if (brokers.has_value()) {
-      broker_list.append(",");
-      broker_list.append(broker);
-      broker_list.append(brokers.get());
+      conn_name.append(",");
+      conn_name.append(brokers.get());
     }
 
     // this should be validated by the regex in parse_url()
@@ -583,7 +575,7 @@ public:
     }
 
     std::lock_guard lock(connections_lock);
-    const auto it = connections.find(broker);
+    const auto it = connections.find(conn_name);
     // note that ssl vs. non-ssl connection to the same host are two separate conenctions
     if (it != connections.end()) {
       // connection found - return even if non-ok
@@ -602,8 +594,8 @@ public:
     // in such a case the creation will be retried in the main thread
     ++connection_count;
     ldout(cct, 10) << "Kafka connect: new connection is created. Total connections: " << connection_count << dendl;
-    auto conn = connections.emplace(broker, std::make_unique<connection_t>(cct, broker, use_ssl, verify_ssl, ca_location, user, password, 
-	  mechanism, broker_list)).first->second.get();
+    auto conn = connections.emplace(conn_name, std::make_unique<connection_t>(cct, conn_name, use_ssl, verify_ssl, ca_location, user, password, 
+	  mechanism)).first->second.get();
     if (!new_producer(conn)) {
       ldout(cct, 10) << "Kafka connect: new connection is created. But producer creation failed. will retry" << dendl;
     }
@@ -696,12 +688,12 @@ void shutdown() {
   s_manager = nullptr;
 }
 
-bool connect(std::string& broker, const std::string& url, bool use_ssl, bool verify_ssl,
+bool connect(std::string& conn_name, const std::string& url, bool use_ssl, bool verify_ssl,
         boost::optional<const std::string&> ca_location,
         boost::optional<const std::string&> mechanism,
         boost::optional<const std::string&> brokers) {
   if (!s_manager) return false;
-  return s_manager->connect(broker, url, use_ssl, verify_ssl, ca_location, mechanism, brokers);
+  return s_manager->connect(conn_name, url, use_ssl, verify_ssl, ca_location, mechanism, brokers);
 }
 
 int publish(const std::string& conn_name,

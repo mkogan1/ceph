@@ -22,7 +22,7 @@ bool init(CephContext* cct);
 void shutdown();
 
 // connect to a kafka endpoint
-bool connect(std::string& broker, const std::string& url, bool use_ssl, bool verify_ssl, boost::optional<const std::string&> ca_location, 
+bool connect(std::string& conn_name, const std::string& url, bool use_ssl, bool verify_ssl, boost::optional<const std::string&> ca_location, 
     boost::optional<const std::string&> mechanism,
     boost::optional<const std::string&> brokers);
 
