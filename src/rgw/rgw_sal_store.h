@@ -251,6 +251,7 @@ class StoreObject : public Object {
     virtual int set_attrs(Attrs a) override { state.attrset = a; state.has_attrs = true; return 0; }
     virtual bool has_attrs(void) override { return state.has_attrs; }
     virtual ceph::real_time get_mtime(void) const override { return state.mtime; }
+    virtual void set_mtime(ceph::real_time& mtime) override { state.mtime = mtime; }
     virtual uint64_t get_obj_size(void) const override { return state.size; }
     virtual Bucket* get_bucket(void) const override { return bucket; }
     virtual void set_bucket(Bucket* b) override { bucket = b; state.obj.bucket = b->get_key(); }

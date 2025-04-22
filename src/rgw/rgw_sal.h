@@ -1365,6 +1365,8 @@ class Object {
     virtual bool has_attrs(void) = 0;
     /** Get the cached modification time for this object */
     virtual ceph::real_time get_mtime(void) const = 0;
+    /** Set the cached modification time for this object */
+    virtual void set_mtime(ceph::real_time&) = 0;
     /** Get the cached size for this object */
     virtual uint64_t get_obj_size(void) const = 0;
     /** Get the bucket containing this object */

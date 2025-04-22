@@ -851,6 +851,7 @@ public:
   virtual int set_attrs(Attrs a) override { return next->set_attrs(a); };
   virtual bool has_attrs(void) override { return next->has_attrs(); };
   virtual ceph::real_time get_mtime(void) const override { return next->get_mtime(); };
+  virtual void set_mtime(ceph::real_time& mtime) override { return next->set_mtime(mtime); }
   virtual uint64_t get_obj_size(void) const override { return next->get_obj_size(); };
   virtual Bucket* get_bucket(void) const override { return bucket; };
   virtual void set_bucket(Bucket* b) override;
