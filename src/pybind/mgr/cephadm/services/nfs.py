@@ -139,10 +139,14 @@ class NFSService(CephService):
         self.mgr.log.info(f'Ensuring {nodeid} is in the ganesha grace table')
         self.run_grace_tool(spec, 'add', nodeid)
 
+        # create the rados config object
+        self.create_rados_config_obj(spec)
+
         port = daemon_spec.ports[0] if daemon_spec.ports else 2049
+        monitoring_port = spec.monitoring_port if spec.monitoring_port else 9587
 
         # create the RGW keyring
-        rgw_user = f'{daemon_type}.{daemon_id}-rgw'
+        rgw_user = f'{rados_user}-rgw'
         rgw_keyring = self.create_rgw_keyring(daemon_spec)
         if spec.virtual_ip and not spec.enable_haproxy_protocol:
             bind_addr = spec.virtual_ip
@@ -155,6 +159,17 @@ class NFSService(CephService):
             logger.debug("using haproxy bind address: %r", bind_addr)
 
         add_kmip_block = (spec.kmip_cert and spec.kmip_key and spec.kmip_ca_cert and spec.kmip_host_list)
+        # check if monitor needs to be bind on specific ip
+        monitoring_addr = spec.monitoring_ip_addrs.get(host) if spec.monitoring_ip_addrs else None
+        if monitoring_addr and monitoring_addr not in self.mgr.cache.get_host_network_ips(host):
+            logger.debug(f"Monitoring IP {monitoring_addr} is not configured on host {daemon_spec.host}.")
+            monitoring_addr = None
+        if not monitoring_addr and spec.monitoring_networks:
+            monitoring_addr = self.mgr.get_first_matching_network_ip(daemon_spec.host, spec, spec.monitoring_networks)
+            if not monitoring_addr:
+                logger.debug(f"No IP address found in the network {spec.monitoring_networks} on host {daemon_spec.host}.")
+        if monitoring_addr:
+            daemon_spec.port_ips.update({str(monitoring_port): monitoring_addr})
 
         # generate the ganesha config
         def get_ganesha_conf() -> str:
@@ -167,7 +182,8 @@ class NFSService(CephService):
                 "url": f'rados://{POOL_NAME}/{spec.service_id}/{spec.rados_config_name()}',
                 # fall back to default NFS port if not present in daemon_spec
                 "port": port,
-                "monitoring_port": spec.monitoring_port if spec.monitoring_port else 9587,
+                "monitoring_addr": monitoring_addr,
+                "monitoring_port": monitoring_port,
                 "bind_addr": bind_addr,
                 "haproxy_hosts": [],
                 "nfs_idmap_conf": nfs_idmap_conf,
