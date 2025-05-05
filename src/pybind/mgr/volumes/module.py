@@ -766,7 +766,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                         namespace_isolated=cmd.get('namespace_isolated', False),
                                         earmark=cmd.get('earmark', None),
                                         normalization=cmd.get('normalization', None),
-                                        casesensitive=cmd.get('casesensitive', None))
+                                        casesensitive=cmd.get('casesensitive', None)),
                                         enctag=cmd.get('enctag', None))
 
     @mgr_cmd_wrap
