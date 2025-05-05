@@ -103,6 +103,11 @@
   allowed.  `rbd trash mv` command now behaves the same way as `rbd rm` in this
   scenario.
 
+* RBD: Fetching the mirroring mode of an image is invalid if the image is
+  disabled for mirroring. The public APIs -- C++ `mirror_image_get_mode()`,
+  C `rbd_mirror_image_get_mode()`, and Python `Image.mirror_image_get_mode()`
+  -- will return EINVAL when mirroring is disabled.
+
 >=19.2.1
 
 * CephFS: Command `fs subvolume create` now allows tagging subvolumes through option
