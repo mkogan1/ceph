@@ -13334,7 +13334,7 @@ void MDCache::repair_inode_stats_work(const MDRequestRef& mdr)
         dir = diri->get_or_open_dirfrag(this, leaf);
       }
       if (mds->damage_table.is_dirfrag_damaged(dir)) {
-        mds->server->respond_to_request(mdr, -CEPHFS_EIO);
+        mds->server->respond_to_request(mdr, -EIO);
         return;
       }
       if (dir->get_version() == 0) {
