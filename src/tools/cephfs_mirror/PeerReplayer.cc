@@ -2,7 +2,6 @@
 // vim: ts=8 sw=2 smarttab
 
 #include <stack>
-#include <queue>
 #include <fcntl.h>
 #include <algorithm>
 #include <sys/time.h>
@@ -1249,39 +1248,6 @@ int PeerReplayer::pre_sync_check_and_open_handles(
   return 0;
 }
 
-// Determines if the source is the local (previous) snapshot or the remote dir_root
-int PeerReplayer::validate_source(const std::string &dir_root,
-                                  const Snapshot &prev,
-                                  FHandles *fh) {
-  MountRef mnt = m_local_mount;
-  auto prev_snap_path = snapshot_path(m_cct, dir_root, prev.first);
-  auto fd = open_dir(mnt, prev_snap_path, prev.second);
-
-  if (fd < 0) {
-    if (fd != -ENOENT) {
-      ceph_close(m_local_mount, fh->c_fd);
-      return fd;
-    }
-
-    // ENOENT of previous snap, switching to remote dir_root
-    dout(5) << ": previous snapshot=" << prev << " missing" << dendl;
-    mnt = m_remote_mount;
-    fd = open_dir(mnt, dir_root, boost::none);
-    if (fd < 0) {
-      ceph_close(m_local_mount, fh->c_fd);
-      return fd;
-    }
-  }
-
-  // "previous" snapshot or dir_root file descriptor
-  fh->p_fd = fd;
-  fh->p_mnt = mnt;
-
-  dout(5) << ": using " << ((fh->p_mnt == m_local_mount) ? "local (previous) snapshot" : "remote dir_root")
-          << " for incremental transfer" << dendl;
-  return 0;
-}
-
 // sync the mode of the remote dir_root with that of the local dir_root
 int PeerReplayer::sync_perms(const std::string& path) {
   int r = 0;
@@ -1555,7 +1521,6 @@ int PeerReplayer::SnapDiffSync::get_entry(std::string *epath, struct ceph_statx 
 
     *epath = _epath;
     *stx = estx;
-    *sync_check = true;
     *sync_check = !pic;
 
     dout(10) << ": sync_check=" << *sync_check << " for epath=" << *epath << dendl;
@@ -1817,6 +1782,7 @@ int PeerReplayer::do_synchronize(const std::string &dir_root, const Snapshot &cu
     derr << ": failed to initialize sync mechanism" << dendl;
     ceph_close(m_local_mount, fh.c_fd);
     ceph_close(fh.p_mnt, fh.p_fd);
+    delete syncm;
     return r;
   }
 
@@ -1878,6 +1844,7 @@ int PeerReplayer::do_synchronize(const std::string &dir_root, const Snapshot &cu
   }
 
   syncm->finish_sync();
+  delete syncm;
 
   dout(20) << " cur:" << fh.c_fd
            << " prev:" << fh.p_fd
@@ -2151,7 +2118,7 @@ void PeerReplayer::peer_status(Formatter *f) {
       f->dump_string("state", "idle");
     } else {
       f->dump_string("state", "syncing");
-      f->open_object_section("current_sycning_snap");
+      f->open_object_section("current_syncing_snap");
       f->dump_unsigned("id", (*sync_stat.current_syncing_snap).first);
       f->dump_string("name", (*sync_stat.current_syncing_snap).second);
       f->close_section();
