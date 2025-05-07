@@ -146,7 +146,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                    'name=namespace_isolated,type=CephBool,req=false '
                    'name=earmark,type=CephString,req=false '
                    'name=normalization,type=CephChoices,strings=nfd|nfc|nfkd|nfkc,req=false '
-                   'name=casesensitive,type=CephBool,req=false ',
+                   'name=casesensitive,type=CephBool,req=false '
                    'name=enctag,type=CephString,req=false ',
             'desc': "Create a CephFS subvolume in a volume, and optionally, "
                     "with a specific size (in bytes), a specific data pool layout, "
