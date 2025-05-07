@@ -203,6 +203,28 @@ class NvmeofService(CephService):
         warn_message = f'It is presumed safe to stop {names}'
         return HandleCommandResult(0, warn_message, '')
 
+    def ignore_possible_stray(
+        self, service_type: str, daemon_id: str, name: str
+    ) -> bool:
+        if service_type == 'nvmeof':
+            # Some newer versions of nvmeof will register with the cluster
+            # with a name that does not include the pool or group name
+            # getting us from "nvmeof.<pool>.<group>.<hostname>.<6-random-chars>"
+            # to "nvmeof.<hostname>.<6-random-chars>"
+            for nvmeof_daemon in self.mgr.cache.get_daemons_by_type('nvmeof'):
+                # it's possible an old daemon that was upgraded might have
+                # a name that doesn't fit the expected format. Additionally,
+                # it's possible the hostname itself could have dots
+                try:
+                    daemon_type, pool_name, group_name, hostname_and_chars = nvmeof_daemon.name().split('.', 3)
+                    if daemon_id == hostname_and_chars:
+                        logger.debug('ignoring possibly stray nvmeof daemon: %s', name)
+                        return True
+                except ValueError:
+                    logger.debug('nvmeof daemon: "%s" found with less than 3 dots in name', nvmeof_daemon.name())
+                    continue
+        return False
+
     def post_remove(self, daemon: DaemonDescription, is_failed_deploy: bool) -> None:
         """
         Called after the daemon is removed.
