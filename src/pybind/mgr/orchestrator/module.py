@@ -2023,6 +2023,7 @@ Usage:
                             port: Optional[int] = None,
                             ssl: Optional[bool] = True,
                             enable_auth: Optional[bool] = False,
+                            virtual_ip: Optional[str] = None,
                             placement: Optional[str] = None,
                             unmanaged: bool = False,
                             dry_run: bool = False,
