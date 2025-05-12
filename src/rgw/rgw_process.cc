@@ -446,15 +446,15 @@ done:
   }
 
   if (op && op->always_do_bucket_logging()) {
-    std::ignore = rgw::bucketlogging::log_record(driver, 
+    std::ignore = rgw::bucketlogging::log_record(driver,
         rgw::bucketlogging::LoggingType::Standard,
         s->object.get(),
-        s, 
-        op->canonical_name(), 
-        "", 
+        s,
+        op->canonical_name(),
+        "",
         (s->src_object ? s->src_object->get_obj_size() : (s->object ? s->object->get_obj_size() : 0)),
-        op, 
-        yield, 
+        op,
+        yield,
         true,
         false);
   }
