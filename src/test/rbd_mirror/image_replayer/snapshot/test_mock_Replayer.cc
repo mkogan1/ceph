@@ -677,8 +677,8 @@ public:
     expect_register_update_watcher(mock_remote_image_ctx, update_watch_ctx, 234,
                                    0);
     expect_load_image_meta(mock_image_meta, false, 0);
-    expect_is_refresh_required(mock_local_image_ctx, false);
     expect_is_refresh_required(mock_remote_image_ctx, false);
+    expect_is_refresh_required(mock_local_image_ctx, false);
 
     C_SaferCond init_ctx;
     mock_replayer.init(&init_ctx);
@@ -801,8 +801,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SyncSnapshot) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -827,14 +827,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SyncSnapshot) {
 
   // sync snap4
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, true);
-  expect_refresh(
-    mock_local_image_ctx, {
-      {11U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
-         1, true, 0, {{1, CEPH_NOSNAP}}},
-       0, {}, 0, 0, {}}},
-    }, 0);
   expect_is_refresh_required(mock_remote_image_ctx, true);
   expect_refresh(
     mock_remote_image_ctx, {
@@ -857,6 +849,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SyncSnapshot) {
          "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}}
     }, 0);
+  expect_is_refresh_required(mock_local_image_ctx, true);
+  expect_refresh(
+    mock_local_image_ctx, {
+      {11U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
+         1, true, 0, {{1, CEPH_NOSNAP}}},
+       0, {}, 0, 0, {}}},
+    }, 0);
   expect_snapshot_copy(mock_snapshot_copy_request, 1, 4, 11,
                        {{1, 11}, {2, 12}, {4, CEPH_NOSNAP}}, 0);
   expect_get_image_state(mock_get_image_state_request, 4, 0);
@@ -878,20 +878,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SyncSnapshot) {
 
   // prune non-primary snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, true);
-  expect_refresh(
-    mock_local_image_ctx, {
-      {11U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
-         1, true, 0, {}},
-       0, {}, 0, 0, {}}},
-      {12U, librbd::SnapInfo{"snap2", cls::rbd::UserSnapshotNamespace{},
-       0, {}, 0, 0, {}}},
-      {14U, librbd::SnapInfo{"snap4", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
-         4, true, 0, {}},
-       0, {}, 0, 0, {}}},
-    }, 0);
   expect_is_refresh_required(mock_remote_image_ctx, true);
   expect_refresh(
     mock_remote_image_ctx, {
@@ -910,18 +896,24 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SyncSnapshot) {
          "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}}
     }, 0);
-  expect_prune_non_primary_snapshot(mock_local_image_ctx, 11, 0);
-
-  // idle
-  expect_load_image_meta(mock_image_meta, false, 0);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
+      {11U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
+         1, true, 0, {}},
+       0, {}, 0, 0, {}}},
+      {12U, librbd::SnapInfo{"snap2", cls::rbd::UserSnapshotNamespace{},
+       0, {}, 0, 0, {}}},
       {14U, librbd::SnapInfo{"snap4", cls::rbd::MirrorSnapshotNamespace{
          cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
          4, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
+  expect_prune_non_primary_snapshot(mock_local_image_ctx, 11, 0);
+
+  // idle
+  expect_load_image_meta(mock_image_meta, false, 0);
   expect_is_refresh_required(mock_remote_image_ctx, true);
   expect_refresh(
     mock_remote_image_ctx, {
@@ -929,6 +921,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SyncSnapshot) {
          cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
          "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}}
+    }, 0);
+  expect_is_refresh_required(mock_local_image_ctx, true);
+  expect_refresh(
+    mock_local_image_ctx, {
+      {14U, librbd::SnapInfo{"snap4", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
+         4, true, 0, {}},
+       0, {}, 0, 0, {}}},
     }, 0);
 
   // fire init
@@ -991,8 +991,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncInitial) {
 
   // re-sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockGetImageStateRequest mock_get_image_state_request;
   expect_get_image_state(mock_get_image_state_request, 11, 0);
   expect_notify_sync_request(mock_instance_watcher, mock_local_image_ctx.id, 0);
@@ -1009,6 +1009,7 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncInitial) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1017,7 +1018,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncInitial) {
          1, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -1085,8 +1085,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDelta) {
 
   // re-sync snap2
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockGetImageStateRequest mock_get_image_state_request;
   expect_get_image_state(mock_get_image_state_request, 12, 0);
   expect_notify_sync_request(mock_instance_watcher, mock_local_image_ctx.id, 0);
@@ -1106,6 +1106,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDelta) {
 
   // prune non-primary snap1
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, true);
+  expect_refresh(
+    mock_remote_image_ctx, {
+      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
+         "", CEPH_NOSNAP, true, 0, {}},
+       0, {}, 0, 0, {}}},
+    }, 0);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1118,18 +1126,11 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDelta) {
          2, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, true);
-  expect_refresh(
-    mock_remote_image_ctx, {
-      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
-         "", CEPH_NOSNAP, true, 0, {}},
-       0, {}, 0, 0, {}}},
-    }, 0);
   expect_prune_non_primary_snapshot(mock_local_image_ctx, 11, 0);
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1138,7 +1139,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDelta) {
          2, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -1207,8 +1207,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDeltaDemote) {
 
   // re-sync snap2
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockGetImageStateRequest mock_get_image_state_request;
   expect_get_image_state(mock_get_image_state_request, 12, 0);
   expect_notify_sync_request(mock_instance_watcher, mock_local_image_ctx.id, 0);
@@ -1228,6 +1228,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDeltaDemote) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, true);
+  expect_refresh(
+    mock_remote_image_ctx, {
+      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
+         "", CEPH_NOSNAP, true, 0, {}},
+       0, {}, 0, 0, {}}},
+    }, 0);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1238,14 +1246,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedSyncDeltaDemote) {
       {12U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
          cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
          2, true, 0, {}},
-       0, {}, 0, 0, {}}},
-    }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, true);
-  expect_refresh(
-    mock_remote_image_ctx, {
-      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
-         "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
 
@@ -1306,8 +1306,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncInitial) {
 
   // re-sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockGetImageStateRequest mock_get_image_state_request;
   expect_get_image_state(mock_get_image_state_request, 11, 0);
   expect_notify_sync_request(mock_instance_watcher, mock_local_image_ctx.id, 0);
@@ -1323,6 +1323,7 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncInitial) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1331,7 +1332,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncInitial) {
          1, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -1399,12 +1399,13 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDelta) {
 
   // prune non-primary snap2
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_prune_non_primary_snapshot(mock_local_image_ctx, 12, 0);
 
   // sync snap2
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1413,7 +1414,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDelta) {
          1, true, 0, {{1, CEPH_NOSNAP}}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 1, 2, 11,
                        {{2, CEPH_NOSNAP}}, 0);
@@ -1439,6 +1439,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDelta) {
 
   // prune non-primary snap1
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, true);
+  expect_refresh(
+    mock_remote_image_ctx, {
+      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
+         "", CEPH_NOSNAP, true, 0, {}},
+       0, {}, 0, 0, {}}},
+    }, 0);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1451,18 +1459,11 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDelta) {
          2, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, true);
-  expect_refresh(
-    mock_remote_image_ctx, {
-      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
-         "", CEPH_NOSNAP, true, 0, {}},
-       0, {}, 0, 0, {}}},
-    }, 0);
   expect_prune_non_primary_snapshot(mock_local_image_ctx, 11, 0);
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1471,7 +1472,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDelta) {
          2, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -1540,12 +1540,13 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDeltaDemote)
 
   // prune non-primary snap2
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_prune_non_primary_snapshot(mock_local_image_ctx, 12, 0);
 
   // sync snap2
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1554,7 +1555,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDeltaDemote)
          {"remote mirror peer uuid"}, "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 1, 2, 11,
                        {{2, CEPH_NOSNAP}}, 0);
@@ -1580,6 +1580,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDeltaDemote)
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, true);
+  expect_refresh(
+    mock_remote_image_ctx, {
+      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
+         "", CEPH_NOSNAP, true, 0, {}},
+       0, {}, 0, 0, {}}},
+    }, 0);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1590,14 +1598,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, InterruptedPendingSyncDeltaDemote)
       {13U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
          cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY, {}, "remote mirror uuid",
          2, true, 0, {}},
-       0, {}, 0, 0, {}}},
-    }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, true);
-  expect_refresh(
-    mock_remote_image_ctx, {
-      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
-         "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
 
@@ -1653,8 +1653,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteImageDemoted) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -1679,6 +1679,7 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteImageDemoted) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -1687,7 +1688,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteImageDemoted) {
          1, true, 0, {}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -1742,8 +1742,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, LocalImagePromoted) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -1788,14 +1788,109 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, ResyncRequested) {
                                    mock_replayer_listener,
                                    mock_image_meta,
                                    &update_watch_ctx));
+  // inject a primary snapshot
+  mock_remote_image_ctx.snap_info = {
+    {1U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
+        cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
+        "", CEPH_NOSNAP, true, 0, {}},
+      0, {}, 0, 0, {}}}};
 
   // idle
   expect_load_image_meta(mock_image_meta, true, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
 
   // wait for sync to complete and expect replay complete
+  ASSERT_EQ(0, wait_for_notification(1));
+  ASSERT_FALSE(mock_replayer.is_replaying());
+
+  ASSERT_EQ(0, shut_down_entry_replayer(mock_replayer, mock_threads,
+                                        mock_local_image_ctx,
+                                        mock_remote_image_ctx));
+}
+
+TEST_F(TestMockImageReplayerSnapshotReplayer, ResyncRequestedRemoteNotPrimary) {
+  librbd::MockTestImageCtx mock_local_image_ctx{*m_local_image_ctx};
+  librbd::MockTestImageCtx mock_remote_image_ctx{*m_remote_image_ctx};
+
+  MockThreads mock_threads(m_threads);
+  expect_work_queue_repeatedly(mock_threads);
+
+  MockReplayerListener mock_replayer_listener;
+  expect_notification(mock_threads, mock_replayer_listener);
+
+  InSequence seq;
+
+  MockInstanceWatcher mock_instance_watcher;
+  MockImageMeta mock_image_meta;
+  MockStateBuilder mock_state_builder(mock_local_image_ctx,
+                                      mock_remote_image_ctx,
+                                      mock_image_meta);
+  MockReplayer mock_replayer{&mock_threads, &mock_instance_watcher,
+                             "local mirror uuid", &m_pool_meta_cache,
+                             &mock_state_builder, &mock_replayer_listener};
+  m_pool_meta_cache.set_remote_pool_meta(
+    m_remote_io_ctx.get_id(),
+    {"remote mirror uuid", "remote mirror peer uuid"});
+
+  librbd::UpdateWatchCtx* update_watch_ctx = nullptr;
+  ASSERT_EQ(0, init_entry_replayer(mock_replayer, mock_threads,
+                                   mock_local_image_ctx,
+                                   mock_remote_image_ctx,
+                                   mock_replayer_listener,
+                                   mock_image_meta,
+                                   &update_watch_ctx));
+
+  // inject a demotion snapshot
+  mock_remote_image_ctx.snap_info = {
+    {1U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
+       cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY_DEMOTED,
+       {"remote mirror peer uuid"}, "", CEPH_NOSNAP, true, 0, {}},
+     0, {}, 0, 0, {}}}};
+
+  // resync requested
+  expect_load_image_meta(mock_image_meta, true, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
+
+  // remote is not primary so no resync should occur
+  expect_is_refresh_required(mock_local_image_ctx, false);
+  MockSnapshotCopyRequest mock_snapshot_copy_request;
+  expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0,
+                    {{1, CEPH_NOSNAP}}, 0);
+  MockGetImageStateRequest mock_get_image_state_request;
+  expect_get_image_state(mock_get_image_state_request, 1, 0);
+  MockCreateNonPrimaryRequest mock_create_non_primary_request;
+  expect_create_non_primary_request(mock_create_non_primary_request,
+                                    true, "remote mirror uuid", 1,
+                                    {{1, CEPH_NOSNAP}}, 11, 0);
+  MockImageStateUpdateRequest mock_image_state_update_request;
+  expect_update_mirror_image_state(mock_image_state_update_request, 0);
+  expect_notify_sync_request(mock_instance_watcher, mock_local_image_ctx.id, 0);
+  MockImageCopyRequest mock_image_copy_request;
+  expect_image_copy(mock_image_copy_request, 0, 1, 0, {},
+                    {{1, CEPH_NOSNAP}}, 0);
+  MockApplyImageStateRequest mock_apply_state_request;
+  expect_apply_image_state(mock_apply_state_request, 0);
+  expect_mirror_image_snapshot_set_copy_progress(
+    mock_local_image_ctx, 11, true, 0, 0);
+  expect_notify_update(mock_local_image_ctx);
+  expect_notify_sync_complete(mock_instance_watcher, mock_local_image_ctx.id);
+  expect_load_image_meta(mock_image_meta, true, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, true);
+  expect_refresh(
+    mock_local_image_ctx, {
+      {11U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
+        cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED, {"uuid"},
+        "remote mirror uuid", 1, true, 0, {{1, CEPH_NOSNAP}}},
+       0, {}, 0, 0, {}}},
+    }, 0);
+
+  // wake-up replayer
+  update_watch_ctx->handle_notify();
+
   ASSERT_EQ(0, wait_for_notification(1));
   ASSERT_FALSE(mock_replayer.is_replaying());
 
@@ -2040,6 +2135,7 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RefreshLocalImageError) {
 
   // sync
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(mock_local_image_ctx, {}, -EINVAL);
 
@@ -2090,7 +2186,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RefreshRemoteImageError) {
 
   // sync
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, true);
   expect_refresh(mock_remote_image_ctx, {}, -EINVAL);
 
@@ -2148,8 +2243,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, CopySnapshotsError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        -EINVAL);
@@ -2208,8 +2303,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, GetImageStateError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -2270,8 +2365,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, CreateNonPrimarySnapshotError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -2336,8 +2431,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, UpdateMirrorImageStateError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -2404,8 +2499,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RequestSyncError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -2474,8 +2569,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, CopyImageError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -2547,8 +2642,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, UpdateNonPrimarySnapshotError) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -2633,8 +2728,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, UnlinkPeerError) {
 
   // sync snap2
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 1, 2, 11, {{2, CEPH_NOSNAP}},
                        0);
@@ -2717,8 +2812,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SplitBrain) {
 
   // detect split-brain
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -2785,8 +2880,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteSnapshotMissingSplitBrain) {
 
   // split-brain due to missing snapshot 1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -2859,8 +2954,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteFailover) {
 
   // attach to promoted remote image
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 2, 3, 12,
                        {{2, 12}, {3, CEPH_NOSNAP}}, 0);
@@ -2887,6 +2982,20 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteFailover) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, true);
+  expect_refresh(
+    mock_remote_image_ctx, {
+      {1U, librbd::SnapInfo{"snap1", cls::rbd::UserSnapshotNamespace{},
+         0, {}, 0, 0, {}}},
+      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED,
+         {"remote mirror peer uuid"}, "local mirror uuid", 12U, true, 0, {}},
+       0, {}, 0, 0, {}}},
+      {3U, librbd::SnapInfo{"snap3", cls::rbd::MirrorSnapshotNamespace{
+         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {}, "", CEPH_NOSNAP, true, 0,
+         {}},
+       0, {}, 0, 0, {}}}
+    }, 0);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -2901,20 +3010,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, RemoteFailover) {
          "remote mirror uuid", 3, true, 0,
          {{1, 11}, {2, 12}, {3, CEPH_NOSNAP}}},
        0, {}, 0, 0, {}}},
-    }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, true);
-  expect_refresh(
-    mock_remote_image_ctx, {
-      {1U, librbd::SnapInfo{"snap1", cls::rbd::UserSnapshotNamespace{},
-         0, {}, 0, 0, {}}},
-      {2U, librbd::SnapInfo{"snap2", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED,
-         {"remote mirror peer uuid"}, "local mirror uuid", 12U, true, 0, {}},
-       0, {}, 0, 0, {}}},
-      {3U, librbd::SnapInfo{"snap3", cls::rbd::MirrorSnapshotNamespace{
-         cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {}, "", CEPH_NOSNAP, true, 0,
-         {}},
-       0, {}, 0, 0, {}}}
     }, 0);
 
   // wake-up replayer
@@ -2978,15 +3073,14 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, UnlinkRemoteSnapshot) {
 
   // unlink snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockUnlinkPeerRequest mock_unlink_peer_request;
   expect_unlink_peer(mock_unlink_peer_request, 1, "remote mirror peer uuid",
                      false, 0);
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, true);
   expect_refresh(
     mock_remote_image_ctx, {
@@ -3001,6 +3095,7 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, UnlinkRemoteSnapshot) {
          "", CEPH_NOSNAP, true, 0, {}},
        0, {}, 0, 0, {}}}
     }, 0);
+  expect_is_refresh_required(mock_local_image_ctx, false);
 
   // fire init
   C_SaferCond init_ctx;
@@ -3056,8 +3151,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SkipImageSync) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -3077,6 +3172,7 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SkipImageSync) {
 
   // idle
   expect_load_image_meta(mock_image_meta, false, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
   expect_is_refresh_required(mock_local_image_ctx, true);
   expect_refresh(
     mock_local_image_ctx, {
@@ -3085,7 +3181,6 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, SkipImageSync) {
          1, true, 0, {{1, CEPH_NOSNAP}}},
        0, {}, 0, 0, {}}},
     }, 0);
-  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // fire init
   C_SaferCond init_ctx;
@@ -3133,11 +3228,19 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, ImageNameUpdated) {
                                    mock_image_meta,
                                    &update_watch_ctx));
 
+  // inject a primary snapshot
+  mock_remote_image_ctx.snap_info = {
+    {1U, librbd::SnapInfo{"snap1", cls::rbd::MirrorSnapshotNamespace{
+        cls::rbd::MIRROR_SNAPSHOT_STATE_PRIMARY, {"remote mirror peer uuid"},
+        "", CEPH_NOSNAP, true, 0, {}},
+      0, {}, 0, 0, {}}}};
+
   // change the name of the image
   mock_local_image_ctx.name = "NEW NAME";
 
   // idle
   expect_load_image_meta(mock_image_meta, true, 0);
+  expect_is_refresh_required(mock_remote_image_ctx, false);
 
   // wake-up replayer
   update_watch_ctx->handle_notify();
@@ -3197,8 +3300,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, ApplyImageStatePendingShutdown) {
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
@@ -3284,8 +3387,8 @@ TEST_F(TestMockImageReplayerSnapshotReplayer, ApplyImageStateErrorPendingShutdow
 
   // sync snap1
   expect_load_image_meta(mock_image_meta, false, 0);
-  expect_is_refresh_required(mock_local_image_ctx, false);
   expect_is_refresh_required(mock_remote_image_ctx, false);
+  expect_is_refresh_required(mock_local_image_ctx, false);
   MockSnapshotCopyRequest mock_snapshot_copy_request;
   expect_snapshot_copy(mock_snapshot_copy_request, 0, 1, 0, {{1, CEPH_NOSNAP}},
                        0);
