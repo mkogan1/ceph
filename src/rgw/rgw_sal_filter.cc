@@ -435,10 +435,9 @@ std::unique_ptr<Lifecycle> FilterDriver::get_lifecycle(void)
   return std::make_unique<FilterLifecycle>(std::move(lc));
 }
 
-std::unique_ptr<Restore> FilterDriver::get_restore(const int n_objs,
-		       	const std::vector<std::string_view>& obj_names)
+std::unique_ptr<Restore> FilterDriver::get_restore()
 {
-  std::unique_ptr<Restore> restore = next->get_restore(n_objs, obj_names);
+  std::unique_ptr<Restore> restore = next->get_restore();
   return std::make_unique<FilterRestore>(std::move(restore));
 }
 
@@ -1483,6 +1482,11 @@ std::unique_ptr<RestoreSerializer> FilterRestore::get_serializer(const std::stri
   std::unique_ptr<RestoreSerializer> ns;
   ns = next->get_serializer(lock_name, oid, cookie);
   return std::make_unique<FilterRestoreSerializer>(std::move(ns));
+}
+
+int FilterRestore::initialize(const DoutPrefixProvider* dpp, optional_yield y,
+		  int n_objs, std::vector<std::string>& obj_names) {
+  return next->initialize(dpp, y, n_objs, obj_names);
 }
 
 int FilterRestore::add_entry(const DoutPrefixProvider* dpp, optional_yield y,

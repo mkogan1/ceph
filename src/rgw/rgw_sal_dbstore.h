@@ -888,8 +888,7 @@ public:
       virtual int list_all_zones(const DoutPrefixProvider* dpp, std::list<std::string>& zone_ids) override;
       virtual int cluster_stat(RGWClusterStat& stats) override;
       virtual std::unique_ptr<Lifecycle> get_lifecycle(void) override;
-      virtual std::unique_ptr<Restore> get_restore(const int n_objs,
-		     const std::vector<std::string_view>& obj_names) override;
+      virtual std::unique_ptr<Restore> get_restore(void) override;
 
   virtual std::unique_ptr<Notification> get_notification(
     rgw::sal::Object* obj, rgw::sal::Object* src_obj, req_state* s,

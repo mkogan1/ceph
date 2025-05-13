@@ -450,6 +450,13 @@ public:
   virtual void print(std::ostream& out) const override { out << oid; }
 };
 
+class StoreRestore : public Restore {
+
+public:
+  StoreRestore() = default;
+  virtual ~StoreRestore() = default;
+};
+
 class StoreNotification : public Notification {
 protected:
   Object* obj;

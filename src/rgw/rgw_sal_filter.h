@@ -295,8 +295,7 @@ public:
   }
   virtual int cluster_stat(RGWClusterStat& stats) override;
   virtual std::unique_ptr<Lifecycle> get_lifecycle(void) override;
-  virtual std::unique_ptr<Restore> get_restore(const int n_objs,
-		 	const std::vector<std::string_view>& obj_names) override;
+  virtual std::unique_ptr<Restore> get_restore(void) override;
 
   virtual std::unique_ptr<Notification> get_notification(rgw::sal::Object* obj,
 				 rgw::sal::Object* src_obj, struct req_state* s,
@@ -1097,6 +1096,8 @@ public:
   FilterRestore(std::unique_ptr<Restore> _next) : next(std::move(_next)) {}
   ~FilterRestore() override = default;
 
+  virtual int initialize(const DoutPrefixProvider* dpp, optional_yield y,
+		  int n_objs, std::vector<std::string>& obj_names) override;
   virtual int add_entry(const DoutPrefixProvider* dpp, optional_yield y,
 		  int index, const RGWRestoreEntry& r_entry) override;
   virtual int add_entries(const DoutPrefixProvider* dpp, optional_yield y,
