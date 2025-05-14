@@ -8,6 +8,7 @@ import { TableComponent } from '../datatable/table/table.component';
 import { Router } from '@angular/router';
 import { MgrModuleInfo } from '../models/mgr-modules.interface';
 import { NotificationType } from '../enum/notification-type.enum';
+import { NgbActiveModal } from '@ng-bootstrap/ng-bootstrap';
 
 @Injectable({
   providedIn: 'root'
@@ -85,7 +86,8 @@ export class MgrModuleService {
     table: TableComponent = null,
     navigateTo: string = '',
     notificationText?: string,
-    navigateByUrl?: boolean
+    navigateByUrl?: boolean,
+    activeModal?: NgbActiveModal
   ): void {
     let $obs;
     const fnWaitUntilReconnected = () => {
@@ -102,6 +104,8 @@ export class MgrModuleService {
             if (table) {
               table.refreshBtn();
             }
+
+            if (activeModal) activeModal.close();
 
             if (notificationText) {
               this.notificationService.show(

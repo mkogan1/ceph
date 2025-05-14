@@ -4,8 +4,7 @@ import { MgrModuleService } from '../../api/mgr-module.service';
 import { NotificationService } from '../../services/notification.service';
 import { NotificationType } from '../../enum/notification-type.enum';
 import { BlockUI, NgBlockUI } from 'ng-block-ui';
-import { BehaviorSubject, Observable, timer } from 'rxjs';
-import { CallHomeNotificationService } from '../../services/call-home-notification.service';
+import { BehaviorSubject, Observable } from 'rxjs';
 import { CdFormGroup } from '../../forms/cd-form-group';
 import { FormControl, Validators } from '@angular/forms';
 import { CallHomeService } from '../../api/call-home.service';
@@ -41,7 +40,6 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
     public activeModal: NgbActiveModal,
     private mgrModuleService: MgrModuleService,
     private notificationService: NotificationService,
-    private callHomeNotificationService: CallHomeNotificationService,
     private callHomeSerive: CallHomeService,
     private textToDownloadService: TextToDownloadService
   ) {
@@ -121,64 +119,16 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
   }
 
   callHome(enable = true) {
-    const fnWaitUntilReconnected = () => {
-      timer(2000).subscribe(() => {
-        // Trigger an API request to check if the connection is
-        // re-established.
-        this.mgrModuleService.list().subscribe(
-          () => {
-            // Resume showing the notification toasties.
-            this.notificationService.suspendToasties(false);
-            // Unblock the whole UI.
-            this.blockUI.stop();
-            // Reload the data table content.
-            if (enable) {
-              this.notificationService.show(
-                NotificationType.success,
-                $localize`Activated IBM Call Home Agent`
-              );
-              this.callHomeNotificationService.setVisibility(false);
-              this.activeModal.close();
-            } else {
-              this.notificationService.show(
-                NotificationType.success,
-                $localize`Deactivated IBM Call Home Agent`
-              );
-              this.activeModal.close();
-            }
-          },
-          () => {
-            fnWaitUntilReconnected();
-          }
-        );
-      });
-    };
-
-    if (enable) {
-      this.mgrModuleService.enable('call_home_agent').subscribe(
-        () => undefined,
-        () => {
-          // Suspend showing the notification toasties.
-          this.notificationService.suspendToasties(true);
-          // Block the whole UI to prevent user interactions until
-          // the connection to the backend is reestablished
-          this.blockUI.start($localize`Reconnecting, please wait ...`);
-          fnWaitUntilReconnected();
-        }
-      );
-    } else {
-      this.mgrModuleService.disable('call_home_agent').subscribe(
-        () => undefined,
-        () => {
-          // Suspend showing the notification toasties.
-          this.notificationService.suspendToasties(true);
-          // Block the whole UI to prevent user interactions until
-          // the connection to the backend is reestablished
-          this.blockUI.start($localize`Reconnecting, please wait ...`);
-          fnWaitUntilReconnected();
-        }
-      );
-    }
+    this.mgrModuleService.updateModuleState(
+      'call_home_agent',
+      !enable,
+      null,
+      '',
+      enable ? $localize`Activated IBM Call Home Agent`
+       : $localize`Deactivated IBM Call Home Agent`,
+      false,
+      this.activeModal
+    );
   }
 
   testConnectivity() {
