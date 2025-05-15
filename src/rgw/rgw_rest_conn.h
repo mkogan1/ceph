@@ -347,7 +347,7 @@ public:
   int wait(bufferlist *pbl, optional_yield y) {
     int ret = req.wait(y);
     if (ret < 0) {
-      if (ret == -EIO) {
+      if (ret == -ERR_INTERNAL_ERROR) {
         conn->set_url_unconnectable(req.get_url_orig());
       }
       return ret;
@@ -402,7 +402,7 @@ int RGWRESTReadResource::wait(T *dest, optional_yield y)
 {
   int ret = req.wait(y);
   if (ret < 0) {
-    if (ret == -EIO) {
+    if (ret == -ERR_INTERNAL_ERROR) {
       conn->set_url_unconnectable(req.get_url_orig());
     }
     return ret;
@@ -476,7 +476,7 @@ public:
     int ret = req.wait(y);
     *pbl = bl;
 
-    if (ret == -EIO) {
+    if (ret == -ERR_INTERNAL_ERROR) {
       conn->set_url_unconnectable(req.get_url_orig());
     }
 
@@ -495,7 +495,7 @@ template <class T, class E>
 int RGWRESTSendResource::wait(T *dest, optional_yield y, E *err_result)
 {
   int ret = req.wait(y);
-  if (ret == -EIO) {
+  if (ret == -ERR_INTERNAL_ERROR) {
     conn->set_url_unconnectable(req.get_url_orig());
   }
 
