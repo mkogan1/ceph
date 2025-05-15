@@ -29,30 +29,32 @@ export class DocService {
     let sections = {};
 
     if (environment.build === 'ibm') {
-      const domain = `https://www.ibm.com/docs/storage-ceph/${docVersion}?topic=`;
+      // overriding the ibm docs to serve from 8.1.0 link. not overriding the
+      // global variable since rh still uses old versioning format
+      const domain = `https://www.ibm.com/docs/storage-ceph/${docVersion}.1.0?topic=`;
       const domainIBM = `https://www.ibm.com/support/customer/csol/terms/`;
 
       sections = {
         iscsi: `${domain}dashboard-management-iscsi-functions-using-ceph`,
-        prometheus: `${domain}dashboard-management-alerts-ceph`,
-        'nfs-ganesha': `${domain}dashboard-management-nfs-ganesha-exports-ceph`,
-        'rgw-nfs': `${domain}dashboard-management-nfs-ganesha-exports-ceph`,
-        rgw: `${domain}dashboard-management-ceph-object-gateway-using`,
+        prometheus: `${domain}dashboard-managing-alerts`,
+        'nfs-ganesha': `${domain}dashboard-managing-nfs-exports`,
+        'rgw-nfs': `${domain}dashboard-managing-nfs-exports`,
+        rgw: `${domain}dashboard-managing-ceph-object-gateway`,
         'rgw-multisite': `${domain}zone-failover-disaster-recovery`,
         multisite: `${domain}gateway-multi-site-configuration-administration`,
         dashboard: `${domain}dashboard`,
-        grafana: `${domain}dashboard-enabling-monitoring-stack`,
+        grafana: `${domain}alerts-enabling-monitoring-stack`,
         orch: `${domain}operations-introduction-ceph-orchestrator`,
         pgs: `https://access.redhat.com/labs/cephpgc/`,
         help: domain,
         terms: `${domainIBM}?id=L-KDIY-CJHJCJ&lc=en#detail-document`,
         privacy: `${domainIBM}?id=Z126-7870&lc=en#detail-document`,
-        'dashboard-landing-page-status': `${domain}access-understanding-landing-page-ceph-dashboard`,
-        'dashboard-landing-page-performance': `${domain}access-understanding-landing-page-ceph-dashboard`,
-        'dashboard-landing-page-capacity': `${domain}access-understanding-landing-page-ceph-dashboard`
+        'dashboard-landing-page-status': `${domain}dashboard-understanding-landing-page-ceph`,
+        'dashboard-landing-page-performance': `${domain}dashboard-understanding-landing-page-ceph`,
+        'dashboard-landing-page-capacity': `${domain}dashboard-understanding-landing-page-ceph`
       };
     } else {
-      const domain = `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/${docVersion}/html/`;
+      const domain = `https://docs.redhat.com/en/documentation/red_hat_ceph_storage/${docVersion}/html/`;
       const domainRedHat = `https://www.redhat.com/en/about/`;
 
       sections = {
@@ -67,7 +69,7 @@ export class DocService {
         grafana: `${domain}dashboard_guide/management-of-alerts-on-the-ceph-dashboard#enabling-monitoring-stack_dash`,
         orch: `${domain}operations_guide/introduction-to-the-ceph-orchestrator`,
         pgs: `https://access.redhat.com/labs/cephpgc/`,
-        help: `https://access.redhat.com/documentation/en-us/red_hat_ceph_storage/`,
+        help: `https://docs.redhat.com/en/documentation/red_hat_ceph_storage/`,
         terms: `${domainRedHat}all-policies-guidelines/`,
         privacy: `${domainRedHat}privacy-policy/`,
         'dashboard-landing-page-status': `${domain}dashboard_guide/index#understanding-the-landing-page_dash`,
