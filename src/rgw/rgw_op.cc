@@ -4118,7 +4118,8 @@ int RGWPutObj::init_processing(optional_yield y) {
 
 int RGWPutObj::verify_permission(optional_yield y)
 {
-  if (! copy_source.empty()) {
+  if (! (copy_source.empty() ||
+	 copy_source_object_name.empty())) {
 
     RGWAccessControlPolicy cs_acl;
     boost::optional<Policy> policy;
