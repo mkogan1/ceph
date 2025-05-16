@@ -215,7 +215,7 @@ class CallHomeAgent(MgrModule):
         Option(
             name='ecurep_url',
             type='str',
-            default='https://www.secure.ecurep.ibm.com',
+            default='https://www.ecurep.ibm.com',
             desc='ECuRep file exchange systems'
         ),
         Option(
