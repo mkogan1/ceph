@@ -2824,3 +2824,10 @@ extern "C" int ceph_get_perf_counters(struct ceph_mount_info *cmount, char **per
   do_out_buffer(outbl, perf_dump, NULL);
   return outbl.length();
 }
+
+extern "C" int ceph_fcopyfile(struct ceph_mount_info *cmount, const char *spath, const char *dpath, mode_t mode)
+{
+  if (!cmount->is_mounted())
+    return -ENOTCONN;
+  return cmount->get_client()->fcopyfile(spath, dpath, cmount->default_perms, mode);
+}
