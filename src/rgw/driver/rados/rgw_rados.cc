@@ -228,6 +228,7 @@ void RGWObjectCtx::set_atomic(const rgw_obj& obj) {
   assert (!obj.empty());
   objs_state[obj].state.is_atomic = true;
 }
+
 void RGWObjectCtx::set_prefetch_data(const rgw_obj& obj) {
   std::unique_lock wl{lock};
   assert (!obj.empty());

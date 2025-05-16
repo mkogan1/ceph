@@ -4010,13 +4010,15 @@ int RGWPutObj::init_processing(optional_yield y) {
 
 int RGWPutObj::verify_permission(optional_yield y)
 {
-  if (! copy_source.empty()) {
+  if (! (copy_source.empty() ||
+	 copy_source_object_name.empty())) {
 
     RGWAccessControlPolicy cs_acl;
     boost::optional<Policy> policy;
     auto cs_bucket = driver->get_bucket(copy_source_bucket_info);
     auto cs_object = cs_bucket->get_object(rgw_obj_key(copy_source_object_name,
                                                        copy_source_version_id));
+
     cs_object->set_atomic();
     cs_object->set_prefetch_data();
 
