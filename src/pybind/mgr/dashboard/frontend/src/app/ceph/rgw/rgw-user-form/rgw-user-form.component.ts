@@ -77,7 +77,7 @@ export class RgwUserFormComponent extends CdForm implements OnInit {
       // General
       user_id: [
         null,
-        [Validators.required, Validators.pattern(/^[a-zA-Z0-9!@#%^&*()_-]+$/)],
+        [Validators.required, Validators.pattern(/^[a-zA-Z0-9!@#%^&*()._-]+$/)],
         this.editing
           ? []
           : [
@@ -89,7 +89,7 @@ export class RgwUserFormComponent extends CdForm implements OnInit {
       show_tenant: [this.editing],
       tenant: [
         null,
-        [Validators.pattern(/^[a-zA-Z0-9!@#%^&*()_-]+$/)],
+        [Validators.pattern(/^[a-zA-Z0-9_]+$/)],
         this.editing
           ? []
           : [
