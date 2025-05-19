@@ -1418,6 +1418,7 @@ class RGWSpec(ServiceSpec):
                  concentrator_monitor_port: Optional[int] = None,
                  concentrator_monitor_user: Optional[str] = None,
                  concentrator_monitor_password: Optional[str] = None,
+                 qat: Optional[Dict[str, str]] = None,
                  ):
         assert service_type == 'rgw', service_type
 
@@ -1491,6 +1492,8 @@ class RGWSpec(ServiceSpec):
         self.concentrator_monitor_password = concentrator_monitor_password
         self._set_concentrator_defaults()
         self.wildcard_enabled = wildcard_enabled
+
+        self.qat = qat or {}
 
     def get_port_start(self) -> List[int]:
         ports = self.get_port()
@@ -1587,6 +1590,13 @@ class RGWSpec(ServiceSpec):
             if unset_concentrator_attrs:
                 raise SpecValidationError(f'Parameter(s) {unset_concentrator_attrs} found empty '
                                           'with"concentrator" parameter set to "haproxy"')
+        valid_compression_modes = ('sw', 'hw')
+        if self.qat:
+            compression = self.qat.get('compression')
+            if compression and compression not in valid_compression_modes:
+                raise SpecValidationError(
+                    f"Invalid compression mode {compression}. Only 'sw' and 'hw' are allowed"
+                    )
 
 
 yaml.add_representer(RGWSpec, ServiceSpec.yaml_representer)
