@@ -7,7 +7,6 @@ from ceph.deployment.service_spec import PlacementSpec, ServiceSpec, HostPlaceme
 from cephadm.schedule import HostAssignment
 from cephadm.utils import SpecialHostLabels
 from cephadm.services.nfs import NFSService
-from cephadm.services.service_registry import service_registry
 import rados
 
 from mgr_module import NFS_POOL_NAME
@@ -455,7 +454,7 @@ class Migrations:
             the old node ids that exist in the rados grace table.
             """
             service_specs = self.mgr.spec_store.get_specs_by_type('nfs')
-            nfs_service = cast(NFSService, service_registry.get_service('nfs'))
+            nfs_service = NFSService(self.mgr)
             for service_name, spec in service_specs.items():
                 daemons = self.mgr.cache.get_daemons_by_service(service_name)
                 for daemon in daemons:
