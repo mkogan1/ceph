@@ -13,6 +13,7 @@ import { TextToDownloadService } from '../../services/text-to-download.service';
 import { ConnectivityStatus } from '../../models/call-home.model';
 import { switchMap } from 'rxjs/operators';
 import { Icons } from '../../enum/icons.enum';
+import { CallHomeNotificationService } from '../../services/call-home-notification.service';
 
 @Component({
   selector: 'cd-call-home-modal',
@@ -41,7 +42,8 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
     private mgrModuleService: MgrModuleService,
     private notificationService: NotificationService,
     private callHomeSerive: CallHomeService,
-    private textToDownloadService: TextToDownloadService
+    private textToDownloadService: TextToDownloadService,
+    private callHomeNotificationService: CallHomeNotificationService
   ) {
     super();
   }
@@ -113,8 +115,9 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
         customer_country_code: countryCode
       })
       .subscribe({
+        next: () => this.callHome(),
         error: () => this.callHomeForm.setErrors({ cdSubmitButton: true }),
-        complete: () => this.callHome()
+        complete: () => this.callHomeNotificationService.setVisibility(false)
       });
   }
 
@@ -129,6 +132,8 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
       false,
       this.activeModal
     );
+
+    if (!enable) this.callHomeNotificationService.setVisibility(true);
   }
 
   testConnectivity() {
