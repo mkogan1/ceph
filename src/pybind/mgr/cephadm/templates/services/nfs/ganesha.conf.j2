@@ -29,7 +29,7 @@ NFSv4 {
 
 RADOS_KV {
         UserId = "{{ user }}";
-        nodeid = {{ nodeid }};
+        nodeid = "{{ nodeid }}";
         pool = "{{ pool }}";
         namespace = "{{ namespace }}";
 }
@@ -43,5 +43,11 @@ RGW {
         cluster = "ceph";
         name = "client.{{ rgw_user }}";
 }
+{% if use_old_nodeid %}
+
+Ceph {
+        Use_old_uuid = true;
+}
+{% endif %}
 
 %url    {{ url }}
