@@ -42,8 +42,8 @@ RGW {
         cluster = "ceph";
         name = "client.{{ rgw_user }}";
 }
-
 {% if use_old_nodeid %}
+
 Ceph {
         Use_old_uuid = true;
 }

@@ -70,7 +70,7 @@ class NFSService(CephService):
         daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
         return daemon_spec
 
-    def get_daemon_nodeid(self, service_name: str, rank: int) -> str:
+    def get_daemon_nodeid(self, service_name: str, rank: Optional[int]) -> str:
         out = self.mgr.get_store('nfs_services_with_old_nodeid')
         if out and service_name in out.split(','):
                 return f'{service_name}.{rank}'
@@ -78,7 +78,6 @@ class NFSService(CephService):
 
     def generate_config(self, daemon_spec: CephadmDaemonDeploySpec) -> Tuple[Dict[str, Any], List[str]]:
         assert self.TYPE == daemon_spec.daemon_type
-        assert daemon_spec.rank is not None
 
         daemon_type = daemon_spec.daemon_type
         daemon_id = daemon_spec.daemon_id
@@ -240,7 +239,7 @@ class NFSService(CephService):
     def run_grace_tool(self,
                        spec: NFSServiceSpec,
                        action: str,
-                       nodeid: str='') -> str:
+                       nodeid: str = '') -> str:
         # write a temp keyring and referencing config file.  this is a kludge
         # because the ganesha-grace-tool can only authenticate as a client (and
         # not a mgr).  Also, it doesn't allow you to pass a keyring location via

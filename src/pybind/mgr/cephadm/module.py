@@ -2716,7 +2716,7 @@ Then run the following:
                 raise OrchestratorError(
                     f'If {service_name} is removed then the following OSDs will remain, --force to proceed anyway\n{msg}')
         elif service_name.startswith('nfs.'):
-            #check if its using old node id style and remove from mon store
+            # check if its using old node id style and remove from mon store
             nfs_services = self.get_store('nfs_services_with_old_nodeid')
             if nfs_services:
                 nfs_services = nfs_services.split(',')
