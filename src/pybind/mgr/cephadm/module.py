@@ -93,6 +93,8 @@ from .inventory import (
     CertKeyStore,
     OrchSecretNotFound,
     CoredumpctlOverrides,
+    DaemonDeployQueue,
+    DaemonRemovalQueue,
 )
 from .upgrade import CephadmUpgrade
 from .template import TemplateMgr
@@ -773,6 +775,10 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
         # removed daemons. Daemons are added to the dict upon creation or removal and cleared
         # as part of the handling of stray daemons
         self.recently_altered_daemons: Dict[str, datetime.datetime] = {}
+
+
+        self.daemon_deploy_queue = DaemonDeployQueue()
+        self.daemon_removal_queue = DaemonRemovalQueue()
 
     def shutdown(self) -> None:
         self.log.debug('shutdown')
