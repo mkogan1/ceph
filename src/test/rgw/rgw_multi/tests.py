@@ -3568,7 +3568,7 @@ def test_bucket_remove_rgw_down():
     finally:
         start_2nd_rgw(zonegroup)
 
-@attr('fails_with_rgw')
+# @attr('fails_with_rgw')
 @attr('rgw_down')
 def test_object_sync_rgw_down():
     zonegroup = realm.master_zonegroup()
