@@ -67,7 +67,6 @@ class OrchSecretNotFound(OrchestratorError):
         self.hostname = hostname
 
 
-<<<<<<< HEAD
 class CoredumpctlOverrides:
     """
     Class to track supported coredumpctl override parameters
@@ -112,7 +111,8 @@ class CoredumpctlOverrides:
                     return False
             return True
         return NotImplemented
-=======
+
+
 class DaemonDeployQueue:
     """
     Queue of daemons cephadm thinks it should deploy
@@ -166,7 +166,6 @@ class DaemonDeployQueue:
 
     def clear_queued_daemons(self) -> None:
         self._daemons = {}
->>>>>>> 9c228c014be (mgr/cephadm: add DaemonDeployQueue class)
 
 
 class DaemonRemovalQueue:
