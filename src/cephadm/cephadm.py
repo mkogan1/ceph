@@ -143,6 +143,7 @@ from cephadmlib.logging import (
 )
 from cephadmlib.systemd import check_unit, check_units, terminate_service, enable_service
 from cephadmlib import systemd_unit
+from cephadmlib.signals import send_signal_to_container_entrypoint
 from cephadmlib import runscripts
 from cephadmlib.container_types import (
     CephContainer,
@@ -758,6 +759,24 @@ def get_legacy_daemon_fsid(ctx, cluster,
     if not fsid:
         fsid = get_legacy_config_fsid(cluster, legacy_dir=legacy_dir)
     return fsid
+
+def lookup_container_id_by_daemon_name(ctx: CephadmContext, fsid: str, name: str) -> str:
+    updater = CombinedStatusUpdater([CoreStatusUpdater()])
+    daemon_entries = daemons_matching(
+        ctx,
+        daemon_name=name,
+    )
+    daemons = [updater.expand(ctx, entry) for entry in daemon_entries]
+    if not daemons:
+        raise Error('Failed to find daemon {}'.format(name))
+    if len(daemons) > 1:
+        raise Error('Found multiple daemons matching name {}: {}'.format(name, daemons))
+
+    daemon = daemons[0]
+    try:
+        return daemon['container_id']
+    except KeyError:
+        raise Error('Failed to get container id for {}'.format(daemon))
 
 
 def create_daemon_dirs(
@@ -3565,6 +3584,18 @@ def command_unit(ctx):
     )
     return code
 
+
+@infer_fsid
+def command_signal(ctx):
+    # type: (CephadmContext) -> int
+    if not ctx.fsid:
+        raise Error('must pass --fsid to specify cluster')
+
+    container_id = lookup_container_id_by_daemon_name(ctx, ctx.fsid, ctx.name)
+
+    return send_signal_to_container_entrypoint(ctx, container_id, ctx.signal_name, ctx.signal_number)
+
+
 ##################################
 
 
@@ -5622,6 +5653,24 @@ def _get_parser():
         action='store_true',
         help='Set LimitCORE=infinity in ceph unit files'
     )
+
+    parser_signal = subparsers.add_parser(
+        'signal', help='Send signal to entrypoint of containerized daemon')
+    parser_signal.set_defaults(func=command_signal)
+    signal_group = parser_signal.add_mutually_exclusive_group(required=True)
+    signal_group.add_argument(
+        '--signal-number',
+        help='Signal number to send',)
+    signal_group.add_argument(
+        '--signal-name',
+        help='Signal to send')
+    parser_signal.add_argument(
+        '--fsid',
+        help='cluster FSID')
+    parser_signal.add_argument(
+        '--name', '-n',
+        required=True,
+        help='daemon name (type.id)')
 
     parser_logs = subparsers.add_parser(
         'logs', help='print journald logs for a daemon container')
