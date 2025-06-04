@@ -3194,10 +3194,7 @@ def command_deploy(ctx):
     # type: (CephadmContext) -> None
     lock = FileLock(ctx, ctx.fsid)
     lock.acquire()
-    try:
-        _common_deploy(ctx)
-    except DaemonStartException:
-        sys.exit(DAEMON_FAILED_ERROR)
+    _common_deploy(ctx)
 
 
 def apply_deploy_config_to_ctx(
@@ -3247,8 +3244,6 @@ def command_deploy_from(base_ctx: CephadmContext) -> None:
         rc: int = 0
         try:
             _common_deploy(ctx)
-        except DaemonStartException:
-            rc = DAEMON_FAILED_ERROR
         except Exception:
             # TODO: better rc based on exception?
             rc = -1

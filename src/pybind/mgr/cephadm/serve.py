@@ -683,7 +683,7 @@ class CephadmServe:
                 self.mgr.spec_store.mark_needs_configuration(spec.service_name())
                 hosts_altered.update(conflict_hosts_altered)
             if self.mgr.spec_store.needs_configuration(spec.service_name()):
-                svc = service_registry.get_service(spec.service_type)
+                svc = self.mgr.cephadm_services[spec.service_type]
                 svc.config(spec)
                 self.mgr.spec_store.mark_configured(spec.service_name())
             return (r, hosts_altered, daemon_place_fails)
@@ -981,7 +981,7 @@ class CephadmServe:
         service_name = spec.service_name()
         slots_to_add = self.mgr.daemon_deploy_queue.get_queued_daemon_placements_by_service(spec.service_name())
         daemons_to_remove = self.mgr.daemon_removal_queue.get_queued_daemon_descriptions_by_service(spec.service_name())
-        svc = service_registry.get_service(service_type)
+        svc = self.mgr.cephadm_services[service_type]
         daemons = self.mgr.cache.get_daemons_by_service(service_name)
         rank_map = None
         if svc.ranked(spec):
@@ -1023,7 +1023,7 @@ class CephadmServe:
 
     def build_ok_for_removal_list_by_service(self, spec: ServiceSpec) -> List[orchestrator.DaemonDescription]:
         service_type = spec.service_type
-        svc = service_registry.get_service(service_type)
+        svc = self.mgr.cephadm_services[service_type]
         daemons_to_remove = self.mgr.daemon_removal_queue.get_queued_daemon_descriptions_by_service(spec.service_name())
 
         # remove any?
@@ -1072,7 +1072,7 @@ class CephadmServe:
 
     def prep_daemon_specs_for_creation_by_service(self, spec: ServiceSpec, slots_to_add: List[DaemonPlacement]) -> Tuple[List[CephadmDaemonDeploySpec], List[str]]:
         service_type = spec.service_type
-        svc = service_registry.get_service(service_type)
+        svc = self.mgr.cephadm_services[service_type]
         prepare_create_fails: List[str] = []
         daemon_specs: List[CephadmDaemonDeploySpec] = []
         for slot in slots_to_add:
@@ -1152,7 +1152,7 @@ class CephadmServe:
     def prepare_daemons_to_add_and_remove_by_service(self, spec: ServiceSpec) -> Tuple[List[orchestrator.DaemonDescription], List[CephadmDaemonDeploySpec], List[orchestrator.DaemonDescription]]:
         service_type = spec.service_type
         service_name = spec.service_name()
-        svc = service_registry.get_service(service_type)
+        svc = self.mgr.cephadm_services[service_type]
         daemons = self.mgr.cache.get_daemons_by_service(service_name)
         slots_to_add = self.mgr.daemon_deploy_queue.get_queued_daemon_placements_by_service(spec.service_name())
         daemons_to_remove = self.mgr.daemon_removal_queue.get_queued_daemon_descriptions_by_service(spec.service_name())
@@ -1622,9 +1622,8 @@ class CephadmServe:
                             # just created
                             sd = daemon_spec.to_daemon_description(
                                 DaemonDescriptionStatus.starting, 'starting')
-                            # If daemon requires post action, then mark pending_daemon_config as true
                             if daemon_spec.daemon_type in REQUIRES_POST_ACTIONS:
-                                sd.update_pending_daemon_config(True)
+                                self.mgr.requires_post_actions.add(daemon_spec.name())
                             self.mgr.cache.add_daemon(daemon_spec.host, sd)
                         self.mgr.cache.invalidate_host_daemons(daemon_spec.host)
 
@@ -1652,7 +1651,7 @@ class CephadmServe:
                         # we have to clean up the daemon. E.g. keyrings.
                         servict_type = daemon_type_to_service(daemon_spec.daemon_type)
                         dd = daemon_spec.to_daemon_description(DaemonDescriptionStatus.error, 'failed')
-                        service_registry.get_service(servict_type).post_remove(dd, is_failed_deploy=True)
+                        self.mgr.cephadm_services[servict_type].post_remove(dd, is_failed_deploy=True)
                     failures[daemon_spec.name()] = str(e)
         return successes, failures
 
@@ -1733,7 +1732,7 @@ class CephadmServe:
                 service_name=dd.service_name(),
                 hostname=host)
             with set_exception_subject('service', daemon.service_id(), overwrite=True):
-                service_registry.get_service(daemon_type_to_service(daemon_type)).pre_remove(daemon)
+                self.mgr.cephadm_services[daemon_type_to_service(daemon_type)].pre_remove(daemon)
             daemon_rm_info.append({'name': name, 'tcp_ports': [str(port) for port in (dd.ports or [])]})
             self.log.info('Removing daemon %s from %s -- ports %s' % (name, host, dd.ports))
 
