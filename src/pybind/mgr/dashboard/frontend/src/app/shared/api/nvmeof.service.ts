@@ -121,7 +121,8 @@ export class NvmeofService {
       {
         observe: 'response',
         params: {
-          trsvcid
+          trsvcid,
+          force: 'true'
         }
       }
     );
