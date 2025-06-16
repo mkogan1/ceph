@@ -19,6 +19,7 @@ import { CdValidators } from '~/app/shared/forms/cd-validators';
 import { FinishedTask } from '~/app/shared/models/finished-task';
 import { Permission } from '~/app/shared/models/permissions';
 import { TaskWrapperService } from '~/app/shared/services/task-wrapper.service';
+import { Host } from '~/app/shared/models/host.interface';
 
 @Component({
   selector: 'cd-cephfs-form',
@@ -127,7 +128,7 @@ export class CephfsVolumeFormComponent extends CdForm implements OnInit {
         labels: this.hostService.getLabels()
       }).pipe(
         map(({ hosts, labels }) => ({
-          hosts: hosts.map((host: any) => ({ content: host['hostname'] })),
+          hosts: hosts.map((host: Host) => ({ content: host['hostname'] })),
           labels: labels.map((label: string) => ({ content: label }))
         }))
       );
