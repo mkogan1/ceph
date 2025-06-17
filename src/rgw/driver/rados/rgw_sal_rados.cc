@@ -1058,7 +1058,7 @@ int get_committed_logging_object(RadosStore* store,
   librados::ObjectReadOperation op;
   int rval;
   op.getxattr(RGW_ATTR_COMMITTED_LOGGING_OBJ, &bl, &rval);
-  if (const int ret = rgw_rados_operate(dpp, io_ctx, obj_name_oid, std::move(op), nullptr, y); ret < 0) {
+  if (const int ret = rgw_rados_operate(dpp, io_ctx, obj_name_oid, &op, nullptr, y); ret < 0) {
     return ret;
   }
   last_committed = bl.to_str();
@@ -1085,7 +1085,7 @@ int set_committed_logging_object(RadosStore* store,
   bl.append(last_committed);
   librados::ObjectWriteOperation op;
   op.setxattr(RGW_ATTR_COMMITTED_LOGGING_OBJ, std::move(bl));
-  return rgw_rados_operate(dpp, io_ctx, obj_name_oid, std::move(op), y);
+  return rgw_rados_operate(dpp, io_ctx, obj_name_oid, &op, y);
 }
 
 int RadosBucket::get_logging_object_name(std::string& obj_name,
