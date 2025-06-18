@@ -196,11 +196,11 @@ class NFSCluster:
                     virtual_ip,
                     ingress_mode,
                     port,
+                    enable_virtual_server,
                     kmip_cert,
                     kmip_key,
                     kmip_ca_cert,
                     kmip_host_list,
-                    enable_virtual_server
                 )
                 return
             raise NonFatalError(f"{cluster_id} cluster already exists")

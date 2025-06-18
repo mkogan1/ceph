@@ -72,7 +72,7 @@ class NFSService(CephService):
     def get_daemon_nodeid(self, service_name: str, rank: Optional[int]) -> str:
         out = self.mgr.get_store('nfs_services_with_old_nodeid')
         if out and service_name in out.split(','):
-                return f'{service_name}.{rank}'
+            return f'{service_name}.{rank}'
         return str(rank)
 
     @classmethod
@@ -80,7 +80,8 @@ class NFSService(CephService):
         cls,
         mgr: "CephadmOrchestrator",
         spec: Optional[ServiceSpec] = None,
-        daemon_type: Optional[str] = None
+        daemon_type: Optional[str] = None,
+        hostname: Optional[str] = None
     ) -> List[str]:
         deps: List[str] = []
         if not spec:
