@@ -761,12 +761,7 @@ def get_legacy_daemon_fsid(ctx, cluster,
     return fsid
 
 def lookup_container_id_by_daemon_name(ctx: CephadmContext, fsid: str, name: str) -> str:
-    updater = CombinedStatusUpdater([CoreStatusUpdater()])
-    daemon_entries = daemons_matching(
-        ctx,
-        daemon_name=name,
-    )
-    daemons = [updater.expand(ctx, entry) for entry in daemon_entries]
+    daemons = list_daemons(ctx, daemon_name=name)
     if not daemons:
         raise Error(f'Failed to find daemon {name}')
     if len(daemons) > 1:
