@@ -791,7 +791,6 @@ class TestMonitoring:
                         }
                     }),
                     use_current_daemon_image=False,
-<<<<<<< HEAD
                 )
 
     @pytest.mark.parametrize(
@@ -993,67 +992,65 @@ class TestMonitoring:
                     use_current_daemon_image=False,
                 )
 
-    @patch('cephadm.cert_mgr.CertMgr.generate_cert', lambda instance, fqdn, ip: (ceph_generated_cert, ceph_generated_key))
-    @patch('cephadm.cert_mgr.CertMgr.get_root_ca', lambda instance: cephadm_root_ca)
-    @patch("cephadm.serve.CephadmServe._run_cephadm")
-    @patch("socket.getfqdn")
-    def test_node_exporter_config_with_mgmt_gw(
-        self,
-        mock_getfqdn,
-        _run_cephadm,
-        cephadm_module: CephadmOrchestrator,
-    ):
-        _run_cephadm.side_effect = async_side_effect(("{}", "", 0))
-        mock_getfqdn.return_value = 'host1.test'
-
-        y = dedent("""
-        tls_server_config:
-          cert_file: node_exporter.crt
-          key_file: node_exporter.key
-          client_auth_type: RequireAndVerifyClientCert
-          client_ca_file: root_cert.pem
-        """).lstrip()
-
-        with with_host(cephadm_module, "test"):
-            with with_service(cephadm_module, MgmtGatewaySpec("mgmt-gateway")) as _, \
-                 with_service(cephadm_module, MonitoringSpec('node-exporter')):
-                _run_cephadm.assert_called_with(
-                    'test',
-                    "node-exporter.test",
-                    ['_orch', 'deploy'],
-                    [],
-                    stdin=json.dumps({
-                        "fsid": "fsid",
-                        "name": 'node-exporter.test',
-                        "image": '',
-                        "deploy_arguments": [],
-                        "params": {
-                            'tcp_ports': [9100],
-                        },
-                        "meta": {
-                            'service_name': 'node-exporter',
-                            'ports': [9100],
-                            'ip': None,
-                            'deployed_by': [],
-                            'rank': None,
-                            'rank_generation': None,
-                            'extra_container_args': None,
-                            'extra_entrypoint_args': None,
-                        },
-                        "config_blobs": {
-                            "files": {
-                                "web.yml": y,
-                                'root_cert.pem': f"{cephadm_root_ca}",
-                                'node_exporter.crt': f"{ceph_generated_cert}",
-                                'node_exporter.key': f"{ceph_generated_key}",
-                            },
-                            'web_config': '/etc/node-exporter/web.yml',
-                        }
-                    }),
-                    use_current_daemon_image=False,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
-                )
+    # @patch('cephadm.cert_mgr.CertMgr.generate_cert', lambda instance, fqdn, ip: (ceph_generated_cert, ceph_generated_key))
+    # @patch('cephadm.cert_mgr.CertMgr.get_root_ca', lambda instance: cephadm_root_ca)
+    # @patch("cephadm.serve.CephadmServe._run_cephadm")
+    # @patch("socket.getfqdn")
+    # def test_node_exporter_config_with_mgmt_gw(
+    #     self,
+    #     mock_getfqdn,
+    #     _run_cephadm,
+    #     cephadm_module: CephadmOrchestrator,
+    # ):
+    #     _run_cephadm.side_effect = async_side_effect(("{}", "", 0))
+    #     mock_getfqdn.return_value = 'host1.test'
+    # 
+    #     y = dedent("""
+    #     tls_server_config:
+    #       cert_file: node_exporter.crt
+    #       key_file: node_exporter.key
+    #       client_auth_type: RequireAndVerifyClientCert
+    #       client_ca_file: root_cert.pem
+    #     """).lstrip()
+    # 
+    #     with with_host(cephadm_module, "test"):
+    #         with with_service(cephadm_module, MgmtGatewaySpec("mgmt-gateway")) as _, \
+    #              with_service(cephadm_module, MonitoringSpec('node-exporter')):
+    #             _run_cephadm.assert_called_with(
+    #                 'test',
+    #                 "node-exporter.test",
+    #                 ['_orch', 'deploy'],
+    #                 [],
+    #                 stdin=json.dumps({
+    #                     "fsid": "fsid",
+    #                     "name": 'node-exporter.test',
+    #                     "image": '',
+    #                     "deploy_arguments": [],
+    #                     "params": {
+    #                         'tcp_ports': [9100],
+    #                     },
+    #                     "meta": {
+    #                         'service_name': 'node-exporter',
+    #                         'ports': [9100],
+    #                         'ip': None,
+    #                         'deployed_by': [],
+    #                         'rank': None,
+    #                         'rank_generation': None,
+    #                         'extra_container_args': None,
+    #                         'extra_entrypoint_args': None,
+    #                     },
+    #                     "config_blobs": {
+    #                         "files": {
+    #                             "web.yml": y,
+    #                             'root_cert.pem': f"{cephadm_root_ca}",
+    #                             'node_exporter.crt': f"{ceph_generated_cert}",
+    #                             'node_exporter.key': f"{ceph_generated_key}",
+    #                         },
+    #                         'web_config': '/etc/node-exporter/web.yml',
+    #                     }
+    #                 }),
+    #                 use_current_daemon_image=False,
+    #             )
 
     @patch("cephadm.serve.CephadmServe._run_cephadm")
     @patch("cephadm.module.CephadmOrchestrator.get_mgr_ip", lambda _: '::1')
@@ -1560,165 +1557,164 @@ class TestMonitoring:
                     use_current_daemon_image=False,
                 )
 
-    @patch("cephadm.serve.CephadmServe._run_cephadm")
-    @patch("cephadm.module.CephadmOrchestrator.get_mgr_ip", lambda _: '1::4')
-    @patch("cephadm.module.CephadmOrchestrator.get_fqdn", lambda a, b: 'host_fqdn')
-    @patch('cephadm.cert_mgr.CertMgr.get_root_ca', lambda instance: cephadm_root_ca)
-    def test_grafana_config_with_mgmt_gw_and_ouath2_proxy(self, _run_cephadm, cephadm_module: CephadmOrchestrator):
-        _run_cephadm.side_effect = async_side_effect(("{}", "", 0))
-
-        def inline_certificate(multi_line_cert):
-            """
-            Converts a multi-line certificate into a one-line string with escaped newlines.
-            """
-            return '\\n'.join([line.strip() for line in multi_line_cert.splitlines()])
-
-        oneline_cephadm_root_ca = inline_certificate(cephadm_root_ca)
-        oneline_ceph_generated_cert = inline_certificate(ceph_generated_cert)
-        oneline_ceph_generated_key = inline_certificate(ceph_generated_key)
-
-        y = dedent(f"""
-             # This file is generated by cephadm.
-             apiVersion: 1
-
-             deleteDatasources:
-               - name: 'Dashboard1'
-                 orgId: 1
-
-             datasources:
-               - name: 'Dashboard1'
-                 type: 'prometheus'
-                 access: 'proxy'
-                 orgId: 1
-                 url: 'https://host_fqdn:29443/internal/prometheus'
-                 basicAuth: true
-                 isDefault: true
-                 editable: false
-                 basicAuthUser: admin
-                 jsonData:
-                    graphiteVersion: "1.1"
-                    tlsAuth: false
-                    tlsAuthWithCACert: true
-                    tlsSkipVerify: false
-                 secureJsonData:
-                   basicAuthPassword: admin
-                   tlsCACert: "{oneline_cephadm_root_ca}"
-                   tlsClientCert: "{oneline_ceph_generated_cert}"
-                   tlsClientKey: "{oneline_ceph_generated_key}"
-
-               - name: 'Loki'
-                 type: 'loki'
-                 access: 'proxy'
-                 url: ''
-                 basicAuth: false
-                 isDefault: false
-                 editable: false""").lstrip()
-
-        oauth2_spec = OAuth2ProxySpec(provider_display_name='my_idp_provider',
-                                      client_id='my_client_id',
-                                      client_secret='my_client_secret',
-                                      oidc_issuer_url='http://192.168.10.10:8888/dex',
-                                      cookie_secret='kbAEM9opAmuHskQvt0AW8oeJRaOM2BYy5Loba0kZ0SQ=',
-                                      ssl_cert=ceph_generated_cert,
-                                      ssl_key=ceph_generated_key)
-
-        with with_host(cephadm_module, "test"):
-            cephadm_module.cert_mgr.save_cert('grafana_cert', ceph_generated_cert, host='test')
-            cephadm_module.cert_mgr.save_key('grafana_key', ceph_generated_key, host='test')
-            with with_service(cephadm_module, PrometheusSpec("prometheus")) as _, \
-                 with_service(cephadm_module, MgmtGatewaySpec("mgmt-gateway")) as _, \
-                 with_service(cephadm_module, oauth2_spec) as _, \
-                 with_service(cephadm_module, ServiceSpec("mgr")) as _, with_service(
-                     cephadm_module, GrafanaSpec("grafana")
-            ) as _:
-                files = {
-                    'grafana.ini': dedent("""
-                        # This file is generated by cephadm.
-                        [users]
-                          default_theme = light
-                        [auth.anonymous]
-                          enabled = true
-                          org_name = 'Main Org.'
-                          org_role = 'Viewer'
-                        [server]
-                          domain = 'host_fqdn'
-                          protocol = https
-                          cert_file = /etc/grafana/certs/cert_file
-                          cert_key = /etc/grafana/certs/cert_key
-                          http_port = 3000
-                          http_addr = 
-                          root_url = %(protocol)s://%(domain)s:%(http_port)s/grafana/
-                          serve_from_sub_path = true
-                        [snapshots]
-                          external_enabled = false
-                        [security]
-                          disable_initial_admin_creation = true
-                          cookie_secure = true
-                          cookie_samesite = none
-                          allow_embedding = true
-                        [auth]
-                          disable_login_form = true
-                        [auth.proxy]
-                          enabled = true
-                          header_name = X-WEBAUTH-USER
-                          header_property = username
-                          auto_sign_up = true
-                          sync_ttl = 15
-                          whitelist = 1::4
-                          headers_encoded = false
-                          enable_login_token = false
-                          headers = Role:X-WEBAUTH-ROLE\n""").lstrip(),  # noqa: W291
-                    "provisioning/datasources/ceph-dashboard.yml": y,
-                    'certs/cert_file': dedent(f"""
-                        # generated by cephadm\n{ceph_generated_cert}""").lstrip(),
-                    'certs/cert_key': dedent(f"""
-                        # generated by cephadm\n{ceph_generated_key}""").lstrip(),
-                    'provisioning/dashboards/default.yml': dedent("""
-                        # This file is generated by cephadm.
-                        apiVersion: 1
-
-                        providers:
-                          - name: 'Ceph Dashboard'
-                            orgId: 1
-                            folder: ''
-                            type: file
-                            disableDeletion: false
-                            updateIntervalSeconds: 3
-                            editable: false
-                            options:
-                              path: '/etc/grafana/provisioning/dashboards'""").lstrip(),
-                }
-
-                _run_cephadm.assert_called_with(
-                    'test',
-                    "grafana.test",
-                    ['_orch', 'deploy'],
-                    [],
-                    stdin=json.dumps({
-                        "fsid": "fsid",
-                        "name": 'grafana.test',
-                        "image": '',
-                        "deploy_arguments": [],
-                        "params": {
-                            'tcp_ports': [3000],
-                        },
-                        "meta": {
-                            'service_name': 'grafana',
-                            'ports': [3000],
-                            'ip': None,
-                            'deployed_by': [],
-                            'rank': None,
-                            'rank_generation': None,
-                            'extra_container_args': None,
-                            'extra_entrypoint_args': None,
-                        },
-                        "config_blobs": {
-                            "files": files,
-                        },
-                    }),
-                    use_current_daemon_image=False,
-<<<<<<< HEAD
-                )
+    # @patch("cephadm.serve.CephadmServe._run_cephadm")
+    # @patch("cephadm.module.CephadmOrchestrator.get_mgr_ip", lambda _: '1::4')
+    # @patch("cephadm.module.CephadmOrchestrator.get_fqdn", lambda a, b: 'host_fqdn')
+    # @patch('cephadm.cert_mgr.CertMgr.get_root_ca', lambda instance: cephadm_root_ca)
+    # def test_grafana_config_with_mgmt_gw_and_ouath2_proxy(self, _run_cephadm, cephadm_module: CephadmOrchestrator):
+    #     _run_cephadm.side_effect = async_side_effect(("{}", "", 0))
+    # 
+    #     def inline_certificate(multi_line_cert):
+    #         """
+    #         Converts a multi-line certificate into a one-line string with escaped newlines.
+    #         """
+    #         return '\\n'.join([line.strip() for line in multi_line_cert.splitlines()])
+    # 
+    #     oneline_cephadm_root_ca = inline_certificate(cephadm_root_ca)
+    #     oneline_ceph_generated_cert = inline_certificate(ceph_generated_cert)
+    #     oneline_ceph_generated_key = inline_certificate(ceph_generated_key)
+    # 
+    #     y = dedent(f"""
+    #          # This file is generated by cephadm.
+    #          apiVersion: 1
+    # 
+    #          deleteDatasources:
+    #            - name: 'Dashboard1'
+    #              orgId: 1
+    # 
+    #          datasources:
+    #            - name: 'Dashboard1'
+    #              type: 'prometheus'
+    #              access: 'proxy'
+    #              orgId: 1
+    #              url: 'https://host_fqdn:29443/internal/prometheus'
+    #              basicAuth: true
+    #              isDefault: true
+    #              editable: false
+    #              basicAuthUser: admin
+    #              jsonData:
+    #                 graphiteVersion: "1.1"
+    #                 tlsAuth: false
+    #                 tlsAuthWithCACert: true
+    #                 tlsSkipVerify: false
+    #              secureJsonData:
+    #                basicAuthPassword: admin
+    #                tlsCACert: "{oneline_cephadm_root_ca}"
+    #                tlsClientCert: "{oneline_ceph_generated_cert}"
+    #                tlsClientKey: "{oneline_ceph_generated_key}"
+    # 
+    #            - name: 'Loki'
+    #              type: 'loki'
+    #              access: 'proxy'
+    #              url: ''
+    #              basicAuth: false
+    #              isDefault: false
+    #              editable: false""").lstrip()
+    # 
+    #     oauth2_spec = OAuth2ProxySpec(provider_display_name='my_idp_provider',
+    #                                   client_id='my_client_id',
+    #                                   client_secret='my_client_secret',
+    #                                   oidc_issuer_url='http://192.168.10.10:8888/dex',
+    #                                   cookie_secret='kbAEM9opAmuHskQvt0AW8oeJRaOM2BYy5Loba0kZ0SQ=',
+    #                                   ssl_cert=ceph_generated_cert,
+    #                                   ssl_key=ceph_generated_key)
+    # 
+    #     with with_host(cephadm_module, "test"):
+    #         cephadm_module.cert_mgr.save_cert('grafana_cert', ceph_generated_cert, host='test')
+    #         cephadm_module.cert_mgr.save_key('grafana_key', ceph_generated_key, host='test')
+    #         with with_service(cephadm_module, PrometheusSpec("prometheus")) as _, \
+    #              with_service(cephadm_module, MgmtGatewaySpec("mgmt-gateway")) as _, \
+    #              with_service(cephadm_module, oauth2_spec) as _, \
+    #              with_service(cephadm_module, ServiceSpec("mgr")) as _, with_service(
+    #                  cephadm_module, GrafanaSpec("grafana")
+    #         ) as _:
+    #             files = {
+    #                 'grafana.ini': dedent("""
+    #                     # This file is generated by cephadm.
+    #                     [users]
+    #                       default_theme = light
+    #                     [auth.anonymous]
+    #                       enabled = true
+    #                       org_name = 'Main Org.'
+    #                       org_role = 'Viewer'
+    #                     [server]
+    #                       domain = 'host_fqdn'
+    #                       protocol = https
+    #                       cert_file = /etc/grafana/certs/cert_file
+    #                       cert_key = /etc/grafana/certs/cert_key
+    #                       http_port = 3000
+    #                       http_addr = 
+    #                       root_url = %(protocol)s://%(domain)s:%(http_port)s/grafana/
+    #                       serve_from_sub_path = true
+    #                     [snapshots]
+    #                       external_enabled = false
+    #                     [security]
+    #                       disable_initial_admin_creation = true
+    #                       cookie_secure = true
+    #                       cookie_samesite = none
+    #                       allow_embedding = true
+    #                     [auth]
+    #                       disable_login_form = true
+    #                     [auth.proxy]
+    #                       enabled = true
+    #                       header_name = X-WEBAUTH-USER
+    #                       header_property = username
+    #                       auto_sign_up = true
+    #                       sync_ttl = 15
+    #                       whitelist = 1::4
+    #                       headers_encoded = false
+    #                       enable_login_token = false
+    #                       headers = Role:X-WEBAUTH-ROLE\n""").lstrip(),  # noqa: W291
+    #                 "provisioning/datasources/ceph-dashboard.yml": y,
+    #                 'certs/cert_file': dedent(f"""
+    #                     # generated by cephadm\n{ceph_generated_cert}""").lstrip(),
+    #                 'certs/cert_key': dedent(f"""
+    #                     # generated by cephadm\n{ceph_generated_key}""").lstrip(),
+    #                 'provisioning/dashboards/default.yml': dedent("""
+    #                     # This file is generated by cephadm.
+    #                     apiVersion: 1
+    # 
+    #                     providers:
+    #                       - name: 'Ceph Dashboard'
+    #                         orgId: 1
+    #                         folder: ''
+    #                         type: file
+    #                         disableDeletion: false
+    #                         updateIntervalSeconds: 3
+    #                         editable: false
+    #                         options:
+    #                           path: '/etc/grafana/provisioning/dashboards'""").lstrip(),
+    #             }
+    # 
+    #             _run_cephadm.assert_called_with(
+    #                 'test',
+    #                 "grafana.test",
+    #                 ['_orch', 'deploy'],
+    #                 [],
+    #                 stdin=json.dumps({
+    #                     "fsid": "fsid",
+    #                     "name": 'grafana.test',
+    #                     "image": '',
+    #                     "deploy_arguments": [],
+    #                     "params": {
+    #                         'tcp_ports': [3000],
+    #                     },
+    #                     "meta": {
+    #                         'service_name': 'grafana',
+    #                         'ports': [3000],
+    #                         'ip': None,
+    #                         'deployed_by': [],
+    #                         'rank': None,
+    #                         'rank_generation': None,
+    #                         'extra_container_args': None,
+    #                         'extra_entrypoint_args': None,
+    #                     },
+    #                     "config_blobs": {
+    #                         "files": files,
+    #                     },
+    #                 }),
+    #                 use_current_daemon_image=False,
+    #             )
 
     @patch("cephadm.serve.CephadmServe._run_cephadm")
     @patch("cephadm.module.CephadmOrchestrator.get_mgr_ip", lambda _: '1::4')
@@ -1969,8 +1965,6 @@ class TestMonitoring:
                         },
                     }),
                     use_current_daemon_image=False,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                 )
 
     @patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
@@ -2144,11 +2138,7 @@ spec:
                             },
                             "config_blobs": {},
                         }),
-<<<<<<< HEAD
                         use_current_daemon_image=False,
-=======
-                        use_current_daemon_image=True,
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     )
 
 
@@ -3805,10 +3795,7 @@ class TestJaeger:
                         },
                         "config_blobs": config,
                     }),
-<<<<<<< HEAD
                     error_ok=True,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
 
@@ -3849,10 +3836,7 @@ class TestJaeger:
                         },
                         "config_blobs": es_config,
                     }),
-<<<<<<< HEAD
                     error_ok=True,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
                 with with_service(cephadm_module, collector_spec):
@@ -3881,10 +3865,7 @@ class TestJaeger:
                             },
                             "config_blobs": collector_config,
                         }),
-<<<<<<< HEAD
                         error_ok=True,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                         use_current_daemon_image=False,
                     )
 
@@ -3925,10 +3906,7 @@ class TestJaeger:
                         },
                         "config_blobs": collector_config,
                     }),
-<<<<<<< HEAD
                     error_ok=True,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
                 with with_service(cephadm_module, agent_spec):
@@ -3957,10 +3935,7 @@ class TestJaeger:
                             },
                             "config_blobs": agent_config,
                         }),
-<<<<<<< HEAD
                         error_ok=True,
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                         use_current_daemon_image=False,
                     )
 
@@ -4202,11 +4177,7 @@ class TestSMB:
                     ['_orch', 'deploy'],
                     [],
                     stdin=json.dumps(expected),
-<<<<<<< HEAD
                     use_current_daemon_image=False
-=======
-                    use_current_daemon_image=False,
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                 )
 
     @patch("cephadm.module.CephadmOrchestrator.get_unique_name")
@@ -4280,7 +4251,6 @@ class TestSMB:
                     ['_orch', 'deploy'],
                     [],
                     stdin=json.dumps(expected),
-<<<<<<< HEAD
                     use_current_daemon_image=False
                 )
 
@@ -4997,7 +4967,5 @@ class TestMgmtGateway:
                     ['_orch', 'deploy'],
                     [],
                     stdin=json.dumps(expected),
-=======
->>>>>>> 5922d20e05e (mgr/cephadm: pass daemon's current image when reconfiguring)
                     use_current_daemon_image=False,
                 )
