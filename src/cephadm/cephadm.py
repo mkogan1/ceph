@@ -208,7 +208,6 @@ from cephadmlib.listing_updaters import (
     VersionStatusUpdater,
 )
 from cephadmlib.container_lookup import infer_local_ceph_image, identify
-from ceph.utils import with_units_to_int
 
 
 FuncT = TypeVar('FuncT', bound=Callable)
@@ -1083,7 +1082,7 @@ def deploy_daemon_units(
             ctx,
             image=container.image,
             entrypoint='/usr/bin/tcmu-runner',
-            cname = f'{container.cname}-tcmu'
+            cname=f'{container.cname}-tcmu'
         )
         tcmu_container_exists = f'{ctx.container_engine.path} inspect %s-tcmu &>/dev/null'
         post_stop_commands.append(
@@ -4430,14 +4429,14 @@ def command_sos(ctx: CephadmContext):
     # cat /var/log/ceph/<cluster_fsid>/sosreport* > /tmp/sosreport_case_<xx>.tar.xz
     """
     def remove_files(folder: str, pattern: str) -> None:
-        file_path = ""
+        file_path = ''
         try:
             for file_path in filter(os.path.isfile, glob(os.path.join(folder, pattern))):
                 os.remove(file_path)
         except Exception as ex:
             logger.error(f'Error removing file {file_path}: {ex}')
 
-    result = 1 # error by default, will be changed if everything ok
+    result = 1  # error by default, will be changed if everything ok
     try:
         # get silently the cluster fsid
         cp = read_config(ctx.config)
@@ -4714,7 +4713,7 @@ def _add_deploy_parser_args(
         action='store_true',
         default=False,
         help='Set LimitCORE=infinity in ceph unit files'
-     )
+    )
     parser_deploy.add_argument(
         '--skip-restart-for-reconfig',
         action='store_true',
@@ -5314,8 +5313,6 @@ def _get_parser():
         '--yes-i-know',
         action='store_true',
         help='deprecated flag only here for backwards compatibility')
-
-
     parser_bootstrap.add_argument(
         '--call-home-icn',
         help='')
@@ -5354,7 +5351,7 @@ def _get_parser():
         action='store_true',
         default=False,
         help='Enroll in Storage Insights')
-    parser_bootstrap.add_argument(    
+    parser_bootstrap.add_argument(
         '--limit-core-infinity',
         action='store_true',
         help='Set LimitCORE=infinity in ceph unit files'
