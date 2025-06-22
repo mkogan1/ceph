@@ -1,0 +1,13 @@
+# Suite to run stripe-equals-chunk with datacache
+---
+# Include the specific striping config with datacache
+overrides:
+  # This will be merged with the below fragments
+
+# Import the two fragments
+# (Teuthology will merge these YAML fragments)
+
+# Path is relative to the suite root
+describe:
+  - striping$/stripe-equals-chunk.yaml
+  - datacache/rgw-datacache-stripe-equals-chunk.yaml

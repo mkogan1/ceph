@@ -1,3 +1,4 @@
+# Datacache configuration specifically for stripe-equals-chunk scenarios
 overrides:
   ceph:
     conf:

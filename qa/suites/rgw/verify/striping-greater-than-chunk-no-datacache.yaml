@@ -1,0 +1,13 @@
+# Suite to run stripe-greater-than-chunk only with no_datacache
+---
+# Include the specific striping config
+overrides:
+  # This will be merged with the below fragment
+
+# Import the two fragments
+# (Teuthology will merge these YAML fragments)
+
+# Path is relative to the suite root
+describe:
+  - striping$/stripe-greater-than-chunk.yaml
+  - datacache/no_datacache.yaml
