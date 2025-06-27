@@ -18137,6 +18137,16 @@ int Client::set_fscrypt_policy_v2(int fd, const struct fscrypt_policy_v2& policy
   return ll_set_fscrypt_policy_v2(f->inode.get(), policy);
 }
 
+static int is_empty_directory(Inode *in)
+{
+  if (!in->is_dir())
+    return -ENOTDIR;
+
+  if (in->dir && in->dir->dentries.size() > 0)
+    return -ENOTEMPTY;
+  return 0;
+}
+
 int Client::ll_set_fscrypt_policy_v2(Inode *in, const struct fscrypt_policy_v2& policy)
 {
   if (in->fscrypt_auth.size() > 0) {
@@ -18144,13 +18154,13 @@ int Client::ll_set_fscrypt_policy_v2(Inode *in, const struct fscrypt_policy_v2& 
     in->fscrypt_ctx->convert_to(&policy2);
     if (memcmp(&policy, &policy2, sizeof(policy)))
       return -EEXIST;
+    return 0;
   }
 
-  if (!in->is_dir())
-    return -ENOTDIR;
-
-  if (in->is_dir() && in->dir && in->dir->dentries.size() > 0)
-    return -ENOTEMPTY;
+  int r = is_empty_directory(in);
+  if (r < 0) {
+    return r;
+  }
 
   FSCryptContext fsc(cct);
   fsc.init(policy);
@@ -18162,7 +18172,7 @@ int Client::ll_set_fscrypt_policy_v2(Inode *in, const struct fscrypt_policy_v2& 
 
   fsc.encode(env_bl);
 
-  int r = ll_setxattr(in, "ceph.fscrypt.auth", (void *)env_bl.c_str(), env_bl.length(), CEPH_XATTR_CREATE, perms);
+  r = ll_setxattr(in, "ceph.fscrypt.auth", (void *)env_bl.c_str(), env_bl.length(), CEPH_XATTR_CREATE, perms);
   if (r < 0) {
     ldout(cct, 0) << __func__ << "(): failed to set fscrypt_auth attr: r=" << r << dendl;
     return r;
