@@ -18137,18 +18137,25 @@ int Client::set_fscrypt_policy_v2(int fd, const struct fscrypt_policy_v2& policy
   return ll_set_fscrypt_policy_v2(f->inode.get(), policy);
 }
 
-static int is_empty_directory(Inode *in)
+int Client::_is_empty_directory(Inode *in, const UserPerm& perms)
 {
   if (!in->is_dir())
     return -ENOTDIR;
 
-  if (in->dir && in->dir->dentries.size() > 0)
-    return -ENOTEMPTY;
-  return 0;
+  int r = 0;
+  unsigned mask = CEPH_CAP_FILE_SHARED;
+  if (!in->caps_issued_mask(mask, true))
+    r = _ll_getattr(in, mask, perms);
+  if (!r && (in->dirstat.nsubdirs | in->dirstat.nfiles))
+    r = -ENOTEMPTY;
+
+  return r;
 }
 
 int Client::ll_set_fscrypt_policy_v2(Inode *in, const struct fscrypt_policy_v2& policy)
 {
+  UserPerm perms(in->uid, in->gid);
+
   if (in->fscrypt_auth.size() > 0) {
     struct fscrypt_policy_v2 policy2;
     in->fscrypt_ctx->convert_to(&policy2);
@@ -18157,7 +18164,7 @@ int Client::ll_set_fscrypt_policy_v2(Inode *in, const struct fscrypt_policy_v2& 
     return 0;
   }
 
-  int r = is_empty_directory(in);
+  int r = _is_empty_directory(in, perms);
   if (r < 0) {
     return r;
   }
@@ -18165,8 +18172,6 @@ int Client::ll_set_fscrypt_policy_v2(Inode *in, const struct fscrypt_policy_v2& 
   FSCryptContext fsc(cct);
   fsc.init(policy);
   fsc.generate_new_nonce();
-
-  UserPerm perms(in->uid, in->gid);
 
   bufferlist env_bl;
 
