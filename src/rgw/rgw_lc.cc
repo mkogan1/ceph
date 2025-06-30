@@ -628,10 +628,15 @@ static int remove_expired_obj(const DoutPrefixProvider* dpp,
   auto obj = oc.bucket->get_object(obj_key);
   ret = obj->get_obj_state(dpp, &obj_state, null_yield, true);
   if (ret < 0) {
-    ldpp_dout(oc.dpp, 0) <<
-      fmt::format("ERROR: get_obj_state() failed in {} for object k={} error r={}",
-		  __func__, oc.o.key.to_string(), ret) << dendl;
-    return ret;
+    /* for delete markers, we expect load_obj_state() to "fail"
+     * with -ENOENT */
+    if (! (o.is_delete_marker() &&
+	   (ret == -ENOENT))) {
+      ldpp_dout(oc.dpp, 0) <<
+	fmt::format("ERROR: get_obj_state() failed in {} for object k={} error r={}",
+		    __func__, oc.o.key.to_string(), ret) << dendl;
+      return ret;
+    }
   }
 
   auto have_notify = !event_types.empty();
@@ -1290,13 +1295,14 @@ public:
 			<< oc.wq->thr_name() << dendl;
       return false;
     }
+    /* don't remove the delete marker if that would expose a non-current
+     * version as current */
     if (oc.next_has_same_name(o.key.name)) {
       ldpp_dout(dpp, 20) << __func__ << "(): key=" << o.key
-			<< ": next is same object, skipping "
+			<< ": dm expiration would expose a non-current version, skipping "
 			<< oc.wq->thr_name() << dendl;
       return false;
     }
-
     *exp_time = real_clock::now();
 
     return true;
