@@ -1867,7 +1867,7 @@ class CephadmServe:
             host,
             name,
             ['_orch', 'rm-daemons'],
-            [],
+            ['--force'],
             stdin=json.dumps(daemon_rm_info),
             error_ok=True
         )
