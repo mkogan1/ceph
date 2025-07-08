@@ -11,7 +11,7 @@ class RGWMultiDelObject : public XMLObj
 {
   std::string key;
   std::string version_id;
-  const char *if_match;
+  const char *if_match{nullptr};
   ceph::real_time last_mod_time;
   uint64_t size_match = 0;
 public:
