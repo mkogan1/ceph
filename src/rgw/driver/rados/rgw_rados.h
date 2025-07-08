@@ -873,8 +873,8 @@ public:
         ceph::real_time last_mod_time_match;
         ceph::real_time mtime; /* for setting delete marker mtime */
         uint64_t size_match = 0;
-        const char *if_match;
-        const char *if_nomatch;
+        const char *if_match{nullptr};
+        const char *if_nomatch{nullptr};
         bool high_precision_time;
         rgw_zone_set *zones_trace;
 	bool abortmp;

@@ -1493,8 +1493,8 @@ protected:
   ceph::real_time unmod_since; /* if unmodified since */
   ceph::real_time last_mod_time_match; /* if modified time match */
   uint64_t size_match = 0; /* if size match */
-  const char *if_match; /* if etag match */
-  const char *if_nomatch; /* if size doesn't match */
+  const char *if_match{nullptr}; /* if etag match */
+  const char *if_nomatch{nullptr}; /* if size doesn't match */
   bool no_precondition_error;
   std::unique_ptr<RGWBulkDelete::Deleter> deleter;
   bool bypass_perm;

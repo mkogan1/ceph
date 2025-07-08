@@ -1829,8 +1829,8 @@ class DB {
           bool high_precision_time;
           uint32_t mod_zone_id;
           uint64_t mod_pg_ver;
-          const char *if_match;
-          const char *if_nomatch;
+          const char *if_match{nullptr};
+          const char *if_nomatch{nullptr};
 
           ConditionParams() :
             mod_ptr(NULL), unmod_ptr(NULL), high_precision_time(false), mod_zone_id(0), mod_pg_ver(0),
