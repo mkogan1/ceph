@@ -126,10 +126,10 @@ int group_snap_rollback_by_record(librados::IoCtx& group_ioctx,
                                   const std::string& group_id,
                                   ProgressContext& pctx) {
   CephContext *cct = (CephContext *)group_ioctx.cct();
+  std::vector<librados::IoCtx> ioctxs;
+  std::vector<librbd::ImageCtx*> ictxs;
   std::vector<C_SaferCond*> on_finishes;
   int r, ret_code;
-
-  std::vector<librbd::ImageCtx*> ictxs;
 
   ldout(cct, 20) << "Rolling back snapshots" << dendl;
   int snap_count = group_snap.snaps.size();
@@ -141,9 +141,12 @@ int group_snap_rollback_by_record(librados::IoCtx& group_ioctx,
     if (r < 0) {
       return r;
     }
+    ioctxs.push_back(std::move(image_io_ctx));
+  }
 
+  for (int i = 0; i < snap_count; ++i) {
     librbd::ImageCtx* image_ctx = new ImageCtx("", group_snap.snaps[i].image_id,
-                                               nullptr, image_io_ctx, false);
+                                               nullptr, ioctxs[i], false);
 
     C_SaferCond* on_finish = new C_SaferCond;
 
