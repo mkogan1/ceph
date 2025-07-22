@@ -11,12 +11,18 @@
 * Monitoring: Added new Prometheus alerts for certificate management:
   - CephCertificateError: Fires when a Ceph certificate has expired (critical severity).
   - CephCertificateWarning: Fires when a Ceph certificate is about to expire (warning severity).
+* RGW: radosgw-admin bucket list now supports pagination for versioned buckets by using
+  both --marker and --object-version options together (e.g., ``--marker=obj1 --object-version=abc123``).
+  This enables proper pagination through versioned bucket listings without duplicates or
+  infinite loops. For non-versioned buckets, use only --marker as before (backward compatible).
 * RGW: OpenSSL engine support is deprecated in favor of provider support.
   - Removed the `openssl_engine_opts` configuration option. OpenSSL engine configuration in string format is no longer supported.
   - Added the `openssl_conf` configuration option for loading specified providers as default providers.
     Configuration file syntax follows the OpenSSL standard (see https://github.com/openssl/openssl/blob/master/doc/man5/config.pod).
     If the default provider is required when also using custom providers,
     it must be explicitly loaded in the configuration file or code (see https://github.com/openssl/openssl/blob/master/README-PROVIDERS.md).
+* RGW: Fixed bucket notification events so the 'x_amz_request_id' in NotificationEvent now matches the 'x_amz_request_id' returned by the corresponding S3 operation.
+
 
 * DASHBOARD: Removed the older landing page which was deprecated in Quincy.
   Admins can no longer enable the older, deprecated landing page layout by
@@ -24,11 +30,25 @@
 * DASHBOARD: RGW Service form updated to take input regarding QAT compression.
   - QAT compression is an optional field which can be set to 'Hardware' or 'Software' by selecting options from provided dropdwon. If 'None' is selected, compression is removed altogether.
 * CephFS: The `peer_add` command is deprecated in favor of the `peer_bootstrap` command.
+* Monitoring: Added new Prometheus alerts for certificate management:
+  - CephCertificateError: Fires when a Ceph certificate has expired (critical severity).
+  - CephCertificateWarning: Fires when a Ceph certificate is about to expire (warning severity).
+* CephFS: The `peer_add` command is deprecated in favor of the `peer_bootstrap` command.
+* RGW: For `radosgw-admin account rm`, the `--purge-data` option previously applied only
+  to buckets and objects, but now deletes account users, roles, groups, and oidc-providers
+  too instead of failing with ENOTEMPTY.
 * RADOS: When objects are read during deep scrubs, the data is read in strides,
   and the scrubbing process is delayed between each read in order to avoid monopolizing
   the I/O capacity of the OSD.
   The default stride size (``osd_deep_scrub_stride``) was 512 KBytes, and is now 4 MBytes.
 * RGW: Add SSE-KMS secrets cache
+>=21.0.0
+
+* The ``auth_supported`` config has been removed.
+
+* RADOS: Stretch mode can now be entered even if the two dividing buckets differ
+  in weight by a small fraction (default 0.1). This is tunable via
+  `mon_stretch_max_bucket_weight_delta`.
 
 * CephFS: The offline CephFS tools (cephfs-data-scan, cephfs-journal-tool,
   and cephfs-table-tool) now include progress tracking with ETA (Estimated Time of
@@ -85,6 +105,17 @@
   Admins can no longer enable the older, deprecated landing page layout by
   adjusting FEATURE_TOGGLE_DASHBOARD.
 * CephFS: The `peer_add` command is deprecated in favor of the `peer_bootstrap` command.
+* RBD: Introduced a new ``RBD_LOCK_MODE_EXCLUSIVE_TRANSIENT`` policy for
+  ``rbd_lock_acquire()``. This is a low-level interface intended to allow
+  a peer to grab exclusive lock manually for short periods of time with other
+  peers pausing their activity and waiting for the lock to be released rather
+  than instantly aborting I/O and returning an error. It's possible to switch
+  from ``RBD_LOCK_MODE_EXCLUSIVE`` to ``RBD_LOCK_MODE_EXCLUSIVE_TRANSIENT``
+  policy and vice versa even if the lock is already held.
+* OSD: A health warning is reported when BlueFS usage exceeds the
+  configured ratio of the main OSD data device size. This warning is
+  informational and can be muted with:
+  ``ceph health mute BLUESTORE_BLUEFS_OVERSIZED``
 
 >=20.0.0
 
