@@ -262,8 +262,8 @@ req_info::req_info(CephContext *cct, const class RGWEnv *env) : env(env) {
     bool all_digits = true;
     for (unsigned i = colon_offset + 1; i < host.size(); ++i) {
       if (!isdigit(host[i])) {
-	all_digits = false;
-	break;
+  all_digits = false;
+  break;
       }
     }
     if (all_digits) {
@@ -331,8 +331,8 @@ bool search_err(rgw_http_errors& errs, int err_no, int& http_ret, string& code)
 }
 
 void set_req_state_err(struct rgw_err& err,	/* out */
-			int err_no,		/* in  */
-			const int prot_flags)	/* in  */
+      int err_no,		/* in  */
+      const int prot_flags)	/* in  */
 {
   if (err_no < 0)
     err_no = -err_no;
@@ -361,7 +361,7 @@ void set_req_state_err(struct rgw_err& err,	/* out */
   if (search_err(rgw_http_s3_errors, err_no, err.http_ret, err.err_code))
       return;
   dout(0) << "WARNING: set_req_state_err err_no=" << err_no
-	<< " resorting to 500" << dendl;
+  << " resorting to 500" << dendl;
 
   err.http_ret = 500;
   err.err_code = "UnknownError";
@@ -515,12 +515,12 @@ bool rgw_set_amz_meta_header(
     break;
   case APPEND:
     if (r) {
-	std::string old { it->second };
-	boost::algorithm::trim_right(old);
-	old.append(",");
-	old.append(v);
-	x_meta_map[k] = old;
-	break;
+  std::string old { it->second };
+  boost::algorithm::trim_right(old);
+  old.append(",");
+  old.append(v);
+  x_meta_map[k] = old;
+  break;
     }
     /* fall through */
   case OVERWRITE:
@@ -1114,12 +1114,12 @@ struct perm_state_from_req_state : public perm_state_base {
   req_state * const s;
   perm_state_from_req_state(req_state * const _s)
     : perm_state_base(_s->cct,
-		      _s->env,
-		      _s->auth.identity.get(),
-		      _s->bucket.get() ? _s->bucket->get_info() : RGWBucketInfo(),
-		      _s->perm_mask,
-		      _s->defer_to_bucket_acls,
-		      _s->bucket_access_conf),
+          _s->env,
+          _s->auth.identity.get(),
+          _s->bucket.get() ? _s->bucket->get_info() : RGWBucketInfo(),
+          _s->perm_mask,
+          _s->defer_to_bucket_acls,
+          _s->bucket_access_conf),
       s(_s) {}
 
   std::optional<bool> get_request_payer() const override {
@@ -1158,7 +1158,7 @@ Effect eval_or_pass(const DoutPrefixProvider* dpp,
 }
 
 Effect eval_identity_or_session_policies(const DoutPrefixProvider* dpp,
-			  const vector<Policy>& policies,
+        const vector<Policy>& policies,
                           const rgw::IAM::Environment& env,
                           const uint64_t op,
                           const ARN& arn) {
@@ -1359,7 +1359,7 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp,
                               bool account_root,
                               const RGWAccessControlPolicy& user_acl,
                               const RGWAccessControlPolicy& bucket_acl,
-			      const boost::optional<Policy>& bucket_policy,
+            const boost::optional<Policy>& bucket_policy,
                               const vector<Policy>& identity_policies,
                               const vector<Policy>& session_policies,
                               const uint64_t op, bool* granted_by_acl)
@@ -1369,7 +1369,7 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp,
 
   if (bucket_policy) {
     ldpp_dout(dpp, 16) << __func__ << ": policy: " << bucket_policy.get()
-		       << " resource: " << arn << dendl;
+           << " resource: " << arn << dendl;
   }
 
   // If RestrictPublicBuckets is enabled and the bucket policy allows public access,
@@ -1399,7 +1399,7 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp,
                               const rgw::ARN& arn,
                               const RGWAccessControlPolicy& user_acl,
                               const RGWAccessControlPolicy& bucket_acl,
-			      const boost::optional<Policy>& bucket_policy,
+            const boost::optional<Policy>& bucket_policy,
                               const vector<Policy>& user_policies,
                               const vector<Policy>& session_policies,
                               const uint64_t op)
@@ -1442,9 +1442,9 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp,
 
 bool verify_bucket_permission_no_policy(const DoutPrefixProvider* dpp,
                                         const perm_state_base * const ps,
-					const RGWAccessControlPolicy& user_acl,
-					const RGWAccessControlPolicy& bucket_acl,
-					const int perm, bool* granted_by_acl)
+          const RGWAccessControlPolicy& user_acl,
+          const RGWAccessControlPolicy& bucket_acl,
+          const int perm, bool* granted_by_acl)
 {
   if ((perm & (int)ps->perm_mask) != perm)
     return false;
@@ -1470,9 +1470,9 @@ bool verify_bucket_permission_no_policy(const DoutPrefixProvider* dpp,
 }
 
 bool verify_bucket_permission_no_policy(const DoutPrefixProvider* dpp, req_state * const s,
-					const RGWAccessControlPolicy& user_acl,
-					const RGWAccessControlPolicy& bucket_acl,
-					const int perm)
+          const RGWAccessControlPolicy& user_acl,
+          const RGWAccessControlPolicy& bucket_acl,
+          const int perm)
 {
   perm_state_from_req_state ps(s);
   return verify_bucket_permission_no_policy(dpp,
@@ -1516,18 +1516,18 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp, req_state* s, uint6
 
 static inline bool check_deferred_bucket_only_acl(const DoutPrefixProvider* dpp,
                                                   struct perm_state_base * const ps,
-						  const RGWAccessControlPolicy& user_acl,
-						  const RGWAccessControlPolicy& bucket_acl,
-						  const uint8_t deferred_check,
-						  const int perm, bool* granted_by_acl = nullptr)
+              const RGWAccessControlPolicy& user_acl,
+              const RGWAccessControlPolicy& bucket_acl,
+              const uint8_t deferred_check,
+              const int perm, bool* granted_by_acl = nullptr)
 {
   return (ps->defer_to_bucket_acls == deferred_check \
-	  && verify_bucket_permission_no_policy(dpp, ps, user_acl, bucket_acl, perm,
+    && verify_bucket_permission_no_policy(dpp, ps, user_acl, bucket_acl, perm,
                                                 granted_by_acl));
 }
 
 bool verify_object_permission(const DoutPrefixProvider* dpp, struct perm_state_base * const ps,
-			      const rgw_obj& obj, bool account_root,
+            const rgw_obj& obj, bool account_root,
                               const RGWAccessControlPolicy& user_acl,
                               const RGWAccessControlPolicy& bucket_acl,
                               const RGWAccessControlPolicy& object_acl,
@@ -1563,7 +1563,7 @@ bool verify_object_permission(const DoutPrefixProvider* dpp, struct perm_state_b
 }
 
 bool verify_object_permission(const DoutPrefixProvider* dpp, req_state * const s,
-			      const rgw_obj& obj,
+            const rgw_obj& obj,
                               const RGWAccessControlPolicy& user_acl,
                               const RGWAccessControlPolicy& bucket_acl,
                               const RGWAccessControlPolicy& object_acl,
@@ -1614,10 +1614,10 @@ bool verify_object_permission(const DoutPrefixProvider* dpp, req_state * const s
 
 bool verify_object_permission_no_policy(const DoutPrefixProvider* dpp,
                                         struct perm_state_base * const ps,
-					const RGWAccessControlPolicy& user_acl,
-					const RGWAccessControlPolicy& bucket_acl,
-					const RGWAccessControlPolicy& object_acl,
-					const int perm, bool *granted_by_acl)
+          const RGWAccessControlPolicy& user_acl,
+          const RGWAccessControlPolicy& bucket_acl,
+          const RGWAccessControlPolicy& object_acl,
+          const int perm, bool *granted_by_acl)
 {
   if (check_deferred_bucket_only_acl(dpp, ps, user_acl, bucket_acl, RGW_DEFER_TO_BUCKET_ACLS_RECURSE, perm, granted_by_acl) ||
       check_deferred_bucket_only_acl(dpp, ps, user_acl, bucket_acl, RGW_DEFER_TO_BUCKET_ACLS_FULL_CONTROL, RGW_PERM_FULL_CONTROL, granted_by_acl)) {
@@ -1625,9 +1625,9 @@ bool verify_object_permission_no_policy(const DoutPrefixProvider* dpp,
   }
 
   bool ret = object_acl.verify_permission(dpp, *ps->identity, ps->perm_mask, perm,
-					  nullptr, /* http referrer */
-					  ps->bucket_access_conf &&
-					  ps->bucket_access_conf->ignore_public_acls());
+            nullptr, /* http referrer */
+            ps->bucket_access_conf &&
+            ps->bucket_access_conf->ignore_public_acls());
   if (ret) {
     ldpp_dout(dpp, 10) << __func__ << ": granted by object acl" << dendl;
     if (granted_by_acl) {
@@ -1941,11 +1941,11 @@ string rgw_trim_quotes(const string& val)
 
 static struct rgw_name_to_flag cap_names[] = { {"*",     RGW_CAP_ALL},
                   {"read",  RGW_CAP_READ},
-		  {"write", RGW_CAP_WRITE},
-		  {NULL, 0} };
+      {"write", RGW_CAP_WRITE},
+      {NULL, 0} };
 
 static int rgw_parse_list_of_flags(struct rgw_name_to_flag *mapping,
-			    const string& str, uint32_t *perm)
+          const string& str, uint32_t *perm)
 {
   list<string> strs;
   get_str_list(str, strs);
@@ -2089,11 +2089,11 @@ void RGWUserCaps::dump(Formatter *f, const char *name) const
     string perm_str;
     for (int i=0; cap_names[i].type_name; i++) {
       if ((perm & cap_names[i].flag) == cap_names[i].flag) {
-	if (perm_str.size())
-	  perm_str.append(", ");
+  if (perm_str.size())
+    perm_str.append(", ");
 
-	perm_str.append(cap_names[i].type_name);
-	perm &= ~cap_names[i].flag;
+  perm_str.append(cap_names[i].type_name);
+  perm &= ~cap_names[i].flag;
       }
     }
     if (perm_str.empty())
@@ -2218,9 +2218,9 @@ void rgw_raw_obj::generate_test_instances(std::list<rgw_raw_obj*>& o)
 
 static struct rgw_name_to_flag op_type_mapping[] = { {"*",  RGW_OP_TYPE_ALL},
                   {"read",  RGW_OP_TYPE_READ},
-		  {"write", RGW_OP_TYPE_WRITE},
-		  {"delete", RGW_OP_TYPE_DELETE},
-		  {NULL, 0} };
+      {"write", RGW_OP_TYPE_WRITE},
+      {"delete", RGW_OP_TYPE_DELETE},
+      {NULL, 0} };
 
 
 int rgw_parse_op_type_list(const string& str, uint32_t *perm)
@@ -2821,6 +2821,7 @@ void RGWRateLimitInfo::decode_json(JSONObj *obj)
 {
   JSONDecoder::decode_json("max_read_ops", max_read_ops, obj);
   JSONDecoder::decode_json("max_write_ops", max_write_ops, obj);
+  JSONDecoder::decode_json("max_list_ops", max_list_ops, obj);
   JSONDecoder::decode_json("max_read_bytes", max_read_bytes, obj);
   JSONDecoder::decode_json("max_write_bytes", max_write_bytes, obj);
   JSONDecoder::decode_json("enabled", enabled, obj);
@@ -2830,6 +2831,7 @@ void RGWRateLimitInfo::dump(Formatter *f) const
 {
   f->dump_int("max_read_ops", max_read_ops);
   f->dump_int("max_write_ops", max_write_ops);
+  f->dump_int("max_list_ops", max_list_ops);
   f->dump_int("max_read_bytes", max_read_bytes);
   f->dump_int("max_write_bytes", max_write_bytes);
   f->dump_bool("enabled", enabled);
@@ -3243,9 +3245,9 @@ int rgw_bucket_parse_bucket_instance(const string& bucket_instance, string *buck
 
 boost::intrusive_ptr<CephContext>
 rgw_global_init(const std::map<std::string,std::string> *defaults,
-		    std::vector < const char* >& args,
-		    uint32_t module_type, code_environment_t code_env,
-		    int flags)
+        std::vector < const char* >& args,
+        uint32_t module_type, code_environment_t code_env,
+        int flags)
 {
   // Load the config from the files, but not the mon
   global_pre_init(defaults, args, module_type, code_env, flags);

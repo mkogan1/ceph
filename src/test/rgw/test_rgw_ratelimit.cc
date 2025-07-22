@@ -1,3 +1,100 @@
+
+#include <gtest/gtest.h>
+#include "rgw_ratelimit.h"
+#include <string>
+
+using namespace std::chrono_literals;
+
+// Helper for LIST op resource string
+#define LIST_RESOURCE "?list-type=2"
+
+TEST(RGWRateLimit, reject_list_op_over_limit)
+{
+  // check that LIST op is being rejected because there are not enough tokens
+  std::atomic_bool replacing;
+  std::condition_variable cv;
+  RateLimiter ratelimit(replacing, cv);
+  RGWRateLimitInfo info;
+  info.enabled = true;
+  info.max_list_ops = 1;
+  auto time = ceph::coarse_real_clock::now();
+  std::string key = "uuser_list";
+  bool success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  time = ceph::coarse_real_clock::now();
+  success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  EXPECT_EQ(true, success);
+}
+
+TEST(RGWRateLimit, accept_list_op_after_giveback)
+{
+  // check that giveback is working for LIST ops
+  std::atomic_bool replacing;
+  std::condition_variable cv;
+  RateLimiter ratelimit(replacing, cv);
+  RGWRateLimitInfo info;
+  info.enabled = true;
+  info.max_list_ops = 1;
+  auto time = ceph::coarse_real_clock::now();
+  std::string key = "uuser_list";
+  bool success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  ratelimit.giveback_tokens("GET", key, LIST_RESOURCE);
+  time = ceph::coarse_real_clock::now();
+  success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  EXPECT_EQ(false, success);
+}
+
+TEST(RGWRateLimit, accept_list_op_after_refill)
+{
+  // check that tokens are being filled properly for LIST ops
+  std::atomic_bool replacing;
+  std::condition_variable cv;
+  RateLimiter ratelimit(replacing, cv);
+  RGWRateLimitInfo info;
+  info.enabled = true;
+  info.max_list_ops = 1;
+  auto time = ceph::coarse_real_clock::now();
+  std::string key = "uuser_list";
+  bool success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  time += 61s;
+  success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  EXPECT_EQ(false, success);
+}
+
+TEST(RGWRateLimit, list_limit_does_not_affect_reads)
+{
+  // list limit does not affect reads
+  std::atomic_bool replacing;
+  std::condition_variable cv;
+  RateLimiter ratelimit(replacing, cv);
+  RGWRateLimitInfo info;
+  info.enabled = true;
+  info.max_list_ops = 1;
+  info.max_read_ops = 1;
+  auto time = ceph::coarse_real_clock::now();
+  std::string key = "uuser_list";
+  bool success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  // Should still be able to do a normal GET (read)
+  success = ratelimit.should_rate_limit("GET", key, time, &info);
+  EXPECT_EQ(false, success);
+}
+
+TEST(RGWRateLimit, read_limit_does_not_affect_lists)
+{
+  // read limit does not affect lists
+  std::atomic_bool replacing;
+  std::condition_variable cv;
+  RateLimiter ratelimit(replacing, cv);
+  RGWRateLimitInfo info;
+  info.enabled = true;
+  info.max_list_ops = 1;
+  info.max_read_ops = 1;
+  auto time = ceph::coarse_real_clock::now();
+  std::string key = "uuser_list";
+  bool success = ratelimit.should_rate_limit("GET", key, time, &info);
+  // Should still be able to do a LIST op
+  success = ratelimit.should_rate_limit("GET", key, time, &info, LIST_RESOURCE);
+  EXPECT_EQ(false, success);
+}
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab ft=cpp
 

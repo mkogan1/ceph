@@ -568,33 +568,39 @@ class RateLimiter;
 struct RGWRateLimitInfo {
   int64_t max_write_ops;
   int64_t max_read_ops;
+  int64_t max_list_ops;
   int64_t max_write_bytes;
   int64_t max_read_bytes;
   bool enabled = false;
   RGWRateLimitInfo()
-    : max_write_ops(0), max_read_ops(0), max_write_bytes(0), max_read_bytes(0)  {}
+    : max_write_ops(0), max_read_ops(0), max_list_ops(0), max_write_bytes(0), max_read_bytes(0)  {}
 
   void encode(bufferlist& bl) const {
-    ENCODE_START(1, 1, bl);
+    ENCODE_START(2, 1, bl);
     encode(max_write_ops, bl);
     encode(max_read_ops, bl);
+    encode(max_list_ops, bl);
     encode(max_write_bytes, bl);
     encode(max_read_bytes, bl);
     encode(enabled, bl);
     ENCODE_FINISH(bl);
   }
   void decode(bufferlist::const_iterator& bl) {
-    DECODE_START(1, bl);
-    decode(max_write_ops,bl);
+    DECODE_START(2, bl);
+    decode(max_write_ops, bl);
     decode(max_read_ops, bl);
-    decode(max_write_bytes,bl);
+    if (struct_v >= 2) {
+      decode(max_list_ops, bl);
+    } else {
+      max_list_ops = 0;
+    }
+    decode(max_write_bytes, bl);
     decode(max_read_bytes, bl);
     decode(enabled, bl);
     DECODE_FINISH(bl);
   }
 
   void dump(Formatter *f) const;
-
   void decode_json(JSONObj *obj);
 
 };
@@ -947,10 +953,10 @@ WRITE_CLASS_ENCODER(RGWGroupInfo)
 ///
 struct RGWObjVersionTracker {
   obj_version read_version; //< The version read from an object. If
-			    //  set, this value is used to check the
-			    //  stored version.
+          //  set, this value is used to check the
+          //  stored version.
   obj_version write_version; //< Set the object to this version on
-			     //  write, if set.
+           //  write, if set.
 
   /// Pointer to the read version.
   obj_version* version_for_read() {
@@ -1582,12 +1588,12 @@ struct multipart_upload_info
       decode(obj_retention, bl);
       decode(obj_legal_hold, bl);
       if (struct_v >= 3) {
-	uint16_t ct;
-	decode(ct, bl);
-	cksum_type = rgw::cksum::Type(ct);
-	if (struct_v >= 4) {
-	  decode(cksum_flags, bl);
-	}
+  uint16_t ct;
+  decode(ct, bl);
+  cksum_type = rgw::cksum::Type(ct);
+  if (struct_v >= 4) {
+    decode(cksum_flags, bl);
+  }
       }
     } else {
       obj_retention_exist = false;
@@ -1767,10 +1773,10 @@ bool verify_user_permission_no_policy(const DoutPrefixProvider* dpp,
 
 bool verify_object_permission_no_policy(const DoutPrefixProvider* dpp,
                                         struct perm_state_base * const s,
-					const RGWAccessControlPolicy& user_acl,
-					const RGWAccessControlPolicy& bucket_acl,
-					const RGWAccessControlPolicy& object_acl,
-					const int perm,
+          const RGWAccessControlPolicy& user_acl,
+          const RGWAccessControlPolicy& bucket_acl,
+          const RGWAccessControlPolicy& object_acl,
+          const int perm,
                                         bool *granted_by_acl = nullptr);
 
 // determine whether a request is allowed or denied within an account
@@ -1797,7 +1803,7 @@ bool verify_bucket_permission(const DoutPrefixProvider* dpp,
                               bool account_root,
                               const RGWAccessControlPolicy& user_acl,
                               const RGWAccessControlPolicy& bucket_acl,
-			      const boost::optional<rgw::IAM::Policy>& bucket_policy,
+            const boost::optional<rgw::IAM::Policy>& bucket_policy,
                               const std::vector<rgw::IAM::Policy>& identity_policies,
                               const std::vector<rgw::IAM::Policy>& session_policies,
                               const uint64_t op, bool *granted_by_acl = nullptr);
@@ -1823,7 +1829,7 @@ bool verify_bucket_permission_no_policy(
   const int perm);
 bool verify_bucket_permission_no_policy(const DoutPrefixProvider* dpp,
                                         req_state * const s,
-					const int perm);
+          const int perm);
 extern bool verify_object_permission(
   const DoutPrefixProvider* dpp,
   req_state * const s,
@@ -1837,7 +1843,7 @@ extern bool verify_object_permission(
   const uint64_t op);
 extern bool verify_object_permission(const DoutPrefixProvider* dpp, req_state *s, uint64_t op);
 extern bool verify_object_permission_no_policy(const DoutPrefixProvider* dpp, req_state *s,
-					       int perm);
+                 int perm);
 extern int verify_object_lock(
   const DoutPrefixProvider* dpp,
   const rgw::sal::Attrs& attrs,
@@ -1943,7 +1949,7 @@ void rgw_setup_saved_curl_handles();
 void rgw_release_all_curl_handles();
 
 static inline void rgw_escape_str(const std::string& s, char esc_char,
-				  char special_char, std::string *dest)
+          char special_char, std::string *dest)
 {
   const char *src = s.c_str();
   char dest_buf[s.size() * 2 + 1];
@@ -1961,8 +1967,8 @@ static inline void rgw_escape_str(const std::string& s, char esc_char,
 }
 
 static inline ssize_t rgw_unescape_str(const std::string& s, ssize_t ofs,
-				       char esc_char, char special_char,
-				       std::string *dest)
+               char esc_char, char special_char,
+               std::string *dest)
 {
   const char *src = s.c_str();
   char dest_buf[s.size() + 1];
@@ -2020,9 +2026,9 @@ static inline std::string ys_header_mangle(std::string_view name)
   std::string out;
   out.reserve(name.length());
   std::transform(std::begin(name), std::end(name),
-		 std::back_inserter(out), [](const int c) {
-		   return c == '-' ? '_' : c == '_' ? '-' : std::toupper(c);
-		 });
+     std::back_inserter(out), [](const int c) {
+       return c == '-' ? '_' : c == '_' ? '-' : std::toupper(c);
+     });
   return out;
 } /* ys_header_mangle */
 
@@ -2030,9 +2036,9 @@ extern int rgw_bucket_parse_bucket_instance(const std::string& bucket_instance, 
 
 boost::intrusive_ptr<CephContext>
 rgw_global_init(const std::map<std::string,std::string> *defaults,
-		    std::vector < const char* >& args,
-		    uint32_t module_type, code_environment_t code_env,
-		    int flags);
+        std::vector < const char* >& args,
+        uint32_t module_type, code_environment_t code_env,
+        int flags);
 
 
 struct AioCompletionDeleter {
