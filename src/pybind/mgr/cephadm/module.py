@@ -204,6 +204,12 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             desc='how frequently to perform a host check',
         ),
         Option(
+            'stray_daemon_check_interval',
+            type='secs',
+            default=30 * 60,
+            desc='how frequently cephadm should check for the presence of stray daemons',
+        ),
+        Option(
             'mode',
             type='str',
             enum_allowed=['root', 'cephadm-package'],
@@ -537,6 +543,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
             self.daemon_cache_timeout = 0
             self.facts_cache_timeout = 0
             self.host_check_interval = 0
+            self.stray_daemon_check_interval = 0
             self.max_count_per_host = 0
             self.mode = ''
             self.container_image_base = ''
@@ -704,6 +711,8 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule,
 
         self.offline_watcher = OfflineHostWatcher(self)
         self.offline_watcher.start()
+
+        self.last_stray_daemon_check: Optional[datetime.datetime] = None
 
     def shutdown(self) -> None:
         self.log.debug('shutdown')
