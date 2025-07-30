@@ -1597,7 +1597,10 @@ int show_user_ratelimit(std::unique_ptr<rgw::sal::User>& user, Formatter *format
       ldpp_dout(dpp(), 0) << "ERROR: failed to decode rate limit" << dendl;
       return -EIO;
     }
+  } else {
+    return -ENOENT;
   }
+
   formatter->open_object_section("user_ratelimit");
   encode_json("user_ratelimit", ratelimit_info, formatter);
   formatter->close_section();
@@ -6559,7 +6562,8 @@ int main(int argc, const char **argv)
                                         OPT::ROLE_CREATE, OPT::ROLE_DELETE,
                                         OPT::ROLE_POLICY_PUT, OPT::ROLE_POLICY_DELETE,
                                         OPT::ROLE_POLICY_ATTACH, OPT::ROLE_POLICY_DETACH,
-                                        OPT::USER_POLICY_ATTACH, OPT::USER_POLICY_DETACH};
+                                        OPT::USER_POLICY_ATTACH, OPT::USER_POLICY_DETACH,
+                                        OPT::RATELIMIT_SET, OPT::RATELIMIT_ENABLE, OPT::RATELIMIT_DISABLE};
 
   bool print_warning_message = (non_master_ops_list.find(opt_cmd) != non_master_ops_list.end() &&
                                 non_master_cmd);
@@ -11008,7 +11012,11 @@ next:
       return show_bucket_ratelimit(driver, tenant, bucket_name, formatter.get());
     } else if (!rgw::sal::User::empty(user)) {
       if (ratelimit_scope == "user") {
-        return show_user_ratelimit(user, formatter.get());
+        int ret = show_user_ratelimit(user, formatter.get());
+        if (ret < 0) {
+          std::cerr << "ERROR: failed to get a ratelimit for user id: '" << user->get_id() << "', errno: " << cpp_strerror(-ret) << std::endl;
+        }
+        return ret;
       } else {
         cerr << "ERROR: invalid ratelimit scope specification. Please specify either --ratelimit-scope=bucket, or --ratelimit-scope=user" << std::endl;
         return EINVAL;
