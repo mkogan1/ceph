@@ -4498,3 +4498,28 @@ options:
   default: false
   services:
   - rgw
+- name: rgw_ratelimit_accumulation_interval_seconds
+  type: uint
+  level: advanced
+  desc: Time window for rate limiting in seconds
+  long_desc: This option sets the time window for rate limiting in seconds.
+    Requests that exceed the configured rate limits within this time window will be rejected.
+    The default is 1 minute token bucket.
+  default: 60
+  services:
+  - rgw
+  flags:
+  - startup
+  with_legacy: true
+- name: rgw_enable_ratelimit_list_and_delete
+  type: bool
+  level: advanced
+  desc: Enable rate limiting for LIST and DELETE operations
+  long_desc: Enables rate limiting for S3 LIST and
+    S3 single-object DELETE (not multi-object delete) operations.
+  default: true
+  services:
+  - rgw
+  flags:
+  - startup
+  with_legacy: true

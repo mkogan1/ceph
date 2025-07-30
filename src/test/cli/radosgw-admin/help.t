@@ -361,6 +361,8 @@
      --max-read-bytes              specify max bytes per minute for READ ops per RGW (GET and HEAD request methods), 0 means unlimited
      --max-write-ops               specify max requests per minute for WRITE ops per RGW (Not GET or HEAD request methods), 0 means unlimited
      --max-write-bytes             specify max bytes per minute for WRITE ops per RGW (Not GET or HEAD request methods), 0 means unlimited
+     --max-list-ops                specify max requests per minute for LIST ops per RGW (LIST request methods), 0 means unlimited
+     --max-delete-ops              specify max requests per minute for DELETE ops per RGW (DELETE request methods), 0 means unlimited
      --ratelimit-scope             scope of rate limiting: bucket, user, anonymous
                                    anonymous can be configured only with global rate limit
   
