@@ -24,6 +24,8 @@ import sched
 import time
 #from threading import Event
 import threading
+import importlib.util
+import pathlib
 
 from ceph.cryptotools.select import get_crypto_caller
 
@@ -100,11 +102,11 @@ class CallHomeAgent(MgrModule):
             desc='Time frequency for the alerts report'
         ),
         Option(
-            name='interval_performance_report_seconds',
+            name='interval_service_report_seconds',
             type='int',
             min=0,
-            default = int(os.environ.get('CHA_INTERVAL_PERFORMANCE_REPORT_SECONDS', 60 * 5)),  # 5 minutes
-            desc='Time frequency for the performance report'
+            default = int(os.environ.get('CHA_INTERVAL_SERVICE_REPORT_SECONDS', 60 * 60)),  # 60 minutes
+            desc='Time frequency for checking for new alerts for service events'
         ),
         Option(
             name='customer_email',
@@ -250,6 +252,12 @@ class CallHomeAgent(MgrModule):
             default=3600 * 2,
             desc='Time interval in seconds to allow a cooldown between level 2 upload snap requests'
         ),
+        Option(
+            name='disable_service_events',
+            type='bool',
+            default=False,
+            desc='Disable service events'
+        ),
     ]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -293,11 +301,11 @@ class CallHomeAgent(MgrModule):
         # set up some members to enable the serve() method and shutdown()
         self.run = True
 
-        # Module options
-        self.refresh_options()
-
         # Health checks
         self.health_checks: Dict[str, Dict[str, Any]] = dict()
+
+        # Module options
+        self.refresh_options()
 
         # Unsolicited Request support
 
@@ -332,7 +340,8 @@ class CallHomeAgent(MgrModule):
             self.log.info("Cleaning old module's db_operations")
             self.set_store('db_operations', None)
 
-        
+        self.scheduler = sched.scheduler(time.time, time.sleep)
+
     def get_jwt_jti(self) -> str:
         # Extract jti from JWT. This is another way to identify clusters in addition to the ICN.
         jwt_jti = ""
@@ -375,6 +384,9 @@ class CallHomeAgent(MgrModule):
 
         self.jwt_jti = self.get_jwt_jti()
 
+        # validate icn and country_code
+        self.validate_config()
+
     def ceph_command(self, srv_type: str, prefix: str, srv_spec: Optional[str] = '', inbuf: str = '', **kwargs):
         # Note: A simplified version of the function used in dashboard ceph services
         """
@@ -398,6 +410,96 @@ class CallHomeAgent(MgrModule):
         except Exception as ex:
             self.log.error(f"Execution of command '{prefix}' failed: {ex}")
             return outb
+
+
+    def validate_country_code(self, country_code: str) -> Tuple[bool, str]:
+        """
+        Validates a 2-letter country code using ISO 3166-1 alpha-2 codes
+        """
+        # Set of valid ISO 3166-1 alpha-2 country codes
+        VALID_COUNTRY_CODES = {
+            'AF', 'AX', 'AL', 'DZ', 'AS', 'AD', 'AO', 'AI', 'AQ', 'AG',
+            'AR', 'AM', 'AW', 'AU', 'AT', 'AZ', 'BS', 'BH', 'BD', 'BB',
+            'BY', 'BE', 'BZ', 'BJ', 'BM', 'BT', 'BO', 'BQ', 'BA', 'BW',
+            'BV', 'BR', 'IO', 'BN', 'BG', 'BF', 'BI', 'KH', 'CM', 'CA',
+            'CV', 'KY', 'CF', 'TD', 'CL', 'CN', 'CX', 'CC', 'CO', 'KM',
+            'CG', 'CD', 'CK', 'CR', 'CI', 'HR', 'CU', 'CW', 'CY', 'CZ',
+            'DK', 'DJ', 'DM', 'DO', 'EC', 'EG', 'SV', 'GQ', 'ER', 'EE',
+            'SZ', 'ET', 'FK', 'FO', 'FJ', 'FI', 'FR', 'GF', 'PF', 'TF',
+            'GA', 'GM', 'GE', 'DE', 'GH', 'GI', 'GR', 'GL', 'GD', 'GP',
+            'GU', 'GT', 'GG', 'GN', 'GW', 'GY', 'HT', 'HM', 'VA', 'HN',
+            'HK', 'HU', 'IS', 'IN', 'ID', 'IR', 'IQ', 'IE', 'IM', 'IL',
+            'IT', 'JM', 'JP', 'JE', 'JO', 'KZ', 'KE', 'KI', 'KP', 'KR',
+            'KW', 'KG', 'LA', 'LV', 'LB', 'LS', 'LR', 'LY', 'LI', 'LT',
+            'LU', 'MO', 'MG', 'MW', 'MY', 'MV', 'ML', 'MT', 'MH', 'MQ',
+            'MR', 'MU', 'YT', 'MX', 'FM', 'MD', 'MC', 'MN', 'ME', 'MS',
+            'MA', 'MZ', 'MM', 'NA', 'NR', 'NP', 'NL', 'NC', 'NZ', 'NI',
+            'NE', 'NG', 'NU', 'NF', 'MK', 'MP', 'NO', 'OM', 'PK', 'PW',
+            'PS', 'PA', 'PG', 'PY', 'PE', 'PH', 'PN', 'PL', 'PT', 'PR',
+            'QA', 'RE', 'RO', 'RU', 'RW', 'BL', 'SH', 'KN', 'LC', 'MF',
+            'PM', 'VC', 'WS', 'SM', 'ST', 'SA', 'SN', 'RS', 'SC', 'SL',
+            'SG', 'SX', 'SK', 'SI', 'SB', 'SO', 'ZA', 'GS', 'SS', 'ES',
+            'LK', 'SD', 'SR', 'SJ', 'SE', 'CH', 'SY', 'TW', 'TJ', 'TZ',
+            'TH', 'TL', 'TG', 'TK', 'TO', 'TT', 'TN', 'TR', 'TM', 'TC',
+            'TV', 'UG', 'UA', 'AE', 'GB', 'US', 'UM', 'UY', 'UZ', 'VU',
+            'VE', 'VN', 'VG', 'VI', 'WF', 'EH', 'YE', 'ZM', 'ZW'
+        }
+
+        # if the user did not populate the customer_country_code config option yet
+        if country_code is None:
+            return False, "Country code is not configured"
+
+        if country_code.upper() not in VALID_COUNTRY_CODES:
+            return False, f"'{country_code}' must be a valid ISO 3166-1 alpha-2 country code"
+
+        return True, f"'{country_code}' is a valid country code"
+
+    def validate_icn(self, icn: str) -> Tuple[bool, str]:
+        # if the user did not populate the ICN config option yet
+        if icn is None:
+            return False, f"IBM Customer Number (ICN) is not configured"
+
+        # ICN is exactly 7 alphanumeric characters long
+        if len(icn) != 7 or not icn.isalnum():
+            return False, f"Invalid ICN: '{icn}'. ICN must be exactly 7 alphanumeric characters long"
+
+        return True, "ICN is valid"
+
+    def validate_config(self) -> None:
+        """
+        Validate the mandatory fields in the config options
+        """
+        # ICN is a mandatory field for service events
+        is_valid, msg = self.validate_icn(self.icn)
+        if not is_valid:
+            self.log.warning(f"CHA_INVALID_ICN: {msg}")
+            self.health_checks.update({
+                'CHA_INVALID_ICN': {
+                    'severity': 'warning',
+                    'summary': 'Call Home Agent: IBM Customer Number (ICN) is invalid. '
+                               'Run "ceph callhome set icn <icn>" to set it.',
+                    'detail': [msg]
+                }
+            })
+        else:
+            self.health_checks.pop('CHA_INVALID_ICN', None)
+
+        # Country code is a mandatory field for service events
+        is_valid, msg = self.validate_country_code(self.customer_country_code)
+        if not is_valid:
+            self.log.warning(f"CHA_INVALID_COUNTRY_CODE: {msg}")
+            self.health_checks.update({
+                'CHA_INVALID_COUNTRY_CODE': {
+                    'severity': 'warning',
+                    'summary': 'Call Home Agent: Country code is invalid. '
+                               'Run "ceph callhome set country-code <country-code>" to set it.',
+                    'detail': [msg]
+                }
+            })
+        else:
+            self.health_checks.pop('CHA_INVALID_COUNTRY_CODE', None)
+
+        self.set_health_checks(self.health_checks)
 
     def connectivity_update(self, response: dict) -> None:
         """
@@ -625,7 +727,7 @@ class CallHomeAgent(MgrModule):
         """
         This only affects changes in ceph config options.
         To change configuration using env. vars a restart of the module
-        will be neeed or the change in one config option will refresh
+        will be needed or the change in one config option will refresh
         configuration coming from env vars
         """
         self.refresh_options()
@@ -636,7 +738,6 @@ class CallHomeAgent(MgrModule):
 
     def serve(self):
         self.log.info('Starting IBM Ceph Call Home Agent')
-        self.scheduler = sched.scheduler(time.time, time.sleep)
         self.schedule_tasks()
         while self.run:
             # Passing False causes the scheduler.run() to return the time until the next event. therefore we're not blocked in
@@ -879,3 +980,44 @@ class CallHomeAgent(MgrModule):
         self.set_store('ur_cooldown', json.dumps(self.ur_cooldown))
 
         return HandleCommandResult(stdout="Success")
+
+    @CLIWriteCommand('callhome set country-code')
+    def cli_set_country_code(self, country_code: str) -> Tuple[int, str, str]:
+        """
+        Set a 2 letter country code
+        """
+        is_valid, msg = self.validate_country_code(country_code)
+
+        if not is_valid:
+            self.log.error(f"Invalid country code: {msg}")
+            return HandleCommandResult(retval=1, stderr=f'Invalid country code: {msg}')
+
+        try:
+            self.set_module_option('customer_country_code', country_code.upper())
+        except Exception as e:
+            return HandleCommandResult(retval=1, stderr=str(e))
+        else:
+            return HandleCommandResult(stdout=f'country code is set to {country_code}')
+        finally:
+            self.refresh_options()  # This will always run, no matter what.
+
+    @CLIWriteCommand('callhome set icn')
+    def cli_set_icn(self, icn: str) -> Tuple[int, str, str]:
+        """
+        Set an IBM customer number (7-character alphanumeric string)
+        """
+        is_valid, msg = self.validate_icn(icn)
+
+        if not is_valid:
+            self.log.warning(msg)
+            return HandleCommandResult(retval=1, stderr=msg)
+
+        try:
+            self.set_module_option('icn', icn)
+        except Exception as e:
+            return HandleCommandResult(retval=1, stderr=str(e))
+        else:
+            return HandleCommandResult()
+        finally:
+            self.refresh_options()  # This will always run, no matter what.
+

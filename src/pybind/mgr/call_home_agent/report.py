@@ -27,15 +27,20 @@ class Report:
         self.report_type = report_type
         self.event_classes = event_classes
         self.report_event_id = None
+        self.events = []
+
+    def add_event(self, event):
+        self.events.append(event)
+        self.data['events'].append(event.data)
 
     def compile(self) -> Optional[dict]:
         report_times = ReportTimes()
-        report = self.get_report_headers(report_times, self.report_event_id)
+        self.set_headers(report_times, self.report_event_id)
         for event_class in self.event_classes:
             event = event_class(self.agent).generate(report_times)
-            report['events'].append(event.data)
+            self.add_event(event)
 
-        return report
+        return self.data
 
     def run(self) -> Optional[str]:
         compiled = self.compile()
@@ -43,7 +48,7 @@ class Report:
             return None
         return self.send(compiled)
 
-    def get_report_headers(self, report_times: ReportTimes, report_event_id = None) -> dict:
+    def set_headers(self, report_times: ReportTimes, report_event_id = None) -> None:
         try:
             secrets = self.agent.get_secrets()
         except Exception as e:
@@ -55,8 +60,9 @@ class Report:
 
         if not report_event_id:
             report_event_id = f"IBM_chc_event_RedHatMarine_ceph_{self.agent.ceph_cluster_id}_{self.report_type}_report_{report_times.time_ms}"
+        self.report_event_id = report_event_id
 
-        header = {
+        self.data = {
                 "agent": "RedHat_Marine_firmware_agent",
                 "api_key": secrets['api_key'],
                 "private_key": secrets['private_key'],
@@ -86,9 +92,7 @@ class Report:
                 "events": []
             }
 
-        #header.update(self._header_times(report_timestamp))
-
-        return header
+        #data.update(self._header_times(report_timestamp))  # TODO: check
 
     def send(self, report: dict, force: bool = False) -> str:
         resp = None
@@ -105,7 +109,7 @@ class Report:
                                  data=json.dumps(report),
                                  proxies=self.agent.proxies,
                                  timeout=60)
-            self.agent.log.debug(f"Report response: {resp.text}")
+            self.agent.log.debug(f"Report response: {resp.text}")  # TODO: remove keys
             resp.raise_for_status()
 
             ch_response = resp.json()

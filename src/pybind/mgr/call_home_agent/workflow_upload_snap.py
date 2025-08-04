@@ -22,13 +22,17 @@ OPERATION_STATUS_REQUEST_REJECTED = 'REQUEST_REJECTED'
 DIAGS_FOLDER = '/var/log/ceph'
 
 class WorkFlowUploadSnap:
-    def __init__(self, agent, req, req_id, report_event_id):
+    def __init__(self, agent, req, req_id, report_event_id, send_status_log_upload = True):
+        """
+            send_status_log_upload: Should the workflow send percent complete reports to SI. Set to False in service_events.
+        """
         self.agent = agent
         self.req = req
         self.req_id = req_id  # unique ID for this request
         self.pmr = self.req.get('options', {}).get('pmr', None)
         self.report_event_id = report_event_id
         self._event_id_counter = 0
+        self.send_status_log_upload = send_status_log_upload
         self.si_requestid = self.req.get('options', {}).get('si_requestid', '')
 
     def next_event_id(self):
@@ -41,7 +45,7 @@ class WorkFlowUploadSnap:
         self.agent.log.info(f"WorkFlowUploadSnap <{self.req_id}> : Processing new request {self.req}")
         if not self.pmr:
             self.agent.log.warning(f"WorkFlowUploadSnap <{self.req_id}> : Error - No PMR in request.")
-            ReportURError(self.agent, self.next_event_id())
+            ReportURError(self.agent, self.next_event_id()).run()
             return
 
         try:
@@ -61,7 +65,8 @@ class WorkFlowUploadSnap:
             self.agent.log.info(f"WorkFlowUploadSnap <{self.req_id}> :  Completed operation")
         except Exception as ex:
             self.agent.log.error(f'Operations ({self.req_id}): Error processing operation {self.req}. Exception={ex} trace={traceback.format_exc()}')
-            ReportStatusLogUpload(self.agent, self.next_event_id(), self.si_requestid, 0, f"ERROR: {ex}", OPERATION_STATUS_ERROR).run()
+            if self.send_status_log_upload:
+                ReportStatusLogUpload(self.agent, self.next_event_id(), self.si_requestid, 0, f"ERROR: {ex}", OPERATION_STATUS_ERROR).run()
 
         # if it was ok or not, we always report the state
         ReportConfirmResponse(self.agent, self.next_event_id()).run()
@@ -269,13 +274,14 @@ class WorkFlowUploadSnap:
                     resp.raise_for_status()
                 start_byte += chunk_size
                 part_sent += 1
-                if chunk_pattern:
-                    percent_progress = int(part_sent/len(files_to_upload) * 100)
-                    status = OPERATION_STATUS_COMPLETE if percent_progress == 100 else OPERATION_STATUS_IN_PROGRESS
-                    ReportStatusLogUpload(self.agent, self.next_event_id(), self.si_requestid, percent_progress, f"file <{file_name}> is being sent", status).run()
-                else:
-                    status = OPERATION_STATUS_COMPLETE if percent_complete == 100 else OPERATION_STATUS_IN_PROGRESS
-                    ReportStatusLogUpload(self.agent, self.next_event_id(), self.si_requestid, percent_complete, status, status).run()
+                if self.send_status_log_upload:
+                    if chunk_pattern:
+                        percent_progress = int(part_sent/len(files_to_upload) * 100)
+                        status = OPERATION_STATUS_COMPLETE if percent_progress == 100 else OPERATION_STATUS_IN_PROGRESS
+                        ReportStatusLogUpload(self.agent, self.next_event_id(), self.si_requestid, percent_progress, f"file <{file_name}> is being sent", status).run()
+                    else:
+                        status = OPERATION_STATUS_COMPLETE if percent_complete == 100 else OPERATION_STATUS_IN_PROGRESS
+                        ReportStatusLogUpload(self.agent, self.next_event_id(), self.si_requestid, percent_complete, status, status).run()
         except Exception as ex:
             explanation = resp.text if resp else ""
             raise SendError(f'WorkFlowUploadSnap <{self.req_id}> : Failed to send <{file_path}> to <{ecurep_file_upload_url}>: {ex}: {explanation} trace={traceback.format_exc()}')
@@ -292,10 +298,10 @@ class ReportStatusLogUpload(Report):
     def compile(self) -> Optional[dict]:
         # We override run because this event gets a non standard generate arguments
         report_times = ReportTimes()
-        report = self.get_report_headers(report_times, self.report_event_id)
+        self.set_headers(report_times, self.report_event_id)
         event = EventStatusLogUpload(self.agent).generate(report_times, self.si_requestid, self.percent_progress, self.description, self.status)
-        report['events'].append(event.data)
-        return report
+        self.add_event(event)
+        return self.data
 
 class EventStatusLogUpload(Event):
     def gather(self) -> dict:
