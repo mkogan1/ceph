@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include "rgw_common.h"
 
-enum class OpType { Read, Write, List };
+enum class OpType { Read, Write, List, Delete };
 
 
 class RateLimiterEntry {
@@ -24,6 +24,7 @@ class RateLimiterEntry {
   counters read;
   counters write;
   counters list;
+  counters del;
   ceph::timespan ts;
   bool first_run = true;
   std::mutex ts_lock;
@@ -39,6 +40,10 @@ class RateLimiterEntry {
   int64_t list_ops() const
   {
     return list.ops / fixed_point_rgw_ratelimit;
+  }
+  int64_t delete_ops() const
+  {
+    return del.ops / fixed_point_rgw_ratelimit;
   }
   int64_t read_bytes() const
   {
@@ -65,6 +70,14 @@ class RateLimiterEntry {
       return true;
     }
     list.ops -= fixed_point_rgw_ratelimit;
+    return false;
+  }
+  bool should_rate_limit_delete(int64_t ops_limit)
+  {
+    if ((delete_ops() - 1 < 0) && (ops_limit > 0)) {
+      return true;
+    }
+    del.ops -= fixed_point_rgw_ratelimit;
     return false;
   }
   bool should_rate_limit_write(int64_t ops_limit, int64_t bw_limit) 
@@ -107,6 +120,7 @@ class RateLimiterEntry {
       read.ops = info->max_read_ops * fixed_point;
       read.bytes = info->max_read_bytes * fixed_point;
       list.ops = info->max_list_ops * fixed_point;
+      del.ops = info->max_delete_ops * fixed_point;
       ts = curr_timestamp;
       first_run = false;
       return;
@@ -120,11 +134,13 @@ class RateLimiterEntry {
       const int64_t read_ops = info->max_read_ops * time_in_ms;
       const int64_t read_bw = info->max_read_bytes * time_in_ms;
       const int64_t list_ops = info->max_list_ops * time_in_ms;
+      const int64_t delete_ops = info->max_delete_ops * time_in_ms;
       read.ops = std::min(info->max_read_ops * fixed_point, read_ops + read.ops);
       read.bytes = std::min(info->max_read_bytes * fixed_point, read_bw + read.bytes);
       write.ops = std::min(info->max_write_ops * fixed_point, write_ops + write.ops);
       write.bytes = std::min(info->max_write_bytes * fixed_point, write_bw + write.bytes);
       list.ops = std::min(info->max_list_ops * fixed_point, list_ops + list.ops);
+      del.ops = std::min(info->max_delete_ops * fixed_point, delete_ops + del.ops);
     }
   }
 
@@ -140,6 +156,8 @@ class RateLimiterEntry {
           return should_rate_limit_write(ratelimit_info->max_write_ops, ratelimit_info->max_write_bytes);
         case OpType::List:
           return should_rate_limit_list(ratelimit_info->max_list_ops);
+        case OpType::Delete:
+          return should_rate_limit_delete(ratelimit_info->max_delete_ops);
       }
       return false;
     }
@@ -166,6 +184,9 @@ class RateLimiterEntry {
         case OpType::List:
           list.ops += fixed_point_rgw_ratelimit;
           break;
+        case OpType::Delete:
+          del.ops += fixed_point_rgw_ratelimit;
+          break;
       }
     }
 };
@@ -183,6 +204,9 @@ class RateLimiter {
     auto contains_any = [](std::string_view s, auto&&... patterns) {
       return ((s.find(patterns) != std::string::npos) || ...);
     };
+    if (method == "DELETE") {
+      return OpType::Delete;
+    }
     if (method == "GET" && !resource.empty() && contains_any(resource, "list-type=", "prefix=", "delimiter=")) {
       return OpType::List;
     }
