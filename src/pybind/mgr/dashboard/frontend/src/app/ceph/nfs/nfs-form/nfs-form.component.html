@@ -154,7 +154,7 @@
       </div>
 
       <div class="form-item"
-           *ngIf="storageBackend === 'CEPH' && nfsForm.getValue('fsal').fs_name && !this.isEdit">
+           *ngIf="storageBackend === 'CEPH' && nfsForm.getValue('fsal').fs_name">
         <cds-select formControlName="subvolume_group"
                     name="subvolume_group"
                     for="subvolume_group"
@@ -175,7 +175,7 @@
       </div>
 
     <div class="form-group row"
-         *ngIf="storageBackend === 'CEPH' && nfsForm.getValue('fsal').fs_name && !this.isEdit">
+         *ngIf="storageBackend === 'CEPH' && nfsForm.getValue('fsal').fs_name">
       <cds-select formControlName="subvolume"
                   name="subvolume"
                   for="subvolume"
