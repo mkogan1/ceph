@@ -139,6 +139,8 @@ DISK_OCCUPATION = ('ceph_daemon', 'device', 'db_device',
 
 NUM_OBJECTS = ['degraded', 'misplaced', 'unfound']
 
+CEPHADM_DAEMON_STATUS = ('service_type', 'daemon_name', 'hostname', 'service_name')
+
 alert_metric = namedtuple('alert_metric', 'name description')
 HEALTH_CHECKS = [
     alert_metric('SLOW_OPS', 'OSD or Monitor requests taking a long time to process'),
@@ -797,6 +799,13 @@ class Module(MgrModule, OrchestratorClientMixin):
             ('type', 'ceph_daemon',)
         )
 
+        metrics['cephadm_daemon_status'] = Metric(
+            'gauge',
+            'cephadm_daemon_status',
+            'Status of cephadm daemons (0=stopped, 1=running, 2=errored)',
+            CEPHADM_DAEMON_STATUS
+        )
+
         for flag in OSD_FLAGS:
             path = 'osd_flag_{}'.format(flag)
             metrics[path] = Metric(
@@ -977,6 +986,30 @@ class Module(MgrModule, OrchestratorClientMixin):
                     pool['recovery_rate'].get(stat, 0),
                     (pool['pool_id'],)
                 )
+
+    @profile_method()
+    def set_cephadm_daemon_status_metrics(self) -> None:
+        try:
+            daemons = raise_if_exception(self.list_daemons())
+            for daemon in daemons:
+                service_type = getattr(daemon, 'daemon_type', '')
+                daemon_name = getattr(daemon, 'daemon_name', '')
+                hostname = str(getattr(daemon, 'hostname', ''))
+                status = getattr(daemon, 'status', '')
+                service_name_attr = getattr(daemon, 'service_name', '')
+                service_name = service_name_attr() if callable(service_name_attr) else str(service_name_attr)
+
+                self.metrics['cephadm_daemon_status'].set(
+                    int(status),
+                    (
+                        service_type,
+                        daemon_name,
+                        hostname,
+                        service_name,
+                    )
+                )
+        except Exception as e:
+            self.log.error(f"Failed to collect cephadm daemon status: {e}")
 
     @profile_method()
     def get_df(self) -> None:
@@ -1733,6 +1766,7 @@ class Module(MgrModule, OrchestratorClientMixin):
         self.get_pool_repaired_objects()
         self.get_num_objects()
         self.get_all_daemon_health_metrics()
+        self.set_cephadm_daemon_status_metrics()
 
         if not self.get_module_option('exclude_perf_counters'):
             self.get_perf_counters()
