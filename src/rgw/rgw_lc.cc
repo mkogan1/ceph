@@ -630,17 +630,21 @@ static int remove_expired_obj(const DoutPrefixProvider* dpp,
   if (ret < 0) {
     /* for delete markers, we expect load_obj_state() to "fail"
      * with -ENOENT */
+    ldpp_dout(oc.dpp, 0) <<
+      fmt::format("ERROR: get_obj_state() failed in {} for object k={} error r={}",
+		  __func__, oc.o.key.to_string(), ret) << dendl;
+
     if (! (o.is_delete_marker() &&
 	   (ret == -ENOENT))) {
       ldpp_dout(oc.dpp, 0) <<
-	fmt::format("ERROR: get_obj_state() failed in {} for object k={} error r={}",
+	fmt::format("ERROR: get_obj_state() failed in {} for object k={} error r={} because obj was a delete marker",
 		    __func__, oc.o.key.to_string(), ret) << dendl;
       return ret;
     }
   }
 
   auto have_notify = !event_types.empty();
-  if (have_notify) {
+  if (have_notify && obj_state) {
     auto iter = obj_state->attrset.find(RGW_ATTR_ETAG);
     if (iter != obj_state->attrset.end()) {
       etag = rgw_bl_str(iter->second);
