@@ -7,25 +7,6 @@
 #include "rgw_xml.h"
 #include "rgw_common.h"
 
-class RGWMultiDelObject : public XMLObj
-{
-  std::string key;
-  std::string version_id;
-  const char *if_match{nullptr};
-  ceph::real_time last_mod_time;
-  std::optional<uint64_t> size_match;
-public:
-  RGWMultiDelObject() {}
-  ~RGWMultiDelObject() override {}
-  bool xml_end(const char *el) override;
-
-  const std::string& get_key() const { return key; }
-  const std::string& get_version_id() const { return version_id; }
-  const char* get_if_match() const { return if_match; }
-  const ceph::real_time& get_last_mod_time() const { return last_mod_time; }
-  const std::optional<uint64_t> get_size_match() const { return size_match; }
-};
-
 class RGWMultiDelDelete : public XMLObj
 {
 public:
@@ -33,7 +14,7 @@ public:
   ~RGWMultiDelDelete() override {}
   bool xml_end(const char *el) override;
 
-  std::vector<RGWMultiDelObject> objects;
+  std::vector<rgw_obj_key> objects;
   bool quiet;
   bool is_quiet() { return quiet; }
 };
@@ -43,6 +24,19 @@ class RGWMultiDelQuiet : public XMLObj
 public:
   RGWMultiDelQuiet() {}
   ~RGWMultiDelQuiet() override {}
+};
+
+class RGWMultiDelObject : public XMLObj
+{
+  std::string key;
+  std::string version_id;
+public:
+  RGWMultiDelObject() {}
+  ~RGWMultiDelObject() override {}
+  bool xml_end(const char *el) override;
+
+  const std::string& get_key() { return key; }
+  const std::string& get_version_id() { return version_id; }
 };
 
 class RGWMultiDelKey : public XMLObj
