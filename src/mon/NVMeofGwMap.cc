@@ -1048,7 +1048,7 @@ int NVMeofGwMap::blocklist_gw(
   }
 
   if (nonces.size() > 0) {
-    NvmeNonceVector &nonce_vector = gw_map.nonce_map[grpid];;
+    NvmeNonceVector &nonce_vector = nonces;
     std::string str = "[";
     entity_addrvec_t addr_vect;
 
