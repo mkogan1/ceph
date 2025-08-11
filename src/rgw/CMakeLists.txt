@@ -258,9 +258,9 @@ if(WITH_RADOSGW_POSIX)
   find_package(LMDB REQUIRED)
   add_compile_definitions(LMDB_SAFE_NO_CPP_UTILITIES)
   list(APPEND librgw_common_srcs
-	      driver/posix/rgw_sal_posix.cc
-	      driver/posix/lmdb-safe.cc
-	      driver/posix/notify.cpp)
+        driver/posix/rgw_sal_posix.cc
+        driver/posix/lmdb-safe.cc
+        driver/posix/notify.cpp)
 endif()
 if(WITH_JAEGER)
   list(APPEND librgw_common_srcs rgw_tracer.cc)
@@ -316,6 +316,7 @@ target_link_libraries(rgw_common
     ${ARROW_LIBRARIES}
     ${ARROW_FLIGHT_LIBRARIES}
     ${LMDB_LIBRARIES}
+    uring
   PUBLIC
     ${LUA_LIBRARIES}
     RapidJSON::RapidJSON
@@ -501,7 +502,8 @@ target_link_libraries(radosgw PRIVATE
   ${rgw_libs}
   rgw_schedulers
   kmip
-  ${ALLOC_LIBS})
+  ${ALLOC_LIBS}
+  uring)
 
 install(TARGETS radosgw DESTINATION bin)
 
