@@ -24,14 +24,14 @@ export class DocService {
     });
   }
 
-  urlGenerator(section: string, release = 'squid'): string {
-    const docVersion = release === 'squid' ? '8' : release;
+  urlGenerator(section: string, release = 'tentacle'): string {
+    const docVersion = release === 'tentacle' ? '9' : release;
     let sections = {};
 
     if (environment.build === 'ibm') {
-      // overriding the ibm docs to serve from 8.1.0 link. not overriding the
+      // overriding the ibm docs to serve from 9.0.0 link. not overriding the
       // global variable since rh still uses old versioning format
-      const domain = `https://www.ibm.com/docs/storage-ceph/${docVersion}.1.0?topic=`;
+      const domain = `https://www.ibm.com/docs/storage-ceph/${docVersion}.0.0?topic=`;
       const domainIBM = `https://www.ibm.com/support/customer/csol/terms/`;
 
       sections = {
