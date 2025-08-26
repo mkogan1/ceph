@@ -52,19 +52,18 @@ export class AboutComponent implements OnInit, OnDestroy {
   }
 
   setVariables() {
-    const NOT_AVAILABLE = $localize`Not available`;
     const project = {} as any;
-    project.user = localStorage.getItem(LocalStorage.DASHBOARD_USRENAME);
-    project.role = USER;
+    project.user = localStorage.getItem('dashboard_username');
+    project.role = 'user';
     if (this.userPermission.read) {
       this.userService.get(project.user).subscribe((data: any) => {
         project.role = data.roles;
       });
     }
     const browser = detect();
-    project.browserName = browser && browser.name ? browser.name : NOT_AVAILABLE;
-    project.browserVersion = browser && browser.version ? browser.version : NOT_AVAILABLE;
-    project.browserOS = browser && browser.os ? browser.os : NOT_AVAILABLE;
+    project.browserName = browser && browser.name ? browser.name : 'Not detected';
+    project.browserVersion = browser && browser.version ? browser.version : 'Not detected';
+    project.browserOS = browser && browser.os ? browser.os : 'Not detected';
     return project;
   }
 }
