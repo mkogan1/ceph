@@ -3,6 +3,8 @@ import json
 import logging
 import re
 import socket
+import random
+import string
 import time
 from abc import ABCMeta, abstractmethod
 import ipaddress
@@ -19,6 +21,7 @@ from ceph.deployment.service_spec import (
     InitContainerSpec,
     MONSpec,
     RGWSpec,
+    IngressSpec,
     ServiceSpec,
 )
 from ceph.deployment.utils import is_ipv6, unwrap_ipv6

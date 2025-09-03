@@ -4713,7 +4713,6 @@ def _add_deploy_parser_args(
         help='Additional entrypoint arguments to apply to deamon'
     )
     parser_deploy.add_argument(
-<<<<<<< HEAD
         '--skip-restart-for-reconfig',
         action='store_true',
         default=False,
@@ -4736,12 +4735,10 @@ def _name_opts(parser: argparse.ArgumentParser) -> None:
         '--infer-name',
         '-i',
         help='daemon name search (type[.partial_id])',
-=======
         '--limit-core-infinity',
         action='store_true',
         default=False,
         help='Set LimitCORE=infinity in ceph unit files'
->>>>>>> fe7cad2588e (cephadm: add LimitCORE=infinity to ceph unit file template)
     )
 
 
@@ -5320,8 +5317,6 @@ def _get_parser():
         help='deprecated flag only here for backwards compatibility')
 
 
-<<<<<<< HEAD
-=======
     parser_bootstrap.add_argument(
         '--call-home-icn',
         help='')
@@ -5366,7 +5361,6 @@ def _get_parser():
         help='Set LimitCORE=infinity in ceph unit files'
     )
 
->>>>>>> fe7cad2588e (cephadm: add LimitCORE=infinity to ceph unit file template)
     parser_deploy = subparsers.add_parser(
         'deploy', help='deploy a daemon')
     parser_deploy.set_defaults(func=command_deploy)
