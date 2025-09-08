@@ -262,8 +262,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             raise object_format.ErrorResponse.wrap(e)
         return self.nfs.enable_cluster_qos_bw(cluster_id=cluster_id,
                                               qos_type=QOSType[qos.value],
-                                              bw_obj=bw_obj,
-                                              skip_qos_type_validation=True)
+                                              bw_obj=bw_obj)
 
     def enable_export_qos_bw(self, cluster_id: str,
                              pseudo_path: str,
@@ -284,7 +283,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
         return self.export_mgr.enable_export_qos_bw(cluster_id=cluster_id,
                                                     pseudo_path=pseudo_path,
                                                     bw_obj=bw_obj)
-                                                    
+
     @CLICommand('nfs export qos enable bandwidth_control', perm='rw')
     @object_format.EmptyResponder()
     def _cmd_export_qos_bw_enable(self,
@@ -329,8 +328,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             raise object_format.ErrorResponse.wrap(e)
         return self.nfs.enable_cluster_qos_ops(cluster_id=cluster_id,
                                                qos_type=QOSType[qos.value],
-                                               ops_obj=ops_obj,
-                                               skip_qos_type_validation=True)
+                                               ops_obj=ops_obj)
 
     def enable_export_qos_ops(self, cluster_id: str,
                               pseudo_path: str,
@@ -345,6 +343,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
         return self.export_mgr.enable_export_qos_ops(cluster_id=cluster_id,
                                                      pseudo_path=pseudo_path,
                                                      ops_obj=ops_obj)
+
     @CLICommand('nfs export qos get', perm='r')
     @object_format.Responder()
     def _cmd_export_qos_get(self, cluster_id: str, pseudo_path: str) -> Dict[str, int]:

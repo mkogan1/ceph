@@ -27,7 +27,8 @@ from .qos_conf import (
     QOS,
     QOSType,
     QOSBandwidthControl,
-    QOSOpsControl)
+    QOSOpsControl,
+    QOSParams)
 
 if TYPE_CHECKING:
     from nfs.module import Module

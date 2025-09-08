@@ -486,6 +486,7 @@ class Migrations:
             self.mgr.set_store('nfs_services_with_old_userid', ','.join(nfs_services))
         return True
 
+
 def queue_migrate_rgw_spec(mgr: "CephadmOrchestrator", spec_dict: Dict[Any, Any]) -> None:
     """
     As aprt of 17.2.6 a stricter RGW spec validation has been added so the field
