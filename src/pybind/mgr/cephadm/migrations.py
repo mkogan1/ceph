@@ -509,7 +509,7 @@ class Migrations:
             nfs_services.append(service_name)
         if nfs_services:
             self.mgr.set_store('nfs_services_with_old_userid', ','.join(nfs_services))
-            return True
+        return True
 
     def migrate_9_10(self) -> bool:
         logger.info(f'Starting rgw SSL/TLS migration (queue length is {len(self.rgw_ssl_migration_queue)})')
