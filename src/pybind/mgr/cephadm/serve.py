@@ -1384,6 +1384,14 @@ class CephadmServe:
                     else:
                         skip_restart_for_reconfig = True
                         send_signal_to_daemon = 'SIGHUP'
+            elif dd.daemon_type == 'haproxy':
+                if spec and hasattr(spec, 'backend_service'):
+                    backend_spec = self.mgr.spec_store[spec.backend_service].spec
+                    if backend_spec.service_type == 'nfs':
+                        svc = service_registry.get_service('ingress')
+                        if svc.has_placement_changed(deps, spec):
+                            self.log.debug(f'Redeploy {spec.service_name()} as placement has changed')
+                            action = 'redeploy'
             elif spec is not None and hasattr(spec, 'extra_container_args') and dd.extra_container_args != spec.extra_container_args:
                 self.log.debug(
                     f'{dd.name()} container cli args {dd.extra_container_args} -> {spec.extra_container_args}')
