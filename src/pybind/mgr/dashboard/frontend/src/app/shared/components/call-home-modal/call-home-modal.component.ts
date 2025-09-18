@@ -130,6 +130,7 @@ export class CallHomeModalComponent extends CdForm implements OnInit {
       enable ? $localize`Activated IBM Call Home Agent`
        : $localize`Deactivated IBM Call Home Agent`,
       false,
+      $localize`Enabling Call Home Module...`,
       this.activeModal
     );
 
