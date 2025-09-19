@@ -2370,7 +2370,9 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     return false;
   };
 
-  SimpleBackoff shard_lock(5 /* max retries */, 50ms);
+  // retrying longer, so that you wait for at least for |max_lock_secs| which
+  // has a default value of 90 seconds.
+  SimpleBackoff shard_lock(50 /* max retries */, 50ms);
   if (! shard_lock.wait_backoff(lock_lambda)) {
     ldpp_dout(this, 0) << "RGWLC::process(): failed to acquire lock on "
 		       << lc_shard << " after " << shard_lock.get_retries()
@@ -2386,7 +2388,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     if (ret < 0) {
       ldpp_dout(this, 0) << "RGWLC::process() failed to get obj head "
           << lc_shard << ", ret=" << ret << dendl;
-      goto exit;
+      break;
     }
 
     /* if there is nothing at head, try to reinitialize head.marker with the
@@ -2405,7 +2407,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
       if (ret < 0) {
 	ldpp_dout(this, 0) << "RGWLC::process() sal_lc->list_entries(lc_shard, head.marker, 1, "
 			   << "entries) returned error ret==" << ret << dendl;
-	goto exit;
+        break;
       }
       if (entries.size() > 0) {
 	entry = std::move(entries.front());
@@ -2426,15 +2428,15 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 	      std::unique_ptr<rgw::sal::Lifecycle::LCEntry> tmp_entry = sal_lc->get_entry();
       	tmp_entry->set_bucket(head->get_marker());
 
-	      if (update_head(lc_shard, *head.get(), *tmp_entry.get(), now, worker->ix) != 0) {
-	        goto exit;
-	      }
+	if (update_head(lc_shard, *head.get(), *tmp_entry.get(), now, worker->ix) != 0) {
+	  break;
+	}
         continue;
       }
       if (ret < 0) {
 	ldpp_dout(this, 0) << "RGWLC::process() sal_lc->get_entry(lc_shard, head.marker, entry) "
 			   << "returned error ret==" << ret << dendl;
-	goto exit;
+        break;
       }
     }
 
@@ -2451,7 +2453,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
               << " index: " << index << " worker ix: " << worker->ix << dendl;
 	  /* skip to next entry */
 	  if (update_head(lc_shard, *head.get(), *entry.get(), now, worker->ix) != 0) {
-	     goto exit;
+	     break;
 	  }
           continue;
         }
@@ -2463,7 +2465,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 			     << dendl;
 	  /* skip to next entry */
 	      if (update_head(lc_shard, *head.get(), *entry.get(), now, worker->ix) != 0) {
-	        goto exit;
+	        break;
 	      }
 	  continue;
 	}
@@ -2473,7 +2475,7 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
 			 << " (this is possible mainly before any lc policy has been stored"
 			 << " or after removal of an lc_shard object)"
                          << dendl;
-      goto exit;
+      break;
     }
 
     /* When there are no more entries to process, entry will be
@@ -2491,12 +2493,12 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
     if (ret < 0) {
       ldpp_dout(this, 0) << "RGWLC::process() failed to set obj entry "
 	      << lc_shard << entry->get_bucket() << entry->get_status() << dendl;
-      goto exit;
+      break;
     }
 
     /* advance head for next waiter, then process */
     if (advance_head(lc_shard, *head.get(), *entry.get(), now) < 0) {
-      goto exit;
+      break;
     }
 
     ldpp_dout(this, 5) << "RGWLC::process(): START entry 2: " << entry
@@ -2542,16 +2544,15 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
                            << lc_shard << " entry=" << entry
                            << dendl;
         /* fatal, locked */
-        goto exit;
+        break;
       }
     }
 
     if (check_if_shard_done(lc_shard, *head.get(), worker->ix) != 0 ) {
-      goto exit;
+      break;
     }
   } while(1 && !once && !going_down());
 
-exit:
   lock->unlock();
   return 0;
 }
