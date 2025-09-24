@@ -598,20 +598,6 @@ struct UnknownPayload : public ClientMetricPayloadBase {
   }
 };
 
-typedef boost::variant<CapInfoPayload,
-        ReadLatencyPayload,
-        WriteLatencyPayload,
-        MetadataLatencyPayload,
-        DentryLeasePayload,
-        OpenedFilesPayload,
-        PinnedIcapsPayload,
-        OpenedInodesPayload,
-        ReadIoSizesPayload,
-        WriteIoSizesPayload,
-        CopyIoSizesPayload,
-        SubvolumeMetricsPayload,
-        UnknownPayload> ClientMetricPayload;
-
 /**
  * @brief Struct to hold single IO metric
  * To save the memory for clients with high number of subvolumes, the layout is as following:
@@ -841,6 +827,20 @@ struct SubvolumeMetricsPayload : public ClientMetricPayloadBase {
     *out << "metrics_count: " << subvolume_metrics.size();
   }
 };
+
+typedef boost::variant<CapInfoPayload,
+        ReadLatencyPayload,
+        WriteLatencyPayload,
+        MetadataLatencyPayload,
+        DentryLeasePayload,
+        OpenedFilesPayload,
+        PinnedIcapsPayload,
+        OpenedInodesPayload,
+        ReadIoSizesPayload,
+        WriteIoSizesPayload,
+        CopyIoSizesPayload,
+        SubvolumeMetricsPayload,
+        UnknownPayload> ClientMetricPayload;
 
 // metric update message sent by clients
 struct ClientMetricMessage {
