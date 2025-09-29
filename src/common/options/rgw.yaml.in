@@ -3965,6 +3965,53 @@ options:
   see_also:
   - rgw_thread_pool_size
   with_legacy: true
+- name: rgw_d4n_io_uring_queue_depth
+  type: int
+  level: advanced
+  desc: Initialize the submission and completion queues in the kernel with the specified number of entries
+  long_desc: This option is used by the SSD cache backend during initialization when using the io_uring mode
+    to set the maximum number of simultaneous I/O requests that io_uring can expect to enqueue per thread.
+    It does not apply to the Redis cache backend.
+  default: 128
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d4n_io_uring_iopoll
+  type: bool
+  level: advanced
+  desc: Enable IOPOLL mode for io_uring operations on NVMe devices
+  long_desc: When enabled, io_uring will use IOPOLL mode which performs busy-wait polling for I/O completions
+    instead of relying on interrupts. This can significantly reduce latency on high-performance NVMe devices
+    but increases CPU usage. Only effective when the underlying storage supports polling. Should be enabled
+    for NVMe SSDs to achieve optimal performance.
+  default: false
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d4n_io_uring_sqpoll
+  type: bool
+  level: advanced
+  desc: Enable SQPOLL mode for io_uring with kernel-side submission queue polling
+  long_desc: When enabled, io_uring will create a kernel thread that polls the submission queue, eliminating
+    the need for submission system calls. This reduces system call overhead and can improve throughput for
+    high-frequency I/O operations. The kernel thread will consume CPU resources even when idle.
+  default: false
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d4n_io_uring_buffer_pool_size
+  type: int
+  level: advanced
+  desc: Maximum number of buffers to cache per size in the io_uring buffer pool
+  long_desc: The SSD cache driver uses a buffer pool to avoid malloc/free overhead for io_uring operations.
+    This setting controls how many buffers of each size are kept in the pool. Higher values reduce memory
+    allocation overhead but increase memory usage. Set to 0 to disable buffer pooling entirely.
+  default: 64
+  min: 0
+  max: 1024
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_lfuda_sync_frequency
   type: int
   level: advanced
