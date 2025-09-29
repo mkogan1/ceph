@@ -3965,6 +3965,17 @@ options:
   see_also:
   - rgw_thread_pool_size
   with_legacy: true
+- name: rgw_d4n_io_uring_queue_depth
+  type: int
+  level: advanced
+  desc: Initialize the submission and completion queues in the kernel with the specified number of entries
+  long_desc: This option is used by the SSD cache backend during initialization when using the io_uring mode
+    to set the maximum number of simultaneous I/O requests that io_uring can expect to enqueue per thread.
+    It does not apply to the Redis cache backend.
+  default: 128
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_lfuda_sync_frequency
   type: int
   level: advanced
