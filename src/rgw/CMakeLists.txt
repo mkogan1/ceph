@@ -283,6 +283,12 @@ if(WITH_RADOSGW_D4N)
         driver/d4n/rgw_sal_d4n.cc)
 endif()
 
+option(WITH_RADOSGW_D4N_IO_URING "Enable io_uring for D4N" OFF)
+if(WITH_RADOSGW_D4N_IO_URING)
+  find_package(uring REQUIRED)
+  set(HAVE_D4N_IO_URING TRUE)
+endif()
+
 add_library(rgw_common STATIC ${librgw_common_srcs})
 
 include(CheckCXXCompilerFlag)
@@ -307,6 +313,7 @@ target_link_libraries(rgw_common
     ${ARROW_LIBRARIES}
     ${ARROW_FLIGHT_LIBRARIES}
     ${LMDB_LIBRARIES}
+    $<$<BOOL:${WITH_RADOSGW_D4N_IO_URING}>:uring>
   PUBLIC
     ${LUA_LIBRARIES}
     RapidJSON::RapidJSON
@@ -515,7 +522,8 @@ target_link_libraries(radosgw PRIVATE
   ${rgw_libs}
   rgw_schedulers
   kmip
-  ${ALLOC_LIBS})
+  ${ALLOC_LIBS}
+  $<$<BOOL:${WITH_RADOSGW_D4N_IO_URING}>:uring>)
 
 install(TARGETS radosgw DESTINATION bin)
 
