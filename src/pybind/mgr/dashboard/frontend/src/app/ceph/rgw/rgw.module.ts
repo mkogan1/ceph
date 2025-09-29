@@ -390,8 +390,8 @@ const routes: Routes = [
     ]
   },
   {
-    path: 'tiering',
-    data: { breadcrumbs: 'Tiering' },
+    path: 'storage-class',
+    data: { breadcrumbs: 'Storage class' },
     children: [
       { path: '', component: RgwStorageClassListComponent },
       {
@@ -444,8 +444,8 @@ const routes: Routes = [
     children: [{ path: '', component: RgwConfigurationPageComponent }]
   },
   {
-    path: 'topic',
-    data: { breadcrumbs: 'Topic' },
+    path: 'destination',
+    data: { breadcrumbs: 'Notification destination' },
     children: [
       { path: '', component: RgwTopicListComponent },
       {
