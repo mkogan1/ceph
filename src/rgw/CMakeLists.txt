@@ -318,6 +318,7 @@ target_link_libraries(rgw_common
     ${ARROW_LIBRARIES}
     ${ARROW_FLIGHT_LIBRARIES}
     ${LMDB_LIBRARIES}
+    uring
   PUBLIC
     ${LUA_LIBRARIES}
     RapidJSON::RapidJSON
@@ -507,7 +508,8 @@ target_link_libraries(radosgw PRIVATE
   ${rgw_libs}
   rgw_schedulers
   kmip
-  ${ALLOC_LIBS})
+  ${ALLOC_LIBS}
+  uring)
 
 install(TARGETS radosgw DESTINATION bin)
 

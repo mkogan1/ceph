@@ -2,12 +2,15 @@
 #include "common/errno.h"
 #include "common/async/blocked_completion.h"
 #include "rgw_ssd_driver.h"
+
+#include <liburing.h>
 #if defined(__linux__)
 #include <features.h>
 #include <sys/xattr.h>
 #endif
 
 #include <filesystem>
+#include <cstdio>
 #include <errno.h>
 namespace efs = std::filesystem;
 
@@ -96,18 +99,26 @@ static void create_directories(const DoutPrefixProvider* dpp, const std::string&
     }
 }
 
+// std::string get_file_path(const DoutPrefixProvider* dpp, const std::string& dir_path, const std::string& file_name)
 static inline std::string get_file_path(const DoutPrefixProvider* dpp, const std::string& dir_path, const std::string& file_name)
 {
+    std::clog << "+ MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): dir_path=" << std::quoted(dir_path) << " file_name=" << std::quoted(file_name) << std::endl;
     return dir_path + "/" + file_name;
 }
 
-static std::string create_dirs_get_filepath_from_key(const DoutPrefixProvider* dpp, const std::string& location, const std::string& key, bool temp=false)
+// static std::string create_dirs_get_filepath_from_key(const DoutPrefixProvider* dpp, const std::string& location, const std::string& key, bool temp=false)
+std::string create_dirs_get_filepath_from_key(const DoutPrefixProvider* dpp, const std::string& location, const std::string& key, bool temp=false)
 {
-    std::string dir_path, file_name;
+    std::string dir_path, file_name, ret_path_name = {};
     parse_key(dpp, location, key, dir_path, file_name, temp);
     create_directories(dpp, dir_path);
     return get_file_path(dpp, dir_path, file_name);
+    // return(dir_path + "/" + file_name);
 
+    // ret_path_name = dir_path + "/" + file_name;
+    // return ret_path_name;
+
+    // return "";
 }
 
 int SSDDriver::initialize(const DoutPrefixProvider* dpp)
@@ -173,14 +184,14 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
       }
     }
 
-    #if defined(HAVE_LIBAIO) && defined(__GLIBC__)
-    // libaio setup
-    struct aioinit ainit{0};
-    ainit.aio_threads = dpp->get_cct()->_conf.get_val<int64_t>("rgw_d4n_libaio_aio_threads");
-    ainit.aio_num = dpp->get_cct()->_conf.get_val<int64_t>("rgw_d4n_libaio_aio_num");
-    ainit.aio_idle_time = 120;
-    aio_init(&ainit);
-    #endif
+
+    std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): io_uring_queue_init()" << std::endl;
+    // io_uring setup
+    int uring_ret = io_uring_queue_init(128, &uring, 0); // 128 is queue depth, ///:MK-TODO: ceph.conf
+    if (uring_ret < 0) {
+        ldpp_dout(dpp, 0) << "ERROR: io_uring_queue_init failed: " << uring_ret << dendl;
+        return uring_ret;
+    }
 
     efs::space_info space = efs::space(partition_info.location);
     //currently partition_info.size is unused
@@ -224,138 +235,138 @@ int SSDDriver::restore_blocks_objects(const DoutPrefixProvider* dpp, ObjectDataC
                                 }
                                 ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): parts.size(): " << parts.size() << dendl;
   
-				std::string dirtyStr;
-				bool dirty;
-				auto ret = get_attr(dpp, file_entry.path(), RGW_CACHE_ATTR_DIRTY, dirtyStr, null_yield);
-				if (ret == 0 && dirtyStr == "1") {
-				    ldpp_dout(dpp, 10) << "SSDCache: " << __func__ << "(): Dirty xattr retrieved" << dendl;
+                std::string dirtyStr;
+                bool dirty;
+                auto ret = get_attr(dpp, file_entry.path(), RGW_CACHE_ATTR_DIRTY, dirtyStr, null_yield);
+                if (ret == 0 && dirtyStr == "1") {
+                    ldpp_dout(dpp, 10) << "SSDCache: " << __func__ << "(): Dirty xattr retrieved" << dendl;
                                     dirty = true;
                                 } else if (ret < 0) {
-				    ldpp_dout(dpp, 0) << "SSDCache: " << __func__ << "(): Failed to get attr: " << RGW_CACHE_ATTR_DIRTY << ", ret=" << ret << dendl;
+                    ldpp_dout(dpp, 0) << "SSDCache: " << __func__ << "(): Failed to get attr: " << RGW_CACHE_ATTR_DIRTY << ", ret=" << ret << dendl;
                                     dirty = false;
-				} else {
+                } else {
                                     dirty = false;
                                 }
 
                                 if (parts.size() == 1 || parts.size() == 3) {
-				    std::string version = url_decode(parts[0]);
-				    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): version: " << version << dendl;
+                    std::string version = url_decode(parts[0]);
+                    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): version: " << version << dendl;
 
-				    std::string key = url_encode(bucket_id, true) + CACHE_DELIM + url_encode(version, true) + CACHE_DELIM + url_encode(object_name, true);
-				    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): key: " << key << dendl;
+                    std::string key = url_encode(bucket_id, true) + CACHE_DELIM + url_encode(version, true) + CACHE_DELIM + url_encode(object_name, true);
+                    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): key: " << key << dendl;
 
-				    uint64_t len = 0, offset = 0;
-				    if (parts.size() == 1) {
-					if (dirtyStr == "0") {
-					    //non-dirty or clean blocks - version in head block and offset, len in data blocks
-					    std::string localWeightStr;
-					    ret = get_attr(dpp, file_entry.path(), RGW_CACHE_ATTR_LOCAL_WEIGHT, localWeightStr, null_yield);
-					    if (ret < 0) {
-						ldpp_dout(dpp, 0) << "SSDCache: " << __func__ << "(): Failed to get attr: " << RGW_CACHE_ATTR_LOCAL_WEIGHT << dendl;
-					    } else {
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): localWeightStr: " << localWeightStr << dendl;
-					    }
-					    block_func(dpp, key, offset, len, version, false, null_yield, localWeightStr);
-					    parsed = true;
-				        } else if (dirtyStr == "1") {
+                    uint64_t len = 0, offset = 0;
+                    if (parts.size() == 1) {
+                    if (dirtyStr == "0") {
+                        //non-dirty or clean blocks - version in head block and offset, len in data blocks
+                        std::string localWeightStr;
+                        ret = get_attr(dpp, file_entry.path(), RGW_CACHE_ATTR_LOCAL_WEIGHT, localWeightStr, null_yield);
+                        if (ret < 0) {
+                        ldpp_dout(dpp, 0) << "SSDCache: " << __func__ << "(): Failed to get attr: " << RGW_CACHE_ATTR_LOCAL_WEIGHT << dendl;
+                        } else {
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): localWeightStr: " << localWeightStr << dendl;
+                        }
+                        block_func(dpp, key, offset, len, version, false, null_yield, localWeightStr);
+                        parsed = true;
+                        } else if (dirtyStr == "1") {
                                             //dirty blocks - version in head block and offset, len in data blocks
-					    std::string localWeightStr;
-					    std::string invalidStr;
-					    rgw::sal::Attrs attrs;
-					    get_attrs(dpp, file_entry.path(), attrs, null_yield);
-					    std::string etag, bucket_name;
-					    uint64_t size = 0;
-					    time_t creationTime = time_t(nullptr);
-					    rgw_user user;
-					    rgw_obj_key obj_key;
-					    bool deleteMarker = false;
-					    if (attrs.find(RGW_ATTR_ETAG) != attrs.end()) {
-						etag = attrs[RGW_ATTR_ETAG].to_str();
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): etag: " << etag << dendl;
-					    }
-					    if (attrs.find(RGW_CACHE_ATTR_OBJECT_SIZE) != attrs.end()) {
-						size = std::stoull(attrs[RGW_CACHE_ATTR_OBJECT_SIZE].to_str());
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): size: " << size << dendl;
-					    }
-					    if (attrs.find(RGW_CACHE_ATTR_MTIME) != attrs.end()) {
-						creationTime = ceph::real_clock::to_time_t(ceph::real_clock::from_double(std::stod(attrs[RGW_CACHE_ATTR_MTIME].to_str())));
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): creationTime: " << creationTime << dendl;
-					    }
-					    if (attrs.find(RGW_ATTR_ACL) != attrs.end()) {
-						bufferlist bl_acl = attrs[RGW_ATTR_ACL];
-						RGWAccessControlPolicy policy;
-						auto iter = bl_acl.cbegin();
-						try {
-						    policy.decode(iter);
-						} catch (buffer::error& err) {
-						    ldpp_dout(dpp, 0) << "ERROR: could not decode policy, caught buffer::error" << dendl;
-						    continue;
-						}
-						user = std::get<rgw_user>(policy.get_owner().id);
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): rgw_user: " << user.to_str() << dendl;
-					    }
-					    obj_key.name = object_name;
-					    if (attrs.find(RGW_CACHE_ATTR_VERSION_ID) != attrs.end()) {
-						std::string instance = attrs[RGW_CACHE_ATTR_VERSION_ID].to_str();
-						if (instance != "null") {
-						    obj_key.instance = instance;
-						}
-					    }
-					    if (attrs.find(RGW_CACHE_ATTR_OBJECT_NS) != attrs.end()) {
-						obj_key.ns = attrs[RGW_CACHE_ATTR_OBJECT_NS].to_str();
-					    }
-					    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): rgw_obj_key: " << obj_key.get_oid() << dendl;
-					    if (attrs.find(RGW_CACHE_ATTR_BUCKET_NAME) != attrs.end()) {
-						bucket_name = attrs[RGW_CACHE_ATTR_BUCKET_NAME].to_str();
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): bucket_name: " << bucket_name << dendl;
-					    }
+                        std::string localWeightStr;
+                        std::string invalidStr;
+                        rgw::sal::Attrs attrs;
+                        get_attrs(dpp, file_entry.path(), attrs, null_yield);
+                        std::string etag, bucket_name;
+                        uint64_t size = 0;
+                        time_t creationTime = time_t(nullptr);
+                        rgw_user user;
+                        rgw_obj_key obj_key;
+                        bool deleteMarker = false;
+                        if (attrs.find(RGW_ATTR_ETAG) != attrs.end()) {
+                        etag = attrs[RGW_ATTR_ETAG].to_str();
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): etag: " << etag << dendl;
+                        }
+                        if (attrs.find(RGW_CACHE_ATTR_OBJECT_SIZE) != attrs.end()) {
+                        size = std::stoull(attrs[RGW_CACHE_ATTR_OBJECT_SIZE].to_str());
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): size: " << size << dendl;
+                        }
+                        if (attrs.find(RGW_CACHE_ATTR_MTIME) != attrs.end()) {
+                        creationTime = ceph::real_clock::to_time_t(ceph::real_clock::from_double(std::stod(attrs[RGW_CACHE_ATTR_MTIME].to_str())));
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): creationTime: " << creationTime << dendl;
+                        }
+                        if (attrs.find(RGW_ATTR_ACL) != attrs.end()) {
+                        bufferlist bl_acl = attrs[RGW_ATTR_ACL];
+                        RGWAccessControlPolicy policy;
+                        auto iter = bl_acl.cbegin();
+                        try {
+                            policy.decode(iter);
+                        } catch (buffer::error& err) {
+                            ldpp_dout(dpp, 0) << "ERROR: could not decode policy, caught buffer::error" << dendl;
+                            continue;
+                        }
+                        user = std::get<rgw_user>(policy.get_owner().id);
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): rgw_user: " << user.to_str() << dendl;
+                        }
+                        obj_key.name = object_name;
+                        if (attrs.find(RGW_CACHE_ATTR_VERSION_ID) != attrs.end()) {
+                        std::string instance = attrs[RGW_CACHE_ATTR_VERSION_ID].to_str();
+                        if (instance != "null") {
+                            obj_key.instance = instance;
+                        }
+                        }
+                        if (attrs.find(RGW_CACHE_ATTR_OBJECT_NS) != attrs.end()) {
+                        obj_key.ns = attrs[RGW_CACHE_ATTR_OBJECT_NS].to_str();
+                        }
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): rgw_obj_key: " << obj_key.get_oid() << dendl;
+                        if (attrs.find(RGW_CACHE_ATTR_BUCKET_NAME) != attrs.end()) {
+                        bucket_name = attrs[RGW_CACHE_ATTR_BUCKET_NAME].to_str();
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): bucket_name: " << bucket_name << dendl;
+                        }
 
-					    if (attrs.find(RGW_CACHE_ATTR_LOCAL_WEIGHT) != attrs.end()) {
-						localWeightStr = attrs[RGW_CACHE_ATTR_LOCAL_WEIGHT].to_str();
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): localWeightStr: " << localWeightStr << dendl;
-					    }
+                        if (attrs.find(RGW_CACHE_ATTR_LOCAL_WEIGHT) != attrs.end()) {
+                        localWeightStr = attrs[RGW_CACHE_ATTR_LOCAL_WEIGHT].to_str();
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): localWeightStr: " << localWeightStr << dendl;
+                        }
 
-					    if (attrs.find(RGW_CACHE_ATTR_DELETE_MARKER) != attrs.end()) {
-						std::string deleteMarkerStr = attrs[RGW_CACHE_ATTR_LOCAL_WEIGHT].to_str();
-						deleteMarker = (deleteMarkerStr == "1") ? true : false;
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): deleteMarker: " << deleteMarker << dendl;
-					    }
+                        if (attrs.find(RGW_CACHE_ATTR_DELETE_MARKER) != attrs.end()) {
+                        std::string deleteMarkerStr = attrs[RGW_CACHE_ATTR_DELETE_MARKER].to_str();
+                        deleteMarker = (deleteMarkerStr == "1") ? true : false;
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): deleteMarker: " << deleteMarker << dendl;
+                        }
 
-					    if (attrs.find(RGW_CACHE_ATTR_INVALID) != attrs.end()) {
-						invalidStr = attrs[RGW_CACHE_ATTR_INVALID].to_str();
-						ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): invalidStr: " << invalidStr << dendl;
-					    }
+                        if (attrs.find(RGW_CACHE_ATTR_INVALID) != attrs.end()) {
+                        invalidStr = attrs[RGW_CACHE_ATTR_INVALID].to_str();
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): invalidStr: " << invalidStr << dendl;
+                        }
 
-					    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): calling func for: " << key << dendl;
-					    obj_func(dpp, key, version, deleteMarker, size, creationTime, user, etag, bucket_name, bucket_id, obj_key, null_yield, invalidStr);
-					    block_func(dpp, key, offset, len, version, dirty, null_yield, localWeightStr);
-					    parsed = true;
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): calling func for: " << key << dendl;
+                        obj_func(dpp, key, version, deleteMarker, size, creationTime, user, etag, bucket_name, bucket_id, obj_key, null_yield, invalidStr);
+                        block_func(dpp, key, offset, len, version, dirty, null_yield, localWeightStr);
+                        parsed = true;
                                         } // end-if dirtyStr == "1"
-				    } else if (parts.size() == 3) { //end-if parts.size() == 1
-					offset = std::stoull(parts[1]);
-					ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): offset: " << offset << dendl;
+                    } else if (parts.size() == 3) { //end-if parts.size() == 1
+                    offset = std::stoull(parts[1]);
+                    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): offset: " << offset << dendl;
 
-					len = std::stoull(parts[2]);
-					ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): len: " << len << dendl;
+                    len = std::stoull(parts[2]);
+                    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): len: " << len << dendl;
 
-					key = key + CACHE_DELIM + std::to_string(offset) + CACHE_DELIM + std::to_string(len);
-					ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): key: " << key << dendl;
+                    key = key + CACHE_DELIM + std::to_string(offset) + CACHE_DELIM + std::to_string(len);
+                    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): key: " << key << dendl;
 
-					std::string localWeightStr;
-					auto ret = get_attr(dpp, file_entry.path(), RGW_CACHE_ATTR_LOCAL_WEIGHT, localWeightStr, null_yield);
-					if (ret < 0) {
-					    ldpp_dout(dpp, 0) << "SSDCache: " << __func__ << "(): Failed to get attr: " << RGW_CACHE_ATTR_LOCAL_WEIGHT << dendl;
-					} else {
-					    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): localWeightStr: " << localWeightStr << dendl;
-					}
-					block_func(dpp, key, offset, len, version, dirty, null_yield, localWeightStr);
-					parsed = true;
-				    } 
-				    if (!parsed) {
-					ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): Unable to parse file_name: " << file_name << dendl;
-					continue;
-				    }
-			        }
+                    std::string localWeightStr;
+                    auto ret = get_attr(dpp, file_entry.path(), RGW_CACHE_ATTR_LOCAL_WEIGHT, localWeightStr, null_yield);
+                    if (ret < 0) {
+                        ldpp_dout(dpp, 0) << "SSDCache: " << __func__ << "(): Failed to get attr: " << RGW_CACHE_ATTR_LOCAL_WEIGHT << dendl;
+                    } else {
+                        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): localWeightStr: " << localWeightStr << dendl;
+                    }
+                    block_func(dpp, key, offset, len, version, dirty, null_yield, localWeightStr);
+                    parsed = true;
+                    }
+                    if (!parsed) {
+                    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): Unable to parse file_name: " << file_name << dendl;
+                    continue;
+                    }
+                    }
                             }
                         }//end - try
                         catch(...) {
@@ -507,17 +518,34 @@ auto SSDDriver::get_async(const DoutPrefixProvider *dpp, const Executor& ex, con
     std::string location = create_dirs_get_filepath_from_key(dpp, partition_info.location, key);
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): location=" << location << dendl;
 
-    int ret = op.prepare_libaio_read_op(dpp, location, read_ofs, read_len, p.get());
-    if(0 == ret) {
-        ret = ::aio_read(op.aio_cb.get());
-    }
-    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::aio_read(), ret=" << ret << dendl;
-    if(ret < 0) {
-        auto ec = boost::system::error_code{-ret, boost::system::system_category()};
-        ceph::async::post(std::move(p), ec, bufferlist{});
-    } else {
-        // coverity[leaked_storage:SUPPRESS]
-        (void)p.release();
+    int ret = 0;
+    {
+      std::clog << "MK| NOTE: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): prepare_io_uring_read_op() --> tid=0x" << std::uppercase << std::hex << std::this_thread::get_id() << std::dec << std::nouppercase << std::endl;
+      std::lock_guard<std::mutex> lock(uring_lock);
+      ret = op.prepare_io_uring_read_op(dpp, location, read_ofs, read_len, p.get(), &uring);
+      if (ret == 0) {
+          // submit and wait for completion
+          io_uring_submit(&uring);
+          struct io_uring_cqe* cqe;
+          int rc = io_uring_wait_cqe(&uring, &cqe);
+          if (rc == 0) {
+              SSDDriver::AsyncReadOp::io_uring_read_completion(cqe, &op);
+              io_uring_cqe_seen(&uring, cqe);
+              // Propagate completion to handler
+              boost::system::error_code ec;
+              int cqe_res = cqe->res;
+              if (cqe_res < 0) {
+                  ec.assign(-cqe_res, boost::system::system_category());
+              }
+              ceph::async::post(std::move(p), ec, std::move(op.result));
+          } else {
+              auto ec = boost::system::error_code{-rc, boost::system::system_category()};
+              ceph::async::post(std::move(p), ec, bufferlist{});
+          }
+      } else {
+          auto ec = boost::system::error_code{-ret, boost::system::system_category()};
+          ceph::async::post(std::move(p), ec, bufferlist{});
+      }
     }
   }, token, dpp, ex, key, read_ofs, read_len);
 }
@@ -543,26 +571,37 @@ void SSDDriver::put_async(const DoutPrefixProvider *dpp, const Executor& ex, con
 
     int r = 0;
     bufferlist src = bl;
-    r = op.prepare_libaio_write_op(dpp, src, len, op.temp_file_path);
-    op.cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
-    op.cb->aio_sigevent.sigev_notify_function = SSDDriver::AsyncWriteRequest::libaio_write_cb;
-    op.cb->aio_sigevent.sigev_notify_attributes = nullptr;
-    op.cb->aio_sigevent.sigev_value.sival_ptr = (void*)p.get();
-    op.dpp = dpp;
-    op.priv_data = this;
-    op.attrs = std::move(attrs);
-    if (r >= 0) {
-        r = ::aio_write(op.cb.get());
-    } else {
-        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::prepare_libaio_write_op(), r=" << r << dendl;
-    }
-
-    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::aio_write(), r=" << r << dendl;
-    if(r < 0) {
-        auto ec = boost::system::error_code{-r, boost::system::system_category()};
-        ceph::async::dispatch(std::move(p), ec);
-    } else {
-        (void)p.release();
+    {
+      std::clog << "MK| NOTE: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): prepare_io_uring_write_op() --> tid=0x" << std::uppercase << std::hex << std::this_thread::get_id() << std::dec << std::nouppercase << std::endl;
+      std::clog << "MK| NOTE: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): prepare_io_uring_write_op() --> &uring=0x" << std::uppercase << std::hex << &uring << std::dec << std::nouppercase << std::endl;
+      std::lock_guard<std::mutex> lock(uring_lock);
+      r = op.prepare_io_uring_write_op(dpp, src, len, op.temp_file_path, &uring);
+      op.dpp = dpp;
+      op.priv_data = this;
+      op.attrs = std::move(attrs);
+      if (r >= 0) {
+          io_uring_submit(&uring);
+          struct io_uring_cqe* cqe;
+          int rc = io_uring_wait_cqe(&uring, &cqe);
+          if (rc == 0) {
+              SSDDriver::AsyncWriteRequest::io_uring_write_completion(cqe, &op);
+              io_uring_cqe_seen(&uring, cqe);
+              // Propagate completion to handler
+              boost::system::error_code ec;
+              int cqe_res = cqe->res;
+              if (cqe_res < 0) {
+                  ec.assign(-cqe_res, boost::system::system_category());
+              }
+              ceph::async::dispatch(std::move(p), ec);
+          } else {
+              auto ec = boost::system::error_code{-rc, boost::system::system_category()};
+              ceph::async::dispatch(std::move(p), ec);
+          }
+      } else {
+          ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::prepare_io_uring_write_op(), r=" << r << dendl;
+          auto ec = boost::system::error_code{-r, boost::system::system_category()};
+          ceph::async::dispatch(std::move(p), ec);
+      }
     }
   }, token, dpp, ex, key, bl, len, attrs);
 }
@@ -578,7 +617,7 @@ rgw::Aio::OpFunc SSDDriver::ssd_cache_read_op(const DoutPrefixProvider *dpp, opt
     auto ex = yield.get_executor();
 
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): key=" << key << dendl;
-    this->get_async(dpp, ex, key, read_ofs, read_len, bind_executor(ex, SSDDriver::libaio_read_handler{aio, r}));
+    this->get_async(dpp, ex, key, read_ofs, read_len, bind_executor(ex, /* TODO: replace with io_uring handler if needed */ SSDDriver::libaio_read_handler{aio, r}));
   };
 }
 
@@ -593,7 +632,7 @@ rgw::Aio::OpFunc SSDDriver::ssd_cache_write_op(const DoutPrefixProvider *dpp, op
     auto ex = yield.get_executor();
 
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): key=" << key << dendl;
-    this->put_async(dpp, ex, key, bl, len, attrs, bind_executor(ex, SSDDriver::libaio_write_handler{aio, r}));
+    this->put_async(dpp, ex, key, bl, len, attrs, bind_executor(ex, /* TODO: replace with io_uring handler if needed */ SSDDriver::libaio_write_handler{aio, r}));
   };
 }
 
@@ -667,132 +706,13 @@ int SSDDriver::rename(const DoutPrefixProvider* dpp, const::std::string& oldKey,
 }
 
 
-int SSDDriver::AsyncWriteRequest::prepare_libaio_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path)
-{
-    int r = 0;
-    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): Write To Cache, location=" << file_path << dendl;
-    cb.reset(new struct aiocb);
-    memset(cb.get(), 0, sizeof(struct aiocb));
-    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-    r = fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | dpp->get_cct()->_conf->rgw_d4n_l1_write_open_flags, mode));
-    if (fd < 0) {
-        //directories might have been deleted by a parallel delete of the last version of an object
-        if (errno == ENOENT) {
-            //retry after creating directories
-            std::string dir_path = file_path;
-            auto pos = dir_path.find_last_of('/');
-            if (pos != std::string::npos) {
-                dir_path.erase(pos, (dir_path.length() - pos));
-            }
-            ldpp_dout(dpp, 20) << "INFO: AsyncWriteRequest::prepare_libaio_write_op: dir_path for creating directories=" << dir_path << dendl;
-            create_directories(dpp, dir_path);
-            r = fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | dpp->get_cct()->_conf->rgw_d4n_l1_write_open_flags, mode));
-            if (fd < 0) {
-                ldpp_dout(dpp, 0) << "ERROR: AsyncWriteRequest::prepare_libaio_write_op: open file failed, errno=" << errno << ", location='" << file_path.c_str() << "'" << dendl;
-                return r;
-            }
-        } else {
-            ldpp_dout(dpp, 0) << "ERROR: AsyncWriteRequest::prepare_libaio_write_op: open file failed, errno=" << errno << ", location='" << file_path.c_str() << "'" << dendl;
-            return r;
-        }
-    }
-    if (dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
-        posix_fadvise(fd, 0, 0, dpp->get_cct()->_conf->rgw_d4n_l1_fadvise);
-    cb->aio_fildes = fd;
+// removed prepare_libaio_write_op (replaced by prepare_io_uring_write_op)
 
-    data = malloc(len);
-    if (!data) {
-        ldpp_dout(dpp, 0) << "ERROR: AsyncWriteRequest::prepare_libaio_write_op: memory allocation failed" << dendl;
-        ::close(fd);
-        return r;
-    }
-    cb->aio_buf = data;
-    memcpy((void*)data, bl.c_str(), len);
-    cb->aio_nbytes = len;
-    return r;
-}
+// removed libaio_write_cb (replaced by io_uring_write_completion)
 
-void SSDDriver::AsyncWriteRequest::libaio_write_cb(sigval sigval) {
-    auto p = std::unique_ptr<Completion>{static_cast<Completion*>(sigval.sival_ptr)};
-    auto op = std::move(p->user_data);
-    ldpp_dout(op.dpp, 20) << "INFO: AsyncWriteRequest::libaio_write_cb: key: " << op.file_path << dendl;
-    int ret = -aio_error(op.cb.get());
-    boost::system::error_code ec;
-    if (ret < 0) {
-        ec.assign(-ret, boost::system::system_category());
-        ceph::async::dispatch(std::move(p), ec);
-        return;
-    }
-    int attr_ret = 0;
-    if (op.attrs.size() > 0) {
-        //TODO - fix yield_context
-        optional_yield y{null_yield};
-        attr_ret = op.priv_data->set_attrs(op.dpp, op.temp_file_path, op.attrs, y);
-        if (attr_ret < 0) {
-            ldpp_dout(op.dpp, 0) << "ERROR: AsyncWriteRequest::libaio_write_yield_cb::set_attrs: failed to set attrs, ret = " << attr_ret << dendl;
-            ec.assign(-ret, boost::system::system_category());
-            ceph::async::dispatch(std::move(p), ec);
-            return;
-        }
-    }
+// removed prepare_libaio_read_op (replaced by prepare_io_uring_read_op)
 
-    Partition partition_info = op.priv_data->get_current_partition_info(op.dpp);
-    efs::space_info space = efs::space(partition_info.location);
-    op.priv_data->set_free_space(op.dpp, space.available);
-
-    ldpp_dout(op.dpp, 20) << "INFO: AsyncWriteRequest::libaio_write_yield_cb: new_path: " << op.file_path << dendl;
-    ldpp_dout(op.dpp, 20) << "INFO: AsyncWriteRequest::libaio_write_yield_cb: old_path: " << op.temp_file_path << dendl;
-
-    ret = std::rename(op.temp_file_path.c_str(), op.file_path.c_str());
-    if (ret < 0) {
-        ret = errno;
-        ldpp_dout(op.dpp, 0) << "ERROR: put::rename: failed to rename file: " << ret << dendl;
-        ec.assign(-ret, boost::system::system_category());
-    }
-    ceph::async::dispatch(std::move(p), ec);
-}
-
-int SSDDriver::AsyncReadOp::prepare_libaio_read_op(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, off_t read_len, void* arg)
-{
-    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): file_path=" << file_path << dendl;
-    aio_cb.reset(new struct aiocb);
-    memset(aio_cb.get(), 0, sizeof(struct aiocb));
-    aio_cb->aio_fildes = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY|O_CLOEXEC|O_BINARY));
-    if(aio_cb->aio_fildes < 0) {
-        int err = errno;
-        ldpp_dout(dpp, 1) << "ERROR: SSDCache: " << __func__ << "(): can't open " << file_path << " : " << " error: " << err << dendl;
-        return -err;
-    }
-    if (dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL) {
-        posix_fadvise(aio_cb->aio_fildes, 0, 0, g_conf()->rgw_d4n_l1_fadvise);
-    }
-
-    bufferptr bp(read_len);
-    aio_cb->aio_buf = bp.c_str();
-    result.append(std::move(bp));
-
-    aio_cb->aio_nbytes = read_len;
-    aio_cb->aio_offset = read_ofs;
-    aio_cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
-    aio_cb->aio_sigevent.sigev_notify_function = libaio_cb_aio_dispatch;
-    aio_cb->aio_sigevent.sigev_notify_attributes = nullptr;
-    aio_cb->aio_sigevent.sigev_value.sival_ptr = arg;
-
-    return 0;
-}
-
-void SSDDriver::AsyncReadOp::libaio_cb_aio_dispatch(sigval sigval)
-{
-    auto p = std::unique_ptr<Completion>{static_cast<Completion*>(sigval.sival_ptr)};
-    auto op = std::move(p->user_data);
-    const int ret = -aio_error(op.aio_cb.get());
-    boost::system::error_code ec;
-    if (ret < 0) {
-        ec.assign(-ret, boost::system::system_category());
-    }
-
-    ceph::async::dispatch(std::move(p), ec, std::move(op.result));
-}
+// removed libaio_cb_aio_dispatch (replaced by io_uring_read_completion)
 
 int SSDDriver::update_attrs(const DoutPrefixProvider* dpp, const std::string& key, const rgw::sal::Attrs& attrs, optional_yield y)
 {
@@ -1023,5 +943,167 @@ int SSDDriver::delete_attr(const DoutPrefixProvider* dpp, const std::string& key
 
     return 0;
 }
+
+void SSDDriver::AsyncWriteRequest::io_uring_write_completion(struct io_uring_cqe* cqe, AsyncWriteRequest* op)
+{
+    std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): " << std::endl;
+    boost::system::error_code ec;
+    int ret = cqe->res;
+    if (ret < 0) {
+        ec.assign(-ret, boost::system::system_category());
+    }
+    int attr_ret = 0;
+    if (op->attrs.size() > 0) {
+        optional_yield y{null_yield};
+        attr_ret = op->priv_data->set_attrs(op->dpp, op->temp_file_path, op->attrs, y);
+        if (attr_ret < 0) {
+            ldpp_dout(op->dpp, 0) << "ERROR: io_uring_write_completion::set_attrs: failed to set attrs, ret = " << attr_ret << dendl;
+            ec.assign(-ret, boost::system::system_category());
+        }
+    }
+    Partition partition_info = op->priv_data->get_current_partition_info(op->dpp);
+    efs::space_info space = efs::space(partition_info.location);
+    op->priv_data->set_free_space(op->dpp, space.available);
+    ldpp_dout(op->dpp, 20) << "INFO: io_uring_write_completion: new_path: " << op->file_path << dendl;
+    ldpp_dout(op->dpp, 20) << "INFO: io_uring_write_completion: old_path: " << op->temp_file_path << dendl;
+    ret = std::rename(op->temp_file_path.c_str(), op->file_path.c_str());
+    if (ret < 0) {
+        ret = errno;
+        ldpp_dout(op->dpp, 0) << "ERROR: put::rename: failed to rename file: " << ret << dendl;
+        ec.assign(-ret, boost::system::system_category());
+    }
+
+    if (op->fd >= 0) {
+        ::close(op->fd);
+        op->fd = -1;
+    }
+    if (op->data) {
+        free(op->data);
+        op->data = nullptr;
+    }
+}
+
+int rgw::cache::SSDDriver::AsyncWriteRequest::prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path, struct io_uring* ring)
+{
+    std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): file_path=" << std::quoted(file_path) << ", len=" << len << std::endl;
+    int r = 0;
+    ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): Write To Cache, location=" << file_path << dendl;
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+    r = fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | dpp->get_cct()->_conf->rgw_d4n_l1_write_open_flags, mode));
+    if (fd < 0) {
+        // directories might have been deleted by a parallel delete of the last version of an object
+        if (errno == ENOENT) {
+            // retry after creating directories
+            std::string dir_path = file_path;
+            auto pos = dir_path.find_last_of('/');
+            if (pos != std::string::npos) {
+                dir_path.erase(pos, (dir_path.length() - pos));
+            }
+            ldpp_dout(dpp, 20) << "INFO: AsyncWriteRequest::prepare_io_uring_write_op: dir_path for creating directories=" << dir_path << dendl;
+            create_directories(dpp, dir_path);
+            r = fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | dpp->get_cct()->_conf->rgw_d4n_l1_write_open_flags, mode));
+            if (fd < 0) {
+                ldpp_dout(dpp, 0) << "ERROR: AsyncWriteRequest::prepare_io_uring_write_op: open file failed, errno=" << errno << ", location='" << file_path.c_str() << "'" << dendl;
+                // std::clog << "MK| ERROR: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): AsyncWriteRequest::prepare_io_uring_write_op: open file failed, errno=" << errno << ", location='" << file_path.c_str() << "'" << std::endl;
+                return r;
+            }
+        } else {
+            ldpp_dout(dpp, 0) << "ERROR: AsyncWriteRequest::prepare_io_uring_write_op: open file failed, errno=" << errno << ", location='" << file_path.c_str() << "'" << dendl;
+            // std::clog << "MK| ERROR: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): AsyncWriteRequest::prepare_io_uring_write_op: open file failed, errno=" << errno << ", location='" << file_path.c_str() << "'" << std::endl;
+            return r;
+        }
+    }
+    if (dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
+        posix_fadvise(fd, 0, 0, dpp->get_cct()->_conf->rgw_d4n_l1_fadvise);
+
+    data = malloc(len);
+    if (!data) {
+        ldpp_dout(dpp, 0) << "ERROR: AsyncWriteRequest::prepare_io_uring_write_op: memory allocation failed" << dendl;
+        if (fd >= 0) {
+            ::close(fd);
+        }
+        return -ENOMEM;
+    }
+    memcpy((void*)data, bl.c_str(), len);
+    memcpy((void*)data, bl.c_str(), len);
+    length = len;
+
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+    if (!sqe) {
+        ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_write_op: failed to get sqe" << dendl;
+        ::close(fd);
+        free(data);
+        return -1;
+    }
+    io_uring_prep_write(sqe, fd, data, len, 0);
+    io_uring_sqe_set_data(sqe, this);
+    return 0;
+}
+
+// Handle io_uring read completion for AsyncReadOp
+void rgw::cache::SSDDriver::AsyncReadOp::io_uring_read_completion(struct io_uring_cqe* cqe, AsyncReadOp* op)
+{
+    boost::system::error_code ec;
+    int ret = cqe->res;
+    if (ret < 0) {
+        ec.assign(-ret, boost::system::system_category());
+    }
+    // If read was successful, append data to result bufferlist
+    if (ret > 0 && op->buffer) {
+        op->result.append(static_cast<const char*>(op->buffer), ret);
+    }
+    // Resource cleanup
+    if (op->fd >= 0) {
+        ::close(op->fd);
+        op->fd = -1;
+    }
+    if (op->buffer) {
+        free(op->buffer);
+        op->buffer = nullptr;
+    }
+    // NOTE: Completion handler invocation must be done by the caller (see get_async)
+}
+
+// Prepare an io_uring read operation for AsyncReadOp
+int rgw::cache::SSDDriver::AsyncReadOp::prepare_io_uring_read_op(
+    const DoutPrefixProvider *dpp,
+    const std::string& file_path,
+    off_t read_ofs,
+    size_t read_len,
+    void* arg,
+    struct io_uring* ring)
+{
+    ldpp_dout(dpp, 20) << "SSDCache: AsyncReadOp::prepare_io_uring_read_op(): file_path=" << file_path << dendl;
+    int r = 0;
+    // fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY | dpp->get_cct()->_conf->rgw_d4n_l1_read_open_flags));
+    fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY));
+    if (fd < 0) {
+        ldpp_dout(dpp, 0) << "ERROR: AsyncReadOp::prepare_io_uring_read_op: open file failed, errno=" << errno << ", location='" << file_path << "'" << dendl;
+        return fd;
+    }
+    if (dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
+        posix_fadvise(fd, 0, 0, dpp->get_cct()->_conf->rgw_d4n_l1_fadvise);
+
+    buffer = malloc(read_len);
+    if (!buffer) {
+        ldpp_dout(dpp, 0) << "ERROR: AsyncReadOp::prepare_io_uring_read_op: memory allocation failed" << dendl;
+        ::close(fd);
+        return -ENOMEM;
+    }
+    offset = read_ofs;
+    length = read_len;
+
+    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+    if (!sqe) {
+        ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_read_op: failed to get sqe" << dendl;
+        ::close(fd);
+        free(buffer);
+        return -1;
+    }
+    io_uring_prep_read(sqe, fd, buffer, read_len, read_ofs);
+    io_uring_sqe_set_data(sqe, arg);
+    return 0;
+}
+
 
 } } // namespace rgw::cache
