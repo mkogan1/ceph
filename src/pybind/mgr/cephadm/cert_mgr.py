@@ -4,7 +4,7 @@ from fnmatch import fnmatch
 from enum import Enum
 
 from cephadm.ssl_cert_utils import SSLCerts, SSLConfigException
-from mgr_util import verify_tls, verify_cacrt_content, ServerConfigException
+from mgr_util import verify_tls, certificate_days_to_expire, ServerConfigException
 from cephadm.ssl_cert_utils import get_certificate_info, get_private_key_info
 from cephadm.tlsobject_types import Cert, PrivKey, TLSObjectScope, TLSObjectException, CertKeyPair
 from cephadm.tlsobject_store import TLSObjectStore
@@ -568,7 +568,7 @@ class CertMgr:
         Returns: CertInfo
         """
         try:
-            days_to_expiration = verify_tls(cert.cert, key.key) if key else verify_cacrt_content(cert.cert)
+            days_to_expiration = verify_tls(cert.cert, key.key) if key else certificate_days_to_expire(cert.cert)
             is_close_to_expiration = days_to_expiration < self.mgr.certificate_renewal_threshold_days
             return CertInfo(cert_name, target, cert.user_made, True, is_close_to_expiration, days_to_expiration, "")
         except ServerConfigException as e:
