@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <errno.h>
+#include <chrono>
 namespace efs = std::filesystem;
 
 namespace rgw { namespace cache {
@@ -20,10 +21,23 @@ static std::atomic<uint64_t> index{0};
 static std::atomic<uint64_t> dir_index{0};
 
 namespace {
+
+// Base class for pending operations to allow polymorphic completion handling
+struct PendingOperation {
+    virtual ~PendingOperation() = default;
+    virtual void invoke_completion(struct io_uring_cqe* cqe) = 0;
+};
+
 struct ThreadIoUringState {
     io_uring ring{};
     bool initialized = false;
-
+    
+    // Batching support
+    std::vector<PendingOperation*> pending_ops;
+    size_t batch_size = 16;  // Default, overridden by config
+    std::chrono::steady_clock::time_point last_submit;
+    uint64_t batch_timeout_us = 1000;  // Default 1ms, overridden by config
+    
     int ensure(unsigned queue_depth, unsigned flags) {
         if (initialized) {
             return 0;
@@ -33,17 +47,198 @@ struct ThreadIoUringState {
             return ret;
         }
         initialized = true;
+        last_submit = std::chrono::steady_clock::now();
         return 0;
+    }
+    
+    // Harvest ready completions without blocking
+    int harvest_completions() {
+        if (!initialized) return 0;
+        
+        int harvested = 0;
+        struct io_uring_cqe* cqe;
+        
+        // Use io_uring_peek_cqe to get completions without blocking
+        while (io_uring_peek_cqe(&ring, &cqe) == 0) {
+            if (!cqe) break;
+            
+            // Get the operation context from user_data
+            auto* pending_op = static_cast<PendingOperation*>(io_uring_cqe_get_data(cqe));
+            if (pending_op) {
+                // Invoke the completion handler
+                pending_op->invoke_completion(cqe);
+                
+                // Remove from pending list
+                auto it = std::find(pending_ops.begin(), pending_ops.end(), pending_op);
+                if (it != pending_ops.end()) {
+                    pending_ops.erase(it);
+                }
+                
+                // Delete the operation context
+                delete pending_op;
+            }
+            
+            io_uring_cqe_seen(&ring, cqe);
+            harvested++;
+        }
+        
+        return harvested;
+    }
+    
+    // Check if batch should be submitted
+    bool should_submit_batch() const {
+        if (!initialized || pending_ops.empty()) return false;
+        
+        // Submit if batch size threshold reached
+        if (pending_ops.size() >= batch_size) {
+            return true;
+        }
+        
+        // Submit if timeout expired
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(now - last_submit).count();
+        if (elapsed_us >= static_cast<int64_t>(batch_timeout_us) && !pending_ops.empty()) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // Submit pending operations as a batch
+    int submit_batch() {
+        if (!initialized || pending_ops.empty()) return 0;
+        
+        int ret = io_uring_submit(&ring);
+        last_submit = std::chrono::steady_clock::now();
+        return ret;
+    }
+    
+    // Force flush when SQ is full to make space for new operations
+    int flush_if_full() {
+        if (!initialized) return 0;
+        
+        // Submit pending operations
+        int submitted = io_uring_submit(&ring);
+        if (submitted > 0) {
+            last_submit = std::chrono::steady_clock::now();
+        }
+        
+        // Harvest completions to make space
+        int harvested = harvest_completions();
+        
+        return harvested;
+    }
+    
+    // Wait for at least one completion (blocking), then harvest all ready ones
+    // Use this when operations are pending but haven't completed yet
+    int wait_for_completions() {
+        if (!initialized || pending_ops.empty()) return 0;
+        
+        int harvested = 0;
+        struct io_uring_cqe* cqe;
+        
+        // Wait for at least one completion (blocking)
+        if (io_uring_wait_cqe(&ring, &cqe) == 0 && cqe) {
+            auto* pending_op = static_cast<PendingOperation*>(io_uring_cqe_get_data(cqe));
+            if (pending_op) {
+                pending_op->invoke_completion(cqe);
+                auto it = std::find(pending_ops.begin(), pending_ops.end(), pending_op);
+                if (it != pending_ops.end()) {
+                    pending_ops.erase(it);
+                }
+                delete pending_op;
+            }
+            io_uring_cqe_seen(&ring, cqe);
+            harvested++;
+            
+            // After getting one, harvest any other ready completions (non-blocking)
+            harvested += harvest_completions();
+        }
+        
+        return harvested;
     }
 
     ~ThreadIoUringState() {
         if (initialized) {
+            // Submit any pending operations
+            if (!pending_ops.empty()) {
+                io_uring_submit(&ring);
+            }
+            
+            // Wait for all completions
+            while (!pending_ops.empty()) {
+                struct io_uring_cqe* cqe;
+                if (io_uring_wait_cqe(&ring, &cqe) == 0) {
+                    auto* pending_op = static_cast<PendingOperation*>(io_uring_cqe_get_data(cqe));
+                    if (pending_op) {
+                        pending_op->invoke_completion(cqe);
+                        auto it = std::find(pending_ops.begin(), pending_ops.end(), pending_op);
+                        if (it != pending_ops.end()) {
+                            pending_ops.erase(it);
+                        }
+                        delete pending_op;
+                    }
+                    io_uring_cqe_seen(&ring, cqe);
+                }
+            }
+            
             io_uring_queue_exit(&ring);
         }
     }
 };
 
 thread_local ThreadIoUringState thread_uring_state;
+
+// Pending read operation wrapper for batching
+template<typename CompletionPtr>
+struct PendingReadOp : PendingOperation {
+    CompletionPtr completion_ptr;
+    
+    PendingReadOp(CompletionPtr&& ptr)
+        : completion_ptr(std::move(ptr)) {}
+    
+    void invoke_completion(struct io_uring_cqe* cqe) override {
+        // Access op through completion_ptr->user_data
+        auto& op = completion_ptr->user_data;
+        
+        // Invoke the io_uring completion handler
+        SSDDriver::AsyncReadOp::io_uring_read_completion(cqe, &op);
+        
+        // Propagate completion to async handler
+        boost::system::error_code ec;
+        int cqe_res = cqe->res;
+        if (cqe_res < 0) {
+            ec.assign(-cqe_res, boost::system::system_category());
+        }
+        ceph::async::post(std::move(completion_ptr), ec, std::move(op.result));
+    }
+};
+
+// Pending write operation wrapper for batching  
+template<typename CompletionPtr>
+struct PendingWriteOp : PendingOperation {
+    CompletionPtr completion_ptr;
+    
+    PendingWriteOp(CompletionPtr&& ptr)
+        : completion_ptr(std::move(ptr)) {}
+    
+    void invoke_completion(struct io_uring_cqe* cqe) override {
+        // Access op through completion_ptr->user_data
+        auto& op = completion_ptr->user_data;
+        
+        // Invoke the io_uring completion handler
+        SSDDriver::AsyncWriteRequest::io_uring_write_completion(cqe, &op);
+        
+        // Propagate completion to async handler
+        boost::system::error_code ec;
+        int cqe_res = cqe->res;
+        if (cqe_res < 0) {
+            ec.assign(-cqe_res, boost::system::system_category());
+        }
+        ceph::async::dispatch(std::move(completion_ptr), ec);
+    }
+};
+
 } // anonymous namespace
 
 static std::vector<std::string> tokenize_key(std::string_view key)
@@ -129,7 +324,7 @@ static void create_directories(const DoutPrefixProvider* dpp, const std::string&
 // std::string get_file_path(const DoutPrefixProvider* dpp, const std::string& dir_path, const std::string& file_name)
 static inline std::string get_file_path(const DoutPrefixProvider* dpp, const std::string& dir_path, const std::string& file_name)
 {
-    std::clog << "+ MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): dir_path=" << std::quoted(dir_path) << " file_name=" << std::quoted(file_name) << std::endl;
+    // std::clog << "+ MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): dir_path=" << std::quoted(dir_path) << " file_name=" << std::quoted(file_name) << std::endl;
     return dir_path + "/" + file_name;
 }
 
@@ -212,13 +407,22 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
     }
 
 
+    // std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): ensure_thread_uring()" << std::endl;
     int uring_ret = ensure_thread_uring(dpp, nullptr);
     if (uring_ret < 0) {
         ldpp_dout(dpp, 0) << "ERROR: ensure_thread_uring failed: " << uring_ret << dendl;
         return uring_ret;
     }
 
-    ldpp_dout(dpp, 20) << "SSDDriver: Buffer pool initialized (max buffers per size: " 
+    // Apply batching configuration to thread-local io_uring state
+    thread_uring_state.batch_size = dpp->get_cct()->_conf->rgw_d4n_io_uring_batch_size;
+    thread_uring_state.batch_timeout_us = dpp->get_cct()->_conf->rgw_d4n_io_uring_batch_timeout_us;
+    
+    ldpp_dout(dpp, 10) << "SSDDriver: io_uring batching configured (batch_size=" 
+                       << thread_uring_state.batch_size 
+                       << ", timeout_us=" << thread_uring_state.batch_timeout_us << ")" << dendl;
+    
+    ldpp_dout(dpp, 10) << "SSDDriver: Buffer pool initialized (max buffers per size: " 
                        << dpp->get_cct()->_conf->rgw_d4n_io_uring_buffer_pool_size << ")" << dendl;
 
     efs::space_info space = efs::space(partition_info.location);
@@ -575,7 +779,6 @@ auto SSDDriver::get_async(const DoutPrefixProvider *dpp, const Executor& ex, con
 
     int ret = 0;
     {
-      std::clog << "MK| NOTE: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): prepare_io_uring_read_op() --> tid=0x" << std::uppercase << std::hex << std::this_thread::get_id() << std::dec << std::nouppercase << std::endl;
       io_uring* ring = nullptr;
       int ring_ret = ensure_thread_uring(dpp, &ring);
       if (ring_ret < 0) {
@@ -585,29 +788,47 @@ auto SSDDriver::get_async(const DoutPrefixProvider *dpp, const Executor& ex, con
           return;
       }
 
-      ret = op.prepare_io_uring_read_op(dpp, location, read_ofs, read_len, p.get(), ring);
+      // Harvest any ready completions before adding new operation
+      thread_uring_state.harvest_completions();
+      
+      // Create pending operation wrapper FIRST (before preparing io_uring)
+      auto* pending = new PendingReadOp(std::move(p));
+      
+      // Prepare the read operation with PendingOperation* as user_data
+      ret = op.prepare_io_uring_read_op(dpp, location, read_ofs, read_len, ring, pending, &thread_uring_state);
       if (ret == 0) {
-          // submit and wait for completion
-          io_uring_submit(ring);
-          struct io_uring_cqe* cqe;
-          int rc = io_uring_wait_cqe(ring, &cqe);
-          if (rc == 0) {
-              SSDDriver::AsyncReadOp::io_uring_read_completion(cqe, &op);
-              io_uring_cqe_seen(ring, cqe);
-              // Propagate completion to handler
-              boost::system::error_code ec;
-              int cqe_res = cqe->res;
-              if (cqe_res < 0) {
-                  ec.assign(-cqe_res, boost::system::system_category());
+          // Add to pending list
+          thread_uring_state.pending_ops.push_back(pending);
+          
+          // Submit the batch immediately to avoid stuck operations
+          int submitted = thread_uring_state.submit_batch();
+          if (submitted < 0) {
+              ldpp_dout(dpp, 0) << "ERROR: get_async: batch submit failed: " << submitted << dendl;
+          } else if (submitted > 0) {
+              ldpp_dout(dpp, 20) << "SSDCache: get_async submitted batch of " << submitted << " operations" << dendl;
+          }
+          
+          // Harvest completions immediately to invoke callbacks
+          int harvested = thread_uring_state.harvest_completions();
+          if (harvested > 0) {
+              ldpp_dout(dpp, 20) << "SSDCache: get_async harvested " << harvested << " completions" << dendl;
+          }
+          
+          // If operations are still pending and nothing was harvested,
+          // wait for at least one completion (important for large I/O)
+          if (!thread_uring_state.pending_ops.empty() && harvested == 0) {
+              ldpp_dout(dpp, 20) << "SSDCache: get_async waiting for completions..." << dendl;
+              int waited = thread_uring_state.wait_for_completions();
+              if (waited > 0) {
+                  ldpp_dout(dpp, 20) << "SSDCache: get_async waited and got " << waited << " completions" << dendl;
               }
-              ceph::async::post(std::move(p), ec, std::move(op.result));
-          } else {
-              auto ec = boost::system::error_code{-rc, boost::system::system_category()};
-              ceph::async::post(std::move(p), ec, bufferlist{});
           }
       } else {
+          // Extract completion_ptr before deleting pending
+          auto completion = std::move(pending->completion_ptr);
+          delete pending;
           auto ec = boost::system::error_code{-ret, boost::system::system_category()};
-          ceph::async::post(std::move(p), ec, bufferlist{});
+          ceph::async::post(std::move(completion), ec, bufferlist{});
       }
     }
   }, token, dpp, ex, key, read_ofs, read_len);
@@ -636,7 +857,6 @@ void SSDDriver::put_async(const DoutPrefixProvider *dpp, const Executor& ex, con
     int r = 0;
     bufferlist src = bl;
     {
-      std::clog << "MK| NOTE: " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): prepare_io_uring_write_op() --> tid=0x" << std::uppercase << std::hex << std::this_thread::get_id() << std::dec << std::nouppercase << std::endl;
       io_uring* ring = nullptr;
       int ring_ret = ensure_thread_uring(dpp, &ring);
       if (ring_ret < 0) {
@@ -646,32 +866,53 @@ void SSDDriver::put_async(const DoutPrefixProvider *dpp, const Executor& ex, con
           return;
       }
 
-      r = op.prepare_io_uring_write_op(dpp, src, len, op.temp_file_path, ring);
+      // Harvest any ready completions before adding new operation
+      thread_uring_state.harvest_completions();
+      
+      // Set up operation data before creating PendingOperation
       op.dpp = dpp;
       op.priv_data = this;
       op.attrs = std::move(attrs);
+      
+      // Create pending operation wrapper FIRST (before preparing io_uring)
+      auto* pending = new PendingWriteOp(std::move(p));
+      
+      // Prepare the write operation with PendingOperation* as user_data
+      r = op.prepare_io_uring_write_op(dpp, src, len, op.temp_file_path, ring, pending, &thread_uring_state);
       if (r >= 0) {
-          io_uring_submit(ring);
-          struct io_uring_cqe* cqe;
-          int rc = io_uring_wait_cqe(ring, &cqe);
-          if (rc == 0) {
-              SSDDriver::AsyncWriteRequest::io_uring_write_completion(cqe, &op);
-              io_uring_cqe_seen(ring, cqe);
-              // Propagate completion to handler
-              boost::system::error_code ec;
-              int cqe_res = cqe->res;
-              if (cqe_res < 0) {
-                  ec.assign(-cqe_res, boost::system::system_category());
+          // Add to pending list
+          thread_uring_state.pending_ops.push_back(pending);
+          
+          // Submit the batch immediately to avoid stuck operations
+          int submitted = thread_uring_state.submit_batch();
+          if (submitted < 0) {
+              ldpp_dout(dpp, 0) << "ERROR: put_async: batch submit failed: " << submitted << dendl;
+          } else if (submitted > 0) {
+              ldpp_dout(dpp, 20) << "SSDCache: put_async submitted batch of " << submitted << " operations" << dendl;
+          }
+          
+          // Harvest completions immediately to invoke callbacks
+          int harvested = thread_uring_state.harvest_completions();
+          if (harvested > 0) {
+              ldpp_dout(dpp, 20) << "SSDCache: put_async harvested " << harvested << " completions" << dendl;
+          }
+          
+          // If operations are still pending and nothing was harvested,
+          // wait for at least one completion (important for large I/O)
+          if (!thread_uring_state.pending_ops.empty() && harvested == 0) {
+              ldpp_dout(dpp, 20) << "SSDCache: put_async waiting for completions..." << dendl;
+              int waited = thread_uring_state.wait_for_completions();
+              if (waited > 0) {
+                  ldpp_dout(dpp, 20) << "SSDCache: put_async waited and got " << waited << " completions" << dendl;
               }
-              ceph::async::dispatch(std::move(p), ec);
-          } else {
-              auto ec = boost::system::error_code{-rc, boost::system::system_category()};
-              ceph::async::dispatch(std::move(p), ec);
           }
       } else {
           ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::prepare_io_uring_write_op(), r=" << r << dendl;
+          // Extract completion_ptr before deleting pending
+          auto completion = std::move(pending->completion_ptr);
+          delete pending;
           auto ec = boost::system::error_code{-r, boost::system::system_category()};
-          ceph::async::dispatch(std::move(p), ec);
+          ceph::async::dispatch(std::move(completion), ec);
       }
     }
   }, token, dpp, ex, key, bl, len, attrs);
@@ -1017,7 +1258,7 @@ int SSDDriver::delete_attr(const DoutPrefixProvider* dpp, const std::string& key
 
 void SSDDriver::AsyncWriteRequest::io_uring_write_completion(struct io_uring_cqe* cqe, AsyncWriteRequest* op)
 {
-    std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): " << std::endl;
+    // std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): " << std::endl;
     boost::system::error_code ec;
     int ret = cqe->res;
     if (ret < 0) {
@@ -1058,9 +1299,9 @@ void SSDDriver::AsyncWriteRequest::io_uring_write_completion(struct io_uring_cqe
     }
 }
 
-int rgw::cache::SSDDriver::AsyncWriteRequest::prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path, struct io_uring* ring)
+int rgw::cache::SSDDriver::AsyncWriteRequest::prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, uint64_t len, const std::string& file_path, struct io_uring* ring, void* user_data, void* uring_state)
 {
-    std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): file_path=" << std::quoted(file_path) << ", len=" << len << std::endl;
+    // std::clog << "  MK| OK " << __FILE__ << " :" << __LINE__ << " | " << __func__ << "(): file_path=" << std::quoted(file_path) << ", len=" << len << std::endl;
     int r = 0;
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): Write To Cache, location=" << file_path << dendl;
     mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
@@ -1104,13 +1345,25 @@ int rgw::cache::SSDDriver::AsyncWriteRequest::prepare_io_uring_write_op(const Do
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
     if (!sqe) {
-        ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_write_op: failed to get sqe" << dendl;
-        ::close(fd);
-        free(data);
-        return -1;
+        // SQ is full - this is normal under heavy load
+        // Submit and harvest to make space, then retry
+        ldpp_dout(dpp, 20) << "SSDCache: prepare_io_uring_write_op: SQ full, flushing..." << dendl;
+        
+        auto* state = static_cast<ThreadIoUringState*>(uring_state);
+        int flushed = state->flush_if_full();
+        ldpp_dout(dpp, 20) << "SSDCache: flushed " << flushed << " completions" << dendl;
+        
+        // Retry getting SQE after flush
+        sqe = io_uring_get_sqe(ring);
+        if (!sqe) {
+            ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_write_op: failed to get sqe even after flush" << dendl;
+            ::close(fd);
+            free(data);
+            return -EAGAIN;  // Return EAGAIN to indicate retry-able error
+        }
     }
     io_uring_prep_write(sqe, fd, data, len, 0);
-    io_uring_sqe_set_data(sqe, this);
+    io_uring_sqe_set_data(sqe, user_data);
     return 0;
 }
 
@@ -1146,10 +1399,11 @@ void rgw::cache::SSDDriver::AsyncReadOp::io_uring_read_completion(struct io_urin
 int rgw::cache::SSDDriver::AsyncReadOp::prepare_io_uring_read_op(
     const DoutPrefixProvider *dpp,
     const std::string& file_path,
-    off_t read_ofs,
-    size_t read_len,
-    void* arg,
-    struct io_uring* ring)
+    uint64_t read_ofs,
+    uint64_t read_len,
+    struct io_uring* ring,
+    void* user_data,
+    void* uring_state)
 {
     ldpp_dout(dpp, 20) << "SSDCache: AsyncReadOp::prepare_io_uring_read_op(): file_path=" << file_path << dendl;
     fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY));
@@ -1171,13 +1425,25 @@ int rgw::cache::SSDDriver::AsyncReadOp::prepare_io_uring_read_op(
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
     if (!sqe) {
-        ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_read_op: failed to get sqe" << dendl;
-        ::close(fd);
-        free(buffer);
-        return -1;
+        // SQ is full - this is normal under heavy load
+        // Submit and harvest to make space, then retry
+        ldpp_dout(dpp, 20) << "SSDCache: prepare_io_uring_read_op: SQ full, flushing..." << dendl;
+        
+        auto* state = static_cast<ThreadIoUringState*>(uring_state);
+        int flushed = state->flush_if_full();
+        ldpp_dout(dpp, 20) << "SSDCache: flushed " << flushed << " completions" << dendl;
+        
+        // Retry getting SQE after flush
+        sqe = io_uring_get_sqe(ring);
+        if (!sqe) {
+            ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_read_op: failed to get sqe even after flush" << dendl;
+            ::close(fd);
+            free(buffer);
+            return -EAGAIN;  // Return EAGAIN to indicate retry-able error
+        }
     }
     io_uring_prep_read(sqe, fd, buffer, read_len, read_ofs);
-    io_uring_sqe_set_data(sqe, arg);
+    io_uring_sqe_set_data(sqe, user_data);
     return 0;
 }
 

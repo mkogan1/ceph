@@ -4012,6 +4012,33 @@ options:
   services:
   - rgw
   with_legacy: true
+- name: rgw_d4n_io_uring_batch_size
+  type: int
+  level: advanced
+  desc: Number of io_uring operations to batch before submitting
+  long_desc: The SSD cache driver batches multiple io_uring operations before calling io_uring_submit()
+    to reduce syscall overhead. Higher values reduce syscalls but may increase latency for low-traffic
+    scenarios. The batch is also submitted when the timeout expires. Set to 1 to disable batching.
+  default: 16
+  min: 1
+  max: 256
+  services:
+  - rgw
+  with_legacy: true
+- name: rgw_d4n_io_uring_batch_timeout_us
+  type: int
+  level: advanced
+  desc: Maximum microseconds to wait before submitting a partial io_uring batch
+  long_desc: When batching is enabled, this timeout ensures that operations are submitted even if the
+    batch size threshold has not been reached. This prevents unbounded latency in low-traffic scenarios.
+    Lower values reduce latency but may reduce batching effectiveness. Set to 0 to disable timeout-based
+    submission (not recommended).
+  default: 1000
+  min: 0
+  max: 100000
+  services:
+  - rgw
+  with_legacy: true
 - name: rgw_lfuda_sync_frequency
   type: int
   level: advanced
