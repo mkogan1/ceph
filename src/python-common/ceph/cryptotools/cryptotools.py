@@ -93,6 +93,24 @@ def verify_tls(args: Namespace) -> None:
     _respond({'ok': True})  # need to emit something on success
 
 
+def decrypt_call_home_encrypted_keys(args: Namespace) -> None:
+    data = _load()
+    decryption_key = data['decryption_key']
+    decryption_nonce = data['decryption_nonce']
+    encrypted_keys = data['encrypted_keys']
+    decrypted_json_encoded_keys = args.crypto.decrypt_call_home_encrypted_keys(
+        decryption_key, decryption_nonce, encrypted_keys
+    )
+    _respond({'decrypted_json_encoded_keys': decrypted_json_encoded_keys})
+
+
+def call_home_decrypt_jwt_password(args: Namespace) -> None:
+    data = _load()
+    user_jwt_password = data['user_jwt_password']
+    decrypted_user_jwt_password = args.crypto.call_home_decrypt_jwt_password(user_jwt_password)
+    _respond({'decrypted_jwt_user_password': decrypted_user_jwt_password})
+
+
 def main() -> None:
     # create the top-level parser
     parser = argparse.ArgumentParser(prog='cryptotools.py')
@@ -125,6 +143,14 @@ def main() -> None:
     # password verification
     parser_verify_password = subparsers.add_parser('verify_password')
     parser_verify_password.set_defaults(func=verify_password)
+
+    # call home specific for decoding secrets
+    parser_call_home_decrypt_secrets = subparsers.add_parser('decrypt_call_home_encrypted_keys')
+    parser_call_home_decrypt_secrets.set_defaults(func=decrypt_call_home_encrypted_keys)
+
+    # call home specific for decoding jwt user password
+    parser_call_home_decrypt_jwt_password = subparsers.add_parser('call_home_decrypt_jwt_password')
+    parser_call_home_decrypt_jwt_password.set_defaults(func=call_home_decrypt_jwt_password)
 
     # parse the args and call whatever function was selected
     args = parser.parse_args()
