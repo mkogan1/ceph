@@ -2440,6 +2440,10 @@ int RGWLC::process(int index, int max_lock_secs, LCWorker* worker,
       }
     }
 
+    if (! entry) {
+      continue;
+    }
+
     if (!entry->get_bucket().empty()) {
       if (entry->get_status() == lc_processing) {
         if (expired_session(entry->get_start_time(), worker->lc_start_time)) {
