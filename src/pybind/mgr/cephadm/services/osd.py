@@ -32,7 +32,7 @@ class OSDService(CephService):
     TYPE = 'osd'
 
     def create_from_spec(self, drive_group: DriveGroupSpec) -> str:
-        logger.debug(f"Processing DriveGroup {drive_group}")
+        logger.debug(f"Processing DriveGroup osd.{drive_group.service_id}")
         osd_id_claims = OsdIdClaims(self.mgr)
         if osd_id_claims.get():
             logger.info(
@@ -42,7 +42,7 @@ class OSDService(CephService):
             # skip this host if there has been no change in inventory
             if not self.mgr.cache.osdspec_needs_apply(host, drive_group):
                 self.mgr.log.debug("skipping apply of %s on %s (no change)" % (
-                    host, drive_group))
+                    host, drive_group.service_id))
                 return None
             # skip this host if we cannot schedule here
             if self.mgr.inventory.has_label(host, SpecialHostLabels.DRAIN_DAEMONS):
@@ -256,7 +256,7 @@ class OSDService(CephService):
     def driveselection_to_ceph_volume(drive_selection: DriveSelection,
                                       osd_id_claims: Optional[List[str]] = None,
                                       preview: bool = False) -> List[str]:
-        logger.debug(f"Translating DriveGroup <{drive_selection.spec}> to ceph-volume command")
+        logger.debug(f"Translating DriveGroup <{drive_selection.spec.service_id}> to ceph-volume command")
         cmds: List[str] = translate.to_ceph_volume(drive_selection,
                                                    osd_id_claims, preview=preview).run()
         logger.debug(f"Resulting ceph-volume cmds: {cmds}")
@@ -288,7 +288,7 @@ class OSDService(CephService):
 
         Note: One host can have multiple previews based on its assigned OSDSpecs.
         """
-        self.mgr.log.debug(f"Generating OSDSpec previews for {osdspecs}")
+        self.mgr.log.debug(f"Generating OSDSpec previews for {[s.service_id for s in osdspecs]}")
         ret_all: List[Dict[str, Any]] = []
         if not osdspecs:
             return ret_all
@@ -359,7 +359,7 @@ class OSDService(CephService):
                      if spec.service_type == 'osd']
         for spec in specs:
             if host in spec.placement.filter_matching_hostspecs(self.mgr.cache.get_schedulable_hosts()):
-                self.mgr.log.debug(f"Found OSDSpecs for host: <{host}> -> <{spec}>")
+                self.mgr.log.debug(f"Found OSDSpecs for host: <{host}> -> <{spec.service_id}>")
                 matching_specs.append(spec)
         return matching_specs
 
