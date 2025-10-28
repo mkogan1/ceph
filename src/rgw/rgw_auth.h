@@ -793,17 +793,13 @@ public:
       is_system_request(is_system_request) {}
 
   ACLOwner get_aclowner() const override;
-  uint32_t get_perms_from_aclspec(const DoutPrefixProvider* dpp, const aclspec_t& aclspec) const override {
-    return 0;
-  }
+  uint32_t get_perms_from_aclspec(const DoutPrefixProvider* dpp, const aclspec_t& aclspec) const override;
   bool is_admin_of(const rgw_owner& o) const override {
     return false;
   }
   bool is_owner_of(const rgw_owner& o) const override;
   bool is_identity(const Principal& p) const override;
-  uint32_t get_perm_mask() const override {
-    return RGW_PERM_NONE; 
-  }
+  uint32_t get_perm_mask() const override;
   void to_str(std::ostream& out) const override;
   auto load_acct_info(const DoutPrefixProvider* dpp) const -> std::unique_ptr<rgw::sal::User> override; /* out */
   uint32_t get_identity_type() const override { return TYPE_ROLE; }
