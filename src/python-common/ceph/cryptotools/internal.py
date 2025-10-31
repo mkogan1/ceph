@@ -10,10 +10,6 @@ import warnings
 from OpenSSL import crypto, SSL
 import bcrypt
 
-# for call_home_agent
-import base64
-import jwt  # type: ignore
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore
 
 from .caller import CryptoCaller, CryptoCallError
 
@@ -136,20 +132,3 @@ class InternalCryptoCaller(CryptoCaller):
             )
         except SSL.Error as e:
             self.fail(f'Invalid cert/key pair: {e}')
-
-    def decrypt_call_home_encrypted_keys(
-        self,
-        decryption_key: str,
-        decryption_nonce: str,
-        encrypted_keys: bytes
-    ) -> str:
-        aes_key = base64.b64decode(decryption_key)
-        nonce = base64.b64decode(decryption_nonce)
-        aesgcm = AESGCM(aes_key)
-        clear_keys = aesgcm.decrypt(nonce, encrypted_keys, b'')
-        return clear_keys
-
-    def call_home_decrypt_jwt_password(self, user_jwt_password: str) -> str:
-        jwt_jti = jwt.decode(user_jwt_password, options={
-                            "verify_signature": False})["jti"]
-        return jwt_jti

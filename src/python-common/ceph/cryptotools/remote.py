@@ -181,36 +181,3 @@ class ProcessCryptoCaller(CryptoCaller):
         result_obj = self._result_json(result)
         ok = result_obj.get("ok", False)
         return ok
-
-    def decrypt_call_home_encrypted_keys(
-        self,
-        decryption_key: str,
-        decryption_nonce: str,
-        encrypted_keys: bytes
-    ) -> str:
-        key_data = {
-            "decryption_key": decryption_key,
-            "decryption_nonce": decryption_nonce,
-            "encrypted_keys": encrypted_keys
-        }
-        result = self._run(
-            ["decrypt_call_home_encrypted_keys"],
-            input_data=json.dumps(key_data),
-            capture_output=True,
-            check=True,
-        )
-        result_obj = self._result_json(result)
-        decrypted_json_encoded_keys = result_obj.get("decrypted_json_encoded_keys", '')
-        return decrypted_json_encoded_keys
-
-    def call_home_decrypt_jwt_password(self, user_jwt_password: str) -> str:
-        pwd_data = {"user_jwt_password": user_jwt_password}
-        result = self._run(
-            ["call_home_decrypt_jwt_password"],
-            input_data=json.dumps(pwd_data),
-            capture_output=True,
-            check=True,
-        )
-        result_obj = self._result_json(result)
-        decrypted_jwt_user_password = result_obj.get("decrypted_jwt_user_password", '')
-        return decrypted_jwt_user_password

@@ -46,16 +46,3 @@ class CryptoCaller(abc.ABC):
     @abc.abstractmethod
     def verify_password(self, password: str, hashed_password: str) -> bool:
         """Return true if a password and hash match."""
-
-    @abc.abstractmethod
-    def decrypt_call_home_encrypted_keys(
-        self,
-        decryption_key: str,
-        decryption_nonce: str,
-        encrypted_keys: bytes
-    ) -> str:
-        """Return call home key decrypted but still as a json string"""
-
-    @abc.abstractmethod
-    def call_home_decrypt_jwt_password(self, user_jwt_password: str) -> str:
-        """Decrypt encrypted call home jwt user password"""

@@ -14,10 +14,10 @@ import datetime
 import json
 import os
 import sys
-# from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-# import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import base64
 import re
-# import jwt
+import jwt
 import traceback
 import requests
 import sched
@@ -26,8 +26,6 @@ import time
 import threading
 import importlib.util
 import pathlib
-
-from ceph.cryptotools.select import get_crypto_caller
 
 class URUploadSnap:
     def __init__(self, agent, req: dict):
@@ -357,10 +355,8 @@ class CallHomeAgent(MgrModule):
             user_jwt_password = r"{}".format(reg_credentials['password'])
             registry_url = reg_credentials['url']
             if re.match(self.valid_container_registry, registry_url):
-                cc = get_crypto_caller()
-                jwt_jti = cc.call_home_decrypt_jwt_password(user_jwt_password)
-                # jwt_jti = jwt.decode(user_jwt_password, options={
-                #                     "verify_signature": False})["jti"]
+                jwt_jti = jwt.decode(user_jwt_password, options={
+                                    "verify_signature": False})["jti"]
                 self.log.info("JWT jti field extracted succesfully")
             else:
                 jti_token_fail = f"url for registry credentials stored in <mgr/cephadm/registry_url> does not match with the expected ones <{self.valid_container_registry}>"
@@ -631,12 +627,10 @@ class CallHomeAgent(MgrModule):
 
         try:
             encrypted_keys = self._load_encrypted_keys()
-            cc = get_crypto_caller()
-            clear_keys = cc.decrypt_call_home_encrypted_keys(decryption_key, decryption_nonce, encrypted_keys)
-            # aes_key = base64.b64decode(decryption_key)
-            # nonce = base64.b64decode(decyption_nonce)
-            # aesgcm = AESGCM(aes_key)
-            # clear_keys = aesgcm.decrypt(nonce, encrypted_keys, b'')
+            aes_key = base64.b64decode(decryption_key)
+            nonce = base64.b64decode(decyption_nonce)
+            aesgcm = AESGCM(aes_key)
+            clear_keys = aesgcm.decrypt(nonce, encrypted_keys, b'')
             keys = json.loads(clear_keys)
             return keys
         except Exception as e:
