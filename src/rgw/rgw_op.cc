@@ -1414,7 +1414,7 @@ int RGWPutBucketTags::verify_permission(optional_yield y) {
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketTagging)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketTagging, true)) {
     return -EACCES;
   }
 
@@ -1454,7 +1454,7 @@ int RGWDeleteBucketTags::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketTagging)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketTagging, true)) {
     return -EACCES;
   }
 
@@ -1511,7 +1511,7 @@ int RGWPutBucketReplication::verify_permission(optional_yield y) {
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutReplicationConfiguration)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutReplicationConfiguration, true)) {
     return -EACCES;
   }
 
@@ -1561,7 +1561,7 @@ int RGWDeleteBucketReplication::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3DeleteReplicationConfiguration)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3DeleteReplicationConfiguration, true)) {
     return -EACCES;
   }
 
@@ -2974,7 +2974,7 @@ int RGWGetBucketVersioning::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketVersioning)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketVersioning, true)) {
     return -EACCES;
   }
 
@@ -3004,7 +3004,7 @@ int RGWSetBucketVersioning::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketVersioning)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketVersioning, true)) {
     return -EACCES;
   }
 
@@ -3107,7 +3107,7 @@ int RGWGetBucketWebsite::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketWebsite)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketWebsite, true)) {
     return -EACCES;
   }
 
@@ -3132,7 +3132,7 @@ int RGWSetBucketWebsite::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketWebsite)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketWebsite, true)) {
     return -EACCES;
   }
 
@@ -3183,7 +3183,7 @@ int RGWDeleteBucketWebsite::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3DeleteBucketWebsite)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3DeleteBucketWebsite, true)) {
     return -EACCES;
   }
 
@@ -3377,7 +3377,7 @@ int RGWGetBucketLocation::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketLocation)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketLocation, true)) {
     return -EACCES;
   }
 
@@ -5636,6 +5636,16 @@ int RGWDeleteObj::verify_permission(optional_yield y)
   }
 
   if (s->bucket->get_info().obj_lock_enabled() && bypass_governance_mode) {
+    auto& conf = get_cct()->_conf;
+    if (!s->auth.identity->get_account() &&
+      conf->rgw_sts_backward_compatibility_7_1) {
+      Effect e = evaluate_iam_policies(
+                      this, s->env, *(s->auth.identity), false, rgw::IAM::s3BypassGovernanceRetention, ARN(s->bucket->get_key()),
+                      s->iam_policy, s->iam_identity_policies, s->session_policies);
+      if (e == Effect::Deny) {
+        bypass_perm = false;
+      }
+    }
     // require s3BypassGovernanceRetention for x-amz-bypass-governance-retention
     bypass_perm = verify_bucket_permission(this, s, arn, rgw::IAM::s3BypassGovernanceRetention);
   }
@@ -6974,7 +6984,7 @@ int RGWGetCORS::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketCORS)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketCORS, true)) {
     return -EACCES;
   }
 
@@ -7000,7 +7010,7 @@ int RGWPutCORS::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketCORS)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketCORS, true)) {
     return -EACCES;
   }
 
@@ -7036,7 +7046,7 @@ int RGWDeleteCORS::verify_permission(optional_yield y)
     rgw_iam_add_buckettags(this, s);
 
   // No separate delete permission
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketCORS)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketCORS, true)) {
     return -EACCES;
   }
 
@@ -7134,7 +7144,7 @@ int RGWGetRequestPayment::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketRequestPayment)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketRequestPayment, true)) {
     return -EACCES;
   }
 
@@ -7157,7 +7167,7 @@ int RGWSetRequestPayment::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketRequestPayment)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketRequestPayment, true)) {
     return -EACCES;
   }
 
@@ -7939,8 +7949,19 @@ int RGWDeleteMultiObj::verify_permission(optional_yield y)
     rgw_iam_add_objtags(this, s, has_s3_existing_tag, has_s3_resource_tag);
 
   if (s->bucket->get_info().obj_lock_enabled() && bypass_governance_mode) {
-    // require s3BypassGovernanceRetention for x-amz-bypass-governance-retention
-    bypass_perm = verify_bucket_permission(this, s, rgw::IAM::s3BypassGovernanceRetention);
+    auto& conf = get_cct()->_conf;
+    if (!s->auth.identity->get_account() &&
+      conf->rgw_sts_backward_compatibility_7_1) {
+      Effect e = evaluate_iam_policies(
+                      this, s->env, *(s->auth.identity), false, rgw::IAM::s3BypassGovernanceRetention, ARN(s->bucket->get_key()),
+                      s->iam_policy, s->iam_identity_policies, s->session_policies);
+      if (e == Effect::Deny) {
+        bypass_perm = false;
+      }
+    } else {
+      // require s3BypassGovernanceRetention for x-amz-bypass-governance-retention
+      bypass_perm = verify_bucket_permission(this, s, rgw::IAM::s3BypassGovernanceRetention);
+    }
   }
 
   return 0;
@@ -9398,7 +9419,7 @@ int RGWPutBucketObjectLock::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketObjectLockConfiguration)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3PutBucketObjectLockConfiguration, true)) {
     return -EACCES;
   }
 
@@ -9481,7 +9502,7 @@ int RGWGetBucketObjectLock::verify_permission(optional_yield y)
   if (has_s3_resource_tag)
     rgw_iam_add_buckettags(this, s);
 
-  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketObjectLockConfiguration)) {
+  if (!verify_bucket_permission(this, s, rgw::IAM::s3GetBucketObjectLockConfiguration, true)) {
     return -EACCES;
   }
 
