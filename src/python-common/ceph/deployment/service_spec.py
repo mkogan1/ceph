@@ -1524,8 +1524,8 @@ class NFSServiceSpec(ServiceSpec):
                 )
             if qos_type not in valid_qos_types:
                 raise SpecValidationError(
-                    f'Invalid NFS spec: "{qos_type}" is not a valid qos_type. Valid types '
-                    f'are: {"|".join(valid_qos_types)}.'
+                    f'Invalid NFS spec: "{qos_type}" is not a valid qos_type. '
+                    f'Valid types are: {"|".join(valid_qos_types)}.'
                 )
 
             # Verify bandwidth and IOPS types
@@ -1536,8 +1536,7 @@ class NFSServiceSpec(ServiceSpec):
                     )
                 if key.endswith('iops') and not isinstance(value, int):
                     raise SpecValidationError(
-                        f"Invalid NFS spec: IOPS '{key}' should be an integer"
-                    )
+                        f"Invalid NFS spec: IOPS '{key}' should be an integer")
 
         # TLS certificate validation
         if self.ssl and not self.certificate_source:
