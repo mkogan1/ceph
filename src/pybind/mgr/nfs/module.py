@@ -43,7 +43,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             sectype: Optional[List[str]] = None,
             cmount_path: Optional[str] = "/",
             skip_notify_nfs_server: bool = False,
-            kmip_key_id: Optional[str] = None
+            kmip_key_id: Optional[str] = None,
+            xprtsec: Optional[str] = None
     ) -> Dict[str, Any]:
         """Create a CephFS export"""
         self.export_mgr.skip_notify_nfs_server = skip_notify_nfs_server
@@ -58,6 +59,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             squash=squash,
             addr=client_addr,
             sectype=sectype,
+            xprtsec=xprtsec,
             cmount_path=cmount_path,
             earmark_resolver=earmark_resolver,
             kmip_key_id=kmip_key_id
@@ -76,7 +78,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             squash: str = 'none',
             sectype: Optional[List[str]] = None,
             skip_notify_nfs_server: bool = False,
-            kmip_key_id: Optional[str] = None
+            kmip_key_id: Optional[str] = None,
+            xprtsec: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create an RGW export"""
         self.export_mgr.skip_notify_nfs_server = skip_notify_nfs_server
@@ -90,7 +93,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             squash=squash,
             addr=client_addr,
             sectype=sectype,
-            kmip_key_id=kmip_key_id
+            kmip_key_id=kmip_key_id,
+            xprtsec=xprtsec
         )
 
     @CLICommand('nfs export rm', perm='rw')
