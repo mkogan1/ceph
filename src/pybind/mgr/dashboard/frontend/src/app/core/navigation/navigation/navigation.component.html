@@ -16,7 +16,7 @@
     <!-- CLUSTER SWITCHER TEMPLATE -->
     <!-- ************************* -->
     <cds-header-navigation class="cluster-switcher"
-                           *ngIf="clustersMap?.size > 1 && environment.build === 'ibm'">
+                           *ngIf="clustersMap?.size > 1 && !['ibm', 'redhat'].includes(environment.build)">
       <cds-header-menu [title]="currentClusterName"
                        data-testid="selected-cluster">
         <ng-container *ngFor="let cluster of clustersMap | keyvalue; trackBy:trackByFn ">
