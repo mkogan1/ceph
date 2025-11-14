@@ -42,6 +42,7 @@ from cephadm.utils import (
 from mgr_module import MonCommandFailed
 from mgr_util import format_bytes
 from cephadm.services.service_registry import service_registry
+from cephadm.services.nfs import NFSService
 
 from . import utils
 from . import exchange
@@ -133,6 +134,8 @@ class CephadmServe:
                     self._purge_deleted_services()
 
                     self._check_for_moved_osds()
+
+                    self._retry_failed_operations()
 
                     if self.mgr.agent_helpers._handle_use_agent_setting():
                         continue
@@ -2157,3 +2160,24 @@ class CephadmServe:
         self.log.info(f"Deploying cephadm binary to {host}")
         await self.mgr.ssh._write_remote_file(host, self.mgr.cephadm_binary_path,
                                               self.mgr._cephadm, addr=addr)
+
+    def _retry_failed_operations(self) -> None:
+        self.log.debug('_retry_failed_operations')
+        # retry nfs fencing for failed specs
+        failed_services = self.mgr.get_store('nfs_fencing_failed_services')
+        services = failed_services.split(',') if failed_services else []
+        to_remove = []
+        for service_name in services:
+            if service_name not in self.mgr.spec_store:
+                to_remove.append(service_name)
+                continue
+            spec = self.mgr.spec_store[service_name].spec
+            rank_map = self.mgr.spec_store[spec.service_name()].rank_map or {}
+            daemons = self.mgr.cache.get_daemons_by_service(service_name)
+            svc = service_registry.get_service('nfs')
+            self.log.debug('Retry NFS fence old rank for %s service', service_name)
+            svc.fence_old_ranks(spec, rank_map, len(daemons))
+        if to_remove:
+            self.log.debug('Remove NFS service from retry fence old ranks as services %s are removed', to_remove)
+            svc = cast(NFSService, service_registry.get_service('nfs'))
+            svc.update_failed_fencing_services_remove_missing(to_remove)
