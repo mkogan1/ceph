@@ -62,6 +62,24 @@ class EventStatusAlerts(EventGeneric):
         self.set_content(content)
         return self
 
+    def normalize_ts(self, ts: str) -> str:
+        # Normalize timestamps from Prometheus to use microseconds and a
+        # '+00:00' time zone instead of nanoseconds and "Z", for example:
+        # 2025-05-10T08:58:16.720197621Z   (ts from Prometheus)
+        # 2025-05-10T08:58:16.720197+00:00
+
+        # Prometheus displays time in UTC, and always ends the string with 'Z'.
+        # Convert "Z" to "+00:00"
+        ts = ts.replace("Z", "+00:00")
+
+        main_ts, tz = ts.split("+")
+        if '.' in ts:
+            date, frac = main_ts.split(".")
+            frac = frac[:6]  # truncate nanoseconds → microseconds
+            main_ts = f"{date}.{frac}"
+
+        return f"{main_ts}+{tz}"
+
     def service_events(self, alerts: list) -> None:
         if self.agent.disable_service_events:
             return
@@ -82,7 +100,7 @@ class EventStatusAlerts(EventGeneric):
             return  # don't send more than one service event per hour by default
 
         new_events = list(filter(
-            lambda e: 'activeAt' in e and datetime.fromisoformat(e['activeAt'].replace("Z", "+00:00")).timestamp() > last_service_events_sent,
+            lambda e: 'activeAt' in e and datetime.fromisoformat(self.normalize_ts(e['activeAt'])).timestamp() > last_service_events_sent,
             service_events_alerts
         ))
         if not new_events:

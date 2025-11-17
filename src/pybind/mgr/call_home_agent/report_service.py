@@ -95,7 +95,7 @@ class EventService(EventGeneric):
                 "ceph_versions": versions,
                 "software": {
                     "diagnostic_provided": True,
-                    "ibm_ceph_version": "7.1.0"  # TODO: change to 9.0.0 after the value is available
+                    "ibm_ceph_version": "9.0.0" if self.agent.target_space == "prod" else "8.0.0"
                 }
             }
         } )
