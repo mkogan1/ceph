@@ -1,6 +1,8 @@
 include(GetGitRevisionDescription)
 include(CheckCXXCompilerFlag)
 
+# tserlin comment (for testing)
+
 # for erasure and compressor plugins
 set(CEPH_INSTALL_PKGLIBDIR ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME})
 set(CEPH_INSTALL_FULL_PKGLIBDIR ${CMAKE_INSTALL_FULL_LIBDIR}/${PROJECT_NAME})
