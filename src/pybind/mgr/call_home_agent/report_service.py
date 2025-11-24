@@ -15,7 +15,7 @@ class ReportService(Report):
         event = EventService(self.agent).generate(report_times, self.alerts)
         self.add_event(event)
         self.agent.log.debug("Generated service event:")
-        self.agent.log.debug(json.dumps(self.data)) # TODO: remove keys from the output
+        self.agent.log.debug(json.dumps(self.agent._filter_report(self.data)))
         return self.data
 
 class EventService(EventGeneric):
@@ -50,8 +50,10 @@ class EventService(EventGeneric):
         alert_subject = alert_name + ((':' + alert_instance) if alert_instance else '')
         alert_subject = alert_subject[:140]  # Call home 'code' field is limited to 140 characters.
 
-        description = json.dumps(alerts_sorted, sort_keys = True, indent=4)
-        description = description[:10000]
+        # Use this in case of having body.description in addition to
+        # body.payload.description as the former has a 10K characters limitation.
+        # description = json.dumps(alerts_sorted, sort_keys = True, indent=4)
+        # description = description[:10000]
 
         now = time.time()
 
@@ -71,7 +73,6 @@ class EventService(EventGeneric):
                 "timestamp": int(now),  # time in seconds
                 "transid": int(now * 1000)  # time in milliseconds
             },
-            "description": description, # semi described, 10K character limit
             "object_instance_virtual_id": self.agent.ceph_cluster_id,
             "object_instance": self.agent.ceph_cluster_id,
             "object_type": "ceph",
@@ -93,6 +94,8 @@ class EventService(EventGeneric):
             ###############
             "payload": {
                 "ceph_versions": versions,
+                "description": alerts_sorted, # semi described, 10K character limit
+                "error_code": alert_subject,  # the same as body.code above
                 "software": {
                     "diagnostic_provided": True,
                     "ibm_ceph_version": "9.0.0" if self.agent.target_space == "prod" else "8.0.0"

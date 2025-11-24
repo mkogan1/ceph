@@ -251,10 +251,10 @@ class CallHomeAgent(MgrModule):
             desc='Time interval in seconds to allow a cooldown between level 2 upload snap requests'
         ),
         Option(
-            name='disable_service_events',
+            name='enable_service_events',
             type='bool',
             default=False,
-            desc='Disable service events'
+            desc='Enable service events'
         ),
     ]
 
@@ -376,7 +376,7 @@ class CallHomeAgent(MgrModule):
             setattr(self, opt['name'], self.get_module_option(opt['name']))
             self.log.debug(f" {opt['name']} = {getattr(self, opt['name'])}")
 
-        self.proxies = {'http': proxy, 'https': proxy} if self.proxy else {}
+        self.proxies = {'http': self.proxy, 'https': self.proxy} if self.proxy else {}
 
         self.jwt_jti = self.get_jwt_jti()
 
@@ -991,7 +991,7 @@ class CallHomeAgent(MgrModule):
         except Exception as e:
             return HandleCommandResult(retval=1, stderr=str(e))
         else:
-            return HandleCommandResult(stdout=f'country code is set to {country_code}')
+            return HandleCommandResult()
         finally:
             self.refresh_options()  # This will always run, no matter what.
 

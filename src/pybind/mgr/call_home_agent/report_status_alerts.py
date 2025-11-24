@@ -81,7 +81,7 @@ class EventStatusAlerts(EventGeneric):
         return f"{main_ts}+{tz}"
 
     def service_events(self, alerts: list) -> None:
-        if self.agent.disable_service_events:
+        if not self.agent.enable_service_events:
             return
 
         # Service Events (opening a support case)

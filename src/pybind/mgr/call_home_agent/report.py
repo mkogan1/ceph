@@ -109,7 +109,11 @@ class Report:
                                  data=json.dumps(report),
                                  proxies=self.agent.proxies,
                                  timeout=60)
-            self.agent.log.debug(f"Report response: {resp.text}")  # TODO: remove keys
+            try:
+                self.agent.log.debug(f"Report response: {json.dumps(self.agent._filter_report(resp.json()))}")
+            except:
+                self.agent.log.debug(f"Report response text: {resp.text}")
+
             resp.raise_for_status()
 
             ch_response = resp.json()
