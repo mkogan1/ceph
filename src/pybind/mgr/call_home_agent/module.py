@@ -380,8 +380,9 @@ class CallHomeAgent(MgrModule):
 
         self.jwt_jti = self.get_jwt_jti()
 
-        # validate icn and country_code
-        self.validate_config()
+        if self.enable_service_events:
+            # validate icn and country_code
+            self.validate_config()
 
     def ceph_command(self, srv_type: str, prefix: str, srv_spec: Optional[str] = '', inbuf: str = '', **kwargs):
         # Note: A simplified version of the function used in dashboard ceph services
