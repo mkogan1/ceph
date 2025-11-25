@@ -367,7 +367,7 @@ class CallHomeAgent(MgrModule):
             setattr(self, opt['name'], self.get_module_option(opt['name']))
             self.log.debug(f" {opt['name']} = {getattr(self, opt['name'])}")
 
-        self.proxies = {'http': proxy, 'https': proxy} if self.proxy else {}
+        self.proxies = {'http': self.proxy, 'https': self.proxy} if self.proxy else {}
 
         self.jwt_jti = self.get_jwt_jti()
 
