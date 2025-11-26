@@ -24,30 +24,26 @@ def _create_image(image_ref: str, key: str) -> ContainerImage:
 
 
 class DefaultImages(Enum):
-    PROMETHEUS = _create_image('quay.io/prometheus/prometheus:v2.51.0', 'prometheus')
-    LOKI = _create_image('docker.io/grafana/loki:3.0.0', 'loki')
-    PROMTAIL = _create_image('docker.io/grafana/promtail:3.0.0', 'promtail')
-    ALLOY = _create_image('docker.io/grafana/alloy:latest', 'alloy')
-    NODE_EXPORTER = _create_image('quay.io/prometheus/node-exporter:v1.7.0', 'node_exporter')
-    ALERTMANAGER = _create_image('quay.io/prometheus/alertmanager:v0.27.0', 'alertmanager')
-    GRAFANA = _create_image('quay.io/ceph/grafana:11.6.0', 'grafana')
-    HAPROXY = _create_image('quay.io/ceph/haproxy:2.3', 'haproxy')
-    KEEPALIVED = _create_image('quay.io/ceph/keepalived:2.2.4', 'keepalived')
-    NVMEOF = _create_image('quay.io/ceph/nvmeof:1.5', 'nvmeof')
-    SNMP_GATEWAY = _create_image('docker.io/maxwo/snmp-notifier:v1.2.1', 'snmp_gateway')
+    PROMETHEUS = _create_image('registry.redhat.io/openshift4/ose-prometheus:v4.15', 'prometheus')
+    LOKI = _create_image('registry.redhat.io/openshift-logging/logging-loki-rhel8:v3.1.0', 'loki')
+    PROMTAIL = _create_image('registry.redhat.io/rhceph/rhceph-promtail-rhel9:v3.0.0', 'promtail')
+    ALLOY = _create_image('registry.redhat.io/rhceph/alloy-rhel10:latest', 'alloy')
+    NODE_EXPORTER = _create_image('registry.redhat.io/openshift4/ose-prometheus-node-exporter:v4.15', 'node_exporter')
+    ALERTMANAGER = _create_image('registry.redhat.io/openshift4/ose-prometheus-alertmanager:v4.15', 'alertmanager')
+    GRAFANA = _create_image('registry.redhat.io/rhceph/grafana-rhel10:latest', 'grafana')
+    HAPROXY = _create_image('registry.redhat.io/rhceph/rhceph-haproxy-rhel9:latest', 'haproxy')
+    KEEPALIVED = _create_image('registry.redhat.io/rhceph/keepalived-rhel10:latest', 'keepalived')
+    NVMEOF = _create_image('cp.icr.io/cp/ibm-ceph/nvmeof-rhel9:1.5', 'nvmeof')
+    SNMP_GATEWAY = _create_image('registry.redhat.io/rhceph/snmp-notifier-rhel10:latest', 'snmp_gateway')
     ELASTICSEARCH = _create_image('quay.io/omrizeneva/elasticsearch:6.8.23', 'elasticsearch')
     JAEGER_COLLECTOR = _create_image('quay.io/jaegertracing/jaeger-collector:1.29',
                                      'jaeger_collector')
     JAEGER_AGENT = _create_image('quay.io/jaegertracing/jaeger-agent:1.29', 'jaeger_agent')
     JAEGER_QUERY = _create_image('quay.io/jaegertracing/jaeger-query:1.29', 'jaeger_query')
-    SAMBA = _create_image(
-        'quay.io/samba.org/samba-server:ceph20-centos-amd64', 'samba'
-    )
-    SAMBA_METRICS = _create_image(
-        'quay.io/samba.org/samba-metrics:ceph20-centos-amd64', 'samba_metrics'
-    )
-    NGINX = _create_image('quay.io/ceph/nginx:sclorg-nginx-126', 'nginx')
-    OAUTH2_PROXY = _create_image('quay.io/oauth2-proxy/oauth2-proxy:v7.6.0', 'oauth2_proxy')
+    SAMBA = _create_image('cp.icr.io/cp/ibm-ceph/samba-server-rhel9:v9.0', 'samba')
+    SAMBA_METRICS = _create_image('cp.icr.io/cp/ibm-ceph/samba-metrics-rhel9:v9.0', 'samba_metrics')
+    NGINX = _create_image('registry.redhat.io/rhel9/nginx-124:latest', 'nginx')
+    OAUTH2_PROXY = _create_image('registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0', 'oauth2_proxy')
 
     @property
     def image_ref(self) -> str:
