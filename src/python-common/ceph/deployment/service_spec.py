@@ -1406,6 +1406,7 @@ class NFSServiceSpec(ServiceSpec):
                  kmip_ca_cert: Optional[str] = None,
                  kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
                  cluster_qos_config: Optional[Dict[str, Union[str, bool, int]]] = None,
+                 cluster_qos_port: Optional[int] = None,
                  ssl: bool = False,
                  ssl_cert: Optional[str] = None,
                  ssl_key: Optional[str] = None,
@@ -1445,6 +1446,7 @@ class NFSServiceSpec(ServiceSpec):
         self.kmip_key = kmip_key
         self.kmip_ca_cert = kmip_ca_cert
         self.cluster_qos_config = cluster_qos_config
+        self.cluster_qos_port = cluster_qos_port
         self.kmip_host_list: list[Dict[str, Union[str, int]]] = []
         if kmip_host_list:
             for host_obj in kmip_host_list:
@@ -1464,9 +1466,9 @@ class NFSServiceSpec(ServiceSpec):
         self.tls_min_version = tls_min_version
 
     def get_port_start(self) -> List[int]:
-        if self.port:
-            return [self.port]
-        return []
+        if not self.port:
+            return []
+        return [self.port, self.cluster_qos_port or 31311]
 
     def rados_config_name(self):
         # type: () -> str
