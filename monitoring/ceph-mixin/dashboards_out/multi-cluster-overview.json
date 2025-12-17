@@ -363,7 +363,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "count(ALERTS{alertstate=\"firing\", cluster=~\"$Cluster\"})",
+               "expr": "count(ALERTS{alertstate=\"firing\", cluster=~\"$Cluster|\"})",
                "format": "table",
                "hide": false,
                "instant": true,
@@ -543,7 +543,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "count(ceph_health_status{cluster=~\"$Cluster\"}) or vector(0)",
+               "expr": "count(ceph_health_status{cluster=~\"$Cluster|\"}) or vector(0)",
                "format": "table",
                "hide": false,
                "instant": true,
@@ -612,7 +612,7 @@
          "targets": [
             {
                "datasource": "${DS_PROMETHEUS}",
-               "expr": "sum(ceph_cluster_total_used_bytes{cluster=~\"$Cluster\"}) / sum(ceph_cluster_total_bytes{cluster=~\"$Cluster\"})",
+               "expr": "sum(ceph_cluster_total_used_bytes{cluster=~\"$Cluster|\"}) / sum(ceph_cluster_total_bytes{cluster=~\"$Cluster|\"})",
                "format": "time_series",
                "instant": true,
                "intervalFactor": 1,
@@ -675,7 +675,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(ceph_cluster_total_bytes{cluster=~\"$Cluster\"})",
+               "expr": "sum(ceph_cluster_total_bytes{cluster=~\"$Cluster|\"})",
                "format": "table",
                "hide": false,
                "instant": false,
@@ -741,7 +741,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "count(ceph_osd_metadata{cluster=~\"$Cluster\"})",
+               "expr": "count(ceph_osd_metadata{cluster=~\"$Cluster|\"})",
                "format": "table",
                "hide": false,
                "instant": false,
@@ -807,7 +807,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "count(sum by (hostname) (ceph_osd_metadata{cluster=~\"$Cluster\"}))",
+               "expr": "count(sum by (hostname) (ceph_osd_metadata{cluster=~\"$Cluster|\"}))",
                "format": "table",
                "hide": false,
                "instant": false,
@@ -873,7 +873,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(irate(ceph_pool_wr{cluster=~\"$Cluster\"}[$__interval]))",
+               "expr": "sum(irate(ceph_pool_wr{cluster=~\"$Cluster|\"}[$__interval]))",
                "format": "time_series",
                "hide": false,
                "instant": false,
@@ -888,7 +888,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(irate(ceph_pool_rd{cluster=~\"$Cluster\"}[$__interval]))",
+               "expr": "sum(irate(ceph_pool_rd{cluster=~\"$Cluster|\"}[$__interval]))",
                "format": "time_series",
                "hide": false,
                "intervalFactor": 1,
@@ -952,7 +952,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "avg(ceph_osd_apply_latency_ms{cluster=~\"$Cluster\"})",
+               "expr": "avg(ceph_osd_apply_latency_ms{cluster=~\"$Cluster|\"})",
                "format": "time_series",
                "hide": false,
                "instant": false,
@@ -967,7 +967,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "avg(ceph_osd_commit_latency_ms{cluster=~\"$Cluster\"})",
+               "expr": "avg(ceph_osd_commit_latency_ms{cluster=~\"$Cluster|\"})",
                "format": "time_series",
                "hide": false,
                "intervalFactor": 1,
@@ -1035,7 +1035,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "count(ALERTS{alertstate=\"firing\", cluster=~\"$Cluster\"}) or vector(0)",
+               "expr": "count(ALERTS{alertstate=\"firing\", cluster=~\"$Cluster|\"}) or vector(0)",
                "format": "table",
                "hide": false,
                "instant": true,
@@ -1101,7 +1101,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(ceph_cluster_total_used_bytes{cluster=~\"$Cluster\"})",
+               "expr": "sum(ceph_cluster_total_used_bytes{cluster=~\"$Cluster|\"})",
                "format": "table",
                "hide": false,
                "instant": false,
@@ -1231,7 +1231,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "count(ceph_pool_metadata{cluster=~\"$Cluster\"})",
+               "expr": "count(ceph_pool_metadata{cluster=~\"$Cluster|\"})",
                "format": "table",
                "hide": false,
                "instant": false,
@@ -1297,7 +1297,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(irate(ceph_pool_rd_bytes{cluster=~\"$Cluster\"}[$__interval]))",
+               "expr": "sum(irate(ceph_pool_rd_bytes{cluster=~\"$Cluster|\"}[$__interval]))",
                "format": "time_series",
                "hide": false,
                "instant": false,
@@ -1312,7 +1312,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(irate(ceph_pool_wr_bytes{cluster=~\"$Cluster\"}[$__interval]))",
+               "expr": "sum(irate(ceph_pool_wr_bytes{cluster=~\"$Cluster|\"}[$__interval]))",
                "format": "time_series",
                "hide": false,
                "intervalFactor": 1,
@@ -1376,7 +1376,7 @@
                   "uid": "${DS_PROMETHEUS}"
                },
                "exemplar": false,
-               "expr": "sum(irate(ceph_osd_recovery_ops{cluster=~\"$Cluster\"}[$__interval]))",
+               "expr": "sum(irate(ceph_osd_recovery_ops{cluster=~\"$Cluster|\"}[$__interval]))",
                "format": "time_series",
                "hide": false,
                "instant": false,
@@ -1498,7 +1498,7 @@
                "targets": [
                   {
                      "datasource": "${DS_PROMETHEUS}",
-                     "expr": "count(ALERTS{alertstate=\"firing\",severity=\"critical\", cluster=~\"$Cluster\"}) OR vector(0)",
+                     "expr": "count(ALERTS{alertstate=\"firing\",severity=\"critical\", cluster=~\"$Cluster|\"}) OR vector(0)",
                      "format": "time_series",
                      "instant": true,
                      "intervalFactor": 1,
@@ -1508,7 +1508,7 @@
                   },
                   {
                      "datasource": "${DS_PROMETHEUS}",
-                     "expr": "count(ALERTS{alertstate=\"firing\",severity=\"warning\", cluster=~\"$Cluster\"}) OR vector(0)",
+                     "expr": "count(ALERTS{alertstate=\"firing\",severity=\"warning\", cluster=~\"$Cluster|\"}) OR vector(0)",
                      "format": "time_series",
                      "instant": true,
                      "intervalFactor": 1,
@@ -1585,7 +1585,7 @@
                         "uid": "${DS_PROMETHEUS}"
                      },
                      "exemplar": false,
-                     "expr": "ALERTS{alertstate=\"firing\", cluster=~\"$cluster\", }",
+                     "expr": "ALERTS{alertstate=\"firing\", cluster=~\"$Cluster|\"}",
                      "format": "table",
                      "hide": false,
                      "instant": true,
@@ -1956,7 +1956,7 @@
                "targets": [
                   {
                      "datasource": "$datasource",
-                     "expr": "topk(10, ceph_pool_bytes_used{cluster=~\"$cluster\", }/ceph_pool_max_avail{cluster=~\"$cluster\", } * on(pool_id, cluster) group_left(instance, name) ceph_pool_metadata{cluster=~\"$cluster\", })",
+                     "expr": "topk(10, ceph_pool_bytes_used{cluster=~\"$Cluster|\"}/ceph_pool_max_avail{cluster=~\"$Cluster|\"} * on(pool_id, cluster) group_left(instance, name) ceph_pool_metadata{cluster=~\"$Cluster|\"})",
                      "format": "time_series",
                      "instant": false,
                      "intervalFactor": 1,

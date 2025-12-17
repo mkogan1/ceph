@@ -130,14 +130,14 @@
          ],
          "targets": [
             {
-               "expr": "sum(rate(ceph_objecter_op_r{ceph_daemon=~\"($mds_servers).*\", cluster=~\"$cluster\", }[$__rate_interval]))",
+               "expr": "sum(rate(ceph_objecter_op_r{ceph_daemon=~\"($mds_servers).*\", cluster=~\"$cluster|\", }[$__rate_interval]))",
                "format": "time_series",
                "intervalFactor": 1,
                "legendFormat": "Read Ops",
                "refId": "A"
             },
             {
-               "expr": "sum(rate(ceph_objecter_op_w{ceph_daemon=~\"($mds_servers).*\", cluster=~\"$cluster\", }[$__rate_interval]))",
+               "expr": "sum(rate(ceph_objecter_op_w{ceph_daemon=~\"($mds_servers).*\", cluster=~\"$cluster|\", }[$__rate_interval]))",
                "format": "time_series",
                "intervalFactor": 1,
                "legendFormat": "Write Ops",
@@ -216,7 +216,7 @@
          "seriesOverrides": [ ],
          "targets": [
             {
-               "expr": "ceph_mds_server_handle_client_request{ceph_daemon=~\"($mds_servers).*\", cluster=~\"$cluster\", }",
+               "expr": "ceph_mds_server_handle_client_request{ceph_daemon=~\"($mds_servers).*\", cluster=~\"$cluster|\", }",
                "format": "time_series",
                "intervalFactor": 1,
                "legendFormat": "{{ceph_daemon}}",
@@ -280,7 +280,7 @@
             "multi": false,
             "name": "mds_servers",
             "options": [ ],
-            "query": "label_values(ceph_mds_inodes{cluster=~\"$cluster\", }, ceph_daemon)",
+            "query": "label_values(ceph_mds_inodes{cluster=~\"$cluster|\", }, ceph_daemon)",
             "refresh": 1,
             "regex": "",
             "sort": 1,
