@@ -98,7 +98,7 @@ class EventService(EventGeneric):
                 "error_code": alert_subject,  # the same as body.code above
                 "software": {
                     "diagnostic_provided": True,
-                    "ibm_ceph_version": "9.0.0" if self.agent.target_space == "prod" else "8.0.0"
+                    "ibm_ceph_version": "9.9.0.0" if self.agent.target_space == "prod" else "8.0.0"
                 }
             }
         } )
