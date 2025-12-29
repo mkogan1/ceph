@@ -281,6 +281,10 @@ if(WITH_RADOSGW_D4N)
         driver/d4n/d4n_directory.cc
         driver/d4n/d4n_policy.cc
         driver/d4n/rgw_sal_d4n.cc)
+  # Add io_uring support for SSD cache backend if available
+  if(WITH_LIBURING)
+    find_package(uring REQUIRED)
+  endif()
 endif()
 
 add_library(rgw_common STATIC ${librgw_common_srcs})
@@ -393,6 +397,10 @@ if(WITH_RADOSGW_DAOS)
   target_link_libraries(rgw_common PRIVATE daos dfs ds3 uuid duns)
   target_include_directories(rgw_common PRIVATE ${PC_DAOS_INCLUDEDIR} )
   link_directories( ${PC_DAOS_LIBRARY_DIRS} )
+endif()
+
+if(WITH_RADOSGW_D4N AND WITH_LIBURING)
+  target_link_libraries(rgw_common PRIVATE uring::uring)
 endif()
 
 set(rgw_a_srcs
