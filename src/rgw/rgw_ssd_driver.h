@@ -1,8 +1,27 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:nil -*-
+// vim: ts=8 sw=2 sts=2 expandtab ft=cpp
+
 #pragma once
 
 #include <aio.h>
 #include "rgw_common.h"
 #include "rgw_cache_driver.h"
+
+#if defined(HAVE_LIBURING)
+#include <liburing.h>
+
+namespace rgw { namespace cache {
+
+// Alignment for O_DIRECT I/O (typically 512 or 4096 bytes for modern devices)
+constexpr size_t IO_BUFFER_ALIGNMENT = 4096;
+
+// Round up size to alignment boundary
+inline size_t iouring_align_size(size_t size, size_t alignment = IO_BUFFER_ALIGNMENT) {
+  return (size + alignment - 1) & ~(alignment - 1);
+}
+
+} } // namespace rgw::cache
+#endif // HAVE_LIBURING
 
 namespace rgw { namespace cache {
 
@@ -41,6 +60,15 @@ private:
   std::mutex cache_lock;
   bool admin;
 
+  // io backend selection - true = io_uring, false = libaio
+  bool use_io_uring = false;
+
+#if defined(HAVE_LIBURING)
+  int64_t IoUringQueueDepth;  // set from ceph.conf in SSDDriver::initialize()
+
+  int init_per_thread_uring(const DoutPrefixProvider* dpp, struct io_uring** ring_out) const;
+#endif
+
   struct libaio_read_handler {
     rgw::Aio* throttle = nullptr;
     rgw::AioResult& r;
@@ -62,38 +90,69 @@ private:
     }
   };
 
+#if defined(HAVE_LIBURING)
+
+  // async read operation using io_uring
+  struct IoUringAsyncReadOp {
+    bufferlist result;
+    int fd = -1;
+    off_t offset = 0;
+    size_t length = 0;
+    void* buffer = nullptr;
+    using Signature = void(boost::system::error_code, bufferlist);
+    using Completion = ceph::async::Completion<Signature, IoUringAsyncReadOp>;
+
+    int prepare_io_uring_read_op(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, size_t read_len, void* arg, struct io_uring* ring);
+    static void io_uring_read_completion(struct io_uring_cqe* cqe, IoUringAsyncReadOp* op);
+
+    template <typename Executor1, typename CompletionHandler>
+    static auto create(const Executor1& ex1, CompletionHandler&& handler);
+  };
+
+  // async write operation using io_uring
+  class IoUringAsyncWriteRequest {
+  public:
+    const DoutPrefixProvider* dpp;
+    std::string file_path;
+    std::string temp_file_path;
+    void* data;
+    int fd;
+    size_t length;
+    SSDDriver *priv_data;
+    rgw::sal::Attrs attrs;
+
+    using Signature = void(boost::system::error_code);
+    using Completion = ceph::async::Completion<Signature, IoUringAsyncWriteRequest>;
+
+    int prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path, struct io_uring* ring);
+    static void io_uring_write_completion(struct io_uring_cqe* cqe, IoUringAsyncWriteRequest* op);
+
+    template <typename Executor1, typename CompletionHandler>
+    static auto create(const Executor1& ex1, CompletionHandler&& handler);
+
+    IoUringAsyncWriteRequest() : dpp(nullptr), data(nullptr), fd(-1), length(0), priv_data(nullptr) {}
+    ~IoUringAsyncWriteRequest() = default;
+  };
+#endif // HAVE_LIBURING
+
   // unique_ptr with custom deleter for struct aiocb
   struct libaio_aiocb_deleter {
     void operator()(struct aiocb* c) {
       if(c->aio_fildes > 0) {
-	      TEMP_FAILURE_RETRY(::close(c->aio_fildes));
+        TEMP_FAILURE_RETRY(::close(c->aio_fildes));
       }
       c->aio_buf = nullptr;
       delete c;
     }
   };
 
-  template <typename Executor, typename CompletionToken>
-    auto get_async(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
-		    off_t read_ofs, off_t read_len, CompletionToken&& token);
-  
-  template <typename Executor, typename CompletionToken>
-  void put_async(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
-                  const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, CompletionToken&& token);
-  
-  rgw::Aio::OpFunc ssd_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
-				  off_t read_ofs, off_t read_len, const std::string& key);
-
-  rgw::Aio::OpFunc ssd_cache_write_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
-                                const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, const std::string& key);
-
   using unique_aio_cb_ptr = std::unique_ptr<struct aiocb, libaio_aiocb_deleter>;
 
-  struct AsyncReadOp {
+  struct LibaioAsyncReadOp {
     bufferlist result;
     unique_aio_cb_ptr aio_cb;
     using Signature = void(boost::system::error_code, bufferlist);
-    using Completion = ceph::async::Completion<Signature, AsyncReadOp>;
+    using Completion = ceph::async::Completion<Signature, LibaioAsyncReadOp>;
 
     int prepare_libaio_read_op(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, off_t read_len, void* arg);
     static void libaio_cb_aio_dispatch(sigval sigval);
@@ -102,26 +161,60 @@ private:
     static auto create(const Executor1& ex1, CompletionHandler&& handler);
   };
 
-  struct AsyncWriteRequest {
+  struct LibaioAsyncWriteRequest {
     const DoutPrefixProvider* dpp;
-	  std::string file_path;
+    std::string file_path;
     std::string temp_file_path;
-	  void *data;
-	  int fd;
-	  unique_aio_cb_ptr cb;
+    void *data;
+    int fd;
+    unique_aio_cb_ptr cb;
     SSDDriver *priv_data;
     rgw::sal::Attrs attrs;
 
     using Signature = void(boost::system::error_code);
-    using Completion = ceph::async::Completion<Signature, AsyncWriteRequest>;
+    using Completion = ceph::async::Completion<Signature, LibaioAsyncWriteRequest>;
 
-	  int prepare_libaio_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path);
+    int prepare_libaio_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path);
     static void libaio_write_cb(sigval sigval);
 
     template <typename Executor1, typename CompletionHandler>
     static auto create(const Executor1& ex1, CompletionHandler&& handler);
   };
+
+#if defined(HAVE_LIBURING)
+  // io_uring async operations
+  template <typename Executor, typename CompletionToken>
+  auto get_async_uring(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                 off_t read_ofs, off_t read_len, CompletionToken&& token);
+
+  template <typename Executor, typename CompletionToken>
+  void put_async_uring(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                 const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, CompletionToken&& token);
+#endif
+
+  // libaio async operations
+  template <typename Executor, typename CompletionToken>
+  auto get_async_libaio(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                 off_t read_ofs, off_t read_len, CompletionToken&& token);
+
+  template <typename Executor, typename CompletionToken>
+  void put_async_libaio(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                 const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, CompletionToken&& token);
+
+  // Dispatch to appropriate backend based on use_io_uring flag
+  template <typename Executor, typename CompletionToken>
+  auto get_async(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                 off_t read_ofs, off_t read_len, CompletionToken&& token);
+
+  template <typename Executor, typename CompletionToken>
+  void put_async(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                 const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, CompletionToken&& token);
+
+  rgw::Aio::OpFunc ssd_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
+                                     off_t read_ofs, off_t read_len, const std::string& key);
+
+  rgw::Aio::OpFunc ssd_cache_write_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
+                                      const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, const std::string& key);
 };
 
 } } // namespace rgw::cache
-
