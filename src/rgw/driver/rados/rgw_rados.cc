@@ -6558,10 +6558,8 @@ int RGWRados::Object::Delete::delete_obj(optional_yield y,
     if (add_log) {
       r = add_datalog_entry(dpp, store->svc.datalog_rados,
 			    target->get_bucket_info(), bs->shard_id, y);
-      if (r < 0) {
-        ldpp_dout(dpp, 0) << "failed to write datalog for object: r=" << r << dendl;
-        return r;
-      }
+      ldpp_dout(dpp, 0) << "failed to write datalog for object: r=" << r << dendl;
+      return r;
     }
 
     return 0;
@@ -9234,11 +9232,6 @@ int RGWRados::apply_olh_log(const DoutPrefixProvider *dpp,
       ldpp_dout(dpp, 20) << "olh_log_entry: epoch=" << iter->first << " op=" << (int)entry.op
                      << " key=" << entry.key.name << "[" << entry.key.instance << "] "
                      << (entry.delete_marker ? "(delete)" : "") << dendl;
-
-      if (link_epoch == iter->first)
-        ldpp_dout(dpp, 1) << "apply_olh_log epoch collision detected for " << entry.key
-                          << "; incoming op: " << entry.op << "(" << entry.op_tag << ")" << dendl;
-
       switch (entry.op) {
       case CLS_RGW_OLH_OP_REMOVE_INSTANCE:
         remove_instances.push_back(entry.key);
