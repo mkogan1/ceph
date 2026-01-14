@@ -520,7 +520,6 @@ local timeSeries = import 'timeseries_panel.libsonnet';
     datasource=null,
     description=null,
     sort=null,
-    styles='',
     transform=null,
     pluginVersion='9.1.3',
     options=null,
@@ -535,7 +534,6 @@ local timeSeries = import 'timeseries_panel.libsonnet';
     g.tablePanel.new(datasource=datasource,
                      description=description,
                      sort=sort,
-                     styles=styles,
                      title=title,
                      transform=transform) + {
       pluginVersion: pluginVersion,
