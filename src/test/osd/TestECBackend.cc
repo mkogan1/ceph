@@ -509,6 +509,13 @@ public:
 
   }
 
+  void log_stats(hobject_t soid,
+                 object_stat_sum_t stats,
+                 bool delta,
+                 ObjectStore::Transaction& t) override {
+
+  }
+
   bool is_missing_object(const hobject_t &oid) const override {
     return false;
   }
