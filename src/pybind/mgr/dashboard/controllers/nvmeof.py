@@ -647,6 +647,7 @@ else:
                 "no_auto_visible": Param(
                     bool,
                     "Namespace will be visible only for the allowed hosts"
+                ),
                 "gw_group": Param(str, "NVMeoF gateway group", True, None),
                 "server_address": Param(str, "Target gateway address", True, None),
             },
