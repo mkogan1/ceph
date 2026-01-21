@@ -154,6 +154,7 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                 ingress_mode: Optional[IngressType] = None,
                                 port: Optional[int] = None,
                                 enable_virtual_server: bool = False,
+                                enable_nfsv3: bool = False,
                                 inbuf: Optional[str] = None
                                 ) -> None:
         """Create an NFS Cluster"""
@@ -173,7 +174,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                            enable_virtual_server=enable_virtual_server,
                                            kmip_cert=kmip_cert, kmip_key=kmip_key,
                                            kmip_ca_cert=kmip_ca_cert, kmip_host_list=kmip_host_list,
-                                           cluster_qos_config=cluster_qos_config)
+                                           cluster_qos_config=cluster_qos_config,
+                                           enable_nfsv3=enable_nfsv3)
 
     @CLICommand('nfs cluster rm', perm='rw')
     @object_format.EmptyResponder()

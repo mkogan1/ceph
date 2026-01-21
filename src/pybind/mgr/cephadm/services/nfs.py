@@ -226,7 +226,8 @@ class NFSService(CephService):
                 "cluster_id": self.mgr._cluster_fsid,
                 "enable_virtual_server": str(spec.enable_virtual_server).lower(),
                 "kmip_addrs": spec.kmip_host_list if add_kmip_block else None,
-                "use_old_nodeid": False if nodeid.isdigit() else True
+                "use_old_nodeid": False if nodeid.isdigit() else True,
+                "protocols": "3, 4" if spec.enable_nfsv3 else "4"
             }
             if spec.enable_haproxy_protocol:
                 context["haproxy_hosts"] = self._haproxy_hosts()

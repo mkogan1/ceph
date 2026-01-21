@@ -161,6 +161,7 @@ class NFSCluster:
             kmip_ca_cert: Optional[str] = None,
             kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
             cluster_qos_config: Optional[Dict[str, Union[str, bool, int]]] = None,
+            enable_nfsv3: bool = False,
     ) -> None:
         if not port:
             port = 2049   # default nfs port
@@ -199,7 +200,8 @@ class NFSCluster:
                                   kmip_key=kmip_key,
                                   kmip_ca_cert=kmip_ca_cert,
                                   kmip_host_list=kmip_host_list,
-                                  cluster_qos_config=cluster_qos_config)
+                                  cluster_qos_config=cluster_qos_config,
+                                  enable_nfsv3=enable_nfsv3)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
             ispec = IngressSpec(service_type='ingress',
@@ -223,7 +225,8 @@ class NFSCluster:
                                   kmip_key=kmip_key,
                                   kmip_ca_cert=kmip_ca_cert,
                                   kmip_host_list=kmip_host_list,
-                                  cluster_qos_config=cluster_qos_config)
+                                  cluster_qos_config=cluster_qos_config,
+                                  enable_nfsv3=enable_nfsv3)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
         log.debug("Successfully deployed nfs daemons with cluster id %s and placement %s",
@@ -253,6 +256,7 @@ class NFSCluster:
             kmip_ca_cert: Optional[str] = None,
             kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
             cluster_qos_config: Optional[Dict[str, Union[str, bool, int]]] = None,
+            enable_nfsv3: bool = False,
     ) -> None:
         try:
             if virtual_ip:
@@ -287,7 +291,8 @@ class NFSCluster:
                     kmip_key,
                     kmip_ca_cert,
                     kmip_host_list,
-                    cluster_qos_config=cluster_qos_config
+                    cluster_qos_config=cluster_qos_config,
+                    enable_nfsv3
                 )
                 return
             raise NonFatalError(f"{cluster_id} cluster already exists")

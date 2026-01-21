@@ -1226,6 +1226,7 @@ class NFSServiceSpec(ServiceSpec):
                  kmip_ca_cert: Optional[str] = None,
                  kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
                  cluster_qos_config: Optional[Dict[str, Union[str, bool, int]]] = None,
+                 enable_nfsv3: bool = False,
                  ):
         assert service_type == 'nfs'
         super(NFSServiceSpec, self).__init__(
@@ -1250,6 +1251,7 @@ class NFSServiceSpec(ServiceSpec):
         self.idmap_conf = idmap_conf
         self.enable_nlm = enable_nlm
         self.enable_virtual_server = enable_virtual_server
+        self.enable_nfsv3 = enable_nfsv3
         self.kmip_cert = kmip_cert
         self.kmip_key = kmip_key
         self.kmip_ca_cert = kmip_ca_cert
