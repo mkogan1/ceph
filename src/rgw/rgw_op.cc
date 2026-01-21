@@ -4626,17 +4626,17 @@ void RGWPutObj::execute(optional_yield y)
   } /* !append */
   tracepoint(rgw_op, before_data_transfer, s->req_id.c_str());
   do {
-    bufferlist data;
+    auto data = std::make_unique<bufferlist>();
     if (fst > lst)
       break;
     if (copy_source.empty()) {
-      len = get_data(data);
+      len = get_data(*data);
     } else {
       off_t cur_lst = min<off_t>(fst + s->cct->_conf->rgw_max_chunk_size - 1, lst);
-      op_ret = get_data(fst, cur_lst, data);
+      op_ret = get_data(fst, cur_lst, *data);
       if (op_ret < 0)
         return;
-      len = data.length();
+      len = data->length();
       s->content_length += len;
       fst += len;
     }
@@ -4649,10 +4649,10 @@ void RGWPutObj::execute(optional_yield y)
     }
 
     if (need_calc_md5) {
-      hash.Update((const unsigned char *)data.c_str(), data.length());
+      hash.Update((const unsigned char *)data->c_str(), data->length());
     }
 
-    op_ret = filter->process(std::move(data), ofs);
+    op_ret = filter->process(std::move(*data), ofs);
     if (op_ret < 0) {
       ldpp_dout(this, 20) << "processor->process() returned ret="
           << op_ret << dendl;
