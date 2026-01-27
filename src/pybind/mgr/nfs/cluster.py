@@ -292,7 +292,7 @@ class NFSCluster:
                     kmip_ca_cert,
                     kmip_host_list,
                     cluster_qos_config=cluster_qos_config,
-                    enable_nfsv3
+                    enable_nfsv3=enable_nfsv3
                 )
                 return
             raise NonFatalError(f"{cluster_id} cluster already exists")
