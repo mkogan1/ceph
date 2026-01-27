@@ -40,8 +40,8 @@ class DefaultImages(Enum):
                                      'jaeger_collector')
     JAEGER_AGENT = _create_image('quay.io/jaegertracing/jaeger-agent:1.29', 'jaeger_agent')
     JAEGER_QUERY = _create_image('quay.io/jaegertracing/jaeger-query:1.29', 'jaeger_query')
-    SAMBA = _create_image('cp.icr.io/cp/ibm-ceph/samba-server-rhel9:v9.0', 'samba')
-    SAMBA_METRICS = _create_image('cp.icr.io/cp/ibm-ceph/samba-metrics-rhel9:v9.0', 'samba_metrics')
+    SAMBA = _create_image('cp.icr.io/cp/ibm-ceph/samba-server-rhel10:v9.0', 'samba')
+    SAMBA_METRICS = _create_image('cp.icr.io/cp/ibm-ceph/samba-metrics-rhel10:v9.0', 'samba_metrics')
     NGINX = _create_image('registry.redhat.io/rhel9/nginx-124:latest', 'nginx')
     OAUTH2_PROXY = _create_image('registry.redhat.io/rhceph/oauth2-proxy-rhel9:v7.6.0', 'oauth2_proxy')
 
