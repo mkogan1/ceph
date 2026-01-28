@@ -26,7 +26,7 @@ from orchestrator import OrchestratorError, HostSpec, OrchestratorEvent, service
 from cephadm.services.cephadmservice import CephadmDaemonDeploySpec
 from mgr_util import parse_combined_pem_file
 
-from .utils import resolve_ip, SpecialHostLabels
+from .utils import get_node_proxy_status_value, resolve_ip, SpecialHostLabels
 from .migrations import queue_migrate_nfs_spec, queue_migrate_rgw_spec
 from .schedule import DaemonPlacement
 
@@ -1968,6 +1968,18 @@ class NodeProxyCache:
         self.keyrings[host] = key
         self.mgr.set_store(f'{NODE_PROXY_CACHE_PREFIX}/keyrings', json.dumps(self.keyrings))
 
+    def _get_health_value(self, status: Any) -> str:
+        return get_node_proxy_status_value(status, 'health', lower=True)
+
+    def _has_health_value(self, statuses: ValuesView, health_value: str) -> bool:
+        return any([self._get_health_value(status) == health_value for status in statuses])
+
+    def _is_error_status(self, statuses: ValuesView) -> bool:
+        return self._has_health_value(statuses, 'error')
+
+    def _is_unknown_status(self, statuses: ValuesView) -> bool:
+        return self._has_health_value(statuses, 'unknown') and not self._is_error_status(statuses)
+
     def fullreport(self, **kw: Any) -> Dict[str, Any]:
         """
         Retrieves the full report for the specified hostname.
@@ -2005,12 +2017,6 @@ class NodeProxyCache:
         hostname = kw.get('hostname')
         hosts = [hostname] if hostname else self.data.keys()
 
-        def is_unknown(statuses: ValuesView) -> bool:
-            return any([status['status']['health'].lower() == 'unknown' for status in statuses]) and not is_error(statuses)
-
-        def is_error(statuses: ValuesView) -> bool:
-            return any([status['status']['health'].lower() == 'error' for status in statuses])
-
         _result: Dict[str, Any] = {}
 
         for host in hosts:
@@ -2022,9 +2028,9 @@ class NodeProxyCache:
                 _sys_id_res: List[str] = []
                 for element in details.values():
                     values = element.values()
-                    if is_error(values):
+                    if self._is_error_status(values):
                         state = 'error'
-                    elif is_unknown(values) or not values:
+                    elif self._is_unknown_status(values) or not values:
                         state = 'unknown'
                     else:
                         state = 'ok'
@@ -2088,19 +2094,19 @@ class NodeProxyCache:
 
     def get_critical_from_host(self, hostname: str) -> Dict[str, Any]:
         results: Dict[str, Any] = {}
-        for sys_id, component in self.data[hostname]['status'].items():
-            for component_name, data_component in component.items():
-                if component_name not in results.keys():
-                    results[component_name] = {}
-                for member, data_member in data_component.items():
-                    if component_name == 'power':
-                        data_member['status']['health'] = 'critical'
-                        data_member['status']['state'] = 'unplugged'
-                    if component_name == 'memory':
-                        data_member['status']['health'] = 'critical'
-                        data_member['status']['state'] = 'errors detected'
-                    if data_member['status']['health'].lower() != 'ok':
-                        results[component_name][member] = data_member
+
+        for component, component_data in self.data[hostname]['status'].items():
+            for sys_id, data_sys in component_data.items():
+                if sys_id not in results.keys():
+                    results[sys_id] = {}
+                if component not in results[sys_id].keys():
+                    results[sys_id][component] = {}
+                for member_name, member_data in data_sys.items():
+                    _health = self._get_health_value(member_data)
+                    if _health and _health != 'ok':
+                        if member_name not in results.keys():
+                            results[sys_id][component][member_name] = {}
+                        results[sys_id][component][member_name] = member_data
         return results
 
     def criticals(self, **kw: Any) -> Dict[str, Any]:
