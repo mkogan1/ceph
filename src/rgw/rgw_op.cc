@@ -4625,8 +4625,8 @@ void RGWPutObj::execute(optional_yield y)
     }
   } /* !append */
   tracepoint(rgw_op, before_data_transfer, s->req_id.c_str());
+  bufferlist data;
   do {
-    bufferlist data;
     if (fst > lst)
       break;
     if (copy_source.empty()) {
