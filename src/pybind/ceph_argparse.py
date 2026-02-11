@@ -1658,6 +1658,23 @@ def send_command(cluster,
             ret, outbuf, outs = \
                 filesystem.mds_command(mds_spec, cmd, inbuf)
             filesystem.shutdown()
+        elif target[0] == 'client' or (target[0] not in ('osd', 'mgr', 'mon-mgr', 'pg', 'mon', 'mds')):
+            # For client.* and other daemon types (e.g. rgw), use tell command
+            # via mon (tell is a mon command that forwards to daemons)
+            daemon_name = '{0}.{1}'.format(*target)
+            # Tell expects args as list - pass the full JSON so daemon receives
+            # it in same format as direct osd_command
+            tell_args = [cmd] if cmd else []
+            tell_cmd = json.dumps({
+                'prefix': 'tell',
+                'target': daemon_name,
+                'args': tell_args,
+            })
+            if verbose:
+                print('submit {0} to {1} via tell'.format(cmd, daemon_name),
+                      file=sys.stderr)
+            ret, outbuf, outs = run_in_thread(
+                cluster.mon_command, tell_cmd, inbuf, timeout=timeout)
         else:
             raise ArgumentValid("Bad target type '{0}'".format(target[0]))
 

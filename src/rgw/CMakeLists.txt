@@ -371,6 +371,7 @@ if(WITH_RADOSGW_RADOS)
 	  cls_version_client
 	  librados
 	  libneorados
+	  heap_profiler
   )
 endif()
 
