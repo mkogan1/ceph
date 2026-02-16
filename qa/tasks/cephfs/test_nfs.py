@@ -697,7 +697,7 @@ class TestNFS(MgrTestCase):
         print(f'info {info_output}')
         info_ip = info_output[self.cluster_id].get('backend', [])[0].pop("ip")
         # Pop placement since it may vary by test environment
-        info_placement = info_output[self.cluster_id].pop("placement", {})
+        info_output[self.cluster_id].pop("placement", {})
         host_details = {
             self.cluster_id: {
                 'backend': [
