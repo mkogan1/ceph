@@ -196,13 +196,16 @@ private:
     int fd = -1;
     off_t offset = 0;
     size_t length = 0;
+    off_t orig_offset = 0;    // original requested offset (before O_DIRECT alignment)
+    size_t orig_length = 0;   // original requested length (before O_DIRECT alignment)
+    bool direct_io = false;   // whether O_DIRECT alignment was applied
     void* buffer = nullptr;
     BufferPool* buffer_pool = nullptr;
     using Signature = void(boost::system::error_code, bufferlist);
     using Completion = ceph::async::Completion<Signature, IoUringAsyncReadOp>;
 
     int prepare_io_uring_read_op(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, size_t read_len, void* arg, struct io_uring* ring);
-    static void io_uring_read_completion(struct io_uring_cqe* cqe, IoUringAsyncReadOp* op);
+    static boost::system::error_code io_uring_read_completion(struct io_uring_cqe* cqe, IoUringAsyncReadOp* op);
 
     template <typename Executor1, typename CompletionHandler>
     static auto create(const Executor1& ex1, CompletionHandler&& handler);
@@ -217,6 +220,8 @@ private:
     void* data;
     int fd;
     size_t length;
+    size_t orig_length = 0;   // original (unaligned) data length for ftruncate
+    bool direct_io = false;   // whether O_DIRECT alignment was applied
     SSDDriver *priv_data;
     rgw::sal::Attrs attrs;
     BufferPool* buffer_pool;
@@ -225,12 +230,12 @@ private:
     using Completion = ceph::async::Completion<Signature, IoUringAsyncWriteRequest>;
 
     int prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path, struct io_uring* ring);
-    static void io_uring_write_completion(struct io_uring_cqe* cqe, IoUringAsyncWriteRequest* op);
+    static boost::system::error_code io_uring_write_completion(struct io_uring_cqe* cqe, IoUringAsyncWriteRequest* op);
 
     template <typename Executor1, typename CompletionHandler>
     static auto create(const Executor1& ex1, CompletionHandler&& handler);
 
-    IoUringAsyncWriteRequest() : dpp(nullptr), data(nullptr), fd(-1), length(0), priv_data(nullptr), buffer_pool(nullptr) {}
+    IoUringAsyncWriteRequest() : dpp(nullptr), data(nullptr), fd(-1), length(0), orig_length(0), direct_io(false), priv_data(nullptr), buffer_pool(nullptr) {}
     ~IoUringAsyncWriteRequest() = default;
   };
 #endif // HAVE_LIBURING

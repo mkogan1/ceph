@@ -695,14 +695,8 @@ auto SSDDriver::get_async_uring(const DoutPrefixProvider *dpp, const Executor& e
                   rc = io_uring_wait_cqe(ring, &cqe);
               }
               if (rc == 0) {
-                  int cqe_res = cqe->res;
-                  SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(cqe, &op);
+                  auto ec = SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(cqe, &op);
                   io_uring_cqe_seen(ring, cqe);
-                  // Propagate completion to handler
-                  boost::system::error_code ec;
-                  if (cqe_res < 0) {
-                      ec.assign(-cqe_res, boost::system::system_category());
-                  }
                   ceph::async::post(std::move(p), ec, std::move(op.result));
               } else {
                   // Error getting completion - clean up resources
@@ -794,14 +788,8 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
                   rc = io_uring_wait_cqe(ring, &cqe);
               }
               if (rc == 0) {
-                  int cqe_res = cqe->res;
-                  SSDDriver::IoUringAsyncWriteRequest::io_uring_write_completion(cqe, &op);
+                  auto ec = SSDDriver::IoUringAsyncWriteRequest::io_uring_write_completion(cqe, &op);
                   io_uring_cqe_seen(ring, cqe);
-                  // Propagate completion to handler
-                  boost::system::error_code ec;
-                  if (cqe_res < 0) {
-                      ec.assign(-cqe_res, boost::system::system_category());
-                  }
                   ceph::async::dispatch(std::move(p), ec);
               } else {
                   // Error getting completion - clean up resources
@@ -847,7 +835,7 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
 }
 
 // io_uring read completion handler
-void SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(struct io_uring_cqe* cqe, IoUringAsyncReadOp* op)
+boost::system::error_code SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(struct io_uring_cqe* cqe, IoUringAsyncReadOp* op)
 {
     boost::system::error_code ec;
     int ret = cqe->res;
@@ -856,7 +844,22 @@ void SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(struct io_uring_cqe
     }
     // If read was successful, append data to result bufferlist
     if (ret > 0 && op->buffer) {
-        op->result.append(static_cast<const char*>(op->buffer), ret);
+        if (op->direct_io && op->offset != op->orig_offset) {
+            // With O_DIRECT we may have read from an earlier aligned offset.
+            // Skip the leading padding bytes and trim to the originally requested length.
+            size_t skip = (size_t)(op->orig_offset - op->offset);
+            size_t available = (size_t)ret > skip ? (size_t)ret - skip : 0;
+            size_t to_copy = std::min(available, op->orig_length);
+            if (to_copy > 0) {
+                op->result.append(static_cast<const char*>(op->buffer) + skip, to_copy);
+            }
+        } else if (op->direct_io) {
+            // Offset was already aligned but we may have read more than requested
+            size_t to_copy = std::min((size_t)ret, op->orig_length);
+            op->result.append(static_cast<const char*>(op->buffer), to_copy);
+        } else {
+            op->result.append(static_cast<const char*>(op->buffer), ret);
+        }
     }
     // Resource cleanup
     if (op->fd >= 0) {
@@ -871,6 +874,7 @@ void SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(struct io_uring_cqe
         }
         op->buffer = nullptr;
     }
+    return ec;
 }
 
 // Prepare an io_uring read operation
@@ -886,80 +890,112 @@ int SSDDriver::IoUringAsyncReadOp::prepare_io_uring_read_op(
 
     // Use O_DIRECT when configured for better NVMe performance
     int open_flags = O_RDONLY;
-    if (dpp->get_cct()->_conf->rgw_d4n_io_uring_direct_io) {
+    direct_io = dpp->get_cct()->_conf->rgw_d4n_io_uring_direct_io;
+    if (direct_io) {
         open_flags |= O_DIRECT;
     }
 
     fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), open_flags));
     if (fd < 0) {
         // If O_DIRECT fails, retry without it (may fail on some filesystems)
-        if ((open_flags & O_DIRECT) && errno == EINVAL) {
+        if (direct_io && errno == EINVAL) {
             fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY));
+            if (fd >= 0) {
+                direct_io = false;
+            }
         }
         if (fd < 0) {
             ldpp_dout(dpp, 0) << "ERROR: IoUringAsyncReadOp::prepare_io_uring_read_op: open file failed, errno=" << errno << ", location='" << file_path << "'" << dendl;
             return -errno;
         }
     }
-    if (dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
+    if (!direct_io && dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
         posix_fadvise(fd, 0, 0, dpp->get_cct()->_conf->rgw_d4n_l1_fadvise);
 
-    // For O_DIRECT, we need aligned buffers - buffer_pool provides aligned memory
-    buffer = buffer_pool ? buffer_pool->allocate(read_len) : nullptr;
+    // Save original requested offset/length before alignment
+    orig_offset = read_ofs;
+    orig_length = read_len;
+
+    // For O_DIRECT, offset, length, and buffer must all be aligned
+    off_t aligned_ofs = read_ofs;
+    size_t aligned_len = read_len;
+    if (direct_io) {
+        aligned_ofs = read_ofs & ~(off_t)(IO_BUFFER_ALIGNMENT - 1);
+        off_t end = (off_t)(read_ofs + read_len);
+        off_t aligned_end = (off_t)align_size((size_t)end);
+        aligned_len = (size_t)(aligned_end - aligned_ofs);
+    }
+
+    buffer = buffer_pool ? buffer_pool->allocate(aligned_len) : nullptr;
     if (!buffer) {
-        // Fallback to aligned allocation if pool is unavailable
-        if (posix_memalign(&buffer, IO_BUFFER_ALIGNMENT, align_size(read_len)) != 0) {
+        if (posix_memalign(&buffer, IO_BUFFER_ALIGNMENT, align_size(aligned_len)) != 0) {
             ldpp_dout(dpp, 0) << "ERROR: IoUringAsyncReadOp::prepare_io_uring_read_op: memory allocation failed" << dendl;
             ::close(fd);
             return -ENOMEM;
         }
     }
-    offset = read_ofs;
-    length = read_len;
+    offset = aligned_ofs;
+    length = aligned_len;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
     if (!sqe) {
         ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_read_op: failed to get sqe" << dendl;
         ::close(fd);
         if (buffer_pool) {
-            buffer_pool->deallocate(buffer, read_len);
+            buffer_pool->deallocate(buffer, aligned_len);
         } else {
             free(buffer);
         }
         return -EAGAIN;
     }
-    io_uring_prep_read(sqe, fd, buffer, read_len, read_ofs);
+    io_uring_prep_read(sqe, fd, buffer, aligned_len, aligned_ofs);
     io_uring_sqe_set_data(sqe, arg);
     return 0;
 }
 
 // io_uring write completion handler
-void SSDDriver::IoUringAsyncWriteRequest::io_uring_write_completion(struct io_uring_cqe* cqe, IoUringAsyncWriteRequest* op)
+boost::system::error_code SSDDriver::IoUringAsyncWriteRequest::io_uring_write_completion(struct io_uring_cqe* cqe, IoUringAsyncWriteRequest* op)
 {
     boost::system::error_code ec;
     int ret = cqe->res;
     if (ret < 0) {
         ec.assign(-ret, boost::system::system_category());
-    }
-    int attr_ret = 0;
-    if (op->attrs.size() > 0) {
-        optional_yield y{null_yield};
-        attr_ret = op->priv_data->set_attrs(op->dpp, op->temp_file_path, op->attrs, y);
-        if (attr_ret < 0) {
-            ldpp_dout(op->dpp, 0) << "ERROR: io_uring_write_completion::set_attrs: failed to set attrs, ret = " << attr_ret << dendl;
-            ec.assign(-attr_ret, boost::system::system_category());
+        ldpp_dout(op->dpp, 0) << "ERROR: io_uring_write_completion: I/O write failed, ret=" << ret << dendl;
+        // Skip post-I/O work (set_attrs, rename) on write failure;
+        // fall through to resource cleanup below
+    } else {
+        // With O_DIRECT we wrote an aligned (possibly larger) length.
+        // Truncate the file to the real data size before rename.
+        if (op->direct_io && op->orig_length < op->length && op->fd >= 0) {
+            if (::ftruncate(op->fd, op->orig_length) < 0) {
+                ldpp_dout(op->dpp, 0) << "ERROR: io_uring_write_completion: ftruncate failed, errno=" << errno << dendl;
+                ec.assign(errno, boost::system::system_category());
+            }
         }
-    }
-    Partition partition_info = op->priv_data->get_current_partition_info(op->dpp);
-    efs::space_info space = efs::space(partition_info.location);
-    op->priv_data->set_free_space(op->dpp, space.available);
-    ldpp_dout(op->dpp, 20) << "INFO: io_uring_write_completion: new_path: " << op->file_path << dendl;
-    ldpp_dout(op->dpp, 20) << "INFO: io_uring_write_completion: old_path: " << op->temp_file_path << dendl;
-    ret = std::rename(op->temp_file_path.c_str(), op->file_path.c_str());
-    if (ret < 0) {
-        ret = errno;
-        ldpp_dout(op->dpp, 0) << "ERROR: put::rename: failed to rename file: " << ret << dendl;
-        ec.assign(-ret, boost::system::system_category());
+        int attr_ret = 0;
+        if (op->attrs.size() > 0) {
+            optional_yield y{null_yield};
+            attr_ret = op->priv_data->set_attrs(op->dpp, op->temp_file_path, op->attrs, y);
+            if (attr_ret < 0) {
+                ldpp_dout(op->dpp, 0) << "ERROR: io_uring_write_completion::set_attrs: failed to set attrs, ret = " << attr_ret << dendl;
+                if (!ec) {
+                    ec.assign(-attr_ret, boost::system::system_category());
+                }
+            }
+        }
+        Partition partition_info = op->priv_data->get_current_partition_info(op->dpp);
+        efs::space_info space = efs::space(partition_info.location);
+        op->priv_data->set_free_space(op->dpp, space.available);
+        ldpp_dout(op->dpp, 20) << "INFO: io_uring_write_completion: new_path: " << op->file_path << dendl;
+        ldpp_dout(op->dpp, 20) << "INFO: io_uring_write_completion: old_path: " << op->temp_file_path << dendl;
+        ret = std::rename(op->temp_file_path.c_str(), op->file_path.c_str());
+        if (ret < 0) {
+            ret = errno;
+            ldpp_dout(op->dpp, 0) << "ERROR: put::rename: failed to rename file: " << ret << dendl;
+            if (!ec) {
+                ec.assign(ret, boost::system::system_category());
+            }
+        }
     }
 
     if (op->fd >= 0) {
@@ -974,6 +1010,7 @@ void SSDDriver::IoUringAsyncWriteRequest::io_uring_write_completion(struct io_ur
         }
         op->data = nullptr;
     }
+    return ec;
 }
 
 // Prepare an io_uring write operation
@@ -984,7 +1021,8 @@ int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPre
 
     // Build open flags with optional O_DIRECT for NVMe optimization
     int open_flags = O_WRONLY | O_CREAT | O_TRUNC | dpp->get_cct()->_conf->rgw_d4n_l1_write_open_flags;
-    if (dpp->get_cct()->_conf->rgw_d4n_io_uring_direct_io) {
+    direct_io = dpp->get_cct()->_conf->rgw_d4n_io_uring_direct_io;
+    if (direct_io) {
         open_flags |= O_DIRECT;
     }
 
@@ -992,12 +1030,14 @@ int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPre
     if (fd < 0) {
         int saved_errno = errno;
         // If O_DIRECT fails, retry without it
-        if ((open_flags & O_DIRECT) && saved_errno == EINVAL) {
+        if (direct_io && saved_errno == EINVAL) {
             open_flags &= ~O_DIRECT;
+            direct_io = false;
             fd = TEMP_FAILURE_RETRY(::open(file_path.c_str(), open_flags, mode));
+            saved_errno = errno;
         }
         // directories might have been deleted by a parallel delete of the last version of an object
-        if (fd < 0 && errno == ENOENT) {
+        if (fd < 0 && saved_errno == ENOENT) {
             // retry after creating directories
             std::string dir_path = file_path;
             auto pos = dir_path.find_last_of('/');
@@ -1016,14 +1056,16 @@ int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPre
             return -errno;
         }
     }
-    if (dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
+    if (!direct_io && dpp->get_cct()->_conf->rgw_d4n_l1_fadvise != POSIX_FADV_NORMAL)
         posix_fadvise(fd, 0, 0, dpp->get_cct()->_conf->rgw_d4n_l1_fadvise);
 
-    // Use aligned buffer allocation for O_DIRECT compatibility
-    data = buffer_pool ? buffer_pool->allocate(len) : nullptr;
+    // Save original length; for O_DIRECT the I/O length must be aligned
+    orig_length = len;
+    size_t io_len = direct_io ? align_size(len) : len;
+
+    data = buffer_pool ? buffer_pool->allocate(io_len) : nullptr;
     if (!data) {
-        // Fallback to aligned allocation
-        if (posix_memalign(&data, IO_BUFFER_ALIGNMENT, align_size(len)) != 0) {
+        if (posix_memalign(&data, IO_BUFFER_ALIGNMENT, align_size(io_len)) != 0) {
             ldpp_dout(dpp, 0) << "ERROR: IoUringAsyncWriteRequest::prepare_io_uring_write_op: memory allocation failed" << dendl;
             if (fd >= 0) {
                 ::close(fd);
@@ -1031,21 +1073,25 @@ int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPre
             return -ENOMEM;
         }
     }
-    memcpy((void*)data, bl.c_str(), len);
-    length = len;
+    // Zero the padding bytes beyond the real data for O_DIRECT aligned writes
+    if (io_len > len) {
+        memset(static_cast<char*>(data) + len, 0, io_len - len);
+    }
+    memcpy(data, bl.c_str(), len);
+    length = io_len;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
     if (!sqe) {
         ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_write_op: failed to get sqe" << dendl;
         ::close(fd);
         if (buffer_pool) {
-            buffer_pool->deallocate(data, len);
+            buffer_pool->deallocate(data, io_len);
         } else {
             free(data);
         }
         return -EAGAIN;
     }
-    io_uring_prep_write(sqe, fd, data, len, 0);
+    io_uring_prep_write(sqe, fd, data, io_len, 0);
     io_uring_sqe_set_data(sqe, this);
     return 0;
 }
