@@ -204,7 +204,7 @@ private:
     using Signature = void(boost::system::error_code, bufferlist);
     using Completion = ceph::async::Completion<Signature, IoUringAsyncReadOp>;
 
-    int prepare_io_uring_read_op(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, size_t read_len, void* arg, struct io_uring* ring);
+    int prepare_io_uring_read_op(const DoutPrefixProvider *dpp, const std::string& file_path, off_t read_ofs, size_t read_len);
     static boost::system::error_code io_uring_read_completion(struct io_uring_cqe* cqe, IoUringAsyncReadOp* op);
 
     template <typename Executor1, typename CompletionHandler>
@@ -229,7 +229,7 @@ private:
     using Signature = void(boost::system::error_code);
     using Completion = ceph::async::Completion<Signature, IoUringAsyncWriteRequest>;
 
-    int prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path, struct io_uring* ring);
+    int prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path);
     static boost::system::error_code io_uring_write_completion(struct io_uring_cqe* cqe, IoUringAsyncWriteRequest* op);
 
     template <typename Executor1, typename CompletionHandler>

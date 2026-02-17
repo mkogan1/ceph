@@ -6,16 +6,19 @@
 
 #if defined(HAVE_LIBURING)
 #include <liburing.h>
+#include <boost/asio/posix/stream_descriptor.hpp>
 #endif
 
 #if defined(__linux__)
 #include <features.h>
+#include <sys/eventfd.h>
 #include <sys/xattr.h>
 #endif
 
 #include <filesystem>
 #include <cstdio>
 #include <errno.h>
+#include <unistd.h>
 namespace efs = std::filesystem;
 
 namespace rgw { namespace cache {
@@ -25,34 +28,29 @@ static std::atomic<uint64_t> dir_index{0};
 
 #if defined(HAVE_LIBURING)
 namespace {
+struct IoUringCqeHandler {
+    virtual ~IoUringCqeHandler() = default;
+    virtual void complete_from_cqe(const io_uring_cqe& cqe) = 0;
+    virtual void complete_from_error(int err) = 0;
+};
+
 struct ThreadIoUringState {
     io_uring ring{};
+    int event_fd = -1;
     bool initialized = false;
+    bool eventfd_registered = false;
+    std::mutex ring_mutex;
+    std::unique_ptr<boost::asio::posix::stream_descriptor> event_stream;
+    bool reaper_started = false;
+    bool wait_armed = false;
 
     int ensure(unsigned queue_depth, unsigned flags) {
         if (initialized) {
             return 0;
         }
-        // Add SINGLE_ISSUER flag for thread-local rings - this optimization
-        // tells the kernel that only one thread will submit to this ring,
-        // enabling internal optimizations
-#ifdef IORING_SETUP_SINGLE_ISSUER
-        flags |= IORING_SETUP_SINGLE_ISSUER;
-#endif
-        // COOP_TASKRUN reduces kernel overhead by deferring task work to submission time
-#ifdef IORING_SETUP_COOP_TASKRUN
-        flags |= IORING_SETUP_COOP_TASKRUN;
-#endif
-        // DEFER_TASKRUN further optimizes by running task work only when we wait for completions
-#ifdef IORING_SETUP_DEFER_TASKRUN
-        if (!(flags & IORING_SETUP_SQPOLL)) {
-            // DEFER_TASKRUN is incompatible with SQPOLL
-            flags |= IORING_SETUP_DEFER_TASKRUN;
-        }
-#endif
         int ret = io_uring_queue_init(queue_depth, &ring, flags);
         if (ret < 0) {
-            // If init failed due to unsupported flags, retry without the new flags
+            // Retry without optional flags when kernel support is limited.
             if (ret == -EINVAL) {
                 unsigned basic_flags = flags & (IORING_SETUP_IOPOLL | IORING_SETUP_SQPOLL);
                 ret = io_uring_queue_init(queue_depth, &ring, basic_flags);
@@ -61,6 +59,22 @@ struct ThreadIoUringState {
                 return ret;
             }
         }
+
+        event_fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (event_fd < 0) {
+            int err = -errno;
+            io_uring_queue_exit(&ring);
+            return err;
+        }
+
+        ret = io_uring_register_eventfd(&ring, event_fd);
+        if (ret < 0) {
+            ::close(event_fd);
+            event_fd = -1;
+            io_uring_queue_exit(&ring);
+            return ret;
+        }
+        eventfd_registered = true;
         initialized = true;
         return 0;
     }
@@ -69,10 +83,107 @@ struct ThreadIoUringState {
         if (initialized) {
             io_uring_queue_exit(&ring);
         }
+        if (!event_stream && event_fd >= 0) {
+            ::close(event_fd);
+            event_fd = -1;
+        }
     }
 };
 
-thread_local ThreadIoUringState thread_uring_state;
+thread_local std::shared_ptr<ThreadIoUringState> thread_uring_state;
+
+std::shared_ptr<ThreadIoUringState> get_thread_uring_state()
+{
+    if (!thread_uring_state) {
+        thread_uring_state = std::make_shared<ThreadIoUringState>();
+    }
+    return thread_uring_state;
+}
+
+void arm_thread_uring_reaper(const std::shared_ptr<ThreadIoUringState>& state);
+
+void process_thread_uring_cqes(const std::shared_ptr<ThreadIoUringState>& state)
+{
+    std::vector<std::pair<IoUringCqeHandler*, io_uring_cqe>> completions;
+    {
+        std::lock_guard<std::mutex> lock(state->ring_mutex);
+        io_uring_cqe* cqe = nullptr;
+        while (io_uring_peek_cqe(&state->ring, &cqe) == 0) {
+            auto* handler = static_cast<IoUringCqeHandler*>(io_uring_cqe_get_data(cqe));
+            completions.emplace_back(handler, *cqe);
+            io_uring_cqe_seen(&state->ring, cqe);
+        }
+    }
+
+    for (auto& [handler, cqe] : completions) {
+        if (!handler) {
+            continue;
+        }
+        handler->complete_from_cqe(cqe);
+        delete handler;
+    }
+}
+
+void on_thread_uring_event(const std::shared_ptr<ThreadIoUringState>& state,
+                           const boost::system::error_code& ec)
+{
+    {
+        std::lock_guard<std::mutex> lock(state->ring_mutex);
+        state->wait_armed = false;
+    }
+
+    if (ec == boost::asio::error::operation_aborted) {
+        return;
+    }
+
+    if (!ec) {
+        uint64_t wakeups = 0;
+        while (::read(state->event_fd, &wakeups, sizeof(wakeups)) < 0 && errno == EINTR) {
+        }
+    }
+
+    // Drain all CQEs that are currently available and dispatch callbacks.
+    process_thread_uring_cqes(state);
+    arm_thread_uring_reaper(state);
+}
+
+void arm_thread_uring_reaper(const std::shared_ptr<ThreadIoUringState>& state)
+{
+    boost::asio::posix::stream_descriptor* stream = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(state->ring_mutex);
+        if (!state->event_stream || state->wait_armed) {
+            return;
+        }
+        state->wait_armed = true;
+        stream = state->event_stream.get();
+    }
+
+    stream->async_wait(boost::asio::posix::stream_descriptor::wait_read,
+                       [weak_state = std::weak_ptr<ThreadIoUringState>(state)](const boost::system::error_code& ec) {
+                           if (auto state_locked = weak_state.lock()) {
+                               on_thread_uring_event(state_locked, ec);
+                           }
+                       });
+}
+
+template <typename Executor>
+int ensure_thread_uring_reaper(const std::shared_ptr<ThreadIoUringState>& state,
+                               const Executor& ex)
+{
+    {
+        std::lock_guard<std::mutex> lock(state->ring_mutex);
+        if (!state->event_stream) {
+            state->event_stream = std::make_unique<boost::asio::posix::stream_descriptor>(ex, state->event_fd);
+        }
+        if (state->reaper_started) {
+            return 0;
+        }
+        state->reaper_started = true;
+    }
+    arm_thread_uring_reaper(state);
+    return 0;
+}
 } // anonymous namespace
 #endif // HAVE_LIBURING
 
@@ -189,22 +300,13 @@ int SSDDriver::ensure_thread_uring(const DoutPrefixProvider* dpp, struct io_urin
         flags |= IORING_SETUP_SQPOLL;
         enabled_features += "SQPOLL ";
     }
-#ifdef IORING_SETUP_SINGLE_ISSUER
-    enabled_features += "SINGLE_ISSUER ";
-#endif
-#ifdef IORING_SETUP_COOP_TASKRUN
-    enabled_features += "COOP_TASKRUN ";
-#endif
-#ifdef IORING_SETUP_DEFER_TASKRUN
-    if (!(flags & IORING_SETUP_SQPOLL)) {
-        enabled_features += "DEFER_TASKRUN ";
-    }
-#endif
     if (dpp->get_cct()->_conf->rgw_d4n_io_uring_direct_io) {
         enabled_features += "O_DIRECT ";
     }
+    enabled_features += "EVENTFD ";
 
-    int ret = thread_uring_state.ensure(IoUringQueueDepth, flags);
+    auto state = get_thread_uring_state();
+    int ret = state->ensure(IoUringQueueDepth, flags);
     if (ret < 0) {
         ldpp_dout(dpp, 0) << "ERROR: Failed to initialize io_uring with flags=" << flags
                           << ", queue_depth=" << IoUringQueueDepth << ": " << cpp_strerror(-ret) << dendl;
@@ -212,12 +314,12 @@ int SSDDriver::ensure_thread_uring(const DoutPrefixProvider* dpp, struct io_urin
     }
 
     if (!enabled_features.empty()) {
-        ldpp_dout(dpp, 10) << "SSDDriver: io_uring initialized with optimizations: " << enabled_features
+        ldpp_dout(dpp, 10) << "SSDDriver: io_uring initialized with async CQ reaper: " << enabled_features
                           << "(queue_depth=" << IoUringQueueDepth << ")" << dendl;
     }
 
     if (ring_out) {
-        *ring_out = &thread_uring_state.ring;
+        *ring_out = &state->ring;
     }
 
     return 0;
@@ -664,6 +766,33 @@ auto SSDDriver::get_async_uring(const DoutPrefixProvider *dpp, const Executor& e
       [this] (auto handler, const DoutPrefixProvider *dpp,
               const Executor& ex, const std::string& key,
               off_t read_ofs, off_t read_len) {
+    struct ReadCqeHandler final : IoUringCqeHandler {
+        std::unique_ptr<Op::Completion> completion;
+
+        explicit ReadCqeHandler(std::unique_ptr<Op::Completion>&& p)
+            : completion(std::move(p))
+        {
+        }
+
+        void complete_from_cqe(const io_uring_cqe& cqe) override
+        {
+            io_uring_cqe cqe_copy = cqe;
+            auto& op = completion->user_data;
+            auto ec = Op::io_uring_read_completion(&cqe_copy, &op);
+            bufferlist result = std::move(op.result);
+            ceph::async::post(std::move(completion), ec, std::move(result));
+        }
+
+        void complete_from_error(int err) override
+        {
+            io_uring_cqe fake_cqe{};
+            fake_cqe.res = -err;
+            auto& op = completion->user_data;
+            auto ec = Op::io_uring_read_completion(&fake_cqe, &op);
+            ceph::async::post(std::move(completion), ec, bufferlist{});
+        }
+    };
+
     auto p = Op::create(ex, handler);
     auto& op = p->user_data;
     op.buffer_pool = &buffer_pool_;
@@ -671,72 +800,51 @@ auto SSDDriver::get_async_uring(const DoutPrefixProvider *dpp, const Executor& e
     std::string location = create_dirs_get_filepath_from_key(dpp, partition_info.location, key);
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): location=" << location << dendl;
 
-    int ret = 0;
-    {
-      io_uring* ring = nullptr;
-      int ring_ret = ensure_thread_uring(dpp, &ring);
-      if (ring_ret < 0) {
-          ldpp_dout(dpp, 0) << "ERROR: get_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
-          auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
-          ceph::async::post(std::move(p), ec, bufferlist{});
-          return;
-      }
-
-      ret = op.prepare_io_uring_read_op(dpp, location, read_ofs, read_len, p.get(), ring);
-      if (ret == 0) {
-          // Use submit_and_wait to reduce syscall overhead (combines submit + wait into one syscall)
-          int submitted = io_uring_submit_and_wait(ring, 1);
-          if (submitted >= 0) {
-              struct io_uring_cqe* cqe;
-              // Use peek first for zero-syscall completion retrieval when DEFER_TASKRUN is active
-              int rc = io_uring_peek_cqe(ring, &cqe);
-              if (rc == -EAGAIN) {
-                  // No completion ready yet, fall back to wait
-                  rc = io_uring_wait_cqe(ring, &cqe);
-              }
-              if (rc == 0) {
-                  auto ec = SSDDriver::IoUringAsyncReadOp::io_uring_read_completion(cqe, &op);
-                  io_uring_cqe_seen(ring, cqe);
-                  ceph::async::post(std::move(p), ec, std::move(op.result));
-              } else {
-                  // Error getting completion - clean up resources
-                  if (op.fd >= 0) {
-                      ::close(op.fd);
-                      op.fd = -1;
-                  }
-                  if (op.buffer) {
-                      if (op.buffer_pool && op.length > 0) {
-                          op.buffer_pool->deallocate(op.buffer, op.length);
-                      } else {
-                          ::free(op.buffer);
-                      }
-                      op.buffer = nullptr;
-                  }
-                  auto ec = boost::system::error_code{-rc, boost::system::system_category()};
-                  ceph::async::post(std::move(p), ec, bufferlist{});
-              }
-          } else {
-              // Submit failed - clean up resources
-              if (op.fd >= 0) {
-                  ::close(op.fd);
-                  op.fd = -1;
-              }
-              if (op.buffer) {
-                  if (op.buffer_pool && op.length > 0) {
-                      op.buffer_pool->deallocate(op.buffer, op.length);
-                  } else {
-                      ::free(op.buffer);
-                  }
-                  op.buffer = nullptr;
-              }
-              auto ec = boost::system::error_code{-submitted, boost::system::system_category()};
-              ceph::async::post(std::move(p), ec, bufferlist{});
-          }
-      } else {
-          auto ec = boost::system::error_code{-ret, boost::system::system_category()};
-          ceph::async::post(std::move(p), ec, bufferlist{});
-      }
+    int ring_ret = ensure_thread_uring(dpp, nullptr);
+    if (ring_ret < 0) {
+        ldpp_dout(dpp, 0) << "ERROR: get_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
+        auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
+        ceph::async::post(std::move(p), ec, bufferlist{});
+        return;
     }
+
+    auto state = get_thread_uring_state();
+    int watcher_ret = ensure_thread_uring_reaper(state, ex);
+    if (watcher_ret < 0) {
+        auto ec = boost::system::error_code{-watcher_ret, boost::system::system_category()};
+        ceph::async::post(std::move(p), ec, bufferlist{});
+        return;
+    }
+
+    int ret = op.prepare_io_uring_read_op(dpp, location, read_ofs, read_len);
+    if (ret < 0) {
+        auto ec = boost::system::error_code{-ret, boost::system::system_category()};
+        ceph::async::post(std::move(p), ec, bufferlist{});
+        return;
+    }
+
+    auto cqe_handler = std::make_unique<ReadCqeHandler>(std::move(p));
+    int submit_ret = 0;
+    {
+        std::lock_guard<std::mutex> lock(state->ring_mutex);
+        io_uring_sqe* sqe = io_uring_get_sqe(&state->ring);
+        if (!sqe) {
+            submit_ret = -EAGAIN;
+        } else {
+            io_uring_prep_read(sqe, op.fd, op.buffer, op.length, op.offset);
+            io_uring_sqe_set_data(sqe, cqe_handler.get());
+            submit_ret = io_uring_submit(&state->ring);
+            if (submit_ret == 0) {
+                submit_ret = -EAGAIN;
+            }
+        }
+    }
+    if (submit_ret < 0) {
+        cqe_handler->complete_from_error(-submit_ret);
+        return;
+    }
+    // coverity[leaked_storage:SUPPRESS]
+    (void)cqe_handler.release();
   }, token, dpp, ex, key, read_ofs, read_len);
 }
 
@@ -750,6 +858,32 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
       [this] (auto handler, const DoutPrefixProvider *dpp,
               const Executor& ex, const std::string& key, const bufferlist& bl,
               uint64_t len, const rgw::sal::Attrs& attrs) {
+    struct WriteCqeHandler final : IoUringCqeHandler {
+        std::unique_ptr<Op::Completion> completion;
+
+        explicit WriteCqeHandler(std::unique_ptr<Op::Completion>&& p)
+            : completion(std::move(p))
+        {
+        }
+
+        void complete_from_cqe(const io_uring_cqe& cqe) override
+        {
+            io_uring_cqe cqe_copy = cqe;
+            auto& op = completion->user_data;
+            auto ec = Op::io_uring_write_completion(&cqe_copy, &op);
+            ceph::async::dispatch(std::move(completion), ec);
+        }
+
+        void complete_from_error(int err) override
+        {
+            io_uring_cqe fake_cqe{};
+            fake_cqe.res = -err;
+            auto& op = completion->user_data;
+            auto ec = Op::io_uring_write_completion(&fake_cqe, &op);
+            ceph::async::dispatch(std::move(completion), ec);
+        }
+    };
+
     auto p = Op::create(ex, handler);
     auto& op = p->user_data;
     op.buffer_pool = &buffer_pool_;
@@ -760,77 +894,56 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
     op.temp_file_path = create_dirs_get_filepath_from_key(dpp, partition_info.location, key, true);
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): op.temp_file_path=" << op.temp_file_path << dendl;
 
-    int r = 0;
     bufferlist src = bl;
-    {
-      io_uring* ring = nullptr;
-      int ring_ret = ensure_thread_uring(dpp, &ring);
-      if (ring_ret < 0) {
-          ldpp_dout(dpp, 0) << "ERROR: put_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
-          auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
-          ceph::async::dispatch(std::move(p), ec);
-          return;
-      }
-
-      r = op.prepare_io_uring_write_op(dpp, src, len, op.temp_file_path, ring);
-      op.dpp = dpp;
-      op.priv_data = this;
-      op.attrs = std::move(attrs);
-      if (r >= 0) {
-          // Use submit_and_wait to reduce syscall overhead (combines submit + wait into one syscall)
-          int submitted = io_uring_submit_and_wait(ring, 1);
-          if (submitted >= 0) {
-              struct io_uring_cqe* cqe;
-              // Use peek first for zero-syscall completion retrieval when DEFER_TASKRUN is active
-              int rc = io_uring_peek_cqe(ring, &cqe);
-              if (rc == -EAGAIN) {
-                  // No completion ready yet, fall back to wait
-                  rc = io_uring_wait_cqe(ring, &cqe);
-              }
-              if (rc == 0) {
-                  auto ec = SSDDriver::IoUringAsyncWriteRequest::io_uring_write_completion(cqe, &op);
-                  io_uring_cqe_seen(ring, cqe);
-                  ceph::async::dispatch(std::move(p), ec);
-              } else {
-                  // Error getting completion - clean up resources
-                  if (op.fd >= 0) {
-                      ::close(op.fd);
-                      op.fd = -1;
-                  }
-                  if (op.data) {
-                      if (op.buffer_pool && op.length > 0) {
-                          op.buffer_pool->deallocate(op.data, op.length);
-                      } else {
-                          ::free(op.data);
-                      }
-                      op.data = nullptr;
-                  }
-                  auto ec = boost::system::error_code{-rc, boost::system::system_category()};
-                  ceph::async::dispatch(std::move(p), ec);
-              }
-          } else {
-              // Submit failed - clean up resources
-              if (op.fd >= 0) {
-                  ::close(op.fd);
-                  op.fd = -1;
-              }
-              if (op.data) {
-                  if (op.buffer_pool && op.length > 0) {
-                      op.buffer_pool->deallocate(op.data, op.length);
-                  } else {
-                      ::free(op.data);
-                  }
-                  op.data = nullptr;
-              }
-              auto ec = boost::system::error_code{-submitted, boost::system::system_category()};
-              ceph::async::dispatch(std::move(p), ec);
-          }
-      } else {
-          ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::prepare_io_uring_write_op(), r=" << r << dendl;
-          auto ec = boost::system::error_code{-r, boost::system::system_category()};
-          ceph::async::dispatch(std::move(p), ec);
-      }
+    int ring_ret = ensure_thread_uring(dpp, nullptr);
+    if (ring_ret < 0) {
+        ldpp_dout(dpp, 0) << "ERROR: put_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
+        auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
+        ceph::async::dispatch(std::move(p), ec);
+        return;
     }
+
+    auto state = get_thread_uring_state();
+    int watcher_ret = ensure_thread_uring_reaper(state, ex);
+    if (watcher_ret < 0) {
+        auto ec = boost::system::error_code{-watcher_ret, boost::system::system_category()};
+        ceph::async::dispatch(std::move(p), ec);
+        return;
+    }
+
+    int r = op.prepare_io_uring_write_op(dpp, src, len, op.temp_file_path);
+    op.dpp = dpp;
+    op.priv_data = this;
+    op.attrs = attrs;
+    if (r < 0) {
+        ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): ::prepare_io_uring_write_op(), r=" << r << dendl;
+        auto ec = boost::system::error_code{-r, boost::system::system_category()};
+        ceph::async::dispatch(std::move(p), ec);
+        return;
+    }
+
+    auto cqe_handler = std::make_unique<WriteCqeHandler>(std::move(p));
+    int submit_ret = 0;
+    {
+        std::lock_guard<std::mutex> lock(state->ring_mutex);
+        io_uring_sqe* sqe = io_uring_get_sqe(&state->ring);
+        if (!sqe) {
+            submit_ret = -EAGAIN;
+        } else {
+            io_uring_prep_write(sqe, op.fd, op.data, op.length, 0);
+            io_uring_sqe_set_data(sqe, cqe_handler.get());
+            submit_ret = io_uring_submit(&state->ring);
+            if (submit_ret == 0) {
+                submit_ret = -EAGAIN;
+            }
+        }
+    }
+    if (submit_ret < 0) {
+        cqe_handler->complete_from_error(-submit_ret);
+        return;
+    }
+    // coverity[leaked_storage:SUPPRESS]
+    (void)cqe_handler.release();
   }, token, dpp, ex, key, bl, len, attrs);
 }
 
@@ -882,9 +995,7 @@ int SSDDriver::IoUringAsyncReadOp::prepare_io_uring_read_op(
     const DoutPrefixProvider *dpp,
     const std::string& file_path,
     off_t read_ofs,
-    size_t read_len,
-    void* arg,
-    struct io_uring* ring)
+    size_t read_len)
 {
     ldpp_dout(dpp, 20) << "SSDCache: IoUringAsyncReadOp::prepare_io_uring_read_op(): file_path=" << file_path << dendl;
 
@@ -931,25 +1042,12 @@ int SSDDriver::IoUringAsyncReadOp::prepare_io_uring_read_op(
         if (posix_memalign(&buffer, IO_BUFFER_ALIGNMENT, align_size(aligned_len)) != 0) {
             ldpp_dout(dpp, 0) << "ERROR: IoUringAsyncReadOp::prepare_io_uring_read_op: memory allocation failed" << dendl;
             ::close(fd);
+            fd = -1;
             return -ENOMEM;
         }
     }
     offset = aligned_ofs;
     length = aligned_len;
-
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    if (!sqe) {
-        ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_read_op: failed to get sqe" << dendl;
-        ::close(fd);
-        if (buffer_pool) {
-            buffer_pool->deallocate(buffer, aligned_len);
-        } else {
-            free(buffer);
-        }
-        return -EAGAIN;
-    }
-    io_uring_prep_read(sqe, fd, buffer, aligned_len, aligned_ofs);
-    io_uring_sqe_set_data(sqe, arg);
     return 0;
 }
 
@@ -1014,7 +1112,7 @@ boost::system::error_code SSDDriver::IoUringAsyncWriteRequest::io_uring_write_co
 }
 
 // Prepare an io_uring write operation
-int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path, struct io_uring* ring)
+int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPrefixProvider *dpp, bufferlist& bl, unsigned int len, std::string file_path)
 {
     ldpp_dout(dpp, 20) << "SSDCache: " << __func__ << "(): Write To Cache, location=" << file_path << dendl;
     mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
@@ -1069,6 +1167,7 @@ int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPre
             ldpp_dout(dpp, 0) << "ERROR: IoUringAsyncWriteRequest::prepare_io_uring_write_op: memory allocation failed" << dendl;
             if (fd >= 0) {
                 ::close(fd);
+                fd = -1;
             }
             return -ENOMEM;
         }
@@ -1079,20 +1178,6 @@ int SSDDriver::IoUringAsyncWriteRequest::prepare_io_uring_write_op(const DoutPre
     }
     memcpy(data, bl.c_str(), len);
     length = io_len;
-
-    struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-    if (!sqe) {
-        ldpp_dout(dpp, 0) << "ERROR: prepare_io_uring_write_op: failed to get sqe" << dendl;
-        ::close(fd);
-        if (buffer_pool) {
-            buffer_pool->deallocate(data, io_len);
-        } else {
-            free(data);
-        }
-        return -EAGAIN;
-    }
-    io_uring_prep_write(sqe, fd, data, io_len, 0);
-    io_uring_sqe_set_data(sqe, this);
     return 0;
 }
 #endif // HAVE_LIBURING
