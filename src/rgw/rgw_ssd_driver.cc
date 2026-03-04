@@ -171,16 +171,11 @@ static std::string create_dirs_get_filepath_from_key(const DoutPrefixProvider* d
 }
 
 #if defined(HAVE_LIBURING)
+// Cold path: first-time initialization of the per-thread io_uring ring.
+// Callers should check thread_uring_state.initialized before calling this.
+__attribute__((cold, noinline))
 int SSDDriver::ensure_thread_uring(const DoutPrefixProvider* dpp, struct io_uring** ring_out) const
 {
-    // Fast path: ring already initialized for this thread
-    if (thread_uring_state.initialized) {
-        if (ring_out) {
-            *ring_out = &thread_uring_state.ring;
-        }
-        return 0;
-    }
-
     unsigned flags = 0;
     std::string enabled_features;
 
@@ -665,13 +660,16 @@ auto SSDDriver::get_async_uring(const DoutPrefixProvider *dpp, const Executor& e
 
     int ret = 0;
     {
-      io_uring* ring = nullptr;
-      int ring_ret = ensure_thread_uring(dpp, &ring);
-      if (ring_ret < 0) {
-          ldpp_dout(dpp, 0) << "ERROR: get_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
-          auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
-          ceph::async::post(std::move(p), ec, bufferlist{});
-          return;
+      // Inline fast path: direct TLS access avoids function call overhead
+      io_uring* ring = &thread_uring_state.ring;
+      if (__builtin_expect(!thread_uring_state.initialized, 0)) {
+          int ring_ret = ensure_thread_uring(dpp, &ring);
+          if (ring_ret < 0) {
+              ldpp_dout(dpp, 0) << "ERROR: get_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
+              auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
+              ceph::async::post(std::move(p), ec, bufferlist{});
+              return;
+          }
       }
 
       ret = op.prepare_io_uring_read_op(dpp, location, read_ofs, read_len, p.get(), ring);
@@ -758,13 +756,16 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
     int r = 0;
     bufferlist src = bl;
     {
-      io_uring* ring = nullptr;
-      int ring_ret = ensure_thread_uring(dpp, &ring);
-      if (ring_ret < 0) {
-          ldpp_dout(dpp, 0) << "ERROR: put_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
-          auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
-          ceph::async::dispatch(std::move(p), ec);
-          return;
+      // Inline fast path: direct TLS access avoids function call overhead
+      io_uring* ring = &thread_uring_state.ring;
+      if (__builtin_expect(!thread_uring_state.initialized, 0)) {
+          int ring_ret = ensure_thread_uring(dpp, &ring);
+          if (ring_ret < 0) {
+              ldpp_dout(dpp, 0) << "ERROR: put_async_uring::ensure_thread_uring failed: " << ring_ret << dendl;
+              auto ec = boost::system::error_code{-ring_ret, boost::system::system_category()};
+              ceph::async::dispatch(std::move(p), ec);
+              return;
+          }
       }
 
       r = op.prepare_io_uring_write_op(dpp, src, len, op.temp_file_path, ring);
