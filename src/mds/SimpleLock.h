@@ -240,7 +240,7 @@ public:
     return parent->is_waiter_for(getmask(mask));
   }
   bool has_any_waiter() const {
-    return parent->is_waiter_for(WAIT_ALL << get_wait_shift(), WAIT_RD << get_wait_shift());
+    return is_waiter_for(std::numeric_limits<uint64_t>::max());
   }
 
   bool is_cached() const {
