@@ -572,6 +572,7 @@ class RGWInitDataSyncStatusCoroutine : public RGWCoroutine {
     RGWDataSyncStatusManager::sync_status_oid(sc->source_zone) };
 
   map<int, RGWDataChangesLogInfo> shards_info;
+  int ret = 0;
 
 
 public:
@@ -598,7 +599,6 @@ public:
   }
 
   int operate(const DoutPrefixProvider *dpp) override {
-    int ret = 0;
     reenter(this) {
       if (!lease_cr->is_locked()) {
 	drain_all();
@@ -4893,6 +4893,7 @@ class RGWBucketShardIncrementalSyncCR : public RGWCoroutine {
 
   RGWSyncTraceNodeRef tn;
   RGWBucketIncSyncShardMarkerTrack marker_tracker;
+  int ret = 0;
 
 public:
   RGWBucketShardIncrementalSyncCR(RGWDataSyncCtx *_sc,
@@ -4937,7 +4938,6 @@ public:
 
 int RGWBucketShardIncrementalSyncCR::operate(const DoutPrefixProvider *dpp)
 {
-  int ret = 0;
   reenter(this) {
     do {
       if (lease_cr && !lease_cr->is_locked()) {
@@ -5349,7 +5349,7 @@ static RGWCoroutine* sync_bucket_shard_cr(RGWDataSyncCtx* sc,
                                           std::optional<uint64_t> gen,
                                           const RGWSyncTraceNodeRef& tn,
                                           ceph::real_time* progress,
-					  ceph::coarse_mono_time& last_future_generation_recovery);
+					  ceph::coarse_mono_time& last_future_generation_recovery,
                                           bool no_lease = false);
 
 RGWRunBucketSourcesSyncCR::RGWRunBucketSourcesSyncCR(RGWDataSyncCtx *_sc,
@@ -5793,7 +5793,6 @@ class RGWSyncBucketCR : public RGWCoroutine {
   bool bucket_stopped = false;
   RGWObjVersionTracker objv;
   bool init_check_compat = false;
-  bool no_lease{false};
   rgw_bucket_index_marker_info info;
   rgw_raw_obj error_repo;
   rgw_bucket_shard source_bs;
@@ -5801,7 +5800,7 @@ class RGWSyncBucketCR : public RGWCoroutine {
   uint64_t current_gen = 0;
   // In general operation, a reference to a pinned entry in `bucket_gen_cache`
   ceph::coarse_mono_time& last_future_generation_recovery;
-
+  bool no_lease{false};
   RGWSyncTraceNodeRef tn;
 
   static constexpr std::chrono::seconds throttle_future_recovery = std::chrono::hours(1);
@@ -6021,7 +6020,7 @@ int RGWSyncBucketCR::operate(const DoutPrefixProvider *dpp)
       if (bucket_status.state == BucketSyncState::Full) {
         yield call(new RGWBucketFullSyncCR(sc, sync_pipe, status_obj,
                                            bucket_lease_cr, bucket_status,
-                                           tn, objv, no_lease));
+                                           tn, objv));
         if (retcode < 0) {
           tn->log(20, SSTR("ERROR: full sync failed. error: " << retcode));
           RELEASE_LOCK(bucket_lease_cr);
@@ -6349,7 +6348,7 @@ public:
 					&progress, last_future_generation_recovery,
           true /* no_lease: bucket sync run skips
           lock acquisition so it is never
-          blocked by a background sync process*/)));
+          blocked by a background sync process*/));
 
 	if (retcode < 0) {
 	  ldpp_dout(dpp, 5) << "WARNING: Got retcode=" << retcode << " for "
