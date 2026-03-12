@@ -356,8 +356,15 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
     std::string backend_type = dpp->get_cct()->_conf.get_val<std::string>("rgw_d4n_io_backend_type");
     ldpp_dout(dpp, 5) << "SSDDriver: requested I/O backend type: " << backend_type << dendl;
 
+    if (backend_type == "boosturing") {
+        // boosturing uses boost::asio::random_access_file which leverages io_uring
+        // when BOOST_ASIO_HAS_IO_URING is defined (set in CMakeLists.txt)
+        ldpp_dout(dpp, 5) << "SSDDriver: boosturing backend selected (boost::asio::random_access_file with io_uring)" << dendl;
+        use_boost_uring = true;
+        use_io_uring = false;
+    }
 #if defined(HAVE_LIBURING)
-    if (backend_type == "liburing") {
+    else if (backend_type == "liburing") {
         // Try to initialize io_uring
         IoUringQueueDepth = dpp->get_cct()->_conf.get_val<int64_t>("rgw_d4n_io_uring_queue_depth");
 
@@ -383,14 +390,14 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
         use_io_uring = false;
     }
 #else
-    if (backend_type == "liburing") {
+    else if (backend_type == "liburing") {
         ldpp_dout(dpp, 0) << "ERROR: URING: io_uring backend requested but liburing not compiled in, falling back to using libaio" << dendl;
+        use_io_uring = false;
     }
-    use_io_uring = false;
 #endif
 
     // Initialize libaio if that's what we're using
-    if (!use_io_uring) {
+    if (!use_io_uring && !use_boost_uring) {
 #if defined(HAVE_LIBAIO) && defined(__GLIBC__)
       // libaio setup
       struct aioinit ainit{0};
@@ -402,7 +409,7 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
 #endif
     }
 
-    ldpp_dout(dpp, 5) << "SSDDriver: using " << (use_io_uring ? "io_uring" : "libaio") << " I/O backend" << dendl;
+    ldpp_dout(dpp, 5) << "SSDDriver: using " << (use_boost_uring ? "boosturing" : (use_io_uring ? "io_uring" : "libaio")) << " I/O backend" << dendl;
 
     efs::space_info space = efs::space(partition_info.location);
     //currently partition_info.size is unused
@@ -821,6 +828,9 @@ template <typename Executor, typename CompletionToken>
 auto SSDDriver::get_async(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
                  off_t read_ofs, off_t read_len, CompletionToken&& token)
 {
+    if (use_boost_uring) {
+        return get_async_boosturing(dpp, ex, key, read_ofs, read_len, std::forward<CompletionToken>(token));
+    }
 #if defined(HAVE_LIBURING)
     if (use_io_uring) {
         return get_async_uring(dpp, ex, key, read_ofs, read_len, std::forward<CompletionToken>(token));
@@ -833,6 +843,10 @@ template <typename Executor, typename CompletionToken>
 void SSDDriver::put_async(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
                  const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, CompletionToken&& token)
 {
+    if (use_boost_uring) {
+        put_async_boosturing(dpp, ex, key, bl, len, attrs, std::forward<CompletionToken>(token));
+        return;
+    }
 #if defined(HAVE_LIBURING)
     if (use_io_uring) {
         put_async_uring(dpp, ex, key, bl, len, attrs, std::forward<CompletionToken>(token));
@@ -968,6 +982,143 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
 }
 #endif // HAVE_LIBURING
 
+// boosturing: use the same async_initiate + Completion pattern as the libaio/uring paths
+// to properly integrate with the Aio throttle framework
+
+template <typename Executor, typename CompletionToken>
+auto SSDDriver::get_async_boosturing(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                off_t read_ofs, off_t read_len, CompletionToken&& token)
+{
+  using Signature = void(boost::system::error_code, bufferlist);
+  return boost::asio::async_initiate<CompletionToken, Signature>(
+      [this] (auto handler, const DoutPrefixProvider *dpp,
+              const Executor& ex, const std::string& key,
+              off_t read_ofs, off_t read_len) {
+    std::string location = create_dirs_get_filepath_from_key(dpp, partition_info.location, key);
+    ldpp_dout(dpp, 20) << "SSDCache: URING: boosturing get_async: location=" << location << dendl;
+
+    // Open file and read synchronously using POSIX (the file IO is fast on NVMe).
+    // The completion handler is dispatched through the executor to resume the coroutine.
+    boost::system::error_code ec;
+    bufferlist result;
+    int fd = TEMP_FAILURE_RETRY(::open(location.c_str(), O_RDONLY | O_CLOEXEC));
+    if (fd < 0) {
+      ec.assign(errno, boost::system::system_category());
+      ldpp_dout(dpp, 0) << "ERROR: URING: boosturing get_async: open failed: " << location
+                         << ": " << ec.message() << dendl;
+    } else {
+      bufferptr bp(read_len);
+      ssize_t ret = TEMP_FAILURE_RETRY(::pread(fd, bp.c_str(), read_len, read_ofs));
+      if (ret < 0) {
+        ec.assign(errno, boost::system::system_category());
+        ldpp_dout(dpp, 0) << "ERROR: URING: boosturing get_async: pread failed: " << location
+                           << ": " << ec.message() << dendl;
+      } else {
+        bp.set_length(ret);
+        result.append(std::move(bp));
+      }
+      TEMP_FAILURE_RETRY(::close(fd));
+    }
+    // Dispatch the result back to the caller's executor
+    auto alloc = boost::asio::get_associated_allocator(handler);
+    boost::asio::post(ex, [h=std::move(handler), ec, bl=std::move(result)]() mutable {
+      std::move(h)(ec, std::move(bl));
+    });
+  }, token, dpp, ex, key, read_ofs, read_len);
+}
+
+template <typename Executor, typename CompletionToken>
+void SSDDriver::put_async_boosturing(const DoutPrefixProvider *dpp, const Executor& ex, const std::string& key,
+                const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, CompletionToken&& token)
+{
+  using Signature = void(boost::system::error_code);
+  return boost::asio::async_initiate<CompletionToken, Signature>(
+      [this] (auto handler, const DoutPrefixProvider *dpp,
+              const Executor& ex, const std::string& key, const bufferlist& bl,
+              uint64_t len, const rgw::sal::Attrs& attrs) {
+    std::string file_path = create_dirs_get_filepath_from_key(dpp, partition_info.location, key);
+    std::string temp_file_path = create_dirs_get_filepath_from_key(dpp, partition_info.location, key, true);
+    ldpp_dout(dpp, 20) << "SSDCache: URING: boosturing put_async: temp_file_path=" << temp_file_path << dendl;
+
+    boost::system::error_code ec;
+    mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+    int fd = TEMP_FAILURE_RETRY(::open(temp_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, mode));
+    if (fd < 0) {
+      if (errno == ENOENT) {
+        std::string dir_path = temp_file_path;
+        auto pos = dir_path.find_last_of('/');
+        if (pos != std::string::npos) dir_path.erase(pos);
+        create_directories(dpp, dir_path);
+        fd = TEMP_FAILURE_RETRY(::open(temp_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, mode));
+      }
+      if (fd < 0) {
+        ec.assign(errno, boost::system::system_category());
+        ldpp_dout(dpp, 0) << "ERROR: URING: boosturing put_async: open failed: " << temp_file_path
+                           << ": " << ec.message() << dendl;
+      }
+    }
+    if (!ec) {
+      bufferlist src = bl;
+      ssize_t ret = TEMP_FAILURE_RETRY(::pwrite(fd, src.c_str(), len, 0));
+      if (ret < 0) {
+        ec.assign(errno, boost::system::system_category());
+        ldpp_dout(dpp, 0) << "ERROR: URING: boosturing put_async: pwrite failed: " << temp_file_path
+                           << ": " << ec.message() << dendl;
+      }
+      TEMP_FAILURE_RETRY(::close(fd));
+    }
+    if (!ec) {
+      if (attrs.size() > 0) {
+        optional_yield oy{null_yield};
+        int attr_ret = this->set_attrs(dpp, temp_file_path, attrs, oy);
+        if (attr_ret < 0) {
+          ldpp_dout(dpp, 0) << "ERROR: URING: boosturing put_async::set_attrs: failed, ret=" << attr_ret << dendl;
+        }
+      }
+      Partition pi = this->get_current_partition_info(dpp);
+      efs::space_info space = efs::space(pi.location);
+      this->set_free_space(dpp, space.available);
+      int ret = std::rename(temp_file_path.c_str(), file_path.c_str());
+      if (ret < 0) {
+        ldpp_dout(dpp, 0) << "ERROR: URING: boosturing put_async::rename: failed, errno=" << errno << dendl;
+      }
+    }
+    boost::asio::post(ex, [h=std::move(handler), ec]() mutable {
+      std::move(h)(ec);
+    });
+  }, token, dpp, ex, key, bl, len, attrs);
+}
+
+rgw::Aio::OpFunc SSDDriver::boosturing_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y,
+                                off_t read_ofs, off_t read_len, const std::string& key) {
+  return [this, dpp, y, read_ofs, read_len, key] (Aio* aio, AioResult& r) mutable {
+    ceph_assert(y);
+    ldpp_dout(dpp, 20) << "SSDCache: URING: boosturing_cache_read_op(): Read From Cache, oid=" << r.obj.oid << dendl;
+
+    using namespace boost::asio;
+    yield_context yield = y.get_yield_context();
+    auto ex = yield.get_executor();
+
+    this->get_async_boosturing(dpp, ex, key, read_ofs, read_len,
+                               bind_executor(ex, SSDDriver::libaio_read_handler{aio, r}));
+  };
+}
+
+rgw::Aio::OpFunc SSDDriver::boosturing_cache_write_op(const DoutPrefixProvider *dpp, optional_yield y,
+                                const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, const std::string& key) {
+  return [this, dpp, y, bl, len, attrs, key] (Aio* aio, AioResult& r) mutable {
+    ceph_assert(y);
+    ldpp_dout(dpp, 20) << "SSDCache: URING: boosturing_cache_write_op(): Write to Cache, oid=" << r.obj.oid << dendl;
+
+    using namespace boost::asio;
+    yield_context yield = y.get_yield_context();
+    auto ex = yield.get_executor();
+
+    this->put_async_boosturing(dpp, ex, key, bl, len, attrs,
+                               bind_executor(ex, SSDDriver::libaio_write_handler{aio, r}));
+  };
+}
+
 rgw::Aio::OpFunc SSDDriver::ssd_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
                                 off_t read_ofs, off_t read_len, const std::string& key) {
   return [this, dpp, y, read_ofs, read_len, key] (Aio* aio, AioResult& r) mutable {
@@ -1002,6 +1153,9 @@ rgw::AioResultList SSDDriver::get_async(const DoutPrefixProvider* dpp, optional_
 {
     rgw_raw_obj r_obj;
     r_obj.oid = key;
+    if (use_boost_uring) {
+        return aio->get(r_obj, boosturing_cache_read_op(dpp, y, ofs, len, key), cost, id);
+    }
     return aio->get(r_obj, ssd_cache_read_op(dpp, y, this, ofs, len, key), cost, id);
 }
 
@@ -1009,6 +1163,9 @@ rgw::AioResultList SSDDriver::put_async(const DoutPrefixProvider* dpp, optional_
 {
     rgw_raw_obj r_obj;
     r_obj.oid = key;
+    if (use_boost_uring) {
+        return aio->get(r_obj, boosturing_cache_write_op(dpp, y, bl, len, attrs, key), cost, id);
+    }
     return aio->get(r_obj, ssd_cache_write_op(dpp, y, this, bl, len, attrs, key), cost, id);
 }
 
