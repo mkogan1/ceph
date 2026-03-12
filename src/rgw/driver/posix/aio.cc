@@ -20,6 +20,8 @@ struct FileReadHandler {
   Aio* throttle = nullptr;
   AioResult& r;
   buffer::ptr buffer;
+  // optional: holds file open until IO completes (used by shared_ptr overload)
+  std::shared_ptr<boost::asio::random_access_file> file;
   void operator()(boost::system::error_code ec, size_t bytes) {
     r.result = -ec.value();
     buffer.set_length(bytes);
@@ -36,6 +38,17 @@ Aio::OpFunc file_read_op(boost::asio::random_access_file& file,
     auto buffer = boost::asio::mutable_buffer{p.c_str(), p.length()};
     file.async_read_some_at(offset, buffer,
                             FileReadHandler{aio, r, std::move(p)});
+  };
+}
+
+Aio::OpFunc file_read_op(std::shared_ptr<boost::asio::random_access_file> file,
+                         uint64_t offset, uint64_t len)
+{
+  return [file, offset, len] (Aio* aio, AioResult& r) mutable {
+    buffer::ptr p = buffer::create(len);
+    auto buffer = boost::asio::mutable_buffer{p.c_str(), p.length()};
+    file->async_read_some_at(offset, buffer,
+                             FileReadHandler{aio, r, std::move(p), file});
   };
 }
 
@@ -57,6 +70,33 @@ Aio::OpFunc file_write_op(boost::asio::random_access_file& file,
     auto buffers = ceph::buffer::const_sequence{bl};
     file.async_write_some_at(offset, buffers,
                              FileWriteHandler{aio, r, std::move(bl)});
+  };
+}
+
+struct FileWriteWithCallbackHandler {
+  Aio* throttle = nullptr;
+  AioResult& r;
+  buffer::list bl;
+  std::shared_ptr<boost::asio::random_access_file> file;
+  WriteCompleteFunc on_complete;
+  void operator()(boost::system::error_code ec, size_t bytes) {
+    r.result = -ec.value();
+    file.reset(); // close file before post-completion work
+    std::move(on_complete)(ec);
+    throttle->put(r);
+  }
+};
+
+Aio::OpFunc file_write_op(std::shared_ptr<boost::asio::random_access_file> file,
+                          uint64_t offset, bufferlist bl,
+                          WriteCompleteFunc on_complete)
+{
+  return [file, offset, bl=std::move(bl), on_complete=std::move(on_complete)]
+         (Aio* aio, AioResult& r) mutable {
+    auto buffers = ceph::buffer::const_sequence{bl};
+    file->async_write_some_at(offset, buffers,
+                              FileWriteWithCallbackHandler{aio, r, std::move(bl), file,
+                                                          std::move(on_complete)});
   };
 }
 

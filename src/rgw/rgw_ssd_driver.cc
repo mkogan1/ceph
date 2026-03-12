@@ -2,9 +2,12 @@
 // vim: ts=8 sw=2 sts=2 expandtab ft=cpp
 
 #include <boost/asio/system_executor.hpp>
+#include <boost/asio/random_access_file.hpp>
 #include "common/async/completion.h"
 #include "common/errno.h"
 #include "common/async/blocked_completion.h"
+#include "common/buffer_sequence.h"
+#include "driver/posix/aio.h"
 #include "rgw_ssd_driver.h"
 
 #if defined(HAVE_LIBURING)
@@ -356,8 +359,15 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
     std::string backend_type = dpp->get_cct()->_conf.get_val<std::string>("rgw_d4n_io_backend_type");
     ldpp_dout(dpp, 5) << "SSDDriver: requested I/O backend type: " << backend_type << dendl;
 
+    if (backend_type == "boosturing") {
+        // boosturing uses boost::asio::random_access_file which leverages io_uring
+        // when BOOST_ASIO_HAS_IO_URING is defined (set in CMakeLists.txt)
+        ldpp_dout(dpp, 5) << "SSDDriver: boosturing backend selected (boost::asio::random_access_file with io_uring)" << dendl;
+        use_boost_uring = true;
+        use_io_uring = false;
+    }
 #if defined(HAVE_LIBURING)
-    if (backend_type == "liburing") {
+    else if (backend_type == "liburing") {
         // Try to initialize io_uring
         IoUringQueueDepth = dpp->get_cct()->_conf.get_val<int64_t>("rgw_d4n_io_uring_queue_depth");
 
@@ -383,14 +393,14 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
         use_io_uring = false;
     }
 #else
-    if (backend_type == "liburing") {
+    else if (backend_type == "liburing") {
         ldpp_dout(dpp, 0) << "ERROR: URING: io_uring backend requested but liburing not compiled in, falling back to using libaio" << dendl;
+        use_io_uring = false;
     }
-    use_io_uring = false;
 #endif
 
     // Initialize libaio if that's what we're using
-    if (!use_io_uring) {
+    if (!use_io_uring && !use_boost_uring) {
 #if defined(HAVE_LIBAIO) && defined(__GLIBC__)
       // libaio setup
       struct aioinit ainit{0};
@@ -402,7 +412,7 @@ int SSDDriver::initialize(const DoutPrefixProvider* dpp)
 #endif
     }
 
-    ldpp_dout(dpp, 5) << "SSDDriver: using " << (use_io_uring ? "io_uring" : "libaio") << " I/O backend" << dendl;
+    ldpp_dout(dpp, 5) << "SSDDriver: using " << (use_boost_uring ? "boosturing" : (use_io_uring ? "io_uring" : "libaio")) << " I/O backend" << dendl;
 
     efs::space_info space = efs::space(partition_info.location);
     //currently partition_info.size is unused
@@ -968,6 +978,106 @@ void SSDDriver::put_async_uring(const DoutPrefixProvider *dpp, const Executor& e
 }
 #endif // HAVE_LIBURING
 
+// boosturing: uses file_read_op / file_write_op (shared_ptr overloads) from
+// driver/posix/aio.cc. The shared_ptr<random_access_file> keeps the file
+// open until the async IO completes.
+
+rgw::Aio::OpFunc SSDDriver::boosturing_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y,
+                                off_t read_ofs, off_t read_len, const std::string& key) {
+  std::string location = create_dirs_get_filepath_from_key(dpp, partition_info.location, key);
+  return [dpp, y, read_ofs, read_len, location=std::move(location)] (Aio* aio, AioResult& r) mutable {
+    ceph_assert(y);
+    ldpp_dout(dpp, 20) << "SSDCache: URING: boosturing_cache_read_op(): Read From Cache, oid=" << r.obj.oid
+                       << ", location=" << location << dendl;
+
+    try {
+      using namespace boost::asio;
+      yield_context yield = y.get_yield_context();
+      auto ex = yield.get_executor();
+
+      // Open file using boost::asio::random_access_file (uses io_uring via BOOST_ASIO_HAS_IO_URING)
+      boost::system::error_code ec;
+      auto file = std::make_shared<random_access_file>(ex);
+      file->open(location, random_access_file::read_only, ec);
+      if (ec) {
+        ldpp_dout(dpp, 0) << "ERROR: URING: boosturing_cache_read_op: open failed: "
+                           << location << ": " << ec.message() << dendl;
+        r.result = -ec.value();
+        aio->put(r);
+        return;
+      }
+
+      // Use file_read_op (shared_ptr overload) — the handler keeps the file alive
+      auto op = rgw::file_read_op(file, read_ofs, read_len);
+      std::move(op)(aio, r);
+    } catch (const std::exception& e) {
+      ldpp_dout(dpp, 0) << "ERROR: URING: boosturing_cache_read_op: exception: " << e.what()
+                         << ", location=" << location << dendl;
+      r.result = -EIO;
+      aio->put(r);
+    }
+  };
+}
+
+rgw::Aio::OpFunc SSDDriver::boosturing_cache_write_op(const DoutPrefixProvider *dpp, optional_yield y,
+                                const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, const std::string& key) {
+  std::string file_path = create_dirs_get_filepath_from_key(dpp, partition_info.location, key);
+  std::string temp_file_path = create_dirs_get_filepath_from_key(dpp, partition_info.location, key, true);
+  return [this, dpp, y, bl, attrs, file_path=std::move(file_path), temp_file_path=std::move(temp_file_path)] (Aio* aio, AioResult& r) mutable {
+    ceph_assert(y);
+    ldpp_dout(dpp, 20) << "SSDCache: URING: boosturing_cache_write_op(): Write to Cache, oid=" << r.obj.oid
+                       << ", temp_file_path=" << temp_file_path << dendl;
+
+    try {
+      using namespace boost::asio;
+      yield_context yield = y.get_yield_context();
+      auto ex = yield.get_executor();
+
+      // Open temp file using boost::asio::random_access_file
+      boost::system::error_code ec;
+      auto file = std::make_shared<random_access_file>(ex);
+      file->open(temp_file_path,
+          random_access_file::write_only | random_access_file::create | random_access_file::truncate, ec);
+      if (ec) {
+        ldpp_dout(dpp, 0) << "ERROR: URING: boosturing_cache_write_op: open failed: "
+                           << temp_file_path << ": " << ec.message() << dendl;
+        r.result = -ec.value();
+        aio->put(r);
+        return;
+      }
+
+      // Use file_write_op (shared_ptr overload with post-completion callback)
+      // The callback performs attrs/rename after the write completes
+      auto op = rgw::file_write_op(file, 0, std::move(bl),
+          [this, dpp, attrs=std::move(attrs), file_path=std::move(file_path),
+           temp_file_path=std::move(temp_file_path)] (boost::system::error_code ec) mutable {
+            if (!ec) {
+              if (attrs.size() > 0) {
+                optional_yield y{null_yield};
+                int attr_ret = this->set_attrs(dpp, temp_file_path, attrs, y);
+                if (attr_ret < 0) {
+                  ldpp_dout(dpp, 0) << "ERROR: URING: boosturing write::set_attrs: failed, ret=" << attr_ret << dendl;
+                }
+              }
+              Partition pi = this->get_current_partition_info(dpp);
+              efs::space_info space = efs::space(pi.location);
+              this->set_free_space(dpp, space.available);
+              int ret = std::rename(temp_file_path.c_str(), file_path.c_str());
+              if (ret < 0) {
+                ldpp_dout(dpp, 0) << "ERROR: URING: boosturing put::rename: failed, errno=" << errno << dendl;
+              }
+            }
+          });
+      std::move(op)(aio, r);
+    } catch (const std::exception& e) {
+      ldpp_dout(dpp, 0) << "ERROR: URING: boosturing_cache_write_op: exception: " << e.what()
+                         << ", temp_file_path=" << temp_file_path << dendl;
+      r.result = -EIO;
+      aio->put(r);
+    }
+  };
+}
+
 rgw::Aio::OpFunc SSDDriver::ssd_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
                                 off_t read_ofs, off_t read_len, const std::string& key) {
   return [this, dpp, y, read_ofs, read_len, key] (Aio* aio, AioResult& r) mutable {
@@ -1002,6 +1112,9 @@ rgw::AioResultList SSDDriver::get_async(const DoutPrefixProvider* dpp, optional_
 {
     rgw_raw_obj r_obj;
     r_obj.oid = key;
+    if (use_boost_uring) {
+        return aio->get(r_obj, boosturing_cache_read_op(dpp, y, ofs, len, key), cost, id);
+    }
     return aio->get(r_obj, ssd_cache_read_op(dpp, y, this, ofs, len, key), cost, id);
 }
 
@@ -1009,6 +1122,9 @@ rgw::AioResultList SSDDriver::put_async(const DoutPrefixProvider* dpp, optional_
 {
     rgw_raw_obj r_obj;
     r_obj.oid = key;
+    if (use_boost_uring) {
+        return aio->get(r_obj, boosturing_cache_write_op(dpp, y, bl, len, attrs, key), cost, id);
+    }
     return aio->get(r_obj, ssd_cache_write_op(dpp, y, this, bl, len, attrs, key), cost, id);
 }
 

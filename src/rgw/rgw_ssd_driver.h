@@ -60,8 +60,9 @@ private:
   std::mutex cache_lock;
   bool admin;
 
-  // io backend selection - true = io_uring, false = libaio
+  // io backend selection
   bool use_io_uring = false;
+  bool use_boost_uring = false;
 
 #if defined(HAVE_LIBURING)
   int64_t IoUringQueueDepth;  // set from ceph.conf in SSDDriver::initialize()
@@ -222,6 +223,12 @@ private:
 
   rgw::Aio::OpFunc ssd_cache_write_op(const DoutPrefixProvider *dpp, optional_yield y, rgw::cache::CacheDriver* cache_driver,
                                       const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, const std::string& key);
+
+  rgw::Aio::OpFunc boosturing_cache_read_op(const DoutPrefixProvider *dpp, optional_yield y,
+                                            off_t read_ofs, off_t read_len, const std::string& key);
+
+  rgw::Aio::OpFunc boosturing_cache_write_op(const DoutPrefixProvider *dpp, optional_yield y,
+                                             const bufferlist& bl, uint64_t len, const rgw::sal::Attrs& attrs, const std::string& key);
 };
 
 } } // namespace rgw::cache
