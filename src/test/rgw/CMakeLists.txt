@@ -499,3 +499,9 @@ add_executable(unittest_rgw_http_client test_rgw_http_client.cc)
 add_ceph_unittest(unittest_rgw_http_client)
 target_link_libraries(unittest_rgw_http_client
   rgw_common ${rgw_libs} ${UNITTEST_LIBS})
+
+if(WITH_RADOSGW_LANCEDB)
+add_executable(unittest_rgw_s3vector_filter test_rgw_s3vector_filter.cc)
+add_ceph_unittest(unittest_rgw_s3vector_filter)
+target_link_libraries(unittest_rgw_s3vector_filter ${rgw_libs} ${UNITTEST_LIBS})
+endif()
