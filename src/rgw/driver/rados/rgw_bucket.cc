@@ -2644,7 +2644,6 @@ std::string RGWBucketMetadataHandler::get_marker(void *handle)
 
 static void get_md5_digest(const RGWBucketEntryPoint *be, string& md5_digest) {
 
-   char md5[CEPH_CRYPTO_MD5_DIGESTSIZE * 2 + 1];
    unsigned char m[CEPH_CRYPTO_MD5_DIGESTSIZE];
    bufferlist bl;
 
@@ -2658,11 +2657,11 @@ static void get_md5_digest(const RGWBucketEntryPoint *be, string& md5_digest) {
    hash.Update((const unsigned char *)bl.c_str(), bl.length());
    hash.Final(m);
 
-   buf_to_hex(m, CEPH_CRYPTO_MD5_DIGESTSIZE, md5);
+   md5_digest.clear();
+   md5_digest.reserve(CEPH_CRYPTO_MD5_DIGESTSIZE * 2);
+   buf_to_hex(m, std::back_inserter(md5_digest));
 
    delete f;
-
-   md5_digest = md5;
 }
 #endif
 
