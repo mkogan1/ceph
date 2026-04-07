@@ -630,7 +630,7 @@ if(NOT WIN32)
   monmaptool)
 
 if (WITH_CEPHFS)
-  add_dependencies(tests ceph-mds)
+  add_dependencies(tests ceph-mds cephfs-tool)
 endif()
 if(WITH_MGR)
   add_dependencies(tests ceph-mgr)
