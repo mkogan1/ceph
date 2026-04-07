@@ -618,6 +618,7 @@ public:
   virtual bool is_prefetch_data() override { return next->is_prefetch_data(); }
   virtual void set_compressed() override { return next->set_compressed(); }
   virtual bool is_compressed() override { return next->is_compressed(); }
+  virtual bool is_delete_marker() override { return next->is_delete_marker(); }
   virtual void invalidate() override { return next->invalidate(); }
   virtual bool empty() const override { return next->empty(); }
   virtual const std::string &get_name() const override { return next->get_name(); }
@@ -666,7 +667,6 @@ public:
   virtual std::string get_hash_source(void) override { return next->get_hash_source(); };
   virtual void set_hash_source(std::string s) override { return next->set_hash_source(s); };
   virtual std::string get_oid(void) const override { return next->get_oid(); };
-  virtual bool get_delete_marker(void) override { return next->get_delete_marker(); };
   virtual bool get_in_extra_data(void) override { return next->get_in_extra_data(); };
   virtual void set_in_extra_data(bool i) override { return next->set_in_extra_data(i); };
   int range_to_ofs(uint64_t obj_size, int64_t &ofs, int64_t &end) {

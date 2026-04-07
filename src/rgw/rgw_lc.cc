@@ -577,9 +577,6 @@ static int remove_expired_obj(
   string etag;
   ret = obj->get_obj_state(dpp, &obj_state, null_yield, true);
   if (ret < 0) {
-#if 0
-    return ret;
-#else
     /* for delete markers, we expect load_obj_state() to "fail"
      * with -ENOENT */
     if (! (o.is_delete_marker() &&
@@ -589,7 +586,6 @@ static int remove_expired_obj(
 		    __func__, oc.o.key.to_string(), ret) << dendl;
       return ret;
     }
-#endif
   }
   auto iter = obj_state->attrset.find(RGW_ATTR_ETAG);
   if (iter != obj_state->attrset.end()) {
