@@ -1936,7 +1936,23 @@ int RGWHandler_REST::read_permissions(RGWOp* op_obj, optional_yield y)
     return -EINVAL;
   }
 
-  return do_read_permissions(op_obj, only_bucket, y);
+  auto ret = do_read_permissions(op_obj, only_bucket, y);
+  switch (s->op) {
+  case OP_HEAD:
+  case OP_GET:
+    if (ret == -ENOENT /* note, access already accounted for */) [[unlikely]] {
+      RGWObjState* lstate = nullptr;
+      int ret2 = s->object->get_obj_state(s, &lstate, s->yield);
+      if (! (ret2 < 0)) {
+	auto tf = s->object->is_delete_marker() ? "true" : "false";
+	dump_header(s, "x-amz-delete-marker", tf);
+      }
+    }
+  default:
+    break;
+  }
+
+  return ret;
 }
 
 void RGWRESTMgr::register_resource(string resource, RGWRESTMgr *mgr)
