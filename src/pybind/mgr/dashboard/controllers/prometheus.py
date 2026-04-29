@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from datetime import datetime
+from typing import List
 
 import requests
 
@@ -151,6 +152,17 @@ class Prometheus(PrometheusRESTController):
     @RESTController.Collection(method='DELETE', path='/silence/{s_id}', status=204)
     def delete_silence(self, s_id):
         return self.alert_proxy('DELETE', '/silence/' + s_id) if s_id else None
+
+    @RESTController.Collection(method='PUT', path='/set_remote_write')
+    def set_remote_write(self, remote_write_url: str, remote_write_allowed_metrics: List[str]):
+        orch_client = OrchClient.instance()
+        return orch_client.monitoring.set_prometheus_remote_write(remote_write_url,
+                                                                  remote_write_allowed_metrics)
+
+    @RESTController.Collection(method='PUT', path='/remove_remote_write')
+    def remove_remote_write(self, url: str):
+        orch_client = OrchClient.instance()
+        return orch_client.monitoring.remove_prometheus_remote_write(url)
 
     @RESTController.Collection(method='GET', path='/prometheus_query_data')
     def get_prometeus_query_data(self, **params):

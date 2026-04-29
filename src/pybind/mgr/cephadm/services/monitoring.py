@@ -19,6 +19,14 @@ from ceph.deployment.utils import wrap_ipv6
 logger = logging.getLogger(__name__)
 
 
+def get_field_from_spec(spec: ServiceSpec, attr: str, default: Any) -> Any:
+    try:
+        value = getattr(spec, attr)
+        return value if value else default
+    except AttributeError:
+        return default
+
+
 class GrafanaService(CephadmService):
     TYPE = 'grafana'
     DEFAULT_SERVICE_PORT = 3000
@@ -438,6 +446,9 @@ class PrometheusService(CephadmService):
         except AttributeError:
             # default to disabled
             retention_size = '0'
+        
+        remote_write_url = get_field_from_spec(spec, 'remote_write_url', '')
+        remote_write_allowed_metrics = get_field_from_spec(spec, 'remote_write_allowed_metrics', '')
 
         # build service discovery end-point
         port = self.mgr.service_discovery_port
@@ -489,6 +500,8 @@ class PrometheusService(CephadmService):
             'ceph_exporter_sd_url': ceph_exporter_sd_url,
             'nfs_sd_url': nfs_sd_url,
             'external_prometheus_targets': targets,
+            'remote_write_url': remote_write_url,
+            'remote_write_allowed_metrics': remote_write_allowed_metrics,
             'cluster_fsid': FSID,
             'nvmeof_sd_url': nvmeof_sd_url,
             'clusters_credentials': clusters_credentials,
@@ -598,9 +611,9 @@ class PrometheusService(CephadmService):
         r['files']['/etc/prometheus/alerting/custom_alerts.yml'] = \
             self.mgr.get_store('services/prometheus/alerting/custom_alerts.yml', '')
 
-        return r, sorted(self.calculate_deps())
+        return r, sorted(self.calculate_deps(spec=spec))
 
-    def calculate_deps(self) -> List[str]:
+    def calculate_deps(self, spec: Optional[ServiceSpec] = None) -> List[str]:
         deps = []  # type: List[str]
         port = cast(int, self.mgr.get_module_option_ex('prometheus', 'server_port', self.DEFAULT_MGR_PROMETHEUS_PORT))
         deps.append(str(port))
@@ -621,6 +634,12 @@ class PrometheusService(CephadmService):
         deps += [s for s in ['node-exporter', 'alertmanager'] if self.mgr.cache.get_daemons_by_service(s)]
         if len(self.mgr.cache.get_daemons_by_type('ingress')) > 0:
             deps.append('ingress')
+
+        if spec:
+            prometheus_spec = cast(PrometheusSpec, spec)
+
+            deps.append(f'remote_write_url:{prometheus_spec.remote_write_url}')
+            deps.append(f'remote_write_metrics:{prometheus_spec.remote_write_allowed_metrics}')
         return deps
 
     def get_active_daemon(self, daemon_descrs: List[DaemonDescription]) -> DaemonDescription:
