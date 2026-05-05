@@ -2607,6 +2607,11 @@ void RGWBucketInfo::decode_json(JSONObj *obj) {
   if (obj_lock_enabled()) {
     JSONDecoder::decode_json("obj_lock", obj_lock, obj);
   }
+
+  if (layout.logs.empty() &&
+      layout.current_index.layout.type == rgw::BucketIndexType::Normal) {
+    layout.logs.push_back(rgw::log_layout_from_index(0, layout.current_index));
+  }
 }
 
 list<RGWUserInfo> RGWUserInfo::generate_test_instances()
