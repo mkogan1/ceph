@@ -219,6 +219,8 @@ class CertStoreManager(ResourceManager):
                 hostname: Optional[str] = None) -> str:
         return self.api.cert_store_get_key(entity, service_name, hostname)
 
+class MonitoringManager(ResourceManager):
+
     @wait_api_result
     def set_prometheus_remote_write(self, remote_write_url: str,
                                     remote_write_allowed_metrics: List[str]) -> str:
@@ -252,6 +254,7 @@ class OrchClient(object):
         self.osds = OsdManager(self.api)
         self.daemons = DaemonManager(self.api)
         self.upgrades = UpgradeManager(self.api)
+        self.monitoring = MonitoringManager(self.api)
         self.hardware = HardwareManager(self.api)
         self.cert_store = CertStoreManager(self.api)
 

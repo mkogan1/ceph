@@ -2986,6 +2986,10 @@ Then run the following:
                     deps.append(f'{hash(prometheus_user + prometheus_password)}')
                 if alertmanager_user and alertmanager_password:
                     deps.append(f'{hash(alertmanager_user + alertmanager_password)}')
+            if spec:
+                deps.append(f"remote_write_url:{getattr(spec, 'remote_write_url', '')}")
+                deps.append(f"remote_write_metrics:{getattr(spec, 'remote_write_allowed_metrics', '')}")
+
         elif daemon_type == 'grafana':
             deps += get_daemon_names(['prometheus', 'loki'])
             if self.secure_monitoring_stack and prometheus_user and prometheus_password:
