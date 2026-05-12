@@ -4908,6 +4908,7 @@ void RGWPutObj::execute(optional_yield y)
       return;
     }
     s->obj_size = ofs;
+    s->rdma_bytes_transferred = ofs;
     s->object->set_obj_size(ofs);
   } else
 #endif

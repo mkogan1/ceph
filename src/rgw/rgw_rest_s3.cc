@@ -842,6 +842,7 @@ send_data:
         if (ret < 0) {
           return ret;
         }
+        s->rdma_bytes_transferred = rdma_buf_offset;
       }
       return 0;
     }
