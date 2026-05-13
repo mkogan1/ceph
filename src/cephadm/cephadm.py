@@ -4553,6 +4553,7 @@ def install_base_units(ctx, fsid):
         should be harmless.
         """
         targets: List[str] = [
+            'ceph-exporter',
             'ceph-mon',
             'ceph-mgr',
             'ceph-mds',
