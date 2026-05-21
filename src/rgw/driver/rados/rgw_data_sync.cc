@@ -573,6 +573,7 @@ class RGWInitDataSyncStatusCoroutine : public RGWCoroutine {
     RGWDataSyncStatusManager::sync_status_oid(sc->source_zone) };
 
   map<int, RGWDataChangesLogInfo> shards_info;
+  int ret = 0;
 
 
 public:
@@ -599,7 +600,6 @@ public:
   }
 
   int operate(const DoutPrefixProvider *dpp) override {
-    int ret;
     reenter(this) {
       if (!lease_cr->is_locked()) {
 	drain_all();
