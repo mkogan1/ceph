@@ -52,28 +52,40 @@ class OSDService(CephService):
                 'value': value,
             })
 
-    def _get_post_create_osd_config(
+    def _get_osd_spec_configs(
         self,
         spec: DriveGroupSpec,
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         cfg = getattr(spec, 'config', None) or {}
         if not cfg:
-            return {}
+            return {}, {}
 
         meta_cache: dict[str, Optional[dict[str, Any]]] = {}
+        creation_cfg: dict[str, str] = {}
         post_create_cfg: dict[str, str] = {}
 
         for key, value in cfg.items():
-            if not can_apply_post_create(self.mgr, key, meta_cache):
+            runtime_updatable = can_apply_post_create(
+                self.mgr,
+                key,
+                meta_cache,
+            )
+
+            meta = meta_cache.get(key)
+            if not meta:
                 logger.debug(
-                    "Skipping OSD spec config key %s in post-create",
+                    "Skipping invalid OSD spec config key %s",
                     key,
                 )
                 continue
 
-            post_create_cfg[key] = str(value)
+            if key == 'bluestore_min_alloc_size':
+                creation_cfg[key] = str(value)
 
-        return post_create_cfg
+            if runtime_updatable:
+                post_create_cfg[key] = str(value)
+
+        return creation_cfg, post_create_cfg
 
     def create_from_spec(self, drive_group: DriveGroupSpec, force_apply: bool = False) -> str:
         """
@@ -82,6 +94,7 @@ class OSDService(CephService):
             in inventory timestamps (and the check only compares timestamps, not spec content).
         """
         logger.debug(f"Processing DriveGroup {drive_group.service_id}")
+        creation_cfg, post_create_cfg = self._get_osd_spec_configs(drive_group)
         osd_id_claims = OsdIdClaims(self.mgr)
         if osd_id_claims.get():
             logger.info(
@@ -113,7 +126,8 @@ class OSDService(CephService):
             env_vars: List[str] = [f"CEPH_VOLUME_OSDSPEC_AFFINITY={drive_group.service_id}"]
             ret_msg = await self.create_single_host(
                 drive_group, host, cmds,
-                replace_osd_ids=osd_id_claims_for_host, env_vars=env_vars
+                replace_osd_ids=osd_id_claims_for_host, env_vars=env_vars,
+                creation_cfg=creation_cfg, post_create_cfg=post_create_cfg
             )
             self.mgr.cache.update_osdspec_last_applied(
                 host, drive_group.service_name(), start_ts
@@ -137,9 +151,11 @@ class OSDService(CephService):
     async def create_single_host(self,
                                  drive_group: DriveGroupSpec,
                                  host: str, cmds: List[str], replace_osd_ids: List[str],
-                                 env_vars: Optional[List[str]] = None) -> str:
+                                 env_vars: Optional[List[str]] = None,
+                                 creation_cfg: Optional[dict[str, str]] = None,
+                                 post_create_cfg: Optional[dict[str, str]] = None) -> str:
         for cmd in cmds:
-            out, err, code = await self._run_ceph_volume_command(host, cmd, env_vars=env_vars)
+            out, err, code = await self._run_ceph_volume_command(host, cmd, env_vars=env_vars, creation_cfg=creation_cfg)
             if code == 1 and ', it is already prepared' in '\n'.join(err):
                 # HACK: when we create against an existing LV, ceph-volume
                 # returns an error and the above message.  To make this
@@ -150,12 +166,13 @@ class OSDService(CephService):
                 raise RuntimeError(
                     'cephadm exited with an error code: %d, stderr:%s' % (
                         code, '\n'.join(err)))
-        return await self.deploy_osd_daemons_for_existing_osds(host, drive_group, cmds,
-                                                               replace_osd_ids)
+        return await self.deploy_osd_daemons_for_existing_osds(host, drive_group,
+                                                               replace_osd_ids, post_create_cfg=post_create_cfg)
 
     async def deploy_osd_daemons_for_existing_osds(self, host: str, spec: DriveGroupSpec,
                                                    cv_cmds: Optional[List[str]] = None,
-                                                   replace_osd_ids: Optional[List[str]] = None) -> str:
+                                                   replace_osd_ids: Optional[List[str]] = None,
+                                                   post_create_cfg: Optional[dict[str, str]] = None) -> str:
 
         if replace_osd_ids is None:
             replace_osd_ids = OsdIdClaims(self.mgr).filtered_by_host(host)
@@ -221,6 +238,7 @@ class OSDService(CephService):
                     network='',  # required arg but only really needed for mons
                 )
                 daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
+                self._apply_osd_config_to_daemon(str(osd_id), post_create_cfg or {})
                 await CephadmServe(self.mgr)._create_daemon(
                     [daemon_spec],
                     osd_uuid_map=osd_uuid_map)
@@ -267,6 +285,7 @@ class OSDService(CephService):
                 network='',  # required arg but only really needed for mons
             )
             daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
+            self._apply_osd_config_to_daemon(osd_id, post_create_cfg or {})
             await CephadmServe(self.mgr)._create_daemon(
                 [daemon_spec],
                 osd_uuid_map=osd_uuid_map)
@@ -278,6 +297,7 @@ class OSDService(CephService):
             return "Created osd(s) %s on host '%s'" % (','.join(created), host)
         else:
             return "Created no osd(s) on host %s; already created?" % host
+
 
     def prepare_drivegroup(self, drive_group: DriveGroupSpec) -> List[Tuple[str, DriveSelection]]:
         # 1) use fn_filter to determine matching_hosts
@@ -438,7 +458,8 @@ class OSDService(CephService):
         return matching_specs
 
     async def _run_ceph_volume_command(self, host: str,
-                                       cmd: str, env_vars: Optional[List[str]] = None
+                                       cmd: str, env_vars: Optional[List[str]] = None,
+                                       creation_cfg: Optional[dict[str, str]] = None
                                        ) -> Tuple[List[str], List[str], int]:
         self.mgr.inventory.assert_host(host)
 
@@ -448,8 +469,13 @@ class OSDService(CephService):
             'entity': 'client.bootstrap-osd',
         })
 
+        ceph_conf = self.mgr.get_minimal_ceph_conf()
+        if creation_cfg:
+            ceph_conf = self._append_osd_creation_config(
+                ceph_conf, creation_cfg)
+
         j = json.dumps({
-            'config': self.mgr.get_minimal_ceph_conf(),
+            'config': ceph_conf,
             'keyring': keyring,
         })
 
@@ -463,6 +489,22 @@ class OSDService(CephService):
             stdin=j,
             error_ok=True)
         return out, err, code
+
+    @staticmethod
+    def _append_osd_creation_config(
+        ceph_conf: str,
+        cfg: dict[str, str],
+    ) -> str:
+        lines = ['', '[osd]']
+
+        for key, value in cfg.items():
+            if '\n' in value or '\r' in value:
+                raise OrchestratorError(
+                    f'OSD spec config option {key} contains a multiline value'
+                )
+            lines.append(f'{key} = {value}')
+
+        return ceph_conf.rstrip() + '\n' + '\n'.join(lines) + '\n'
 
     def post_remove(self, daemon: DaemonDescription, is_failed_deploy: bool) -> None:
         # Do not remove the osd.N keyring, if we failed to deploy the OSD, because
