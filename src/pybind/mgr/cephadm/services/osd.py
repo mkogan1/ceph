@@ -87,6 +87,29 @@ class OSDService(CephService):
 
         return creation_cfg, post_create_cfg
 
+    def _get_post_create_osd_config(
+        self,
+        spec: DriveGroupSpec,
+    ) -> dict[str, str]:
+        cfg = getattr(spec, 'config', None) or {}
+        if not cfg:
+            return {}
+
+        meta_cache: dict[str, Optional[dict[str, Any]]] = {}
+        post_create_cfg: dict[str, str] = {}
+
+        for key, value in cfg.items():
+            if not can_apply_post_create(self.mgr, key, meta_cache):
+                logger.debug(
+                    "Skipping OSD spec config key %s in post-create",
+                    key,
+                )
+                continue
+
+            post_create_cfg[key] = str(value)
+
+        return post_create_cfg
+
     def create_from_spec(self, drive_group: DriveGroupSpec, force_apply: bool = False) -> str:
         """
         :param force_apply: If True, do not check osdspec_needs_apply(). Used by
