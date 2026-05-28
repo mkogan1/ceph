@@ -7953,9 +7953,10 @@ void RGWDeleteMultiObj::write_ops_log_entry(rgw_log_entry& entry) const {
   entry.delete_multi_obj_meta.objects = std::move(ops_log_entries);
 }
 
-void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object,
-                                                 optional_yield y,
-                                                 const bool skip_olh_obj_update)
+RGWDeleteMultiObj::DeleteResult
+RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object,
+                                            optional_yield y,
+                                            const bool skip_olh_obj_update)
 {
   const string& key = object.get_key();
   const string& instance = object.get_version_id();
@@ -7973,8 +7974,7 @@ void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object
 
   std::unique_ptr<rgw::sal::Object> obj = bucket->get_object(o);
   if (o.empty()) {
-    send_partial_response(o, false, "", -EINVAL);
-    return;
+    return {o, false, "", -EINVAL};
   }
 
   // verify object delete permission
@@ -7985,8 +7985,7 @@ void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object
                                 s->bucket_acl, s->iam_policy,
                                 s->iam_identity_policies,
                                 s->session_policies, action)) {
-    send_partial_response(o, false, "", -EACCES);
-    return;
+    return {o, false, "", -EACCES};
   }
 
   uint64_t obj_size = 0;
@@ -8002,9 +8001,7 @@ void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object
         // object maybe delete_marker, skip check_obj_lock
         check_obj_lock = false;
       } else {
-        // Something went wrong.
-        send_partial_response(o, false, "", ret);
-        return;
+        return {o, false, "", ret};
       }
     } else {
       obj_size = obj->get_size();
@@ -8015,8 +8012,7 @@ void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object
       ceph_assert(state_loaded == 0);
       int object_lock_response = verify_object_lock(dpp, obj->get_attrs(), bypass_perm, bypass_governance_mode);
       if (object_lock_response != 0) {
-        send_partial_response(o, false, "", object_lock_response);
-        return;
+        return {o, false, "", object_lock_response};
       }
     }
   }
@@ -8030,8 +8026,7 @@ void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object
           = driver->get_notification(obj.get(), s->src_object.get(), s, event_type, y);
   int r = res->publish_reserve(dpp);
   if (r < 0) {
-    send_partial_response(o, false, "", r);
-    return;
+    return {o, false, "", r};
   }
 
   obj->set_atomic(true);
@@ -8062,11 +8057,10 @@ void RGWDeleteMultiObj::handle_individual_object(const RGWMultiDelObject& object
     int ret = res->publish_commit(dpp, obj_size, ceph::real_clock::now(), etag, version_id);
     if (ret < 0) {
       ldpp_dout(dpp, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
-      // too late to rollback operation, hence op_ret is not set here
     }
   }
-  
-  send_partial_response(o, del_op->result.delete_marker, del_op->result.version_id, r);
+
+  return {o, del_op->result.delete_marker, del_op->result.version_id, r};
 }
 
 void RGWDeleteMultiObj::handle_versioned_objects(const std::vector<RGWMultiDelObject>& objects,
@@ -8082,14 +8076,15 @@ void RGWDeleteMultiObj::handle_versioned_objects(const std::vector<RGWMultiDelOb
     grouped_objects[key].push_back(object);
   }
 
+  std::vector<DeleteResult> results;
+  results.reserve(objects.size());
+
   // for each group of objects, handle all but the last object and skip update_olh
   for (const auto& [_, objects] : grouped_objects) {
     for (size_t i = 0; i + 1 < objects.size(); ++i) { // skip the last element
-      group.spawn([this, &objects, i] (boost::asio::yield_context yield) {
-        handle_individual_object(objects[i], yield, true /* skip_olh_obj_update */);
+      group.spawn([this, &objects, i, &results] (boost::asio::yield_context yield) {
+        results.push_back(handle_individual_object(objects[i], yield, true /* skip_olh_obj_update */));
       });
-
-      rgw_flush_formatter(s, s->formatter);
     }
   }
   group.wait();
@@ -8097,13 +8092,17 @@ void RGWDeleteMultiObj::handle_versioned_objects(const std::vector<RGWMultiDelOb
   // Now handle the last object of each group with update_olh
   for (const auto& [_, objects] : grouped_objects) {
     const auto& object = objects.back();
-    group.spawn([this, &object] (boost::asio::yield_context yield) {
-      handle_individual_object(object, yield);
+    group.spawn([this, &object, &results] (boost::asio::yield_context yield) {
+      results.push_back(handle_individual_object(object, yield));
     });
-
-    rgw_flush_formatter(s, s->formatter);
   }
   group.wait();
+
+  // apply results to formatter and ops_log_entries after all coroutines complete
+  for (const auto& r : results) {
+    send_partial_response(r.key, r.delete_marker, r.marker_version_id, r.ret);
+    rgw_flush_formatter(s, s->formatter);
+  }
 }
 
 void RGWDeleteMultiObj::handle_non_versioned_objects(const std::vector<RGWMultiDelObject>& objects,
@@ -8111,15 +8110,20 @@ void RGWDeleteMultiObj::handle_non_versioned_objects(const std::vector<RGWMultiD
                                                      boost::asio::yield_context yield)
 {
   auto group = ceph::async::spawn_throttle{yield, max_aio};
+  std::vector<DeleteResult> results;
+  results.reserve(objects.size());
 
   for (const auto& object : objects) {
-    group.spawn([this, &object] (boost::asio::yield_context yield) {
-                  handle_individual_object(object, yield);
-                });
-
-    rgw_flush_formatter(s, s->formatter);
+    group.spawn([this, &object, &results] (boost::asio::yield_context yield) {
+      results.push_back(handle_individual_object(object, yield));
+    });
   }
   group.wait();
+
+  for (const auto& r : results) {
+    send_partial_response(r.key, r.delete_marker, r.marker_version_id, r.ret);
+    rgw_flush_formatter(s, s->formatter);
+  }
 }
 
 void RGWDeleteMultiObj::handle_objects(const std::vector<RGWMultiDelObject>& objects,
