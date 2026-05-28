@@ -864,7 +864,26 @@ bool RGWDataChangesLog::filter_bucket(const DoutPrefixProvider *dpp,
     return true;
   }
 
-  return bucket_filter(bucket, y, dpp);
+  const auto cache_key = bucket.get_key();
+  {
+    std::lock_guard l(filter_cache_mtx);
+    auto it = filter_cache.find(cache_key);
+    if (it != filter_cache.end()) {
+      constexpr auto ttl = std::chrono::seconds(120);
+      if (ceph::coarse_mono_clock::now() - it->second.second < ttl) {
+        return it->second.first;
+      }
+    }
+  }
+
+  bool result = bucket_filter(bucket, y, dpp);
+
+  {
+    std::lock_guard l(filter_cache_mtx);
+    filter_cache[cache_key] = {result, ceph::coarse_mono_clock::now()};
+  }
+
+  return result;
 }
 
 std::string RGWDataChangesLog::get_oid(uint64_t gen_id, int i) const {

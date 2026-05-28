@@ -67,7 +67,8 @@ using parse_buffer = boost::beast::flat_static_buffer<parse_buffer_size>;
 
 // use mmap/mprotect to allocate 512k coroutine stacks
 auto make_stack_allocator() {
-  return boost::context::protected_fixedsize_stack{512*1024};
+  //return boost::context::protected_fixedsize_stack{512*1024};
+  return boost::context::protected_fixedsize_stack{1024*1024};
 }
 
 static constexpr std::chrono::milliseconds BACKOFF_MAX_WAIT(5000);

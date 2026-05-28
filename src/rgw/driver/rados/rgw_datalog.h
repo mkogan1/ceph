@@ -418,6 +418,8 @@ class RGWDataChangesLog {
 
   std::function<bool(const rgw_bucket& bucket, optional_yield y,
                      const DoutPrefixProvider *dpp)> bucket_filter;
+  mutable std::mutex filter_cache_mtx;
+  mutable std::map<std::string, std::pair<bool, ceph::coarse_mono_clock::time_point>> filter_cache;
   bool going_down() const;
   bool filter_bucket(const DoutPrefixProvider* dpp,
 		     const rgw_bucket& bucket,

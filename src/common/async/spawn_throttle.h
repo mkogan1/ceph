@@ -17,6 +17,7 @@
 
 #include "detail/spawn_throttle_impl.h"
 
+#include <boost/context/protected_fixedsize_stack.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include "cancel_on_error.h"
 
@@ -91,7 +92,10 @@ class spawn_throttle {
   template <typename F>
   void spawn(F&& f)
   {
-    boost::asio::spawn(get_executor(), std::forward<F>(f), impl->get());
+    boost::asio::spawn(get_executor(),
+                       std::allocator_arg,
+                       boost::context::protected_fixedsize_stack(1024*1024),
+                       std::forward<F>(f), impl->get());
   }
 
   /// /overload
