@@ -273,10 +273,11 @@ class IngressService(CephService):
                 'v4v6_flag': v4v6_flag,
                 'monitor_ssl_file': monitor_ssl_file,
                 'peer_hosts': peer_hosts,
-                'is_ipv6': is_ipv6(ip)
+                'is_ipv6': is_ipv6(ip),
+                'qat_support': spec.haproxy_qat_support,
             }
         )
-        config_files = {
+        final_config: Dict[str, Any] = {
             'files': {
                 "haproxy.cfg": haproxy_conf,
             }
@@ -285,14 +286,17 @@ class IngressService(CephService):
         if spec.ssl:
             tls_pair = self.get_certificates(daemon_spec)
             combined_pem = tls_pair.cert + '\n' + tls_pair.key
-            config_files['files']['haproxy.pem'] = combined_pem
+            final_config['files']['haproxy.pem'] = combined_pem
 
         if spec.monitor_ssl and spec.monitor_cert_source != MonitorCertSource.REUSE_SERVICE_CERT.value:
             tls_creds = self.get_stats_certs(spec, daemon_spec, monitor_ips)
             monitor_ssl_cert = [tls_creds.cert, tls_creds.key]
-            config_files['files']['stats_haproxy.pem'] = '\n'.join(monitor_ssl_cert)
+            final_config['files']['stats_haproxy.pem'] = '\n'.join(monitor_ssl_cert)
 
-        return config_files, self.get_haproxy_dependencies(self.mgr, spec)
+        if spec.haproxy_qat_support:
+            final_config['qat_support'] = True
+
+        return final_config, self.get_haproxy_dependencies(self.mgr, spec)
 
     def get_stats_certs(
         self,

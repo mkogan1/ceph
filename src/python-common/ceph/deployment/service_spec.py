@@ -2480,6 +2480,7 @@ class IngressSpec(ServiceSpec):
                  monitor_ip_addrs: Optional[Dict[str, str]] = None,
                  use_tcp_mode_over_rgw: bool = False,
                  haproxy_peer_communication_port: Optional[int] = None,
+                 haproxy_qat_support: bool = False,
                  ):
         assert service_type == 'ingress'
 
@@ -2526,6 +2527,7 @@ class IngressSpec(ServiceSpec):
         self.monitor_ip_addrs = monitor_ip_addrs
         self.use_tcp_mode_over_rgw = use_tcp_mode_over_rgw
         self.haproxy_peer_communication_port = haproxy_peer_communication_port
+        self.haproxy_qat_support = haproxy_qat_support
 
     def get_port_start(self) -> List[int]:
         ports = []
