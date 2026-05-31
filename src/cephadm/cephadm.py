@@ -634,6 +634,25 @@ def lookup_unit_name_by_daemon_name(ctx: CephadmContext, fsid: str, name: str) -
         raise Error('Failed to get unit name for {}'.format(daemon))
 
 
+def lookup_container_id_by_daemon_name(ctx: CephadmContext, fsid: str, name: str) -> str:
+    updater = CombinedStatusUpdater([CoreStatusUpdater()])
+    daemon_entries = daemons_matching(
+        ctx,
+        daemon_name=name,
+    )
+    daemons = [updater.expand(ctx, entry) for entry in daemon_entries]
+    if not daemons:
+        raise Error(f'Failed to find daemon {name}')
+    if len(daemons) > 1:
+        raise Error(f'Found multiple daemons matching name {name}: {daemons}')
+
+    daemon = daemons[0]
+    try:
+        return daemon['container_id']
+    except KeyError:
+        raise Error(f'Failed to get container id for {daemon}')
+
+
 def create_daemon_dirs(
     ctx: CephadmContext,
     ident: 'DaemonIdentity',

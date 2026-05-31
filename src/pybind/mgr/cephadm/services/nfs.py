@@ -16,6 +16,7 @@ from ceph.deployment.service_spec import ServiceSpec, NFSServiceSpec
 from .service_registry import register_cephadm_service
 
 from orchestrator import DaemonDescription, OrchestratorError
+
 from cephadm.services.cephadmservice import AuthEntity, CephadmDaemonDeploySpec, CephService
 from cephadm.schedule import get_placement_hosts
 if TYPE_CHECKING:
@@ -133,9 +134,9 @@ class NFSService(CephService):
         nfs_spec = cast(NFSServiceSpec, spec)
         if (nfs_spec.kmip_cert and nfs_spec.kmip_key and nfs_spec.kmip_ca_cert and nfs_spec.kmip_host_list):
             # add dependency of kmip fields
-            deps.append(f'kmip_cert: {nfs_spec.kmip_cert}')
-            deps.append(f'kmip_key: {nfs_spec.kmip_key}')
-            deps.append(f'kmip_ca_cert: {nfs_spec.kmip_ca_cert}')
+            deps.append(f'kmip_cert: {str(utils.config_hash(nfs_spec.kmip_cert))}')
+            deps.append(f'kmip_key: {str(utils.config_hash(nfs_spec.kmip_key))}')
+            deps.append(f'kmip_ca_cert: {str(utils.config_hash(nfs_spec.kmip_ca_cert))}')
             deps.append(f'kmip_host_list: {nfs_spec.kmip_host_list}')
         deps.append(f'enable_rdma: {nfs_spec.enable_rdma}')
         deps.append(f'rdma_port: {nfs_spec.rdma_port}')
