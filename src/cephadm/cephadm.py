@@ -3231,9 +3231,6 @@ def command_bootstrap(ctx):
 
     enable_cephadm_mgr_module(cli, wait_for_mgr_restart)
 
-    if ctx.automatically_accept_license:
-        cli(['orch', 'accept-license', '--image', ctx.image])
-
     # ssh
     if not ctx.skip_ssh:
         prepare_ssh(ctx, cli, wait_for_mgr_restart)
@@ -3258,6 +3255,9 @@ def command_bootstrap(ctx):
             cli(['orch', 'host', 'label', 'add', get_hostname(), ADMIN_LABEL])
         except Exception:
             logger.info('Unable to set up "admin" label; assuming older version of Ceph')
+
+    if ctx.automatically_accept_license:
+        cli(['orch', 'accept-license', '--image', ctx.image])
 
     if ctx.apply_spec:
         logger.info('Applying %s to cluster' % ctx.apply_spec)
