@@ -164,7 +164,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                 enable_rdma: bool = False,
                                 rdma_port: Optional[int] = None,
                                 enable_nfsv3: bool = False,
-                                inbuf: Optional[str] = None) -> None:
+                                inbuf: Optional[str] = None,
+                                enable_virtual_server: bool = False) -> None:
         """Create an NFS Cluster"""
         cluster_qos_config = None
         ssl_cert = ssl_key = ssl_ca_cert = tls_min_version = tls_ciphers = None
@@ -195,7 +196,8 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                            tls_min_version=tls_min_version,
                                            tls_ciphers=tls_ciphers,
                                            enable_rdma=enable_rdma,
-                                           rdma_port=rdma_port)
+                                           rdma_port=rdma_port,
+                                           enable_virtual_server=enable_virtual_server)
 
     @NFSCLICommand('nfs cluster rm', perm='rw')
     @object_format.EmptyResponder()

@@ -271,7 +271,8 @@ class NFSService(CephService):
                 "tls_debug": spec.tls_debug,
                 "ceph_nodes": ceph_nodes,
                 "protocols": "3, 4" if spec.enable_nfsv3 else "4",
-                "use_old_nodeid": False if nodeid.isdigit() else True
+                "use_old_nodeid": False if nodeid.isdigit() else True,
+                "enable_virtual_server": str(spec.enable_virtual_server).lower()
             }
             if spec.enable_haproxy_protocol:
                 context["haproxy_hosts"] = self._haproxy_hosts()

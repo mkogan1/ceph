@@ -1487,6 +1487,7 @@ class NFSServiceSpec(ServiceSpec):
                  tls_ciphers: Optional[str] = None,
                  colocation_ports: Optional[List[Dict[str, int]]] = None,
                  enable_nfsv3: bool = False,
+                 enable_virtual_server: bool = False,
                  ):
         assert service_type == 'nfs'
         super(NFSServiceSpec, self).__init__(
@@ -1527,6 +1528,8 @@ class NFSServiceSpec(ServiceSpec):
         self.tls_ktls = tls_ktls
         self.tls_debug = tls_debug
         self.tls_min_version = tls_min_version
+
+        self.enable_virtual_server = enable_virtual_server
 
     def get_colocation_port_fields(self) -> List[str]:
         """Return port fields for colocation; include rdma_port when RDMA is enabled."""

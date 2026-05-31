@@ -160,6 +160,7 @@ class NFSCluster:
             tls_ciphers: Optional[str] = None,
             enable_rdma: bool = False,
             rdma_port: Optional[int] = None,
+            enable_virtual_server: bool = False
     ) -> None:
         if not port:
             port = 2049   # default nfs port
@@ -205,7 +206,8 @@ class NFSCluster:
                                   tls_min_version=tls_min_version,
                                   tls_ciphers=tls_ciphers,
                                   enable_rdma=enable_rdma,
-                                  rdma_port=rdma_port)
+                                  rdma_port=rdma_port,
+                                  enable_virtual_server=enable_virtual_server)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
             ispec = IngressSpec(service_type='ingress',
@@ -235,7 +237,8 @@ class NFSCluster:
                                   tls_min_version=tls_min_version,
                                   tls_ciphers=tls_ciphers,
                                   enable_rdma=enable_rdma,
-                                  rdma_port=rdma_port)
+                                  rdma_port=rdma_port,
+                                  enable_virtual_server=enable_virtual_server)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
         log.debug("Successfully deployed nfs daemons with cluster id %s and placement %s",
@@ -271,6 +274,7 @@ class NFSCluster:
             tls_ciphers: Optional[str] = None,
             enable_rdma: bool = False,
             rdma_port: Optional[int] = None,
+            enable_virtual_server: bool = False
     ) -> None:
         try:
             if virtual_ip:
@@ -311,7 +315,8 @@ class NFSCluster:
                     tls_min_version=tls_min_version,
                     tls_ciphers=tls_ciphers,
                     enable_rdma=enable_rdma,
-                    rdma_port=rdma_port
+                    rdma_port=rdma_port,
+                    enable_virtual_server=enable_virtual_server
                 )
                 return
             raise NonFatalError(f"{cluster_id} cluster already exists")
