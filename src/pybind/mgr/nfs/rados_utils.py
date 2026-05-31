@@ -87,7 +87,7 @@ class NFSRados:
         log.debug("write configuration into rados object %s/%s/%s",
                   self.pool, self.namespace, obj)
 
-        with self._get_locked_obj(obj, NFSRadosObjectType.common_config) as ioctx:
+        with self._get_locked_obj(config_obj, NFSRadosObjectType.common_config) as ioctx:
             # Add created obj url to common config obj
             ioctx.append(config_obj, format_block(
                          self._create_url_block(obj)).encode('utf-8'))
@@ -121,7 +121,7 @@ class NFSRados:
         log.debug("Update export %s in %s", obj, config_obj)
 
     def remove_obj(self, obj: str, config_obj: str, should_notify: Optional[bool] = True) -> None:
-        with self._get_locked_obj(obj, NFSRadosObjectType.export) as ioctx:
+        with self._get_locked_obj(config_obj, NFSRadosObjectType.common_config) as ioctx:
             ioctx.set_namespace(self.namespace)
             size, _ = ioctx.stat(config_obj)
             export_urls = ioctx.read(config_obj, size)
