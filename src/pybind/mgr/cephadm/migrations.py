@@ -17,7 +17,7 @@ from orchestrator import OrchestratorError, DaemonDescription
 if TYPE_CHECKING:
     from .module import CephadmOrchestrator
 
-LAST_MIGRATION = 9
+LAST_MIGRATION = 11
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +132,12 @@ class Migrations:
         if self.mgr.migration_current == 9:
             if self.migrate_9_10():
                 self.set(10)
+
+        if self.mgr.migration_current == 10:
+            logger.info('Running migration 10 -> 11')
+            if self.migrate_10_11():
+                self.set(11)
+
 
     def migrate_0_1(self) -> bool:
         """
@@ -607,6 +613,23 @@ class Migrations:
             self.mgr.set_store('nfs_services_with_old_userid', ','.join(nfs_services))
         self.mgr.remove_health_warning('CEPHADM_MIGRATION_FAILURE')
         return True
+
+    def migrate_10_11(self) -> bool:
+        """
+        Migrate NFS cluster QoS type values from integers to strings.
+        Background: QoS type was stored as integers (1, 2, 3) in RADOS objects.
+        Now using descriptive strings ("Per_Export", "Per_Client", "Per_Export_Per_Client").
+        """
+        service_specs = self.mgr.spec_store.get_specs_by_type('nfs')
+        try:
+            from nfs.cluster import update_qos_type_for_cluster
+            for service_name, spec in service_specs.items():
+                assert spec.service_id
+                update_qos_type_for_cluster(self.mgr, spec.service_id)
+            return True
+        except Exception as e:
+            logger.error('Failed to update NFS clusters QoS type from int to str: %s', e)
+            return False
 
 
 def queue_migrate_rgw_spec(mgr: "CephadmOrchestrator", spec_dict: Dict[Any, Any]) -> None:
