@@ -1491,7 +1491,7 @@ class NFSServiceSpec(ServiceSpec):
                  kmip_cert: Optional[str] = None,
                  kmip_key: Optional[str] = None,
                  kmip_ca_cert: Optional[str] = None,
-                 kmip_host_list: Optional[List[str]] = None,
+                 kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
                  ):
         assert service_type == 'nfs'
         super(NFSServiceSpec, self).__init__(
@@ -1537,7 +1537,17 @@ class NFSServiceSpec(ServiceSpec):
         self.kmip_cert = kmip_cert
         self.kmip_key = kmip_key
         self.kmip_ca_cert = kmip_ca_cert
-        self.kmip_host_list = kmip_host_list
+        self.kmip_host_list: list[Dict[str, Union[str, int]]] = []
+        if isinstance(kmip_host_list, list):
+            # convert kmip host list of str to list of dict
+            if len(kmip_host_list) and isinstance(kmip_host_list[0], str):
+                self.kmip_host_list = [
+                    {'addr': host}
+                    for host in kmip_host_list
+                    if isinstance(host, str)
+                ]
+            else:
+                self.kmip_host_list = [host for host in kmip_host_list if isinstance(host, dict)]
 
     def get_colocation_port_fields(self) -> List[str]:
         """Return port fields for colocation; include rdma_port when RDMA is enabled."""
@@ -1621,6 +1631,28 @@ class NFSServiceSpec(ServiceSpec):
         # Validate colocation_ports
         self.validate_colocation_ports()
 
+        kmip_field_names = [
+            'kmip_cert',
+            'kmip_key',
+            'kmip_ca_cert',
+            'kmip_host_list'
+        ]
+        kmip_fields = [getattr(self, kmip_field) for kmip_field in kmip_field_names]
+        if any(kmip_fields) and not all(kmip_fields):
+            raise SpecValidationError(
+                f'Either none or all of {kmip_field_names} attrbutes must be set'
+            )
+        for kmip_host in self.kmip_host_list:
+            if 'addr' not in kmip_host:
+                raise SpecValidationError(
+                    "Each dictionary in kmip_host_list must include the 'addr' key."
+                    f"{kmip_host} is missing 'addr'."
+                )
+            if 'port' in kmip_host and not isinstance(kmip_host['port'], int):
+                raise SpecValidationError(
+                    f'Provided port is not valid for {kmip_host} in kmip_host_list.'
+                )
+
         # validate qos dict
         if self.cluster_qos_config:
             qos_enable = self.cluster_qos_config.get('enable_qos', True)
@@ -1672,18 +1704,6 @@ class NFSServiceSpec(ServiceSpec):
                 raise SpecValidationError(
                     f'Either none or all of {tls_field_names} attributes must be set'
                 )
-
-        kmip_field_names = [
-            'kmip_cert',
-            'kmip_key',
-            'kmip_ca_cert',
-            'kmip_host_list'
-        ]
-        kmip_fields = [getattr(self, kmip_field) for kmip_field in kmip_field_names]
-        if any(kmip_fields) and not all(kmip_fields):
-            raise SpecValidationError(
-                f'Either none or all of {kmip_field_names} attrbutes must be set'
-            )
 
 
 yaml.add_representer(NFSServiceSpec, ServiceSpec.yaml_representer)
