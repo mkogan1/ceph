@@ -1,3 +1,5 @@
+
+
 import fnmatch
 import os
 import re
@@ -1488,6 +1490,10 @@ class NFSServiceSpec(ServiceSpec):
                  colocation_ports: Optional[List[Dict[str, int]]] = None,
                  enable_nfsv3: bool = False,
                  enable_virtual_server: bool = False,
+                 kmip_cert: Optional[str] = None,
+                 kmip_key: Optional[str] = None,
+                 kmip_ca_cert: Optional[str] = None,
+                 kmip_host_list: Optional[List[str]] = None,
                  ):
         assert service_type == 'nfs'
         super(NFSServiceSpec, self).__init__(
@@ -1530,6 +1536,10 @@ class NFSServiceSpec(ServiceSpec):
         self.tls_min_version = tls_min_version
 
         self.enable_virtual_server = enable_virtual_server
+        self.kmip_cert = kmip_cert
+        self.kmip_key = kmip_key
+        self.kmip_ca_cert = kmip_ca_cert
+        self.kmip_host_list = kmip_host_list
 
     def get_colocation_port_fields(self) -> List[str]:
         """Return port fields for colocation; include rdma_port when RDMA is enabled."""
@@ -1664,6 +1674,18 @@ class NFSServiceSpec(ServiceSpec):
                 raise SpecValidationError(
                     f'Either none or all of {tls_field_names} attributes must be set'
                 )
+
+        kmip_field_names = [
+            'kmip_cert',
+            'kmip_key',
+            'kmip_ca_cert',
+            'kmip_host_list'
+        ]
+        kmip_fields = [getattr(self, kmip_field) for kmip_field in kmip_field_names]
+        if any(kmip_fields) and not all(kmip_fields):
+            raise SpecValidationError(
+                f'Either none or all of {kmip_field_names} attrbutes must be set'
+            )
 
 
 yaml.add_representer(NFSServiceSpec, ServiceSpec.yaml_representer)
