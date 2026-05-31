@@ -969,7 +969,7 @@ class Orchestrator(object):
 
     def upgrade_start(self, image: Optional[str], version: Optional[str], daemon_types: Optional[List[str]],
                       hosts: Optional[str], services: Optional[List[str]], limit: Optional[int],
-                      bucket_type: Optional[str] = None, bucket_name: Optional[str] = None) -> OrchResult[str]:
+                      bucket_type: Optional[str] = None, bucket_name: Optional[str] = None, no_osd_flags: bool = False) -> OrchResult[str]:
         raise NotImplementedError()
 
     def upgrade_pause(self) -> OrchResult[str]:
