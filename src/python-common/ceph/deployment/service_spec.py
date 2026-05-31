@@ -2612,6 +2612,7 @@ class IngressSpec(ServiceSpec):
                  use_tcp_mode_over_rgw: bool = False,
                  haproxy_peer_communication_port: Optional[int] = None,
                  haproxy_qat_support: bool = False,
+                 generate_cert: Optional[bool] = False
                  ):
         assert service_type == 'ingress'
 
@@ -2659,6 +2660,7 @@ class IngressSpec(ServiceSpec):
         self.use_tcp_mode_over_rgw = use_tcp_mode_over_rgw
         self.haproxy_peer_communication_port = haproxy_peer_communication_port
         self.haproxy_qat_support = haproxy_qat_support
+        self.generate_cert = generate_cert
 
     def get_port_start(self) -> List[int]:
         ports = []
@@ -2729,6 +2731,12 @@ class IngressSpec(ServiceSpec):
                     'To enable monitor_ssl, both monitor_ssl_cert and monitor_ssl_key '
                     'must be provided.'
                 )
+        if self.generate_cert and not self.ssl:
+            raise SpecValidationError('"generate_cert" cannot be set without setting the "ssl" '
+                                      'field to true')
+        if self.generate_cert and any([self.ssl_cert, self.ssl_key]):
+            raise SpecValidationError('"generate_cert" field cannot be passed along with the '
+                                      '"ssl_cert" or "ssl_key" fields')
 
 
 yaml.add_representer(IngressSpec, ServiceSpec.yaml_representer)

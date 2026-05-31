@@ -284,10 +284,18 @@ class IngressService(CephService):
             }
         }
 
-        if spec.ssl:
-            tls_pair = self.get_certificates(daemon_spec)
-            combined_pem = tls_pair.cert + '\n' + tls_pair.key
-            final_config['files']['haproxy.pem'] = combined_pem
+        if spec.generate_cert:
+            cert, key = self.mgr.cert_mgr.generate_cert(
+                daemon_spec.host,
+                self.mgr.inventory.get_addr(daemon_spec.host),
+            )
+            pem = ''.join([key, cert])
+            final_config['files']['haproxy.pem'] = pem
+        else:
+            if spec.ssl:
+                tls_pair = self.get_certificates(daemon_spec)
+                combined_pem = tls_pair.cert + '\n' + tls_pair.key
+                final_config['files']['haproxy.pem'] = combined_pem
 
         if spec.monitor_ssl and spec.monitor_cert_source != MonitorCertSource.REUSE_SERVICE_CERT.value:
             tls_creds = self.get_stats_certs(spec, daemon_spec, monitor_ips)
