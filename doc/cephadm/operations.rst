@@ -206,6 +206,7 @@ become ``active+clean``, check:
 - OSD logs for errors (``journalctl -u ceph-<fsid>@osd.*``)
 - That the ``noout`` flag has been cleared (``ceph osd dump | grep flags``)
 
+
 Redeploying or reconfiguring a daemon
 -------------------------------------
 
