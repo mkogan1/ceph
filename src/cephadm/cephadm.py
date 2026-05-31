@@ -61,7 +61,6 @@ from cephadmlib.constants import (
     LOG_DIR_MODE,
     SYSCTL_DIR,
     UNIT_DIR,
-    DAEMON_FAILED_ERROR,
 )
 from cephadmlib.context import CephadmContext
 from cephadmlib.context_getters import (
@@ -4922,6 +4921,7 @@ def command_gather_facts(ctx: CephadmContext) -> None:
 
 
 ##################################
+
 
 @infer_config
 def command_sos(ctx: CephadmContext) -> int:
