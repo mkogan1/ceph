@@ -387,11 +387,11 @@ class NFSCluster:
 
             if cluster_id not in available_clusters(self.mgr):
                 self._call_orch_apply_nfs(
-                    cluster_id,
-                    placement,
-                    virtual_ip,
-                    ingress_mode,
-                    port,
+                    cluster_id=cluster_id,
+                    placement=placement,
+                    virtual_ip=virtual_ip,
+                    ingress_mode=ingress_mode,
+                    port=port,
                     cluster_qos_config=cluster_qos_config,
                     enable_nfsv3=enable_nfsv3,
                     ssl=ssl,
