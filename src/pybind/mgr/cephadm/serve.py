@@ -1203,6 +1203,7 @@ class CephadmServe:
                 self.log.info('Reconfiguring %s (unknown last config time)...' % (
                     dd.name()))
                 action = 'reconfig'
+
             elif spec is not None and hasattr(spec, 'extra_container_args') and dd.extra_container_args != spec.extra_container_args:
                 self.log.debug(
                     f'{dd.name()} container cli args {dd.extra_container_args} -> {spec.extra_container_args}')

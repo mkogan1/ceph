@@ -602,10 +602,6 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             self.container_image_snmp_gateway = ''
             self.container_image_nginx = ''
             self.container_image_oauth2_proxy = ''
-            self.container_image_elasticsearch = ''
-            self.container_image_jaeger_agent = ''
-            self.container_image_jaeger_collector = ''
-            self.container_image_jaeger_query = ''
             self.container_image_samba = ''
             self.container_image_samba_metrics = ''
             self.warn_on_stray_hosts = True
@@ -1035,8 +1031,8 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         suffix = daemon_type not in [
             'mon', 'crash', 'ceph-exporter', 'node-proxy',
             'prometheus', 'node-exporter', 'grafana', 'alertmanager',
-            'container', 'agent', 'snmp-gateway', 'loki', 'promtail', 'alloy',
-            'elasticsearch', 'jaeger-collector', 'jaeger-agent', 'jaeger-query', 'mgmt-gateway', 'oauth2-proxy'
+            'container', 'agent', 'snmp-gateway', 'loki', 'promtail',
+            'alloy', 'mgmt-gateway', 'oauth2-proxy'
         ]
         if forcename:
             if len([d for d in existing if d.daemon_id == forcename]):
@@ -2079,12 +2075,8 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         else:
             images = {
                 'alertmanager': self.container_image_alertmanager,
-                'elasticsearch': self.container_image_elasticsearch,
                 'grafana': self.container_image_grafana,
                 'haproxy': self.container_image_haproxy,
-                'jaeger-agent': self.container_image_jaeger_agent,
-                'jaeger-collector': self.container_image_jaeger_collector,
-                'jaeger-query': self.container_image_jaeger_query,
                 'keepalived': self.container_image_keepalived,
                 'loki': self.container_image_loki,
                 'node-exporter': self.container_image_node_exporter,
@@ -4576,10 +4568,6 @@ Then run the following:
                 'snmp-gateway': PlacementSpec(count=1),
                 'mgmt-gateway': PlacementSpec(count=1),
                 'oauth2-proxy': PlacementSpec(count=1),
-                'elasticsearch': PlacementSpec(count=1),
-                'jaeger-agent': PlacementSpec(host_pattern='*'),
-                'jaeger-collector': PlacementSpec(count=1),
-                'jaeger-query': PlacementSpec(count=1),
                 'node-proxy': PlacementSpec(host_pattern='*'),
                 SMBService.TYPE: PlacementSpec(count=1),
             }
