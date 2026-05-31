@@ -4922,7 +4922,6 @@ def command_gather_facts(ctx: CephadmContext) -> None:
 
 ##################################
 
-
 @infer_config
 def command_sos(ctx: CephadmContext) -> int:
     """
