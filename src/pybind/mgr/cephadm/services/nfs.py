@@ -131,6 +131,12 @@ class NFSService(CephService):
         assert spec
         deps: List[str] = []
         nfs_spec = cast(NFSServiceSpec, spec)
+        if (nfs_spec.kmip_cert and nfs_spec.kmip_key and nfs_spec.kmip_ca_cert and nfs_spec.kmip_host_list):
+            # add dependency of kmip fields
+            deps.append(f'kmip_cert: {nfs_spec.kmip_cert}')
+            deps.append(f'kmip_key: {nfs_spec.kmip_key}')
+            deps.append(f'kmip_ca_cert: {nfs_spec.kmip_ca_cert}')
+            deps.append(f'kmip_host_list: {nfs_spec.kmip_host_list}')
         deps.append(f'enable_rdma: {nfs_spec.enable_rdma}')
         deps.append(f'rdma_port: {nfs_spec.rdma_port}')
         deps.append(f'tls_ktls: {nfs_spec.tls_ktls}')
@@ -620,4 +626,10 @@ class NFSService(CephService):
         only_kmip_updated = all(s.startswith('kmip') for s in sym_diff)
         if not only_kmip_updated:
             action = utils.Action.REDEPLOY
+        else:
+            return utils.NextDaemonStep(
+                utils.Action.RECONFIG,
+                skip_restart_for_reconfig=True,
+                send_signal_to_daemon='SIGHUP',
+            )
         return utils.NextDaemonStep(action)

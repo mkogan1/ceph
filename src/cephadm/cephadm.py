@@ -1247,6 +1247,9 @@ def deploy_daemon(
             ctx.signal_name = ctx.send_signal_to_daemon
             ctx.signal_number = None
             command_signal(ctx)
+        else:
+            # perform default action
+            daemon_form_create(ctx, ident).perform_default_restart()
 
 
 def clean_cgroup(ctx: CephadmContext, fsid: str, unit_name: str) -> None:
