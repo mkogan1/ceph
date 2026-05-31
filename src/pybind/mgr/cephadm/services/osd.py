@@ -432,6 +432,8 @@ class OSDService(CephService):
                 config['objectstore'] = svc_spec.objectstore
             if hasattr(svc_spec, 'osd_type') and svc_spec.osd_type:
                 config['osd_type'] = svc_spec.osd_type
+            if getattr(svc_spec, 'crush_device_class', '') == 'fcm':
+                config['fcm_device_spec'] = True
         return config, parent_deps
 
 
