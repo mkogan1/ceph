@@ -3221,7 +3221,8 @@ Then run the following:
                        action: str,
                        image: Optional[str] = None,
                        skip_restart_for_reconfig: bool = False,
-                       send_signal_to_daemon: Optional[str] = None) -> str:
+                       send_signal_to_daemon: Optional[str] = None,
+                       spec: Optional[ServiceSpec] = None) -> str:
         self._daemon_action_set_image(action, image, daemon_spec.daemon_type,
                                       daemon_spec.daemon_id)
 
@@ -3236,9 +3237,13 @@ Then run the following:
         if action == 'redeploy' or action == 'reconfig' or (action == 'restart' and self._mon_public_network_changed(daemon_spec)):
             if action == 'restart':
                 action = 'redeploy'  # to ensure proper behavior since we want redeploy
+        if action == 'redeploy' or action == 'reconfig':
+            if spec:
+                svc_type = spec.service_type
+            else:
+                svc_type = daemon_type_to_service(daemon_spec.daemon_type)
             if daemon_spec.daemon_type != 'osd':
-                daemon_spec = service_registry.get_service(daemon_type_to_service(
-                    daemon_spec.daemon_type)).prepare_create(daemon_spec)
+                daemon_spec = service_registry.get_service(svc_type).prepare_create(daemon_spec)
             else:
                 # for OSDs, we still need to update config, just not carry out the full
                 # prepare_create function
@@ -3848,6 +3853,19 @@ Then run the following:
                     osd_reports.append(osd_report)
             previews_for_specs.update({host: osd_reports})
         return previews_for_specs
+
+    def _calc_daemon_deps(self,
+                          spec: Optional[ServiceSpec],
+                          daemon_type: str,
+                          daemon_id: str,
+                          hostname: str) -> List[str]:
+        if spec is not None:
+            svc_type = spec.service_type
+        else:
+            svc_type = daemon_type_to_service(daemon_type)
+        svc_cls = service_registry.get_service(svc_type)
+        deps = svc_cls.get_dependencies(self, spec, daemon_type, hostname) if svc_cls else []
+        return sorted(deps)
 
     @forall_hosts
     def _remove_daemons(self, name: str, host: str) -> str:

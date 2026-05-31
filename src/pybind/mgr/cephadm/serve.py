@@ -1196,7 +1196,7 @@ class CephadmServe:
             else:
                 dd.is_active = False
 
-            deps = svc_obj.sorted_dependencies(self.mgr, spec, dd.daemon_type)
+            deps = self.mgr._calc_daemon_deps(spec, dd.daemon_type, dd.daemon_id, dd.hostname)
             last_deps, last_config = self.mgr.cache.get_daemon_last_config_deps(
                 dd.hostname, dd.name())
             if last_deps is None:
@@ -1296,7 +1296,7 @@ class CephadmServe:
                         reconfig_extras['skip_restart_for_reconfig'] = True
                     if send_signal_to_daemon:
                         reconfig_extras['send_signal_to_daemon'] = send_signal_to_daemon
-                    self.mgr._daemon_action(daemon_spec, action=action, **reconfig_extras)
+                    self.mgr._daemon_action(daemon_spec, action=action, spec=spec, **reconfig_extras)
 
                     if self.mgr.cache.rm_scheduled_daemon_action(dd.hostname, dd.name()):
                         self.mgr.cache.save_host(dd.hostname)
