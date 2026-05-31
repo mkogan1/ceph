@@ -1676,7 +1676,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
     ) -> Tuple[str, bool, str]:
         return self._prepare_host_for_sudo_hardening(host, cephadm_args, addr)
 
-    @orchestrator._cli_write_command('cephadm prepare-host-and-enable-sudo-hardening')
+    @CephadmCLICommand.Write('cephadm prepare-host-and-enable-sudo-hardening')
     def _prepare_host_and_enable_sudo_hardening(
         self,
         user: str,
@@ -1771,7 +1771,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         return 0, f'Scheduled all hosts to receive new {str(logrotate_type)} logrotate config', ''
 
     @CephadmCLICommand.Write(
-            prefix='cephadm set-extra-ceph-conf')
+        prefix='cephadm set-extra-ceph-conf')
     def _set_extra_ceph_conf(self, inbuf: Optional[str] = None) -> HandleCommandResult:
         """
         Text that is appended to all daemon's ceph.conf.
@@ -3365,9 +3365,11 @@ Then run the following:
         # Track user-initiated stop/start actions
         if action == 'stop':
             d.update_user_stopped_status(True)
+            assert d.hostname is not None
             self.cache.save_host(d.hostname)
         elif action in ['start', 'restart']:
             d.update_user_stopped_status(False)
+            assert d.hostname is not None
             self.cache.save_host(d.hostname)
 
         self._daemon_action_set_image(action, image, d.daemon_type, d.daemon_id)
@@ -3627,7 +3629,7 @@ Then run the following:
             raise OrchestratorError(msg)
         else:
             self.log.info(f'Host {hostname} executed command sos {sos_params}: {out}')
-            result = out
+            result = out[0] if len(out) == 1 else '\n'.join(out)
 
         return result
 
@@ -5004,14 +5006,6 @@ Then run the following:
                 raise OrchestratorError(
                     f'Upgrade aborted - hosts parameter "{host_placement}" provided did not match any hosts')
 
-        if hosts and (bucket_type is not None or bucket_name is not None):
-            raise OrchestratorError(
-                '--hosts cannot be combined with --crush_bucket_type or --crush_bucket_name')
-
-        if services is not None and (bucket_type is not None or bucket_name is not None):
-            raise OrchestratorError(
-                '--services cannot be combined with --crush_bucket_type or --crush_bucket_name')
-
         hosts = None
         if host_filter_matching_hosts and tlabel_matching_hosts:
             hosts = []
@@ -5027,6 +5021,14 @@ Then run the following:
             hosts = host_filter_matching_hosts
         elif tlabel_matching_hosts:
             hosts = list(tlabel_matching_hosts)
+
+        if hosts and (bucket_type is not None or bucket_name is not None):
+            raise OrchestratorError(
+                '--hosts cannot be combined with --crush_bucket_type or --crush_bucket_name')
+
+        if services is not None and (bucket_type is not None or bucket_name is not None):
+            raise OrchestratorError(
+                '--services cannot be combined with --crush_bucket_type or --crush_bucket_name')
 
         if limit is not None:
             if limit < 1:

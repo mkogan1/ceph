@@ -53,13 +53,12 @@ def get_placement_hosts(
         if spec.placement.host_pattern:
             matching_hostnames = spec.placement.filter_matching_hostspecs(hosts)
             host_specs = [h for h in host_specs if h.hostname in matching_hostnames]
-    elif self.spec.placement.labels:
-        ls = []
-        for label in self.spec.placement.labels:
-            for host in self.hosts_by_label(label):
-                if host.hostname not in [h.hostname for h in ls]:
-                    ls.append(DaemonPlacement(daemon_type=self.primary_daemon_type,
-                                              hostname=host.hostname, ports=self.ports_start))
+    elif spec.placement.labels:
+        host_specs = []
+        for label in spec.placement.labels:
+            for host in [h for h in hosts if label in h.labels]:
+                if host.hostname not in [h.hostname for h in host_specs]:
+                    host_specs.append(HostPlacementSpec(hostname=host.hostname, network='', name=''))
     elif spec.placement.host_pattern:
         matching_hostnames = spec.placement.filter_matching_hostspecs(hosts)
         host_specs = [

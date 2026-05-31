@@ -239,7 +239,6 @@ from cephadmlib.listing_updaters import (
 )
 from cephadmlib.container_lookup import infer_local_ceph_image, identify
 from ceph.cephadm.d3n_types import D3NCache, D3NCacheError
-from cephadmlib.user_utils import setup_ssh_user
 from cephadmlib.user_utils import (
     setup_ssh_user,
     validate_user_exists,
@@ -4925,7 +4924,7 @@ def command_gather_facts(ctx: CephadmContext) -> None:
 ##################################
 
 @infer_config
-def command_sos(ctx: CephadmContext):
+def command_sos(ctx: CephadmContext) -> int:
     """
     Execute the sos command
     returns the pattern of the sos report part files generated
@@ -4937,14 +4936,14 @@ def command_sos(ctx: CephadmContext):
     # cat /var/log/ceph/<cluster_fsid>/sosreport* > /tmp/sosreport_case_<xx>.tar.xz
     """
     def remove_files(folder: str, pattern: str) -> None:
-        file_path = ""
+        file_path = ''
         try:
             for file_path in filter(os.path.isfile, glob(os.path.join(folder, pattern))):
                 os.remove(file_path)
         except Exception as ex:
             logger.error(f'Error removing file {file_path}: {ex}')
 
-    result = 1 # error by default, will be changed if everything ok
+    result = 1  # error by default, will be changed if everything ok
     try:
         # get silently the cluster fsid
         cp = read_config(ctx.config)
@@ -5211,6 +5210,7 @@ def command_cluster_status(ctx: CephadmContext) -> int:
 
     print_section_footer()
     return result
+
 
 @infer_fsid
 def command_setup_ssh_user(ctx: CephadmContext) -> int:

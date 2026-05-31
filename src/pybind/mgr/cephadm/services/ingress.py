@@ -299,11 +299,11 @@ class IngressService(CephService):
         }
 
         if spec.generate_cert:
-            cert, key = self.mgr.cert_mgr.generate_cert(
+            tls_creds = self.mgr.cert_mgr.generate_cert(
                 daemon_spec.host,
                 self.mgr.inventory.get_addr(daemon_spec.host),
             )
-            pem = ''.join([key, cert])
+            pem = ''.join([tls_creds.key, tls_creds.cert])
             final_config['files']['haproxy.pem'] = pem
         else:
             if spec.ssl:

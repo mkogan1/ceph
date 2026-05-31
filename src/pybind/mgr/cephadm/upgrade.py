@@ -2114,7 +2114,6 @@ class CephadmUpgrade:
                 logger.info('Failing over to standby mgr to handle key rotation of current active mgr')
                 self.mgr.mgr_service.fail_over()
 
-                
     async def _redeploy_daemons_per_host(
         self,
         hostname: str,

@@ -997,7 +997,7 @@ class Orchestrator(object):
         bucket_type: Optional[str] = None,
         bucket_name: Optional[str] = None,
         no_osd_flags: bool = False,
-        topolocial_labels: Optional[Union[str, List[str]]]
+        topological_labels: Optional[Union[str, List[str]]] = None,
     ) -> OrchResult[str]:
         raise NotImplementedError()
 

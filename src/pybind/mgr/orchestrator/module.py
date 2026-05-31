@@ -2713,7 +2713,7 @@ Usage:
             crush_bucket_type,
             crush_bucket_name,
             no_osd_flags,
-            topological_labels
+            topological_labels,
         )
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
