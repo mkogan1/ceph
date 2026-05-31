@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <limits.h>
 
 #include <array>
@@ -2260,6 +2261,8 @@ class RGWDeleteMultiObj : public RGWOp {
 
 protected:
   std::vector<delete_multi_obj_entry> ops_log_entries;
+  std::mutex mtx_partial_response;
+
   bufferlist data;
   rgw::sal::Bucket* bucket;
   bool quiet;
