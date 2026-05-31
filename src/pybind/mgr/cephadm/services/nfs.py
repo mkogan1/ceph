@@ -237,6 +237,8 @@ class NFSService(CephService):
         elif spec.cluster_qos_port:
             cluster_qos_port = spec.cluster_qos_port
 
+        add_kmip_block = (spec.kmip_cert and spec.kmip_key and spec.kmip_ca_cert and spec.kmip_host_list)
+
         # generate the ganesha config
         rdma_port = None
         if spec.enable_rdma and daemon_spec.ports and len(daemon_spec.ports) > 3:
@@ -272,7 +274,8 @@ class NFSService(CephService):
                 "ceph_nodes": ceph_nodes,
                 "protocols": "3, 4" if spec.enable_nfsv3 else "4",
                 "use_old_nodeid": False if nodeid.isdigit() else True,
-                "enable_virtual_server": str(spec.enable_virtual_server).lower()
+                "enable_virtual_server": str(spec.enable_virtual_server).lower(),
+                "kmip_addrs": spec.kmip_host_list if add_kmip_block else None,
             }
             if spec.enable_haproxy_protocol:
                 context["haproxy_hosts"] = self._haproxy_hosts()
