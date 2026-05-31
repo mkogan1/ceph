@@ -2712,7 +2712,9 @@ Usage:
                        crush_bucket_type: Optional[str] = None,
                        crush_bucket_name: Optional[str] = None,
                        no_osd_flags: bool = False,
-                       topological_labels: Optional[List[str]] = None) -> HandleCommandResult:
+                       topological_labels: Optional[List[str]] = None,
+                       automatically_accept_license: bool = False,
+                       ) -> HandleCommandResult:
         """Initiate upgrade"""
         self._upgrade_check_image_name(image, ceph_version)
 
@@ -2730,6 +2732,7 @@ Usage:
             crush_bucket_name,
             no_osd_flags,
             topological_labels,
+            automatically_accept_license,
         )
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())

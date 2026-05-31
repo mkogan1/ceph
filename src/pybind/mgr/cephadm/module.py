@@ -3621,7 +3621,7 @@ Then run the following:
         """ Execute the sos report command in the requested host
         """
 
-        result = ""
+        result = ''
         self.log.info(f'Sending <sos {sos_params}> command to host {hostname}')
         cmd_args = shlex.split(sos_params)
 
@@ -3635,7 +3635,7 @@ Then run the following:
             raise OrchestratorError(msg)
         else:
             self.log.info(f'Host {hostname} executed command sos {sos_params}: {out}')
-            result = out
+            result = out[0] if len(out) == 1 else '\n'.join(out)
 
         return result
 
@@ -4971,6 +4971,7 @@ Then run the following:
         bucket_name: Optional[str] = None,
         no_osd_flags: bool = False,
         topological_labels: Optional[Union[str, List[str]]] = None,
+        automatically_accept_license: bool = False,
     ) -> str:
         if self.inventory.get_host_with_state("maintenance"):
             raise OrchestratorError("Upgrade aborted - you have host(s) in maintenance state")
@@ -5042,7 +5043,7 @@ Then run the following:
                     f'Upgrade aborted - --limit arg must be a positive integer, not {limit}')
 
         return self.upgrade.upgrade_start(
-            image, version, daemon_types, hosts, services, limit, bucket_type, bucket_name, no_osd_flags)
+            image, version, daemon_types, hosts, services, limit, bucket_type, bucket_name, no_osd_flags, automatically_accept_license)
 
     @handle_orch_error
     def upgrade_pause(self) -> str:
@@ -5062,7 +5063,7 @@ Then run the following:
 
     @handle_orch_error
     def display_license(self, image_name: str) -> str:
-        image_info = self.wait_async(CephadmServe(self)._get_container_image_info(image_name))
+        self.wait_async(CephadmServe(self)._get_container_image_info(image_name))
         license = self.wait_async(CephadmServe(self)._get_container_ibm_license(image_name))
         return license
 
@@ -5070,9 +5071,10 @@ Then run the following:
     def accept_license(self, image_name: str) -> str:
         image_info = self.wait_async(CephadmServe(self)._get_container_image_info(image_name))
         license = self.wait_async(CephadmServe(self)._get_container_ibm_license(image_name))
-        entry_key = get_license_acceptance_key_value_entry_name(image_info.ceph_version, license)
+        ceph_version = image_info.ceph_version or 'unknown_version'
+        entry_key = get_license_acceptance_key_value_entry_name(ceph_version, license)
         entry_content = generate_license_acceptance_key_value_entry(
-            image_info.ceph_version,
+            ceph_version,
             license,
             image_info.image_id
         )

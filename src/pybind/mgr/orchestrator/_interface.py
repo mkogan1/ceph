@@ -1014,6 +1014,7 @@ class Orchestrator(object):
         bucket_name: Optional[str] = None,
         no_osd_flags: bool = False,
         topological_labels: Optional[Union[str, List[str]]] = None,
+        automatically_accept_license: bool = False,
     ) -> OrchResult[str]:
         raise NotImplementedError()
 
