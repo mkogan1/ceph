@@ -168,8 +168,11 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                 enable_rdma: bool = False,
                                 rdma_port: Optional[int] = None,
                                 enable_nfsv3: bool = False,
-                                inbuf: Optional[str] = None,
                                 enable_virtual_server: bool = False,
+                                bind_addrs: Optional[str] = None,
+                                monitoring_addrs: Optional[str] = None,
+                                monitoring_port: Optional[int] = None,
+                                inbuf: Optional[str] = None
                                 ) -> None:
         """Create an NFS Cluster"""
         cluster_qos_config = None
@@ -192,11 +195,31 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             kmip_ca_cert = config.get('kmip_ca_cert')
             kmip_host_list = config.get('kmip_host_list')
 
+        # Parse bind_addrs and monitoring_addrs from CLI format
+        ip_addrs = None
+        if bind_addrs:
+            ip_addrs = {}
+            for pair in bind_addrs.split(','):
+                if ':' in pair:
+                    host, ip = pair.split(':', 1)
+                    ip_addrs[host.strip()] = ip.strip()
+
+        monitoring_ip_addrs = None
+        if monitoring_addrs:
+            monitoring_ip_addrs = {}
+            for pair in monitoring_addrs.split(','):
+                if ':' in pair:
+                    host, ip = pair.split(':', 1)
+                    monitoring_ip_addrs[host.strip()] = ip.strip()
+
         return self.nfs.create_nfs_cluster(cluster_id=cluster_id, placement=placement,
                                            virtual_ip=virtual_ip, ingress=ingress,
                                            ingress_mode=ingress_mode, port=port,
                                            cluster_qos_config=cluster_qos_config,
                                            enable_nfsv3=enable_nfsv3,
+                                           ip_addrs=ip_addrs,
+                                           monitoring_ip_addrs=monitoring_ip_addrs,
+                                           monitoring_port=monitoring_port,
                                            ssl=ssl,
                                            ssl_cert=ssl_cert,
                                            ssl_key=ssl_key,
