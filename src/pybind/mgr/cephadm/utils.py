@@ -101,9 +101,6 @@ class Action(str, Enum):
             return cls.NO_ACTION
         return cls(action)
 
-    def __str__(self) -> str:
-        return self.value
-
 
 @dataclass(frozen=True)
 class NextDaemonStep:
@@ -113,6 +110,21 @@ class NextDaemonStep:
     action: Action
     skip_restart_for_reconfig: bool = False
     send_signal_to_daemon: Optional[str] = None
+
+
+class LogrotateConfigType(str, Enum):
+    cephadm: str = 'cephadm'
+    cluster: str = 'cluster'
+
+    def to_json(self) -> str:
+        return self.value
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def config_key_entry(self) -> str:
+        return f'{self.value}_logrotate_config'
 
 
 def name_to_config_section(name: str) -> ConfEntity:
