@@ -26,13 +26,11 @@ export class DocService {
   }
 
   urlGenerator(section: string, releaseVersion: string = null): string {
-    // Sanitization for z release
-    const docVersion = releaseVersion?.split('z')?.[0];
     let sections: {[key: string]: string} = {};
 
     if (environment.build === 'ibm') {
-      // 9.0 introduced newer build (9.9.0.0) and doc format (9.9.0)
-      const ibmDocVersion = parseFloat(docVersion) >= MIN_VER_NEW_IBM_FORMAT ? docVersion?.replace(/\.0$/, ""): docVersion;
+      // 9.0 introduced newer build format (9.9.0.0, 9.9.1.0, 9.9.0.3) and doc format (9.9.0, 9.9.1, 9.0.0)
+      const ibmDocVersion = parseFloat(releaseVersion) >= MIN_VER_NEW_IBM_FORMAT ? releaseVersion?.replace(/\.\d+$/, ""): releaseVersion;
       const domain = `https://www.ibm.com/docs/storage-ceph/${ibmDocVersion}?topic=`;
       const domainIBM = `https://www.ibm.com/support/customer/csol/terms/`;
 
@@ -56,8 +54,8 @@ export class DocService {
         'dashboard-landing-page-capacity': `${domain}dashboard-understanding-landing-page-ceph`
       };
     } else {
-      // redhat release take doc version as 9 when release is 9.0 or 9.1
-      const redHatVersion = docVersion?.split('.')?.[0];
+      const docVersion = releaseVersion?.split('z')?.[0]; // Sanitization for z release (e.g 9.0z3)
+      const redHatVersion = docVersion?.split('.')?.[0]; // redhat release take doc version as 9 when release is 9.0 or 9.1
       const domain = `https://docs.redhat.com/en/documentation/red_hat_ceph_storage/${redHatVersion}/html/`;
       const domainRedHat = `https://www.redhat.com/en/about/`;
 
