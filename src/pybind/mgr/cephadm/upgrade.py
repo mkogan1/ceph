@@ -57,6 +57,22 @@ PREFERRED_CIPHER = PREFERRED_CIPHERS[0]
 # cipher mons should use by default when servicing clients
 SERVICE_CIPHER = 'aes256k'
 
+# Health warnings to mute when upgrade starts and unmute
+# when upgrade completes as they could be handled by the
+# upgrade process.
+#
+# TODO: need a better way to handle these for staggered upgrades
+# currently they just disappear and re-appear as each bit of the
+# staggered upgrade starts and stops
+MID_UPGRADE_MUTED_WARNINGS = [
+    'AUTH_INSECURE_KEYS_ALLOWED',
+    'AUTH_INSECURE_KEYS_CREATABLE',
+    'AUTH_INSECURE_SERVICE_TICKETS',
+    'AUTH_INSECURE_CLIENT_KEY_TYPE',
+    'AUTH_INSECURE_SERVICE_KEY_TYPE',
+    'AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE'
+]
+
 def normalize_image_digest(digest: str, default_registry: str) -> str:
     """
     Normal case:
@@ -231,6 +247,7 @@ class UpgradeState:
                  crush_bucket_name: Optional[str] = None,
                  rotated_mgr_mon_auth_key_daemons: Optional[List[str]] = None,
                  has_set_cephx_ciphers: Optional[bool] = False,
+                 health_warnings_muted: Optional[bool] = False
                  ):
 
         self._target_name: str = target_name  # Use CephadmUpgrade.target_image instead.
@@ -257,6 +274,7 @@ class UpgradeState:
         self.crush_bucket_name = crush_bucket_name
         self.rotated_mgr_mon_auth_key_daemons = rotated_mgr_mon_auth_key_daemons
         self.has_set_cephx_ciphers = has_set_cephx_ciphers
+        self.health_warnings_muted = health_warnings_muted
 
     def to_json(self) -> dict:
         return {
@@ -282,6 +300,7 @@ class UpgradeState:
             'crush_bucket_name': self.crush_bucket_name,
             'rotated_mgr_mon_auth_key_daemons': self.rotated_mgr_mon_auth_key_daemons,
             'has_set_cephx_ciphers': self.has_set_cephx_ciphers,
+            'health_warnings_muted': self.health_warnings_muted
         }
 
     @classmethod
@@ -881,6 +900,33 @@ class CephadmUpgrade:
         self.upgrade_state.osd_flags = []
         self._save_upgrade_state()
 
+    def _mute_upgrade_related_health_warnings(self) -> None:
+        for health_warning_name in MID_UPGRADE_MUTED_WARNINGS:
+            try:
+                self.mgr.log.info('Muting %s warning for the duration of the upgrade', health_warning_name)
+                self.mgr.check_mon_command({
+                    'prefix': 'health mute',
+                    'code': health_warning_name,
+                    'sticky': True,
+                })
+            except Exception as e:
+                self.mgr.log.error(
+                    f'Failed to mute health warning {health_warning_name} during upgrade: {str(e)}'
+                )
+
+    def _unmute_upgrade_related_health_warnings(self) -> None:
+        for health_warning_name in MID_UPGRADE_MUTED_WARNINGS:
+            try:
+                self.mgr.log.info('Unmuting %s warning as upgrade is completed or has been stopped', health_warning_name)
+                self.mgr.check_mon_command({
+                    'prefix': 'health unmute',
+                    'code': health_warning_name,
+                })
+            except Exception as e:
+                self.mgr.log.error(
+                    f'Failed to unmute health warning {health_warning_name} after upgrade: {str(e)}'
+                )
+
     def _hosts_include_osds(self, hosts: List[str]) -> bool:
         """Return True if any OSD daemon is on one of the given hosts."""
         osds = self.mgr.cache.get_daemons_by_type('osd')
@@ -1166,6 +1212,8 @@ class CephadmUpgrade:
                             self.upgrade_state.progress_id)
         # Restore any OSD flags we temporarily set for this upgrade.
         self._restore_osd_flags_after_upgrade()
+        if self.upgrade_state.health_warnings_muted:
+            self._unmute_upgrade_related_health_warnings()
         target_image = self.target_image
         self.mgr.log.info('Upgrade: Stopped')
         self.upgrade_state = None
@@ -2254,7 +2302,9 @@ class CephadmUpgrade:
             return
         # Restore OSD flags before we clear the upgrade state.
         self._restore_osd_flags_after_upgrade()
-
+        # Unmute health warnings that may have been handled by upgrade
+        if self.upgrade_state.health_warnings_muted:
+            self._unmute_upgrade_related_health_warnings()
         if getattr(self.upgrade_state, 'noautoscale_set', False):
             self._unset_noautoscale()
             self.upgrade_state.noautoscale_set = False
@@ -2368,6 +2418,10 @@ class CephadmUpgrade:
         if self.upgrade_state.hosts is not None:
             logger.debug(f'Filtering daemons to upgrade by hosts: {self.upgrade_state.hosts}')
             daemons = [d for d in daemons if d.hostname in self.upgrade_state.hosts]
+        if not self.upgrade_state.health_warnings_muted:
+            self._mute_upgrade_related_health_warnings()
+            self.upgrade_state.health_warnings_muted = True
+            self._save_upgrade_state()
         upgraded_daemon_count: int = 0
         for daemon_type in CEPH_UPGRADE_ORDER:
             if self.upgrade_state.remaining_count is not None and self.upgrade_state.remaining_count <= 0:
