@@ -1925,6 +1925,14 @@ class CephadmUpgrade:
                         continue
                     daemon_spec = CephadmDaemonDeploySpec.from_daemon_description(dd)
                     self.mgr.key_rotate(daemon_spec)
+                    assert dd.daemon_type is not None
+                    assert dd.daemon_id is not None
+                    self.mgr._daemon_action_set_image(
+                        'redeploy',
+                        target_image,
+                        dd.daemon_type,
+                        dd.daemon_id
+                    )
                     if self.mgr.daemon_is_self(daemon_spec.daemon_type, daemon_spec.daemon_id):
                         self.mgr._schedule_daemon_action(daemon_spec.name(), 'redeploy')
                     else:
@@ -1944,6 +1952,14 @@ class CephadmUpgrade:
                 for dd in mon_daemons:
                     if dd.name() in self.upgrade_state.rotated_mgr_mon_auth_key_daemons:
                         continue
+                    assert dd.daemon_type is not None
+                    assert dd.daemon_id is not None
+                    self.mgr._daemon_action_set_image(
+                        'redeploy',
+                        target_image,
+                        dd.daemon_type,
+                        dd.daemon_id
+                    )
                     daemon_spec = CephadmDaemonDeploySpec.from_daemon_description(dd)
                     self.mgr._daemon_action(daemon_spec, action='redeploy')
                     self.upgrade_state.rotated_mgr_mon_auth_key_daemons.append(daemon_spec.name())
