@@ -104,7 +104,7 @@ from .inventory import (
     DaemonDeployQueue,
     DaemonRemovalQueue,
 )
-from .upgrade import CephadmUpgrade
+from .upgrade import CephadmUpgrade, PREFERRED_CIPHER
 from .template import TemplateMgr
 from .utils import (
     CEPH_IMAGE_TYPES,
@@ -3024,6 +3024,7 @@ Then run the following:
             'prefix': 'auth rotate',
             'entity': daemon_spec.entity_name(),
             'format': 'json',
+            'key_type': PREFERRED_CIPHER
         })
         if rc:
             raise OrchestratorError(
