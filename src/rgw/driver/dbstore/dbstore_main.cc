@@ -5,8 +5,8 @@
 #include <pthread.h>
 
 #include "dbstore_mgr.h"
-#include <dbstore.h>
-#include <dbstore_log.h>
+#include <common/dbstore.h>
+#include <common/dbstore_log.h>
 
 using namespace std;
 using namespace rgw::store;

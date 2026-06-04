@@ -8,12 +8,6 @@ set (dbstore_include_dirs
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
-IF(USE_SQLITE)
-  add_subdirectory(sqlite)
-  list(APPEND dbstore_include_dirs "${CMAKE_CURRENT_SOURCE_DIR}/sqlite")
-  add_compile_definitions(SQLITE_ENABLED=1)
-ENDIF()
-
 set(dbstore_srcs
     common/dbstore_log.h
     common/dbstore.h

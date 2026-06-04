@@ -170,6 +170,39 @@ endif()
 if(WITH_RADOSGW_KAFKA_ENDPOINT)
   list(APPEND librgw_common_srcs rgw_kafka.cc)
 endif()
+
+if(WITH_RADOSGW_DBSTORE)
+  add_subdirectory(driver/dbstore)
+  list(APPEND librgw_common_srcs rgw_sal_dbstore.cc)
+endif()
+if(WITH_RADOSGW_MOTR)
+  list(APPEND librgw_common_srcs driver/motr/rgw_sal_motr.cc)
+endif()
+if(WITH_RADOSGW_DAOS)
+  list(APPEND librgw_common_srcs driver/motr/rgw_sal_daos.cc)
+endif()
+
+if(WITH_RADOSGW_POSIX)
+  #add_subdirectory(driver/posix)
+  find_package(LMDB REQUIRED)
+  add_compile_definitions(LMDB_SAFE_NO_CPP_UTILITIES)
+  list(APPEND librgw_common_srcs
+	      driver/posix/lmdb-safe.cc
+	      driver/posix/notify.cpp
+          driver/posix/posixDB.cc
+	      driver/posix/rgw_sal_posix.cc)
+endif()
+
+if(WITH_RADOSGW_NSFS)
+  find_package(LMDB REQUIRED)
+  add_compile_definitions(LMDB_SAFE_NO_CPP_UTILITIES)
+  list(APPEND librgw_common_srcs
+	      driver/nsfs/rgw_sal_nsfs.cc
+	      driver/nsfs/nsfsDB.cc
+	      driver/posix/lmdb-safe.cc
+	      driver/posix/notify.cpp)
+endif()
+
 if(WITH_JAEGER)
   list(APPEND librgw_common_srcs rgw_tracer.cc)
 endif()
@@ -445,6 +478,19 @@ if(WITH_RADOSGW_RADOS)
 	  librados
 	  libneorados
   )
+endif()
+
+if(WITH_RADOSGW_DBSTORE)
+  target_link_libraries(rgw_common PRIVATE global dbstore)
+endif()
+
+
+if(WITH_RADOSGW_POSIX)
+  target_link_libraries(rgw_common PRIVATE global dbstore)
+endif()
+
+if(WITH_RADOSGW_NSFS)
+  target_link_libraries(rgw_common PRIVATE global dbstore)
 endif()
 
 if(WITH_RADOSGW_MOTR)
