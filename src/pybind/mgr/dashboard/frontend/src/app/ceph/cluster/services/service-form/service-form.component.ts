@@ -714,11 +714,14 @@ export class ServiceFormComponent extends CdForm implements OnInit {
                 response[0].spec?.rgw_zonegroup,
                 response[0].spec?.rgw_zone
               );
-              this.serviceForm.get('ssl').setValue(response[0].spec?.ssl);
-              if (response[0].spec?.ssl) {
-                this.serviceForm
-                  .get('ssl_cert')
-                  .setValue(response[0].spec?.rgw_frontend_ssl_certificate);
+              const rgwSslCert =
+                response[0].spec?.rgw_frontend_ssl_certificate ||
+                response[0].spec?.ssl_certificate ||
+                response[0].spec?.ssl_cert;
+              const rgwSslEnabled = response[0].spec?.ssl || !!rgwSslCert;
+              this.serviceForm.get('ssl').setValue(rgwSslEnabled);
+              if (rgwSslEnabled) {
+                this.serviceForm.get('ssl_cert').setValue(rgwSslCert || '');
               }
               break;
             case 'ingress':

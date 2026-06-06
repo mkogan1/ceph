@@ -780,6 +780,33 @@ x4Ea7kGVgx9kWh5XjWz9wjZvY49UKIT5ppIAWPMbLl3UpfckiuNhTA==
           enable_auth: false
         });
       });
+
+      it('should prefill rgw ssl certificate in edit mode without explicit ssl flag', () => {
+        component.serviceType = 'rgw';
+        component.serviceName = 'rgw.my-rgw';
+        const serviceListObs = new PaginateObservable<any>(of([]));
+        const serviceDetailObs = new PaginateObservable<any>(
+          of([
+            {
+              service_type: 'rgw',
+              service_id: 'my-rgw',
+              unmanaged: false,
+              placement: {},
+              spec: {
+                rgw_frontend_ssl_certificate: '-----BEGIN CERTIFICATE-----\\nCERT\\n-----END CERTIFICATE-----'
+              }
+            }
+          ])
+        );
+        spyOn(cephServiceService, 'list').and.returnValues(serviceListObs, serviceDetailObs);
+
+        component.ngOnInit();
+
+        expect(component.serviceForm.getValue('ssl')).toBeTruthy();
+        expect(component.serviceForm.getValue('ssl_cert')).toBe(
+          '-----BEGIN CERTIFICATE-----\\nCERT\\n-----END CERTIFICATE-----'
+        );
+      });
     });
   });
 });
