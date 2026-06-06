@@ -29,6 +29,7 @@
 #include "osd/osd_types.h"
 
 #include "rgw_common.h"
+#include "rgw_mime.h"
 #include "rgw_obj_types.h"
 #include "rgw_pool_types.h"
 
@@ -105,7 +106,6 @@ int rgw_stat_system_obj(const DoutPrefixProvider *dpp, RGWSI_SysObj* svc_sysobj,
                         real_time *pmtime, uint64_t *psize, optional_yield y,
                         std::map<std::string, bufferlist> *pattrs = nullptr);
 
-const char *rgw_find_mime_by_ext(std::string& ext);
 
 void rgw_filter_attrset(std::map<std::string, bufferlist>& unfiltered_attrset, const std::string& check_prefix,
                         std::map<std::string, bufferlist> *attrset);
@@ -169,8 +169,6 @@ inline std::ostream& operator <<(std::ostream& m, const rgw_rados_ref& ref) {
 
 int rgw_get_rados_ref(const DoutPrefixProvider* dpp, librados::Rados* rados,
 		      rgw_raw_obj obj, rgw_rados_ref* ref);
-
-
 
 int rgw_tools_init(const DoutPrefixProvider *dpp, CephContext *cct);
 void rgw_tools_cleanup();
