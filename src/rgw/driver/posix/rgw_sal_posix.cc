@@ -1982,6 +1982,39 @@ void POSIXDriver::finalize()
   RGWQuotaHandler::free_handler(quota_handler);
 }
 
+void POSIXDriver::cache_user(const UserCacheEntry& entry)
+{
+  std::unique_lock wl{user_cache_mtx};
+  const auto& uid = entry.info.user_id.id;
+  user_cache_by_id[uid] = entry;
+  for (const auto& [ak, _] : entry.info.access_keys) {
+    user_cache_ak_to_id[ak] = uid;
+  }
+}
+
+bool POSIXDriver::lookup_cached_user(const std::string& user_id, UserCacheEntry& out) const
+{
+  std::shared_lock rl{user_cache_mtx};
+  auto it = user_cache_by_id.find(user_id);
+  if (it == user_cache_by_id.end()) {
+    return false;
+  }
+  out = it->second;
+  return true;
+}
+
+void POSIXDriver::invalidate_cached_user(const std::string& user_id)
+{
+  std::unique_lock wl{user_cache_mtx};
+  auto it = user_cache_by_id.find(user_id);
+  if (it != user_cache_by_id.end()) {
+    for (const auto& [ak, _] : it->second.info.access_keys) {
+      user_cache_ak_to_id.erase(ak);
+    }
+    user_cache_by_id.erase(it);
+  }
+}
+
 std::unique_ptr<User> POSIXDriver::get_user(const rgw_user &u)
 {
   return std::make_unique<POSIXUser>(this, u);
@@ -1989,6 +2022,22 @@ std::unique_ptr<User> POSIXDriver::get_user(const rgw_user &u)
 
 int POSIXDriver::get_user_by_access_key(const DoutPrefixProvider* dpp, const std::string& key, optional_yield y, std::unique_ptr<User>* user)
 {
+  {
+    std::shared_lock rl{user_cache_mtx};
+    auto ak_it = user_cache_ak_to_id.find(key);
+    if (ak_it != user_cache_ak_to_id.end()) {
+      auto uid_it = user_cache_by_id.find(ak_it->second);
+      if (uid_it != user_cache_by_id.end()) {
+	const auto& ce = uid_it->second;
+	auto u = new POSIXUser(this, ce.info);
+	u->get_attrs() = ce.attrs;
+	u->get_version_tracker() = ce.objv_tracker;
+	user->reset(u);
+	return 0;
+      }
+    }
+  }
+
   RGWUserInfo uinfo;
   rgw::sal::Attrs attrs;
   RGWObjVersionTracker objv_tracker;
@@ -2007,12 +2056,13 @@ int POSIXDriver::get_user_by_access_key(const DoutPrefixProvider* dpp, const std
   u->get_attrs() = std::move(attrs);
   u->get_version_tracker() = objv_tracker;
   user->reset(u);
+
+  cache_user({uinfo, u->get_attrs(), objv_tracker});
   return 0;
 }
 
 int POSIXDriver::get_user_by_email(const DoutPrefixProvider* dpp, const std::string& email, optional_yield y, std::unique_ptr<User>* user)
 {
-
   RGWUserInfo uinfo;
   rgw::sal::Attrs attrs;
   RGWObjVersionTracker objv_tracker;
@@ -2031,6 +2081,8 @@ int POSIXDriver::get_user_by_email(const DoutPrefixProvider* dpp, const std::str
   u->get_attrs() = std::move(attrs);
   u->get_version_tracker() = objv_tracker;
   user->reset(u);
+
+  cache_user({uinfo, u->get_attrs(), objv_tracker});
   return 0;
 }
 
@@ -2382,8 +2434,20 @@ int POSIXBucket::create(const DoutPrefixProvider* dpp,
 
 int POSIXUser::read_attrs(const DoutPrefixProvider* dpp, optional_yield y)
 {
-  return driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
+  UserCacheEntry ce;
+  if (driver->lookup_cached_user(this->get_id().id, ce)) {
+    this->get_info() = std::move(ce.info);
+    this->get_attrs() = std::move(ce.attrs);
+    this->get_version_tracker() = std::move(ce.objv_tracker);
+    return 0;
+  }
+
+  int ret = driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
         &(this->get_version_tracker()));
+  if (ret == 0) {
+    driver->cache_user({this->get_info(), this->get_attrs(), this->get_version_tracker()});
+  }
+  return ret;
 }
 
 int POSIXUser::merge_and_store_attrs(const DoutPrefixProvider* dpp,
@@ -2399,17 +2463,35 @@ int POSIXUser::merge_and_store_attrs(const DoutPrefixProvider* dpp,
 
 int POSIXUser::load_user(const DoutPrefixProvider* dpp, optional_yield y)
 {
-  return driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
+  UserCacheEntry ce;
+  if (driver->lookup_cached_user(this->get_id().id, ce)) {
+    this->get_info() = std::move(ce.info);
+    this->get_attrs() = std::move(ce.attrs);
+    this->get_version_tracker() = std::move(ce.objv_tracker);
+    return 0;
+  }
+
+  int ret = driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
            &(this->get_version_tracker()));
+  if (ret == 0) {
+    driver->cache_user({this->get_info(), this->get_attrs(), this->get_version_tracker()});
+  }
+  return ret;
 }
 
 int POSIXUser::store_user(const DoutPrefixProvider* dpp, optional_yield y, bool exclusive, RGWUserInfo* old_info)
 {
-  return driver->get_user_db()->store_user(dpp, this->get_info(), exclusive, &(this->get_attrs()), &(this->get_version_tracker()), old_info);
+  int ret = driver->get_user_db()->store_user(dpp, this->get_info(), exclusive, &(this->get_attrs()), &(this->get_version_tracker()), old_info);
+  if (ret == 0) {
+    driver->invalidate_cached_user(this->get_id().id);
+    driver->cache_user({this->get_info(), this->get_attrs(), this->get_version_tracker()});
+  }
+  return ret;
 }
 
 int POSIXUser::remove_user(const DoutPrefixProvider* dpp, optional_yield y)
 {
+  driver->invalidate_cached_user(this->get_id().id);
   return driver->get_user_db()->remove_user(dpp, this->get_info(), &(this->get_version_tracker()));
 }
 

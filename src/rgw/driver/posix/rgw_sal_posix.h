@@ -20,6 +20,8 @@
 #include "rgw_quota.h"
 #include <cstdint>
 #include <memory>
+#include <shared_mutex>
+#include <unordered_map>
 #include "common/dout.h"
 #include "bucket_cache.h"
 #include "posixDB.h"
@@ -472,6 +474,12 @@ public:
   virtual int reload_packages(const DoutPrefixProvider* dpp, optional_yield y) override;
 };
 
+struct UserCacheEntry {
+  RGWUserInfo info;
+  rgw::sal::Attrs attrs;
+  RGWObjVersionTracker objv_tracker;
+};
+
 class POSIXDriver : public StoreDriver {
 protected:	
   CephContext *cct;
@@ -484,6 +492,10 @@ protected:
   int root_fd;
   RGWSyncModuleInstanceRef sync_module;
   RGWQuotaHandler* quota_handler{nullptr};
+
+  mutable std::shared_mutex user_cache_mtx;
+  std::unordered_map<std::string, UserCacheEntry> user_cache_by_id;
+  std::unordered_map<std::string, std::string> user_cache_ak_to_id;
 
 public:
   POSIXDriver(CephContext *_cct) : StoreDriver(), cct(_cct), zone(this)
@@ -785,6 +797,10 @@ public:
   Directory* get_root_dir() { return root_dir.get(); }
   const std::string& get_base_path() const { return base_path; }
   BucketCache* get_bucket_cache() { return bucket_cache.get(); }
+
+  void cache_user(const UserCacheEntry& entry);
+  void invalidate_cached_user(const std::string& user_id);
+  bool lookup_cached_user(const std::string& user_id, UserCacheEntry& out) const;
 
   /* called by BucketCache layer when a new object is discovered
    * by inotify or similar */
