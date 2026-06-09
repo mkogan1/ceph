@@ -1509,6 +1509,7 @@ def deploy_daemon_units(
         init_container_ids=ic_ids,
         sidecar_ids=sc_ids,
         limit_core_infinity=ctx.limit_core_infinity,
+        success_exit_status=container.success_exit_status,
     )
 
 
