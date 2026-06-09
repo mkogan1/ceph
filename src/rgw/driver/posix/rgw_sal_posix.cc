@@ -1989,6 +1989,17 @@ std::unique_ptr<User> POSIXDriver::get_user(const rgw_user &u)
 
 int POSIXDriver::get_user_by_access_key(const DoutPrefixProvider* dpp, const std::string& key, optional_yield y, std::unique_ptr<User>* user)
 {
+  {
+    UserCacheEntry ce;
+    if (user_cache.lookup_user_by_access_key(dpp, key, ce)) {
+      auto u = new POSIXUser(this, ce.info);
+      u->get_attrs() = ce.attrs;
+      u->get_version_tracker() = ce.objv_tracker;
+      user->reset(u);
+      return 0;
+    }
+  }
+
   RGWUserInfo uinfo;
   rgw::sal::Attrs attrs;
   RGWObjVersionTracker objv_tracker;
@@ -2007,6 +2018,8 @@ int POSIXDriver::get_user_by_access_key(const DoutPrefixProvider* dpp, const std
   u->get_attrs() = std::move(attrs);
   u->get_version_tracker() = objv_tracker;
   user->reset(u);
+
+  user_cache.insert_user(dpp, {uinfo, u->get_attrs(), objv_tracker});
   return 0;
 }
 
@@ -2031,6 +2044,8 @@ int POSIXDriver::get_user_by_email(const DoutPrefixProvider* dpp, const std::str
   u->get_attrs() = std::move(attrs);
   u->get_version_tracker() = objv_tracker;
   user->reset(u);
+
+  user_cache.insert_user(dpp, {uinfo, u->get_attrs(), objv_tracker});
   return 0;
 }
 
@@ -2382,8 +2397,21 @@ int POSIXBucket::create(const DoutPrefixProvider* dpp,
 
 int POSIXUser::read_attrs(const DoutPrefixProvider* dpp, optional_yield y)
 {
-  return driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
+  UserCacheEntry ce;
+  if (driver->get_user_cache().lookup_user_by_uid(dpp, this->get_id().id, ce)) {
+    this->get_info() = std::move(ce.info);
+    this->get_attrs() = std::move(ce.attrs);
+    this->get_version_tracker() = std::move(ce.objv_tracker);
+    ldpp_dout(dpp, 20) << "read_attrs: cache hit for uid=" << this->get_id().id << dendl;
+    return 0;
+  }
+
+  int ret = driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
         &(this->get_version_tracker()));
+  if (ret == 0) {
+    driver->get_user_cache().insert_user(dpp, {this->get_info(), this->get_attrs(), this->get_version_tracker()});
+  }
+  return ret;
 }
 
 int POSIXUser::merge_and_store_attrs(const DoutPrefixProvider* dpp,
@@ -2399,17 +2427,36 @@ int POSIXUser::merge_and_store_attrs(const DoutPrefixProvider* dpp,
 
 int POSIXUser::load_user(const DoutPrefixProvider* dpp, optional_yield y)
 {
-  return driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
+  UserCacheEntry ce;
+  if (driver->get_user_cache().lookup_user_by_uid(dpp, this->get_id().id, ce)) {
+    this->get_info() = std::move(ce.info);
+    this->get_attrs() = std::move(ce.attrs);
+    this->get_version_tracker() = std::move(ce.objv_tracker);
+    ldpp_dout(dpp, 20) << "load_user: cache hit for uid=" << this->get_id().id << dendl;
+    return 0;
+  }
+
+  int ret = driver->get_user_db()->get_user(dpp, std::string("user_id"), this->get_id().id, this->get_info(), &(this->get_attrs()),
            &(this->get_version_tracker()));
+  if (ret == 0) {
+    driver->get_user_cache().insert_user(dpp, {this->get_info(), this->get_attrs(), this->get_version_tracker()});
+  }
+  return ret;
 }
 
 int POSIXUser::store_user(const DoutPrefixProvider* dpp, optional_yield y, bool exclusive, RGWUserInfo* old_info)
 {
-  return driver->get_user_db()->store_user(dpp, this->get_info(), exclusive, &(this->get_attrs()), &(this->get_version_tracker()), old_info);
+  int ret = driver->get_user_db()->store_user(dpp, this->get_info(), exclusive, &(this->get_attrs()), &(this->get_version_tracker()), old_info);
+  if (ret == 0) {
+    driver->get_user_cache().invalidate_user(dpp, this->get_id().id);
+    driver->get_user_cache().insert_user(dpp, {this->get_info(), this->get_attrs(), this->get_version_tracker()});
+  }
+  return ret;
 }
 
 int POSIXUser::remove_user(const DoutPrefixProvider* dpp, optional_yield y)
 {
+  driver->get_user_cache().invalidate_user(dpp, this->get_id().id);
   return driver->get_user_db()->remove_user(dpp, this->get_info(), &(this->get_version_tracker()));
 }
 
