@@ -4430,6 +4430,13 @@ options:
   - none
   - direct
   with_legacy: true
+- name: rgw_posix_cache_max_users
+  type: uint
+  level: advanced
+  desc: experimental Maximum number of users to maintain in the in-memory user info cache
+  default: 1000
+  services:
+  - rgw
 - name: rgw_luarocks_location
   type: str
   level: advanced
