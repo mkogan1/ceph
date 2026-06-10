@@ -130,32 +130,6 @@ class NFSService(CephService):
         assert self.TYPE == spec.service_type
         create_ganesha_pool(self.mgr)
 
-    @classmethod
-    def get_dependencies(
-        cls,
-        mgr: "CephadmOrchestrator",
-        spec: Optional[ServiceSpec] = None,
-        daemon_type: Optional[str] = None,
-        hostname: Optional[str] = None,
-    ) -> List[str]:
-        assert spec
-        deps: List[str] = []
-        nfs_spec = cast(NFSServiceSpec, spec)
-        if (nfs_spec.kmip_cert and nfs_spec.kmip_key and nfs_spec.kmip_ca_cert and nfs_spec.kmip_host_list):
-            # add dependency of kmip fields
-            deps.append(f'kmip_cert: {str(utils.config_hash(nfs_spec.kmip_cert))}')
-            deps.append(f'kmip_key: {str(utils.config_hash(nfs_spec.kmip_key))}')
-            deps.append(f'kmip_ca_cert: {str(utils.config_hash(nfs_spec.kmip_ca_cert))}')
-            deps.append(f'kmip_host_list: {nfs_spec.kmip_host_list}')
-        deps.append(f'enable_rdma: {nfs_spec.enable_rdma}')
-        deps.append(f'rdma_port: {nfs_spec.rdma_port}')
-        deps.append(f'tls_ktls: {nfs_spec.tls_ktls}')
-        deps.append(f'tls_debug: {nfs_spec.tls_debug}')
-        deps.append(f'tls_min_version: {nfs_spec.tls_min_version}')
-        deps.append(f'tls_ciphers: {nfs_spec.tls_ciphers}')
-        parent_deps = super().get_dependencies(mgr, spec, daemon_type)
-        return sorted(deps + parent_deps)
-
     def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
         assert self.TYPE == daemon_spec.daemon_type
         daemon_spec.final_config, daemon_spec.deps = self.generate_config(daemon_spec)
@@ -172,6 +146,40 @@ class NFSService(CephService):
         if out and service_name in out.split(','):
             return f'nfs.{daemon_id}'
         return f'{service_name}'
+
+    @classmethod
+    def get_dependencies(
+        cls,
+        mgr: "CephadmOrchestrator",
+        spec: Optional[ServiceSpec] = None,
+        daemon_type: Optional[str] = None,
+        hostname: Optional[str] = None
+    ) -> List[str]:
+        deps: List[str] = []
+        if not spec:
+            return deps
+        nfs_spec = cast(NFSServiceSpec, spec)
+        if (nfs_spec.kmip_cert and nfs_spec.kmip_key and nfs_spec.kmip_ca_cert and nfs_spec.kmip_host_list):
+            # add dependency of kmip fields
+            deps.append(f'kmip_cert: {str(utils.config_hash(nfs_spec.kmip_cert))}')
+            deps.append(f'kmip_key: {str(utils.config_hash(nfs_spec.kmip_key))}')
+            deps.append(f'kmip_ca_cert: {str(utils.config_hash(nfs_spec.kmip_ca_cert))}')
+            deps.append(f'kmip_host_list: {nfs_spec.kmip_host_list}')
+
+        # add dependency of tls fields
+        deps.append(f'tls_ktls: {nfs_spec.tls_ktls}')
+        deps.append(f'tls_debug: {nfs_spec.tls_debug}')
+        deps.append(f'tls_min_version: {nfs_spec.tls_min_version}')
+        deps.append(f'tls_ciphers: {nfs_spec.tls_ciphers}')
+
+        # RDMA dependency
+        deps.append(f'enable_rdma: {nfs_spec.enable_rdma}')
+        deps.append(f'rdma_port: {nfs_spec.rdma_port}')
+
+        deps.append(f'enable_tsm: {nfs_spec.enable_tsm}')
+        deps.append(f'tsm_port: {nfs_spec.tsm_port}')
+        parent_deps = super().get_dependencies(mgr, spec, daemon_type)
+        return sorted(deps + parent_deps)
 
     def generate_config(self, daemon_spec: CephadmDaemonDeploySpec) -> Tuple[Dict[str, Any], List[str]]:
         assert self.TYPE == daemon_spec.daemon_type
@@ -271,6 +279,18 @@ class NFSService(CephService):
         elif spec.enable_rdma:
             rdma_port = spec.rdma_port
 
+        tsm_port = None
+        if spec.enable_tsm and daemon_spec.ports:
+            # If RDMA enabled: ports = [nfs, mon, qos, rdma, tsm] -> index 4
+            # If RDMA disabled: ports = [nfs, mon, qos, tsm] -> index 3
+            tsm_port_index = 4 if spec.enable_rdma else 3
+            if len(daemon_spec.ports) > tsm_port_index:
+                tsm_port = daemon_spec.ports[tsm_port_index]
+            else:
+                tsm_port = spec.tsm_port
+        elif spec.enable_tsm:
+            tsm_port = spec.tsm_port
+
         def get_ganesha_conf() -> str:
             context: Dict[str, Any] = {
                 "user": rados_user,
@@ -301,6 +321,8 @@ class NFSService(CephService):
                 "use_old_nodeid": False if nodeid.isdigit() else True,
                 "enable_virtual_server": str(spec.enable_virtual_server).lower(),
                 "kmip_addrs": spec.kmip_host_list if add_kmip_block else None,
+                "enable_tsm": spec.enable_tsm,
+                "tsm_port": tsm_port
             }
             if spec.enable_haproxy_protocol:
                 context["haproxy_hosts"] = self._haproxy_hosts()
