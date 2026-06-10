@@ -1215,9 +1215,17 @@ def deploy_daemon(
                 except Exception as e:
                     logger.warning(f'[D3N] failed to persist D3N state in {data_dir}: {e}')
 
-    # Disable automatic systemd enable for NFS and keepalived; the mgr
-    # starts them when appropriate (see cephadm serve / DISABLED_SERVICES).
+    # Prevent NFS and keepalived from being automatically enabled by systemd.
+    # These services will not start automatically during reboot or node restart.
+    # Instead, cephadm mgr starts the stopped dameon as needed during the serve loop
+    # (see cephadm serve / DISABLED_SERVICES).
     enable_daemon = daemon_type not in ('nfs', 'keepalived')
+    # NFS daemons: do not start automatically on CREATE. A daemon with the same
+    # rank may already be running, and the mgr will decide whether to start the
+    # new daemon based on the existence and state of the daemon for that rank.
+    # On REDEPLOY, start the daemon normally.
+    start_daemon = daemon_type != 'nfs' or deployment_type == DeploymentType.REDEPLOY
+
     # only write out unit files and start daemon
     # with systemd if this is not a reconfig
     if deployment_type != DeploymentType.RECONFIG:
@@ -1260,9 +1268,7 @@ def deploy_daemon(
         ident=ident,
         deployment_type=deployment_type,
         enable=enable_daemon,
-        # deploy_daemon_units has this "start" option, but it was only
-        # ever set to False during adoption, not new deployments / redeploys
-        start=True,
+        start=start_daemon,
         uid=uid,
         gid=gid,
         endpoints=endpoints
@@ -1282,7 +1288,7 @@ def set_deployment_post_unit_file_writing_ctx_attrs(
     ctx._deployment_ident = ident
     ctx._deployment_type = deployment_type
     ctx._deployment_enable = enable
-    ctx._deployment_start = True
+    ctx._deployment_start = start
     ctx._deployment_uid = uid
     ctx._deployment_gid = gid
     ctx._deployment_endpoints = endpoints

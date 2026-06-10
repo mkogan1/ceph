@@ -57,6 +57,9 @@ logger = logging.getLogger(__name__)
 REQUIRES_POST_ACTIONS = ['grafana', 'iscsi', 'prometheus', 'alertmanager', 'rgw', 'nvmeof', 'mgmt-gateway']
 # Daemons not systemd-enabled on deploy, mgr start them when not user stopped
 DISABLED_SERVICES = ['nfs', 'keepalived']
+# Daemons that should not auto-start on CREATE (new deployment), only on REDEPLOY
+NO_AUTOSTART_ON_CREATE = ['nfs']
+
 
 CEPHADM_EXE = ssh.RemoteExecutable('/usr/bin/cephadm')
 
@@ -791,10 +794,14 @@ class CephadmServe:
             deploy_names = [d.name() for d in all_daemons_in_tier_to_deploy]
             if tier == 0:
                 with self.mgr.async_timeout_handler(cmd=f'cephadm deploying ({deploy_names} and removing {rm_names} daemons)'):
-                    results = self.mgr.wait_async(_deploy_and_remove_all(all_daemons_needing_fencing, all_conflicting_daemons, all_daemons_in_tier_to_deploy, all_daemons_to_remove, all_daemons_to_redeploy))
+                    results = self.mgr.wait_async(_deploy_and_remove_all(
+                        all_daemons_needing_fencing, all_conflicting_daemons,
+                        all_daemons_in_tier_to_deploy, all_daemons_to_remove,
+                        all_daemons_to_redeploy))
             else:
                 with self.mgr.async_timeout_handler(cmd=f'cephadm deploying ({deploy_names} daemons)'):
-                    results = self.mgr.wait_async(_deploy_and_remove_all([], [], all_daemons_in_tier_to_deploy, [], []))
+                    results = self.mgr.wait_async(_deploy_and_remove_all(
+                        [], [], all_daemons_in_tier_to_deploy, [], []))
 
         if any(res[0] for res in results):
             changed = True
@@ -1287,6 +1294,94 @@ class CephadmServe:
             daemon_place_fails.append(msg)
         return r, hosts_altered, daemon_place_fails
 
+    def _defer_nfs_same_rank_removals(
+        self,
+        daemon_specs_to_deploy: List[CephadmDaemonDeploySpec],
+        daemons_to_remove: List[orchestrator.DaemonDescription],
+        daemons_to_fence: List[orchestrator.DaemonDescription],
+    ) -> Tuple[List[orchestrator.DaemonDescription], List[orchestrator.DaemonDescription], bool]:
+        """Deploy same-rank NFS replacement before removing the old daemon."""
+        needs_fencing = bool(daemons_to_fence)
+        if not daemon_specs_to_deploy or (not daemons_to_remove and not daemons_to_fence):
+            return daemons_to_remove, daemons_to_fence, needs_fencing
+
+        # Collect ranks from both removal and fencing lists since daemons can be in either
+        nfs_remove_ranks = {
+            d.rank for d in (daemons_to_remove + daemons_to_fence)
+            if d.rank is not None
+        }
+        if not nfs_remove_ranks:
+            return daemons_to_remove, daemons_to_fence, needs_fencing
+
+        ranks_pending_deploy = set()
+        for ds in daemon_specs_to_deploy:
+            if ds.rank in nfs_remove_ranks:
+                # making sure daemon is not deployed yet by checking cache
+                try:
+                    self.mgr.cache.get_daemon(ds.name(), ds.host)
+                except OrchestratorError:
+                    ranks_pending_deploy.add(ds.rank)
+        if not ranks_pending_deploy:
+            return daemons_to_remove, daemons_to_fence, needs_fencing
+
+        deferred_names = {
+            d.name() for d in (daemons_to_remove + daemons_to_fence)
+            if d.rank in ranks_pending_deploy
+        }
+        if not deferred_names:
+            return daemons_to_remove, daemons_to_fence, needs_fencing
+
+        self.log.info(
+            'Deferring removal of NFS daemon(s) %s until replacement is deployed',
+            sorted(deferred_names),
+        )
+        daemons_to_remove = [
+            d for d in daemons_to_remove if d.name() not in deferred_names]
+        daemons_to_fence = [
+            d for d in daemons_to_fence if d.name() not in deferred_names]
+        return daemons_to_remove, daemons_to_fence, bool(daemons_to_fence)
+
+    def _disabled_daemon_should_start(
+        self,
+        dd: orchestrator.DaemonDescription,
+        spec: Optional[ServiceSpec],
+    ) -> bool:
+        if dd.status != DaemonDescriptionStatus.stopped or dd.user_stopped:
+            return False
+        if spec is None:
+            return dd.daemon_type not in DISABLED_SERVICES
+
+        assert dd.daemon_type
+        svc = service_registry.get_service(daemon_type_to_service(dd.daemon_type))
+        if svc.ranked(spec):
+            same_rank_daemons = [
+                d for d in self.mgr.cache.get_daemons_by_service(dd.service_name())
+                if d.rank == dd.rank and d.daemon_type == dd.daemon_type
+            ]
+            if any(
+                d.name() != dd.name() and d.status in [DaemonDescriptionStatus.running, DaemonDescriptionStatus.starting]
+                for d in same_rank_daemons
+            ):
+                self.log.debug(
+                    '%s should not start: another same-rank daemon is running/starting. Same rank daemons: %s',
+                    dd.name(), [d.name() for d in same_rank_daemons]
+                )
+                return False
+            highest_gen = max(
+                same_rank_daemons,
+                key=lambda d: d.rank_generation or 0,
+            )
+            should_start = dd == highest_gen
+            if not should_start:
+                self.log.debug(
+                    '%s should not start: not the highest generation daemon (highest: %s)',
+                    dd.name(), highest_gen.name()
+                )
+            return should_start
+        if dd.daemon_type == 'keepalived':
+            return IngressService.keepalived_should_auto_start(self.mgr, dd, spec)
+        return True
+
     def prepare_daemons_to_add_and_remove_by_service(
         self,
         spec: ServiceSpec,
@@ -1343,6 +1438,15 @@ class CephadmServe:
         conflicting_daemons = [d for d in conflicting_daemons if d.name() not in fencing_names]
         conflicting_names = [d.name() for d in conflicting_daemons]
         daemons_to_remove = [d for d in daemons_to_remove if d.name() not in (fencing_names + conflicting_names)]
+
+        if service_type == 'nfs':
+            # To avoid a temporary period where two daemons of the same rank are active,
+            # NFS daemon replacement is performed in two phases. The new daemon is created
+            # first in a stopped state while the existing same-rank daemon remains active.
+            # Once the old daemon is removed, the new daemon is started, ensuring a
+            # seamless transition and successful deployment.
+            daemons_to_remove, daemons_to_fence, needs_fencing = self._defer_nfs_same_rank_removals(
+                daemon_specs_to_deploy, daemons_to_remove, daemons_to_fence)
 
         return conflicting_daemons, daemon_specs_to_deploy, daemons_to_remove, daemons_to_fence, needs_fencing
 
@@ -1546,34 +1650,14 @@ class CephadmServe:
                     dd.daemon_type in CEPH_TYPES:
                 self.log.info('Reconfiguring %s (extra config changed)...' % dd.name())
                 action = 'reconfig'
-            elif dd.daemon_type in DISABLED_SERVICES:
-                if dd.status == 0 and not dd.user_stopped:
-                    should_start = False
-                    if spec and service_registry.get_service(daemon_type_to_service(dd.daemon_type)).ranked(spec):
-                        # For ranked services, check if we should start this daemon
-                        same_rank_daemons = [
-                            d for d in self.mgr.cache.get_daemons_by_service(dd.service_name())
-                            if d.rank == dd.rank and d.daemon_type == dd.daemon_type
-                        ]
-                        self.log.debug(
-                            f'Start hightest rank_gen daemon of same rank daemons {same_rank_daemons}'
-                        )
-                        if len(same_rank_daemons) == 1:
-                            should_start = True
-                        else:
-                            # Multiple daemons exist for this rank, only start the highest generation
-                            highest_gen_daemon = max(same_rank_daemons,
-                                                     key=lambda d: d.rank_generation or 0)
-                            should_start = (dd == highest_gen_daemon)
-                    elif dd.daemon_type == 'keepalived' and spec is not None:
-                        should_start = IngressService.keepalived_should_auto_start(
-                            self.mgr, dd, spec
-                        )
-                    else:
-                        should_start = True
-                    if should_start:
-                        self.log.debug(f'Starting daemon {dd.name()}')
-                        action = 'start'
+            elif action != 'redeploy' and dd.daemon_type in DISABLED_SERVICES:
+                # Disabled services are not started automatically after a reboot or node
+                # restart and may remain in a stopped state. Start them here if they were
+                # not explicitly stopped by the user and no active daemon with the same rank
+                # already exists.
+                if self._disabled_daemon_should_start(dd, spec):
+                    self.log.debug(f'Starting daemon {dd.name()}')
+                    action = 'start'
 
             if action:
                 if self.mgr.cache.get_scheduled_daemon_action(dd.hostname, dd.name()) == 'redeploy' \
@@ -1935,14 +2019,41 @@ class CephadmServe:
                     # refresh daemon state?  (ceph daemon reconfig does not need it)
                     if not reconfig or daemon_spec.daemon_type not in CEPH_TYPES:
                         if not rc and daemon_spec.host in self.mgr.cache.daemons:
+                            # Check if this is a redeploy (daemon already existed) before we add it to cache
+                            is_redeploy = daemon_spec.name() in self.mgr.cache.get_daemon_names()
+
                             # prime cached service state with what we (should have)
                             # just created
+                            if daemon_spec.daemon_type in NO_AUTOSTART_ON_CREATE and not is_redeploy:
+                                # New daemons that don't auto-start on CREATE are deployed stopped, mgr starts them later
+                                deploy_status = DaemonDescriptionStatus.stopped
+                                deploy_status_desc = 'stopped'
+                            else:
+                                # Redeployed daemons and normal daemons are started by cephadm
+                                deploy_status = DaemonDescriptionStatus.starting
+                                deploy_status_desc = 'starting'
                             sd = daemon_spec.to_daemon_description(
-                                DaemonDescriptionStatus.starting, 'starting')
+                                deploy_status, deploy_status_desc)
                             # If daemon requires post action, then mark pending_daemon_config as true
                             if daemon_spec.daemon_type in REQUIRES_POST_ACTIONS:
                                 sd.update_pending_daemon_config(True)
                             self.mgr.cache.add_daemon(daemon_spec.host, sd)
+
+                            # NFS daemons are initially created in a stopped state. For new deployments
+                            # (not redeploys), start the daemon immediately if no active daemon with the
+                            # same rank already exists.
+                            if not reconfig and not is_redeploy and daemon_spec.daemon_type == 'nfs':
+                                nfs_spec = self.mgr.spec_store.active_specs.get(daemon_spec.service_name)
+                                if nfs_spec and self._disabled_daemon_should_start(sd, nfs_spec):
+                                    self.log.info('Starting daemon %s immediately after deployment', sd.name())
+                                    try:
+                                        await self._start_daemon_unit(
+                                            daemon_spec.host,
+                                            daemon_spec.name(),
+                                            'after deployment'
+                                        )
+                                    except Exception:
+                                        pass
                         self.mgr.cache.invalidate_host_daemons(daemon_spec.host)
 
                     if daemon_spec.daemon_type != 'agent':
@@ -2023,6 +2134,92 @@ class CephadmServe:
             ic_params.append(ic.to_json(flatten_args=True))
         return ic_meta
 
+    async def _start_daemon_unit(
+        self,
+        hostname: str,
+        daemon_name: str,
+        reason: str = ''
+    ) -> None:
+        """Start a daemon's systemd unit.
+        """
+        try:
+            for action in ['reset-failed', 'start']:
+                try:
+                    await self._run_cephadm(
+                        hostname, daemon_name, 'unit',
+                        ['--name', daemon_name, action])
+                except Exception as exp:
+                    if action == 'reset-failed' and 'not loaded' in str(exp):
+                        pass  # Ignore reset-failed if unit not loaded
+                    else:
+                        raise
+            self.mgr.cache.invalidate_host_daemons(hostname)
+            msg = f"Started {daemon_name} on host '{hostname}'"
+            if reason:
+                msg += f" {reason}"
+            self.mgr.events.for_daemon(daemon_name, OrchestratorEvent.INFO, msg)
+            self.log.info(msg)
+        except Exception as e:
+            error_msg = f'Failed to start {daemon_name}'
+            if reason:
+                error_msg += f' {reason}'
+            error_msg += f': {e}'
+            self.log.exception(error_msg)
+            self.mgr.events.for_daemon(daemon_name, OrchestratorEvent.ERROR, error_msg)
+            raise
+
+    async def _start_nfs_replacement_after_removal(
+        self,
+        removed_daemon: orchestrator.DaemonDescription,
+    ) -> None:
+        """Start NFS replacement daemon immediately after same-rank removal.
+        Called from _remove_daemon after successful removal of an NFS daemon.
+        Finds and starts any stopped NFS daemon of the same rank in the same service.
+        """
+        if removed_daemon.daemon_type != 'nfs' or removed_daemon.rank is None:
+            return
+
+        service_name = removed_daemon.service_name()
+        spec = self.mgr.spec_store.active_specs.get(service_name)
+        if spec is None:
+            return
+
+        # Find replacement daemon with same rank
+        same_rank_daemons = [
+            d for d in self.mgr.cache.get_daemons_by_service(service_name)
+            if d.rank == removed_daemon.rank
+        ]
+        if not same_rank_daemons:
+            self.log.debug(
+                'No same-rank daemons found for %s (rank %s) after removal, no replacement to start',
+                removed_daemon.name(), removed_daemon.rank
+            )
+            return
+
+        # Start the highest generation daemon if stopped
+        replacement = max(same_rank_daemons, key=lambda d: d.rank_generation or 0)
+
+        if replacement.status != DaemonDescriptionStatus.stopped or replacement.user_stopped:
+            self.log.debug(
+                'Skipping NFS replacement start for %s: status=%s, user_stopped=%s',
+                replacement.name(), replacement.status, replacement.user_stopped
+            )
+            return
+
+        if not self._disabled_daemon_should_start(replacement, spec):
+            return
+
+        self.log.info(
+            'Starting NFS daemon %s immediately after removal of same-rank daemon %s',
+            replacement.name(), removed_daemon.name()
+        )
+        assert replacement.hostname
+        await self._start_daemon_unit(
+            replacement.hostname,
+            replacement.name(),
+            'after same-rank removal'
+        )
+
     async def _remove_daemon(
         self,
         names: List[str],
@@ -2080,6 +2277,14 @@ class CephadmServe:
             if results[name] == 0:
                 # remove item from cache
                 self.mgr.cache.rm_daemon(host, name)
+
+                # When removing an NFS daemon, immediately check for another daemon with the
+                # same rank exists and start it
+                if daemon_type == 'nfs' and dd.rank is not None:
+                    try:
+                        await self._start_nfs_replacement_after_removal(dd)
+                    except Exception as e:
+                        self.log.warning(f'Failed to start NFS replacement after removing {name}: {e}')
 
             if name not in no_post_removals or not no_post_removals[name]:
                 if daemon_type not in ['iscsi']:
