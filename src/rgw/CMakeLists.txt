@@ -257,7 +257,7 @@ list(APPEND librgw_rados_srcs
   driver/rados/rgw_obj_manifest.cc
   driver/rados/rgw_object_expirer_core.cc
   driver/rados/rgw_otp.cc
-  driver/rados/rgw_pubsub_push.cc
+  rgw_pubsub_push.cc
   driver/rados/rgw_putobj_processor.cc
   driver/rados/rgw_rados.cc
   driver/rados/rgw_reshard.cc
@@ -387,7 +387,7 @@ if(WITH_RADOSGW_STANDALONE)
   # rgw_rest_user.cc (common) needs admin op implementations from rados/rgw_user.cc.
   list(APPEND librgw_driver_standalone_srcs
     ${librgw_posix_srcs}
-    driver/rados/rgw_pubsub_push.cc
+    rgw_pubsub_push.cc
     driver/rados/rgw_user.cc
     driver/posix/rgw_standalone.cc
   )
@@ -582,6 +582,12 @@ if(WITH_RADOSGW_STANDALONE)
     PUBLIC "-UWITH_RADOSGW_DAOS"
     PUBLIC "-UWITH_RADOSGW_AMQP_ENDPOINT")
 
+  if(WITH_RADOSGW_AMQP_ENDPOINT)
+    # rgw_amqp.cc uses __has_include, so AMQP code compiles even with -U
+    target_link_libraries(rgw_common_standalone
+      PRIVATE
+      RabbitMQ::RabbitMQ)
+  endif()
   if(WITH_RADOSGW_KAFKA_ENDPOINT)
     # used by rgw_kafka.cc
     target_link_libraries(rgw_common_standalone
