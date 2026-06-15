@@ -12,11 +12,6 @@
 #include "include/str_list.h"
 #include "include/ceph_assert.h"
 
-#include "services/svc_zone.h"
-#include "services/svc_sys_obj.h"
-#include "rgw_zone.h"
-#include "common/ceph_json.h"
-
 #define dout_subsys ceph_subsys_rgw
 
 using namespace std;

@@ -163,7 +163,8 @@ set(librgw_common_srcs
 
 list(APPEND librgw_common_srcs
   driver/immutable_config/store.cc
-  driver/json_config/store.cc)
+  driver/json_config/store.cc
+  rgw_rest_user.cc)
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)
   list(APPEND librgw_common_srcs rgw_amqp.cc)
@@ -263,7 +264,6 @@ list(APPEND librgw_rados_srcs
   driver/rados/rgw_rest_bucket.cc
   driver/rados/rgw_rest_log.cc
   driver/rados/rgw_rest_realm.cc
-  driver/rados/rgw_rest_user.cc
   driver/rados/rgw_sal_rados.cc
   driver/rados/rgw_service.cc
   driver/rados/rgw_sync.cc
@@ -332,6 +332,13 @@ list(APPEND librgw_posix_srcs
   driver/posix/posixDB.cc
   driver/posix/notify.cpp
 )
+list(APPEND librgw_nsfs_srcs
+  driver/nsfs/rgw_sal_nsfs.cc
+  driver/posix/posixDB.cc
+  driver/nsfs/fs_strategy.cc
+  driver/posix/lmdb-safe.cc
+  driver/posix/notify.cpp
+)
 list(APPEND librgw_d4n_srcs
   rgw_redis_driver.cc
   rgw_ssd_driver.cc
@@ -362,6 +369,12 @@ if(WITH_RADOSGW_POSIX)
   list(APPEND librgw_driver_srcs ${librgw_posix_srcs})
   list(APPEND librgw_driver_standalone_srcs ${librgw_posix_srcs})
 endif()
+if(WITH_RADOSGW_NSFS)
+  find_package(LMDB REQUIRED)
+  add_compile_definitions(LMDB_SAFE_NO_CPP_UTILITIES)
+  list(APPEND librgw_driver_srcs ${librgw_nsfs_srcs})
+  list(APPEND librgw_driver_standalone_srcs ${librgw_nsfs_srcs})
+endif()
 if(WITH_RADOSGW_D4N)
   list(APPEND librgw_driver_srcs ${librgw_d4n_srcs})
 endif()
@@ -369,8 +382,13 @@ endif()
 if(WITH_RADOSGW_STANDALONE)
   find_package(LMDB REQUIRED)
   add_compile_definitions(LMDB_SAFE_NO_CPP_UTILITIES)
+  # POSIX/NSFS notification paths call RGWPubSubEndpoint; that source lives in
+  # librgw_rados_srcs for the normal build, so pull it into standalone explicitly.
+  # rgw_rest_user.cc (common) needs admin op implementations from rados/rgw_user.cc.
   list(APPEND librgw_driver_standalone_srcs
     ${librgw_posix_srcs}
+    driver/rados/rgw_pubsub_push.cc
+    driver/rados/rgw_user.cc
     driver/posix/rgw_standalone.cc
   )
 endif()
