@@ -494,7 +494,7 @@ class HostAssignment(object):
             hosts_to_avoid = list(set(blocking_daemon_hostnames + unreachable_hostnames))
             candidate_host_hostnames = [dd.hostname for dd in others if dd.hostname not in hosts_to_avoid]
             candidate_hosts = [h for h in self.hosts if h.hostname in candidate_host_hostnames]
-            known_daemon_hosts = [h for h in self.hosts if h.hostname in [dd.hostname for dd in daemons]]
+            known_daemon_hosts = [h for h in self.hosts if h.hostname in [dd.hostname for dd in existing]]
             label_host_mapping, already_present_label_mapping = self.generate_count_per_label_placement(
                 candidate_hosts,
                 self.spec.placement.labels,
@@ -725,7 +725,7 @@ class HostAssignment(object):
             in_maintenance[h.hostname] = False
         unreachable_hosts = [h.hostname for h in self.unreachable_hosts]
         candidates = [
-            c for c in candidates if c.hostname not in unreachable_hosts or in_maintenance[c.hostname]]
+            c for c in candidates if c.hostname not in unreachable_hosts and not in_maintenance[c.hostname]]
         return candidates
 
     def generate_count_per_label_placement(
