@@ -20,6 +20,7 @@ Maintainers are the default assignee for related tracker issues and pull request
 | performance                     | Mark Kogan                      |
 | s3 select                       | Gal Salomon                     |
 | storage abstraction layer       | Daniel Gryniewicz               |
+| test                            | tserlin                         |
 
 # Looking for maintainer
 
