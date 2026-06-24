@@ -140,14 +140,40 @@ See also :ref:`multisite`.
 Setting up HTTPS
 ----------------
 
-In order to enable HTTPS for RGW services, apply a spec file following this scheme:
+RGW services, like other cephadm-managed services, support three ways of configuring
+HTTPS certificates, all managed through the cephadm Certificate Manager (certmgr):
+
+- **cephadm-signed (default):**
+  If ``ssl`` is set to true but no certificate is specified, cephadm generates and
+  signs a certificate for the RGW service automatically.
+
+- **inline:**
+  Users can set ``certificate_source`` to ``inline`` and embed the certificate
+  and private key directly in the spec using ``ssl_cert`` and ``ssl_key``.
+  ``ssl_cert`` may contain a certificate chain: leaf certificate followed by
+  optional intermediate CA certificates.
+
+- **reference:**
+  Users can register their own certificate and key with certmgr and set
+  ``certificate_source`` to ``reference`` in the spec.
+
+**Option 1: Inline certificate and key**
 
 .. code-block:: yaml
 
   service_type: rgw
   service_id: myrgw
   spec:
-    rgw_frontend_ssl_certificate: | 
+    ssl: true
+    certificate_source: inline
+    ssl_cert: |
+      -----BEGIN CERTIFICATE-----
+      (PEM leaf cert contents here)
+      -----END CERTIFICATE-----
+      -----BEGIN CERTIFICATE-----
+      (optional PEM intermediate cert contents here)
+      -----END CERTIFICATE-----
+    ssl_key: |
       -----BEGIN PRIVATE KEY-----
       V2VyIGRhcyBsaWVzdCBpc3QgZG9vZi4gTG9yZW0gaXBzdW0gZG9sb3Igc2l0IGFt
       ZXQsIGNvbnNldGV0dXIgc2FkaXBzY2luZyBlbGl0ciwgc2VkIGRpYW0gbm9udW15
@@ -155,13 +181,6 @@ In order to enable HTTPS for RGW services, apply a spec file following this sche
       YSBhbGlxdXlhbSBlcmF0LCBzZWQgZGlhbSB2b2x1cHR1YS4gQXQgdmVybyBlb3Mg
       ZXQgYWNjdXNhbSBldCBqdXN0byBkdW8=
       -----END PRIVATE KEY-----
-      -----BEGIN CERTIFICATE-----
-      V2VyIGRhcyBsaWVzdCBpc3QgZG9vZi4gTG9yZW0gaXBzdW0gZG9sb3Igc2l0IGFt
-      ZXQsIGNvbnNldGV0dXIgc2FkaXBzY2luZyBlbGl0ciwgc2VkIGRpYW0gbm9udW15
-      IGVpcm1vZCB0ZW1wb3IgaW52aWR1bnQgdXQgbGFib3JlIGV0IGRvbG9yZSBtYWdu
-      YSBhbGlxdXlhbSBlcmF0LCBzZWQgZGlhbSB2b2x1cHR1YS4gQXQgdmVybyBlb3Mg
-      ZXQgYWNjdXNhbSBldCBqdXN0byBkdW8=
-      -----END CERTIFICATE-----
     ssl: true
 
 Then apply this yaml document:
@@ -170,8 +189,55 @@ Then apply this yaml document:
 
   ceph orch apply -i myrgw.yaml
 
-Note the value of ``rgw_frontend_ssl_certificate`` is a literal string as
-indicated by a ``|`` character preserving newline characters.
+.. note::
+
+   The older ``rgw_frontend_ssl_certificate`` field is still supported
+   for backward compatibility, but it is deprecated.  New deployments
+   should use ``ssl_cert`` / ``ssl_key`` instead.  If used,
+   ``rgw_frontend_ssl_certificate`` must contain a combined PEM bundle:
+   unencrypted private key, leaf certificate, and optional intermediate CA
+   certificates.  A certificate chain without the private key is not valid
+   for this field.
+
+**Option 2: Reference to a registered certificate/key**
+
+First, register the certificate and key with certmgr:
+
+.. prompt:: bash #
+
+  ceph orch certmgr cert set rgw_ssl_cert --service-name rgw.<service_id> -i $PWD/server_cert.pem
+  ceph orch certmgr key set rgw_ssl_key --service-name rgw.<service_id> -i $PWD/server_key.pem
+
+Then use ``reference`` source in the RGW spec:
+
+.. code-block:: yaml
+
+  service_type: rgw
+  service_id: myrgw
+  spec:
+    ssl: true
+    certificate_source: reference
+
+Apply the spec:
+
+.. prompt:: bash #
+
+  ceph orch apply -i myrgw.yaml
+
+**Option 3: cephadm-signed (default)**
+
+If ``ssl: true`` is set but no certificate is provided, cephadm
+will automatically generate and sign a certificate for the RGW service.
+
+.. code-block:: yaml
+
+  service_type: rgw
+  service_id: myrgw
+  spec:
+    ssl: true
+    certificate_source: cephadm-signed
+
+This will deploy RGW with a cephadm-signed certificate.
 
 Setting up HTTPS with Wildcard SANs
 -----------------------------------
