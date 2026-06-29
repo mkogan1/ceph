@@ -44,7 +44,7 @@ from ceph.deployment.utils import verify_positive_int, verify_non_negative_numbe
 from ceph.deployment.utils import verify_boolean, verify_enum, verify_int, verify_non_empty_string
 from ceph.deployment.utils import verify_size_with_units
 from ceph.deployment.utils import verify_path
-from ceph.deployment.utils import parse_combined_pem_file, validate_port, validate_unique_ports
+from ceph.deployment.utils import validate_port, validate_unique_ports
 from ceph.cephadm.d3n_types import D3NCacheSpec, D3NCacheError
 from ceph.utils import is_hex
 from ceph.smb import constants as smbconst
