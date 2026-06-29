@@ -41,10 +41,9 @@ from ceph.deployment.hostspec import (
 )
 from ceph.deployment.utils import unwrap_ipv6, valid_addr, verify_non_negative_int
 from ceph.deployment.utils import verify_positive_int, verify_non_negative_number
-from ceph.deployment.utils import verify_boolean, verify_enum, verify_int, verify_non_empty_string
+from ceph.deployment.utils import verify_boolean, verify_enum, verify_int
 from ceph.deployment.utils import validate_port, validate_unique_ports
 from ceph.cephadm.d3n_types import D3NCacheSpec, D3NCacheError
-from ceph.deployment.utils import parse_combined_pem_file, validate_port, validate_unique_ports
 from ceph.utils import is_hex
 from ceph.smb import constants as smbconst
 from ceph.smb import network as smbnet
