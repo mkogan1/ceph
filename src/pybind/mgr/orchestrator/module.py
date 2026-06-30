@@ -23,11 +23,9 @@ from ceph.deployment.utils import unwrap_ipv6
 from ceph.utils import datetime_now
 from ceph.cephadm.images import NonCephImageServiceTypes
 from mgr_util import (
-    is_valid_container_image_ref,
     to_pretty_timedelta,
     format_bytes,
-    NvmeofMetadataPoolHelper,
-    parse_combined_pem_file
+    NvmeofMetadataPoolHelper
 )
 from mgr_module import MgrModule, HandleCommandResult, Option
 from object_format import Format

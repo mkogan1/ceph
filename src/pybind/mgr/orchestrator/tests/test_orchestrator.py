@@ -542,4 +542,3 @@ class TestCertStoreCertKeySet:
             None,
             False,
         )
->>>>>>> 9ab3d3ae7ed (cephadm/certmgr: add unit tests for fullchain PEM ingest)
