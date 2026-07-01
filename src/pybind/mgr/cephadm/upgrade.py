@@ -2388,7 +2388,10 @@ class CephadmUpgrade:
         # Restore OSD flags before we clear the upgrade state.
         self._restore_osd_flags_after_upgrade()
 
-        logger.info('Upgrade: checking if all mon, mgr, OSD, mds daemons upgraded before changing service cipher')
+        logger.info(
+            'Upgrade: checking if all mon, mgr, OSD, mds daemons upgraded before '
+            'changing service cipher and clearing rotating keys'
+        )
         daemons_to_check = (
             self.mgr.cache.get_daemons_by_service('mon')
             + self.mgr.cache.get_daemons_by_service('mgr')
@@ -2405,8 +2408,12 @@ class CephadmUpgrade:
                 'name': 'auth_service_cipher',
                 'value': SERVICE_CIPHER,
             })
+            # wipe the rotating service keys to have them be re-made on the new cipher
+            ret, image, err = self.mgr.check_mon_command({
+                'prefix': 'auth wipe-rotating-service-keys',
+            })
         else:
-            logger.info('Found mon/mgr/OSD/mds daemons still needing upgrade. Service cipher not set')
+            logger.info('Found mon/mgr/OSD/mds daemons still needing upgrade. Service cipher not set. Rotating keys not cleared')
 
         if self.upgrade_state.rotated_osd_mds_keyrings:
             self._clear_rotated_daemon_entry()
