@@ -1498,6 +1498,12 @@ class NFSServiceSpec(ServiceSpec):
                  enable_cephfs_client_log: bool = False,
                  cephfs_client_log_level: Optional[int] = None,
                  cephfs_client_log_dir: Optional[str] = None,
+                 grpc_certificate_source: Optional[str] = CertificateSource.CEPHADM_SIGNED.value,
+                 grpc_server_cert: Optional[str] = None,
+                 grpc_server_key: Optional[str] = None,
+                 grpc_client_cert: Optional[str] = None,
+                 grpc_client_key: Optional[str] = None,
+                 grpc_ca_cert: Optional[str] = None,
                  ):
         assert service_type == 'nfs'
         super(NFSServiceSpec, self).__init__(
@@ -1568,6 +1574,15 @@ class NFSServiceSpec(ServiceSpec):
         # TSM (Transparent State Migration) fields
         self.enable_tsm = enable_tsm
         self.tsm_port = tsm_port
+        # grpc_certificate_source controls cert management: cephadm_signed (default),
+        # inline, or reference.
+        self.grpc_certificate_source = (
+            grpc_certificate_source or CertificateSource.CEPHADM_SIGNED.value)
+        self.grpc_server_cert = grpc_server_cert
+        self.grpc_server_key = grpc_server_key
+        self.grpc_client_cert = grpc_client_cert
+        self.grpc_client_key = grpc_client_key
+        self.grpc_ca_cert = grpc_ca_cert
 
     def get_colocation_port_fields(self) -> List[str]:
         """Return port fields for colocation; dynamically include rdma_port and/or
@@ -1723,6 +1738,22 @@ class NFSServiceSpec(ServiceSpec):
                 "Invalid NFS spec: client_object_cache_size must be greater than "
                 "client_object_cache_max_dirty"
             )
+
+        # gRPC certificate validation — must run before any early return below
+        valid_grpc_sources = {e.value for e in CertificateSource}
+        if self.grpc_certificate_source not in valid_grpc_sources:
+            raise SpecValidationError(
+                f"Invalid grpc_certificate_source '{self.grpc_certificate_source}'. "
+                f"Valid values: {sorted(valid_grpc_sources)}"
+            )
+        if self.grpc_certificate_source == CertificateSource.INLINE.value:
+            grpc_field_names = ['grpc_server_cert', 'grpc_server_key',
+                                'grpc_client_cert', 'grpc_client_key', 'grpc_ca_cert']
+            grpc_fields = [getattr(self, f) for f in grpc_field_names]
+            if not all(grpc_fields):
+                raise SpecValidationError(
+                    f'All of {grpc_field_names} must be set when using inline certificate source'
+                )
 
         # validate qos dict
         if self.cluster_qos_config:
