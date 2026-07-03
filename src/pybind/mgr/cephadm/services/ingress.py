@@ -37,6 +37,31 @@ class IngressService(CephService):
     def haproxy_stats_key_name(self) -> str:
         return 'haproxy_monitor_ssl_key'
 
+    @staticmethod
+    def should_defer_haproxy_for_nfs(
+        mgr: "CephadmOrchestrator",
+        spec: IngressSpec,
+        hostname: str
+    ) -> bool:
+        """
+        Check if HAProxy deployment should be deferred on a specific host
+        waiting for NFS backend to be ready.
+        This ensures per-host ordering: NFS -> HAProxy -> Keepalived
+        """
+        if not spec.backend_service:
+            return False
+
+        # Check if NFS daemon already exists on this host
+        # If NFS is already running, HAProxy can be deployed
+        nfs_daemons = mgr.cache.get_daemons_by_service(spec.backend_service)
+        if any(d.hostname == hostname for d in nfs_daemons):
+            return False  # NFS already deployed, proceed with HAProxy
+
+        # Check if NFS is queued for deployment on this host
+        # If NFS is queued but not yet deployed, defer HAProxy to maintain ordering
+        queued_nfs = mgr.daemon_deploy_queue.get_queued_daemon_placements_by_service(spec.backend_service)
+        return any(p.hostname == hostname for p in queued_nfs)
+
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,

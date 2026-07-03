@@ -1249,13 +1249,45 @@ class CephadmServe:
 
             if service_type == 'ingress':
                 ingress_spec = cast(IngressSpec, spec)
+
+                # Check if backend is NFS to determine ordering behavior
+                is_nfs_backend = False
+                if ingress_spec.backend_service:
+                    backend_spec = self.mgr.spec_store.active_specs.get(ingress_spec.backend_service)
+                    if backend_spec and backend_spec.service_type == 'nfs':
+                        is_nfs_backend = True
+
                 if slot.daemon_type == 'keepalived' and not ingress_spec.keepalive_only:
-                    if not self.mgr.cache.get_daemons_by_service(spec.service_name()):
-                        # prepare_create for keepalive will fail in this case as
-                        # we need to deploy haproxy daemons first in order to have targets
-                        # for keepalive to check the health of. For that reason,
-                        # we'll skip the keepalive daemon(s) and deploy them once
-                        # the serve loop comes back around after deploying haproxy
+                    daemons = self.mgr.cache.get_daemons_by_service(spec.service_name())
+                    if is_nfs_backend:
+                        # For NFS: Keepalived requires HAProxy on the same host
+                        if not any(
+                            d.daemon_type == 'haproxy' and d.hostname == slot.hostname
+                            for d in daemons
+                        ):
+                            self.log.debug(
+                                'Deferring keepalived.%s on %s: waiting for haproxy on same host',
+                                slot.name, slot.hostname
+                            )
+                            continue
+                    else:
+                        if not daemons:
+                            # prepare_create for keepalive will fail in this case as
+                            # we need to deploy haproxy daemons first in order to have targets
+                            # for keepalive to check the health of. For that reason,
+                            # we'll skip the keepalive daemon(s) and deploy them once
+                            # the serve loop comes back around after deploying haproxy
+                            continue
+                elif slot.daemon_type == 'haproxy' and is_nfs_backend:
+                    # For NFS backends only, defer HAProxy until NFS is running on this host
+                    # Enforce per-host ordering (NFS -> HAProxy -> Keepalived)
+                    if IngressService.should_defer_haproxy_for_nfs(
+                        self.mgr, ingress_spec, slot.hostname
+                    ):
+                        self.log.info(
+                            'Deferring haproxy.%s on %s: waiting for NFS backend to be ready',
+                            slot.name, slot.hostname
+                        )
                         continue
 
             # deploy new daemon
