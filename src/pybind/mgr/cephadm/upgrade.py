@@ -1839,6 +1839,15 @@ class CephadmUpgrade:
 
             to_upgrade.append(d_entry)
 
+            # ACADIA BEGIN: Enable parallel MDS upgrades
+            # For MDS daemons, don't break after first daemon - collect all MDS daemons
+            # that need upgrading so they can be upgraded in parallel.
+            # The _redeploy_daemons function already handles parallel deployment per host.
+            if self.upgrade_state:
+                if d.daemon_type == 'mds' and self.upgrade_state.fail_fs:
+                    continue
+            # ACADIA END
+
             # ok-to-stop did not add peer names to known_ok_to_stop.
             # For osd/mds/mon we then stop scanning need_upgrade this pass.
             # This helps:
