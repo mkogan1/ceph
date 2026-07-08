@@ -4913,8 +4913,6 @@ int POSIXMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext 
     return ret;
   }
 
-  driver->get_bucket_cache()->invalidate_bucket(dpp, shadow->get_name());
-
   rgw::sal::Bucket::ListParams params;
   rgw::sal::Bucket::ListResults results;
 
@@ -4925,7 +4923,14 @@ int POSIXMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext 
 
   ret = shadow->list(dpp, params, num_parts + 1, results, y);
   if (ret < 0) {
+    ldpp_dout(dpp, 0) << "ERROR: list_parts: shadow->list failed ret="
+      << ret << " upload=" << get_upload_id() << dendl;
     return ret;
+  }
+  if (results.objs.empty()) {
+    ldpp_dout(dpp, 0) << "WARNING: list_parts: 0 results for upload="
+      << get_upload_id() << " shadow=" << shadow->get_name()
+      << " marker=" << params.marker.name << dendl;
   }
   for (rgw_bucket_dir_entry& ent : results.objs) {
     std::unique_ptr<MultipartPart> part = std::make_unique<POSIXMultipartPart>(this);
@@ -4964,6 +4969,7 @@ int POSIXMultipartUpload::abort(const DoutPrefixProvider *dpp, CephContext *cct,
     return ret;
   }
 
+  driver->get_bucket_cache()->invalidate_bucket(dpp, shadow->get_name());
   shadow->remove(dpp, true, y);
 
   return 0;
@@ -5159,6 +5165,9 @@ int POSIXMultipartUpload::complete(const DoutPrefixProvider *dpp,
     }
   }
 
+  // save shadow name before rename changes info.bucket.name
+  std::string shadow_cache_name = shadow->get_name();
+
   // Rename to target_obj
   ret = shadow->rename(dpp, y, target_obj);
   if (ret < 0) {
@@ -5175,6 +5184,10 @@ int POSIXMultipartUpload::complete(const DoutPrefixProvider *dpp,
       return ret;
     }
   }
+
+  // remove staging directory listing cache entry (frees LMDB DBI slot)
+  driver->get_bucket_cache()->invalidate_bucket(dpp, shadow_cache_name);
+
   return 0;
 }
 

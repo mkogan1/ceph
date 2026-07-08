@@ -5601,6 +5601,7 @@ int NSFSMultipartUpload::abort(const DoutPrefixProvider *dpp, CephContext *cct, 
     return ret;
   }
 
+  driver->get_bucket_cache()->invalidate_bucket(dpp, shadow->get_name());
   shadow->remove(dpp, true, y);
 
   return 0;
@@ -5935,7 +5936,8 @@ int NSFSMultipartUpload::complete(const DoutPrefixProvider *dpp,
     driver->get_bucket_cache()->invalidate_bucket(dpp, pb->get_name());
   }
 
-  // remove staging directory
+  // remove staging directory and its listing cache entry
+  driver->get_bucket_cache()->invalidate_bucket(dpp, shadow->get_name());
   shadow->get_dir()->close();
   delete_directory(pb->get_dir()->get_fd(),
                    get_fname().c_str(), true, dpp);
