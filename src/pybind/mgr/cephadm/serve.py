@@ -2007,6 +2007,7 @@ class CephadmServe:
                     name=daemon_spec.name(),
                     image=image,
                     params=daemon_params,
+                    skip_port_check=skip_port_check,
                     meta=exchange.DeployMeta(
                         service_name=daemon_spec.service_name,
                         ports=daemon_spec.ports,
