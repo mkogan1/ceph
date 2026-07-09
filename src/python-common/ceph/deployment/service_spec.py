@@ -2017,6 +2017,8 @@ class NvmeofServiceSpec(ServiceSpec):
                  port: Optional[int] = None,
                  pool: Optional[str] = None,
                  enable_auth: bool = False,
+                 enable_encryption: bool = False,
+                 encryption_key_path: Optional[str] = None,
                  ssl: Optional[bool] = False,
                  certificate_source: Optional[str] = None,
                  custom_sans: Optional[List[str]] = None,
@@ -2145,6 +2147,9 @@ class NvmeofServiceSpec(ServiceSpec):
         #: ``enable_auth`` enables user authentication on nvmeof gateway
         self.enable_auth = enable_auth
         self.ssl = enable_auth or ssl  # enable ssl if auth is enabled OR if ssl was explicitly set
+
+        self.enable_encryption = enable_encryption
+        self.encryption_key_path = encryption_key_path
         #: ``state_update_notify`` enables automatic update from OMAP in nvmeof gateway
         self.state_update_notify = state_update_notify
         #: ``state_update_interval_sec`` number of seconds to check for updates in OMAP
@@ -2389,6 +2394,27 @@ class NvmeofServiceSpec(ServiceSpec):
             raise SpecValidationError('Cannot add NVMEOF: No Pool specified')
 
         verify_boolean(self.enable_auth, "Enable authentication")
+        verify_boolean(self.enable_encryption, "Enable encryption")
+
+        if self.encryption_key and self.encryption_key_path:
+            raise SpecValidationError(
+                'encryption_key and encryption_key_path cannot both be set'
+            )
+
+        if self.enable_encryption:
+            if not self.encryption_key_path and not self.encryption_key:
+                raise SpecValidationError(
+                    'enable_encryption=true requires either encryption_key_path or encryption_key'
+                )
+            if self.encryption_key_path and not self.encryption_key_path.startswith('/'):
+                raise SpecValidationError(
+                    'encryption_key_path must be an absolute path'
+                )
+        elif self.encryption_key_path:
+            raise SpecValidationError(
+                'encryption_key_path requires enable_encryption=true'
+            )
+
         if self.enable_auth or self.ssl:
             if self.certificate_source == CertificateSource.INLINE.value:
                 if not all([self.server_key, self.server_cert, self.client_key,
