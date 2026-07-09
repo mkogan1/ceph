@@ -486,6 +486,7 @@ bool AuthMonitor::check_health()
 
   auto const& secure_key_types = CryptoManager::get_secure_key_types();
 
+  if (g_conf()->allow_auth_health_wrn) {
   {
     auto allowed_ciphers = mon.monmap->auth_allowed_ciphers;
     std::vector<std::string> details;
@@ -522,6 +523,7 @@ bool AuthMonitor::check_health()
     if (!secure_key_types.contains(service_key_type)) {
       next.add("AUTH_INSECURE_SERVICE_TICKETS", HEALTH_ERR, "Monitors are configured to issue insecure service tickets", 1);
     }
+  }
   }
 
   std::map<std::string,std::list<std::string>> bad_caps_detail;  // entity -> details
@@ -592,6 +594,7 @@ bool AuthMonitor::check_health()
       }
     }
   }
+  if (g_conf()->allow_auth_health_wrn) {
   if (!bad_key_client_detail.empty()) {
     std::ostringstream summary;
     summary << bad_key_client_detail.size() << " auth client entities with insecure key types";
@@ -645,6 +648,7 @@ bool AuthMonitor::check_health()
     for (auto& detail : bad_rotating_service_keys) {
       check.detail.push_back(detail);
     }
+  }
   }
 
   return next != get_health_checks(); /* should propose */

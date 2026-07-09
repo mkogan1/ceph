@@ -818,6 +818,13 @@ options:
   min: 0
   flags:
   - runtime
+- name: allow_auth_health_wrn
+  level: dev
+  type: bool
+  default: false
+  services:
+    - mon
+  with_legacy: true
 - name: paxos_kill_at
   type: int
   level: dev
