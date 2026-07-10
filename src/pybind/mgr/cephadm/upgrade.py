@@ -904,7 +904,8 @@ class CephadmUpgrade:
     def _mute_upgrade_related_health_warnings(self) -> None:
         for health_warning_name in MID_UPGRADE_MUTED_WARNINGS:
             try:
-                self.mgr.log.info('Muting %s warning for the duration of the upgrade', health_warning_name)
+                # TODO: go back to logging this when we're allowed to display cephx related warnings
+                # self.mgr.log.info('Muting %s warning for the duration of the upgrade', health_warning_name)
                 self.mgr.check_mon_command({
                     'prefix': 'health mute',
                     'code': health_warning_name,
@@ -918,7 +919,8 @@ class CephadmUpgrade:
     def _unmute_upgrade_related_health_warnings(self) -> None:
         for health_warning_name in MID_UPGRADE_MUTED_WARNINGS:
             try:
-                self.mgr.log.info('Unmuting %s warning as upgrade is completed or has been stopped', health_warning_name)
+                # TODO: go back to logging this when we're allowed to display cephx related warnings
+                # self.mgr.log.info('Unmuting %s warning as upgrade is completed or has been stopped', health_warning_name)
                 self.mgr.check_mon_command({
                     'prefix': 'health unmute',
                     'code': health_warning_name,
