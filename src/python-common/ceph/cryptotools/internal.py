@@ -115,8 +115,14 @@ class InternalCryptoCaller(CryptoCaller):
     def verify_tls(self, crt: str, key: str) -> None:
         try:
             _key = crypto.load_privatekey(crypto.FILETYPE_PEM, key)
-            _key.check()
+            # PKey.check() maps to RSA_check_key and is RSA-only.
+            # EC keys are still validated by load_privatekey() and
+            # by context.check_privatekey() below.
+            if _key.type() == crypto.TYPE_RSA:
+                _key.check()
         except (ValueError, crypto.Error) as e:
+            self.fail('Invalid private key: %s' % str(e))
+        except TypeError as e:
             self.fail('Invalid private key: %s' % str(e))
         _crt = self._load_cert(crt)
         try:
