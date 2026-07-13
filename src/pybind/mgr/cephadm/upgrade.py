@@ -1249,6 +1249,7 @@ class CephadmUpgrade:
                 return False
             except Exception as e:
                 logger.error(f'Got unexpected exception during upgrade: {str(e)}')
+                logger.error(e.__traceback__)
                 self._fail_upgrade('UPGRADE_EXCEPTION', {
                     'severity': 'error',
                     'summary': 'Upgrade: failed due to an unexpected exception',
