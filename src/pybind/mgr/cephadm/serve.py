@@ -1964,6 +1964,10 @@ class CephadmServe:
 
         all_exchanges = json.dumps([e.dump_json_str() for e in exchanges])
 
+        if not daemon_specs:
+            self.log.error('Got unexpected call to _create_daemon with no daemon specs')
+            return {}, {}
+        daemon_spec = daemon_specs[-1]
         # pass all exchange.deploys to deploy command at once
         out, err, code = await self._run_cephadm(
             daemon_spec.host,
