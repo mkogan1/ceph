@@ -598,8 +598,8 @@ int KeyServer::_build_session_auth_info(uint32_t service_id,
    * upgrades of service daemons where two OSD or two MDS need to talk to each
    * other.
    */
-  int ktype = std::min(key_type.value_or(info.service_secret.get_type()),
-                       info.service_secret.get_type());
+  int ktype = std::min<int>(key_type.value_or(info.service_secret.get_type()),
+                            info.service_secret.get_type());
 
   generate_secret(info.session_key, ktype);
 
