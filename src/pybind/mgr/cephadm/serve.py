@@ -1939,8 +1939,6 @@ class CephadmServe:
                 spec = cast(CustomContainerSpec,
                             self.mgr.spec_store[daemon_spec.service_name].spec)
                 image = spec.image
-                if spec.ports:
-                    ports.extend(spec.ports)
             elif daemon_spec.daemon_type != 'agent':
                 image = self.mgr.get_container_image(
                     daemon_name=daemon_spec.name(),
