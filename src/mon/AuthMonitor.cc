@@ -486,7 +486,6 @@ bool AuthMonitor::check_health()
 
   auto const& secure_key_types = CryptoManager::get_secure_key_types();
 
-  if (g_conf()->allow_auth_health_wrn) {
   {
     auto allowed_ciphers = mon.monmap->auth_allowed_ciphers;
     std::vector<std::string> details;
@@ -499,10 +498,12 @@ bool AuthMonitor::check_health()
       }
     }
     if (!details.empty()) {
+if (g_conf()->allow_auth_health_wrn) {
       auto& check = next.add("AUTH_INSECURE_KEYS_ALLOWED", HEALTH_WARN, "Monitors are configured to allow auth using insecure key types", details.size());
       for (auto& detail : details) {
         check.detail.push_back(detail);
       }
+}
       /* So that existing clusters continue to allow issuing older key types. */
       cct->_conf.set_val_default("mon_auth_allow_insecure_key", "true");
     } else {
@@ -510,6 +511,7 @@ bool AuthMonitor::check_health()
     }
   }
 
+if (g_conf()->allow_auth_health_wrn) {
   if (cct->_conf.get_val<bool>("mon_auth_allow_insecure_key")) {
     next.add("AUTH_INSECURE_KEYS_CREATABLE", HEALTH_WARN, "Monitors are configured to allow creation of insecure key types", 1);
   }
@@ -524,7 +526,7 @@ bool AuthMonitor::check_health()
       next.add("AUTH_INSECURE_SERVICE_TICKETS", HEALTH_ERR, "Monitors are configured to issue insecure service tickets", 1);
     }
   }
-  }
+}
 
   std::map<std::string,std::list<std::string>> bad_caps_detail;  // entity -> details
   std::map<EntityName, std::string> bad_key_client_detail;
@@ -594,7 +596,7 @@ bool AuthMonitor::check_health()
       }
     }
   }
-  if (g_conf()->allow_auth_health_wrn) {
+if (g_conf()->allow_auth_health_wrn) {
   if (!bad_key_client_detail.empty()) {
     std::ostringstream summary;
     summary << bad_key_client_detail.size() << " auth client entities with insecure key types";
@@ -649,7 +651,7 @@ bool AuthMonitor::check_health()
       check.detail.push_back(detail);
     }
   }
-  }
+}
 
   return next != get_health_checks(); /* should propose */
 }
