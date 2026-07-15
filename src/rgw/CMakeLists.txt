@@ -844,8 +844,9 @@ if(WITH_RADOSGW_RADOS)
 endif()
 
 if(WITH_RADOSGW_STANDALONE)
+  # driver/rados/rgw_user.cc is already in rgw_common_standalone (for
+  # rgw_rest_user.cc); only pull the remaining admin-only rados helpers here.
   list(APPEND rgw_standalone_admin_srcs
-    driver/rados/rgw_user.cc
     driver/rados/rgw_bucket.cc
     driver/rados/rgw_obj_manifest.cc)
 
