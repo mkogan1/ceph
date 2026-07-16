@@ -1152,7 +1152,11 @@ def deploy_daemon(
     daemon_type = ident.daemon_type
     # only check port in use if fresh deployment since service
     # we are redeploying/reconfiguring will already be using the port
-    if deployment_type == DeploymentType.DEFAULT and not ctx.skip_port_check:
+    if (
+        deployment_type == DeploymentType.DEFAULT
+        and 'skip_port_check' in ctx
+        and not ctx.skip_port_check
+    ):
         if any([port_in_use(ctx, e) for e in endpoints]):
             if daemon_type == 'mgr':
                 # non-fatal for mgr when we are in mgr_standby_modules=false, but we can't
