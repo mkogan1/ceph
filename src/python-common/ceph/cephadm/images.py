@@ -33,7 +33,7 @@ class DefaultImages(Enum):
     GRAFANA = _create_image('registry.redhat.io/rhceph/grafana-rhel10:v9.1', 'grafana')
     HAPROXY = _create_image('registry.redhat.io/rhceph/rhceph-haproxy-rhel10:v9.1', 'haproxy')
     KEEPALIVED = _create_image('registry.redhat.io/rhceph/keepalived-rhel10:v9.1', 'keepalived')
-    NVMEOF = _create_image('cp.icr.io/cp/ibm-ceph/nvmeof-rhel9:1.6', 'nvmeof')
+    NVMEOF = _create_image('cp.icr.io/cp/ibm-ceph/nvmeof-rhel9:1.6HF', 'nvmeof')
     SNMP_GATEWAY = _create_image('registry.redhat.io/rhceph/snmp-notifier-rhel10:v9.1', 'snmp_gateway')
     SAMBA = _create_image('cp.icr.io/cp/ibm-ceph/samba-server-rhel10:v9.1', 'samba')
     SAMBA_METRICS = _create_image('cp.icr.io/cp/ibm-ceph/samba-metrics-rhel10:v9.1', 'samba_metrics')
