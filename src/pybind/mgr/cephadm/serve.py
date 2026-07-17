@@ -1357,6 +1357,7 @@ class CephadmServe:
             same_rank_daemons = [
                 d for d in self.mgr.cache.get_daemons_by_service(dd.service_name())
                 if d.rank == dd.rank and d.daemon_type == dd.daemon_type
+                and not self.mgr.cache.is_host_unreachable(d.hostname)
             ]
             if any(
                 d.name() != dd.name() and d.status in [DaemonDescriptionStatus.running, DaemonDescriptionStatus.starting]
