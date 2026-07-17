@@ -2278,16 +2278,18 @@ class CephadmUpgrade:
             target_digests = []
         self._rotate_mgr_mon_auth_keys(target_image, target_digests)
 
+        counted_daemons: List[Tuple[DaemonDescription, bool]] = []
         if self.upgrade_state.remaining_count is not None:
-            needs_actual_upgrade = [d for d in to_upgrade if d[1]]
-            needs_deployer_upgrade = [d for d in to_upgrade if not d[1]]
+            needs_actual_upgrade = [d for d in to_upgrade if not d[1]]
+            needs_deployer_upgrade = [d for d in to_upgrade if d[1]]
             if not needs_deployer_upgrade and needs_actual_upgrade and self.upgrade_state.remaining_count <= 0:
                 self.mgr.log.info(
                     f'Hit upgrade limit of {self.upgrade_state.total_count}. Stopping upgrade')
                 return
             if len(needs_actual_upgrade) > self.upgrade_state.remaining_count:
                 needs_actual_upgrade = needs_actual_upgrade[:self.upgrade_state.remaining_count]
-                to_upgrade = needs_actual_upgrade + needs_deployer_upgrade
+            counted_daemons = needs_actual_upgrade
+            to_upgrade = needs_actual_upgrade + needs_deployer_upgrade
 
         hosts = list(set([d[0].hostname for d in to_upgrade if d[0].hostname is not None]))
         for host in hosts:
@@ -2343,9 +2345,11 @@ class CephadmUpgrade:
         failures: Dict[str, Dict[str, str]] = {r[0]: r[2] for r in results if r[2]}
         successes: Dict[str, Dict[str, str]] = {r[0]: r[1] for r in results if r[1]}
         success_count = 0
-        for per_host_successes in successes.values():
-            success_count += len(per_host_successes.keys())
         if self.upgrade_state.remaining_count is not None:
+            counted_daemon_names = {d[0].name() for d in counted_daemons}
+            for per_host_successes in successes.values():
+                success_count += sum(1 for daemon_name in per_host_successes.keys()
+                                     if daemon_name in counted_daemon_names)
             self.upgrade_state.remaining_count -= success_count
         self._save_upgrade_state()
         if any(failures):

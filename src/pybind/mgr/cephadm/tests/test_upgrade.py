@@ -15,7 +15,7 @@ from cephadm.upgrade import (
 )
 from cephadm.ssh import HostConnectionError
 from cephadm.utils import ContainerInspectInfo
-from orchestrator import OrchestratorError, DaemonDescription
+from orchestrator import OrchestratorError, DaemonDescription, HostSpec
 from .fixtures import _run_cephadm, wait, with_host, with_service, \
     with_cephadm_module, receive_agent_metadata, async_side_effect
 
@@ -143,6 +143,45 @@ def test_upgrade_daemons_offline_hosts(cephadm_module: CephadmOrchestrator):
                 _to_upgrade = [(DaemonDescription(daemon_type='crash', daemon_id='test2', hostname='test2'), True)]
                 with pytest.raises(HostConnectionError, match=r"connection failure reason"):
                     cephadm_module.upgrade._upgrade_daemons(_to_upgrade, 'target_image', ['digest1'])
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm(json.dumps({'repo_digests': ['digest1']})))
+def test_upgrade_daemons_limit_counts_only_actual_upgrades(cephadm_module: CephadmOrchestrator):
+    cephadm_module.inventory.add_host(HostSpec('host1'))
+    cephadm_module.inventory.add_host(HostSpec('host2'))
+    cephadm_module.update_host_addr('host1', '1::4')
+    cephadm_module.update_host_addr('host2', '1::5')
+    cephadm_module.upgrade.upgrade_state = UpgradeState(
+        'target_image',
+        0,
+        total_count=1,
+        remaining_count=1,
+    )
+    # Verify --limit counts only real upgrades, not redeploy-only daemons.
+    to_upgrade = [
+        (DaemonDescription(daemon_type='crash', daemon_id='0', hostname='host1'), False),
+        (DaemonDescription(daemon_type='crash', daemon_id='1', hostname='host2'), False),
+        (DaemonDescription(daemon_type='mgr', daemon_id='x', hostname='host1'), True),
+    ]
+    results = [
+        ('host1', {'crash.0': 'ok', 'mgr.x': 'ok'}, {}),
+        ('host2', {}, {}),
+    ]
+    with mock.patch.object(
+        cephadm_module.upgrade,
+        '_redeploy_daemons',
+        side_effect=async_side_effect(results),
+    ) as redeploy, mock.patch.object(
+        cephadm_module.upgrade,
+        '_save_upgrade_state',
+    ):
+        cephadm_module.upgrade._upgrade_daemons(to_upgrade, 'target_image', ['digest1'])
+
+    redeploy.assert_called_once()
+    deployed = redeploy.call_args[0][0]
+    deployed_names = [d[0].name() for d in deployed]
+    assert deployed_names == ['crash.0', 'mgr.x']
+    assert cephadm_module.upgrade.upgrade_state.remaining_count == 0
 
 
 @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
