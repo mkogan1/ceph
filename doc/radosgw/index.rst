@@ -56,6 +56,7 @@ Cluster with one API and then retrieve that data with the other API.
    Swift API <swift>
    Admin Ops API <adminops>
    Python Binding <api>
+   S3 RDMA with cuObject <s3rdma>
    Export over NFS <nfs>
    OpenStack Keystone Integration <keystone>
    OpenStack Barbican Integration <barbican>
