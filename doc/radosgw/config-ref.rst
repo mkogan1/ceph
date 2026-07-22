@@ -63,6 +63,14 @@ instances or all radosgw-admin options can be put into the ``[global]`` or the
 .. confval:: rgw_max_chunk_size
 .. confval:: rgw_multi_obj_del_max_aio
 
+S3 RDMA Settings
+================
+
+For dependencies, build instructions, deployment examples, and the S3 RDMA
+request protocol, see :ref:`radosgw-s3rdma`. The guide includes the complete
+:ref:`S3 RDMA configuration reference <radosgw-cuobj-config-ref>` and
+:ref:`memory sizing and transfer limits <radosgw-cuobj-buffer-limits>`.
+
 Lifecycle Settings
 ==================
 
