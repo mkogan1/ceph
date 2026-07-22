@@ -290,7 +290,15 @@ if(WITH_RADOSGW_D4N)
         driver/d4n/rgw_sal_d4n.cc)
 endif()
 
+if(WITH_RADOSGW_CUOBJ)
+  list(APPEND librgw_common_srcs rgw_cuobj.cc)
+endif()
+
 add_library(rgw_common STATIC ${librgw_common_srcs})
+
+if(WITH_RADOSGW_CUOBJ)
+  target_link_libraries(rgw_common PRIVATE ${CUOBJSERVER_LIBRARY})
+endif()
 
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-Wimplicit-const-int-float-conversion"
