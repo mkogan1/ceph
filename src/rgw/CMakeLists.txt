@@ -352,6 +352,10 @@ if(WITH_RADOSGW_D4N)
   list(APPEND librgw_driver_srcs ${librgw_d4n_srcs})
 endif()
 
+if(WITH_RADOSGW_CUOBJ)
+  list(APPEND librgw_common_srcs rgw_cuobj.cc)
+endif()
+
 if(WITH_RADOSGW_STANDALONE)
   find_package(LMDB REQUIRED)
   add_compile_definitions(LMDB_SAFE_NO_CPP_UTILITIES)
@@ -460,6 +464,10 @@ endif()
 
 if(WITH_LIBURING AND (WITH_RADOSGW_POSIX OR WITH_RADOSGW_NSFS))
   target_link_libraries(rgw_common PRIVATE uring::uring)
+endif()
+
+if(WITH_RADOSGW_CUOBJ)
+  target_link_libraries(rgw_common PRIVATE ${CUOBJSERVER_LIBRARY})
 endif()
 
 if(WITH_RADOSGW_RADOS)
@@ -576,6 +584,10 @@ if(WITH_RADOSGW_STANDALONE)
 
   if(WITH_LIBURING AND (WITH_RADOSGW_POSIX OR WITH_RADOSGW_NSFS))
     target_link_libraries(rgw_common_standalone PRIVATE uring::uring)
+  endif()
+
+  if(WITH_RADOSGW_CUOBJ)
+    target_link_libraries(rgw_common_standalone PRIVATE ${CUOBJSERVER_LIBRARY})
   endif()
 endif()
 
