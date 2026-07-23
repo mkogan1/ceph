@@ -1593,6 +1593,23 @@ class NFSServiceSpec(ServiceSpec):
         # type: () -> str
         return 'conf-' + self.service_name()
 
+    def validate_tsm(self) -> None:
+        """Validate Transparent State Migration placement requirements."""
+        if not self.enable_tsm or not self.placement:
+            return
+        if self.placement.count is not None and self.placement.count < 2:
+            raise SpecValidationError(
+                "NFS Transparent State Migration requires placement count >= 2"
+            )
+        if (
+            self.placement.count is None
+            and self.placement.hosts
+            and len(self.placement.hosts) < 2
+        ):
+            raise SpecValidationError(
+                "NFS Transparent State Migration requires at least 2 hosts"
+            )
+
     def validate_colocation_ports(self) -> None:
         """Validate colocation_ports configuration."""
         if not self.colocation_ports:
@@ -1646,6 +1663,8 @@ class NFSServiceSpec(ServiceSpec):
             raise SpecValidationError(
                 "Placement 'count_per_host' is not supported for nfs service."
             )
+
+        self.validate_tsm()
 
         if self.virtual_ip and (self.ip_addrs or self.networks):
             raise SpecValidationError("Invalid NFS spec: Cannot set virtual_ip and "

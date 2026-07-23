@@ -664,7 +664,7 @@ def test_nfs_spec_tsm_enabled():
     """NFS spec with enable_tsm: get_port_start returns 4 ports, default tsm_port 36369."""
     spec = NFSServiceSpec(
         service_id='mynfs',
-        placement=PlacementSpec(count=1),
+        placement=PlacementSpec(count=2),
         enable_tsm=True,
     )
     assert spec.enable_tsm is True
@@ -677,7 +677,7 @@ def test_nfs_spec_tsm_custom_port():
     """NFS spec with enable_tsm and custom tsm_port."""
     spec = NFSServiceSpec(
         service_id='mynfs',
-        placement=PlacementSpec(count=1),
+        placement=PlacementSpec(count=2),
         enable_tsm=True,
         tsm_port=40000,
     )
@@ -709,7 +709,7 @@ def test_nfs_spec_from_json_tsm():
     data = {
         'service_id': 'mynfs',
         'service_type': 'nfs',
-        'placement': {'count': 1},
+        'placement': {'count': 2},
         'spec': {
             'enable_tsm': True,
             'tsm_port': 40000,
@@ -721,6 +721,45 @@ def test_nfs_spec_from_json_tsm():
     out = spec.to_json()
     assert out.get('spec', {}).get('enable_tsm') is True
     assert out.get('spec', {}).get('tsm_port') == 40000
+
+
+def test_nfs_spec_tsm_requires_min_two_daemons():
+    """TSM with placement count < 2 must fail validation."""
+    with pytest.raises(SpecValidationError, match="requires placement count >= 2"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_tsm=True,
+        ).validate()
+
+
+def test_nfs_spec_tsm_count_two_succeeds():
+    """TSM with placement count == 2 must pass validation."""
+    NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=2),
+        enable_tsm=True,
+    ).validate()
+
+
+def test_nfs_spec_tsm_single_host_fails():
+    """TSM with a single explicit host must fail validation."""
+    with pytest.raises(SpecValidationError, match="requires at least 2 hosts"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(hosts=['host1']),
+            enable_tsm=True,
+        ).validate()
+
+
+def test_nfs_spec_tsm_two_hosts_succeeds():
+    """TSM with two explicit hosts must pass validation."""
+    NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(hosts=['host1', 'host2']),
+        enable_tsm=True,
+    ).validate()
+
 
 def test_nfs_spec_client_object_cache_from_json_roundtrip():
     """Object-cache fields roundtrip via from_json/to_json, preserving size strings."""
