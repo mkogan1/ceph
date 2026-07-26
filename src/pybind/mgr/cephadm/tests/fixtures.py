@@ -129,6 +129,7 @@ def with_cephadm_module(module_options=None, store=None):
             m.mock_store_set('_ceph_get', 'osd_map', {
                 'flags': '',
                 'osds': [],
+                'require_osd_release': 'umbrella',
                 'pools': [],
             })
         if '_ceph_get/health' not in store:
