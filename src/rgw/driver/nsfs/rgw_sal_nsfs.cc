@@ -2050,7 +2050,7 @@ int NSFSDriver::initialize(CephContext *cct, const DoutPrefixProvider *dpp)
   ldpp_dout(dpp, 1) << "nsfs: using " << fs_strategy->name()
     << " fs strategy" << dendl;
 
-  /* ordered listing cache */
+  /* ordered listing cache — same BucketCache<> as POSIX (posix/bucket_cache.h) */
   bucket_cache.reset(
     new BucketCache(
       this, base_path,
@@ -2059,7 +2059,8 @@ int NSFSDriver::initialize(CephContext *cct, const DoutPrefixProvider *dpp)
       g_conf().get_val<int64_t>("rgw_nsfs_cache_lanes"),
       g_conf().get_val<int64_t>("rgw_nsfs_cache_partitions"),
       g_conf().get_val<int64_t>("rgw_nsfs_cache_lmdb_count"),
-      g_conf().get_val<bool>("rgw_nsfs_inotify")));
+      g_conf().get_val<bool>("rgw_nsfs_inotify"),
+      "NSFS"));
 
   /* user info cache */
   user_cache.set_max_size(dpp, g_conf().get_val<uint64_t>("rgw_nsfs_cache_max_users"));
@@ -6099,7 +6100,47 @@ int NSFSMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext *
 
   ret = shadow->list(dpp, params, num_parts + 1, results, y);
   if (ret < 0) {
+    ldpp_dout(dpp, 0) << "ERROR: list_parts: shadow->list failed ret="
+      << ret << " upload=" << get_upload_id() << dendl;
     return ret;
+  }
+  if (results.objs.empty()) {
+    /* Same diagnostic as POSIX: independent readdir of shadow vs cache. */
+    int disk_parts = 0;
+    int disk_ents = 0;
+    int disk_errno = 0;
+    NSFSBucket* sb = static_cast<NSFSBucket*>(shadow.get());
+    if (sb && sb->get_dir()) {
+      int sfd = sb->get_dir_fd(dpp);
+      if (sfd >= 0) {
+        int dfd = ::dup(sfd);
+        if (dfd < 0) {
+          disk_errno = errno;
+        } else if (DIR* d = ::fdopendir(dfd); d != nullptr) {
+          while (struct dirent* e = ::readdir(d)) {
+            std::string_view n(e->d_name);
+            if (n == "." || n == "..") {
+              continue;
+            }
+            ++disk_ents;
+            if (n.starts_with(MP_OBJ_PART_PFX)) {
+              ++disk_parts;
+            }
+          }
+          ::closedir(d);
+        } else {
+          disk_errno = errno;
+          ::close(dfd);
+        }
+      }
+    }
+    ldpp_dout(dpp, 0) << "WARNING: list_parts: 0 results for upload="
+      << get_upload_id() << " shadow=" << shadow->get_name()
+      << " marker=" << params.marker.name
+      << " disk_parts=" << disk_parts
+      << " disk_ents=" << disk_ents
+      << " disk_errno=" << disk_errno
+      << dendl;
   }
   for (rgw_bucket_dir_entry& ent : results.objs) {
     std::unique_ptr<MultipartPart> part = std::make_unique<NSFSMultipartPart>(this);
@@ -6529,6 +6570,9 @@ int NSFSMultipartUpload::complete(const DoutPrefixProvider *dpp,
   }
 
   // remove staging directory and its listing cache entry
+  ldpp_dout(dpp, 2) << "NSFSMultipartUpload::complete: calling shared"
+    << " BucketCache::invalidate_bucket(recycle) shadow="
+    << shadow->get_name() << dendl;
   driver->get_bucket_cache()->invalidate_bucket(dpp, shadow->get_name(), true);
   shadow->get_dir()->close();
   delete_directory(pb->get_dir()->get_fd(),

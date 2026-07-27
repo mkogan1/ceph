@@ -305,6 +305,7 @@ struct BucketCache : public Notifiable
   using unique_lock = std::unique_lock<std::mutex>;
 
   D* driver;
+  const char* driver_name; /* "POSIX" / "NSFS" — for shared-path sanity logs */
   std::string bucket_root;
   uint32_t max_buckets;
   std::atomic<uint64_t> recycle_count;
@@ -465,8 +466,10 @@ public:
   BucketCache(D* driver, std::string bucket_root, std::string database_root,
 	      uint32_t max_buckets=100, uint8_t max_lanes=3,
 	      uint8_t max_partitions=3, uint8_t lmdb_count=3,
-	      bool use_inotify=false)
-    : driver(driver), bucket_root(bucket_root), max_buckets(max_buckets),
+	      bool use_inotify=false,
+	      const char* driver_name="unknown")
+    : driver(driver), driver_name(driver_name), bucket_root(bucket_root),
+      max_buckets(max_buckets),
       lru(max_lanes, max_buckets/max_lanes),
       cache(max_lanes, max_buckets/max_partitions),
       rp(bucket_root),
@@ -485,6 +488,18 @@ public:
 				 database_root) << std::endl;
 	exit(1);
       }
+
+      /* One shared implementation is instantiated for POSIX and NSFS
+       * (file::listing::BucketCache<D,B>).  Tag logs with driver_name so a
+       * workload run can prove both hit this same code. */
+      lsubdout(driver->ctx(), rgw, 1)
+	<< "BucketCache: constructed shared listing cache"
+	<< " driver=" << this->driver_name
+	<< " max_buckets=" << max_buckets
+	<< " lmdb_count=" << (int)lmdb_count
+	<< " bucket_root=" << bucket_root
+	<< " database_root=" << database_root
+	<< dendl;
     }
 
   ~BucketCache() {
@@ -557,7 +572,8 @@ public:
 	if (b) [[likely]] {
 	  ldpp_dout(dpp, 2) << "BucketCache: "
 	    << (iflags & cohort::lru::FLAG_RECYCLE ? "recycled" : "allocated new")
-	    << " entry, LRU total=" << lru.get_size()
+	    << " entry, driver=" << driver_name
+	    << " LRU total=" << lru.get_size()
 	    << " (q=" << lru.get_q_size()
 	    << " active=" << lru.get_active_size() << ")"
 	    << ", bucket=" << name << dendl;
@@ -1136,7 +1152,8 @@ public:
       unique_lock ulk{b->mtx, std::adopt_lock};
 
       ldpp_dout(dpp, 2) << "BucketCache: invalidate bucket=" << bname
-	<< (recycle ? " (recycle)" : "") << dendl;
+	<< (recycle ? " (recycle)" : "")
+	<< " driver=" << driver_name << dendl;
 
       try {
         auto txn = b->env->getRWTransaction();

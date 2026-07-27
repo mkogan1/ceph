@@ -2150,7 +2150,7 @@ int POSIXDriver::initialize(CephContext *cct, const DoutPrefixProvider *dpp)
 
   ldpp_dout(dpp, 20) << "Initializing POSIX driver: " << base_path << dendl;
 
-  /* ordered listing cache */
+  /* ordered listing cache — shared BucketCache<> impl (posix/bucket_cache.h) */
   bucket_cache.reset(
     new BucketCache(
       this, base_path,
@@ -2159,7 +2159,8 @@ int POSIXDriver::initialize(CephContext *cct, const DoutPrefixProvider *dpp)
       g_conf().get_val<int64_t>("rgw_posix_cache_lanes"),
       g_conf().get_val<int64_t>("rgw_posix_cache_partitions"),
       g_conf().get_val<int64_t>("rgw_posix_cache_lmdb_count"),
-      g_conf().get_val<bool>("rgw_posix_inotify")));
+      g_conf().get_val<bool>("rgw_posix_inotify"),
+      "POSIX"));
 
   /* user info cache */
   user_cache.set_max_size(dpp, g_conf().get_val<uint64_t>("rgw_posix_cache_max_users"));
@@ -5196,9 +5197,44 @@ int POSIXMultipartUpload::list_parts(const DoutPrefixProvider *dpp, CephContext 
     return ret;
   }
   if (results.objs.empty()) {
+    /* Distinguish empty-on-disk vs BucketCache fill/list miss.  Count
+     * part-* dentries with an independent dup/fdopendir so we do not
+     * reuse Directory::fd (same class of bug as for_each under load). */
+    int disk_parts = 0;
+    int disk_ents = 0;
+    int disk_errno = 0;
+    POSIXBucket* sb = static_cast<POSIXBucket*>(shadow.get());
+    if (sb && sb->get_dir()) {
+      int sfd = sb->get_dir_fd(dpp);
+      if (sfd >= 0) {
+        int dfd = ::dup(sfd);
+        if (dfd < 0) {
+          disk_errno = errno;
+        } else if (DIR* d = ::fdopendir(dfd); d != nullptr) {
+          while (struct dirent* e = ::readdir(d)) {
+            std::string_view n(e->d_name);
+            if (n == "." || n == "..") {
+              continue;
+            }
+            ++disk_ents;
+            if (n.starts_with(MP_OBJ_PART_PFX)) {
+              ++disk_parts;
+            }
+          }
+          ::closedir(d);
+        } else {
+          disk_errno = errno;
+          ::close(dfd);
+        }
+      }
+    }
     ldpp_dout(dpp, 0) << "WARNING: list_parts: 0 results for upload="
       << get_upload_id() << " shadow=" << shadow->get_name()
-      << " marker=" << params.marker.name << dendl;
+      << " marker=" << params.marker.name
+      << " disk_parts=" << disk_parts
+      << " disk_ents=" << disk_ents
+      << " disk_errno=" << disk_errno
+      << dendl;
   }
   for (rgw_bucket_dir_entry& ent : results.objs) {
     std::unique_ptr<MultipartPart> part = std::make_unique<POSIXMultipartPart>(this);
@@ -5452,6 +5488,9 @@ int POSIXMultipartUpload::complete(const DoutPrefixProvider *dpp,
   }
 
   // remove staging directory listing cache entry (frees LMDB DBI slot)
+  ldpp_dout(dpp, 2) << "POSIXMultipartUpload::complete: calling shared"
+    << " BucketCache::invalidate_bucket(recycle) shadow="
+    << shadow_cache_name << dendl;
   driver->get_bucket_cache()->invalidate_bucket(dpp, shadow_cache_name, true);
 
   return 0;
