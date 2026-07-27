@@ -64,10 +64,17 @@
  *     lane exceeds hiwat.  Runs with the lane lock DROPPED (safe for
  *     LMDB I/O).  Recycles via mdb_drop + recycle_dbi in reclaim().
  *
- *   - unref() hiwat discard: triggered when an entry returns to the
- *     q list and q.size() > lane_hiwat.  The LRU tail entry is
- *     deleted directly.  Recycles via lru_cleanup() (called before
- *     delete, outside the lane lock).
+ *   - unref() hiwat discard: when an entry returns to q and
+ *     q.size() > lane_hiwat, the LRU tail is taken with the same
+ *     protocol as evict_block (evicting flag + unlink under lane
+ *     lock).  lru_cleanup() then marks FLAG_DELETED, recycles the
+ *     DBI, and removes the AVL node (partition lock after mtx is
+ *     released) before delete — so get_bucket()/ref() cannot see an
+ *     unlinked hook.
+ *
+ *   - get_dbi() MDB_DBS_FULL recovery: LMDB partitions can fill before
+ *     lane hiwat (hash imbalance, multipart shadows).  get_bucket()
+ *     reclaims a peer entry in the same partition to free a DBI slot.
  *
  * NOTE: cohort_lru.h is also used by rgw_file.h (RGWFileHandle).
  * Changes to eviction semantics should be reviewed for impact there.
@@ -120,18 +127,35 @@ public:
 
   void lru_cleanup() override {
     bc->cleanup_count++;
-    if (env) {
-      try {
-	auto txn = env->getRWTransaction();
-	mdb_drop(*txn, dbi, 0);
-	txn->commit();
-	bc->lmdbs.recycle_dbi(this);
-      } catch (const std::exception& e) {
-	lsubdout(bc->driver->ctx(), rgw, 0)
-	  << "BucketCache: hiwat dbi recycle failed for "
-	  << name << ": " << e.what() << dendl;
+    /* Retire under mtx (mark deleted, recycle DBI), then drop the AVL
+     * link with FLAG_LOCK after releasing mtx — never mtx→partition while
+     * holding mtx (same rule as reclaim()).  Setting FLAG_DELETED first
+     * makes concurrent get_bucket() bail out; evicting (set by the LRU
+     * before calling us) makes ref() fail. */
+    {
+      auto lock = lock_guard{mtx};
+      if (deleted()) {
+	return;
       }
-      env.reset();
+      flags |= FLAG_DELETED;
+      bc->un->remove_watch(name);
+      if (env) {
+	try {
+	  auto txn = env->getRWTransaction();
+	  mdb_drop(*txn, dbi, 0);
+	  txn->commit();
+	  bc->lmdbs.recycle_dbi(this);
+	} catch (const std::exception& e) {
+	  lsubdout(bc->driver->ctx(), rgw, 0)
+	    << "BucketCache: hiwat dbi recycle failed for "
+	    << name << ": " << e.what() << dendl;
+	}
+	env.reset();
+      }
+    } /* mtx released */
+
+    if (name_hook.is_linked()) {
+      bc->cache.remove(hk, this, bucket_avl_cache::FLAG_LOCK);
     }
   }
 
@@ -387,6 +411,20 @@ struct BucketCache : public Notifiable
       }
     }
 
+    /* Pick another mapped bucket name in the same LMDB partition (for
+     * emergency DBI reclaim when maxdbs is exhausted). */
+    std::string pick_other_mapped_name(BucketCacheEntry<D, B>* bucket) {
+      auto& part = parts[partition_ix(bucket)];
+      std::lock_guard lk(part.mtx);
+      for (const auto& [name, dbi] : part.dbi_map) {
+	(void)dbi;
+	if (name != bucket->name) {
+	  return name;
+	}
+      }
+      return {};
+    }
+
     /* move a dbi from the active map to the free pool for reuse;
      * the caller must have already cleared the database with
      * mdb_drop(dbi, 0) */
@@ -487,8 +525,10 @@ public:
       typename BucketCacheEntry<D, B>::bucket_avl_cache::Latch lat;
       uint32_t iflags{cohort::lru::FLAG_INITIAL};
       GetBucketResult result{nullptr, 0};
+      int create_failures{0};
 
     retry:
+      iflags = cohort::lru::FLAG_INITIAL;
       b = cache.find_latch(fac.hk /* partition selector */,
 			   name /* key */, lat /* serializer */, BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_LOCK);
       /* LATCHED */
@@ -526,15 +566,36 @@ public:
 	  /* attach bucket to an lmdb partition and prepare it for i/o */
 	  auto& env = lmdbs.get_sp_env(b);
 	  auto cmp = B::lmdb_cmp();
-	  auto dbi_opt = lmdbs.get_dbi(b, [&]() {
+	  auto open_dbi = [&]() {
 	    return cmp
 	      ? env->openDB(b->name, MDB_CREATE, cmp)
 	      : env->openDB(b->name, MDB_CREATE);
-	  });
+	  };
+	  auto dbi_opt = lmdbs.get_dbi(b, open_dbi);
+	  /* LMDB partition maxdbs can fill before LRU lane hiwat trips
+	   * (hash imbalance + many multipart shadows).  Reclaim a peer
+	   * in this partition to recycle a DBI, then retry. */
+	  for (int attempt = 0; !dbi_opt && attempt < 4; ++attempt) {
+	    if (!try_reclaim_peer_dbi(dpp, b, lat)) {
+	      break;
+	    }
+	    dbi_opt = lmdbs.get_dbi(b, open_dbi);
+	  }
 	  if (!dbi_opt) {
+	    ldpp_dout(dpp, 0) << "BucketCache: get_dbi failed for " << name
+	      << " after peer reclaim; abandoning incomplete entry" << dendl;
+	    /* b is on the LRU active list (refcnt=2) but not in the AVL
+	     * tree yet — drop both refs so unref deletes it, then retry. */
 	    b->mtx.unlock();
 	    lat.lock->unlock();
-	    return result;
+	    lru.unref(b, cohort::lru::FLAG_NONE);
+	    lru.unref(b, cohort::lru::FLAG_NONE);
+	    if (++create_failures > 8) {
+	      ldpp_dout(dpp, 0) << "BucketCache: giving up get_dbi for "
+		<< name << dendl;
+	      return result;
+	    }
+	    goto retry;
 	  }
 	  b->set_env(env, *dbi_opt);
 
@@ -563,6 +624,54 @@ public:
       get<0>(result) = b;
       return result;
     } /* get_bucket */
+
+  /* Reclaim another cache entry that holds a DBI in the same LMDB
+   * partition as needy, freeing a slot for openDB.  Called with needy->mtx
+   * and the AVL latch for needy's partition held. */
+  bool try_reclaim_peer_dbi(
+      const DoutPrefixProvider* dpp,
+      BucketCacheEntry<D, B>* needy,
+      typename BucketCacheEntry<D, B>::bucket_avl_cache::Latch& lat)
+  {
+    std::string victim_name = lmdbs.pick_other_mapped_name(needy);
+    if (victim_name.empty()) {
+      return false;
+    }
+
+    uint64_t vhk = XXH64(victim_name.c_str(), victim_name.length(),
+			 BucketCacheEntry<D, B>::seed);
+    /* Same AVL partition: we already hold lat — find without re-locking.
+     * Different partition (lanes vs lmdb_count mismatch): take that lock. */
+    const bool same_avl_part =
+      (&cache.partition_of_scalar(vhk) == lat.p);
+    BucketCacheEntry<D, B>* victim = same_avl_part
+      ? cache.find(vhk, victim_name,
+		   BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_NONE)
+      : cache.find(vhk, victim_name,
+		   BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_LOCK);
+    if (!victim || victim == needy) {
+      return false;
+    }
+
+    victim->mtx.lock();
+    if (victim->deleted() ||
+	victim->get_refcnt() != 1 /* SENTINEL */) {
+      victim->mtx.unlock();
+      return false;
+    }
+    victim->mtx.unlock();
+
+    auto* tdo = lru.take_for_retire(victim);
+    if (!tdo) {
+      return false;
+    }
+
+    ldpp_dout(dpp, 2) << "BucketCache: peer reclaim for DBI slot, victim="
+      << victim_name << " needy=" << needy->name << dendl;
+    tdo->lru_cleanup();
+    delete tdo;
+    return true;
+  }
 
   static inline std::string concat_key(const rgw_obj_index_key& k) {
     std::string k_str;

@@ -247,6 +247,13 @@ namespace cohort {
           Lane& lane = lane_of(o);
           lane.lock.lock();
 	  if (! o->active.test()) {
+	    /* Entry may already be unlinked for reclaim/delete.  Do not
+	     * call s_iterator_to() on an unlinked hook (safe_link crash). */
+	    if (! o->lru_hook.is_linked()) {
+	      --(o->lru_refcnt);
+	      lane.lock.unlock();
+	      return false;
+	    }
 	    Object::Queue::iterator it =
 	      Object::Queue::s_iterator_to(*o);
 	    lane.q.erase(it);
@@ -298,11 +305,17 @@ namespace cohort {
                 lane.q.erase(it);
               }
               lane.q.push_front(*o);
-              /* hiwat check -- evict LRU entry if lane is over capacity;
-               * LMDB cleanup is deferred to the next get_bucket() */
+              /* Over-hiwat: retire LRU victim using the same protocol as
+               * evict_block() — set evicting and unlink under the lane lock,
+               * then lru_cleanup()+delete out of line.  lru_cleanup() must
+               * remove the entry from any auxiliary index (e.g. AVL) before
+               * delete so get_bucket()/ref() cannot observe an unlinked hook.
+               * Skip o itself (we just became the MRU). */
               if (lane.q.size() > lane_hiwat) {
                 Object *o2 = &(lane.q.back());
-                if (can_reclaim(o2)) {
+                if (o2 != o && can_reclaim(o2)) {
+                  ++(o2->lru_refcnt);
+                  (void) o2->evicting.test_and_set();
                   Object::Queue::iterator it2 =
                     Object::Queue::s_iterator_to(*o2);
                   lane.q.erase(it2);
@@ -319,6 +332,30 @@ namespace cohort {
 	  delete tdo;
 	}
       } /* unref */
+
+      /* Take a sentinel object off its lane for destruction.  Sets evicting
+       * and unlinks from q/active.  Caller must lru_cleanup()+delete.
+       * Returns nullptr if the object cannot be taken. */
+      Object* take_for_retire(Object* o) {
+	if (!o) {
+	  return nullptr;
+	}
+	Lane& lane = lane_of(o);
+	std::unique_lock lane_lock{lane.lock};
+	if (!can_reclaim(o) || !o->lru_hook.is_linked()) {
+	  return nullptr;
+	}
+	++(o->lru_refcnt);
+	(void) o->evicting.test_and_set();
+	Object::Queue::iterator it = Object::Queue::s_iterator_to(*o);
+	if (o->active.test()) {
+	  lane.active.erase(it);
+	  o->active.clear();
+	} else {
+	  lane.q.erase(it);
+	}
+	return o;
+      }
 
       Object* insert(ObjectFactory* fac, Edge edge, uint32_t& flags) {
 	/* use supplied functor to re-use an evicted object, or
