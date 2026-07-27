@@ -590,28 +590,76 @@ public:
 	  auto dbi_opt = lmdbs.get_dbi(b, open_dbi);
 	  /* LMDB partition maxdbs can fill before LRU lane hiwat trips
 	   * (hash imbalance + many multipart shadows).  Reclaim a peer
-	   * in this partition to recycle a DBI, then retry. */
-	  for (int attempt = 0; !dbi_opt && attempt < 4; ++attempt) {
-	    if (!try_reclaim_peer_dbi(dpp, b, lat)) {
-	      break;
-	    }
-	    dbi_opt = lmdbs.get_dbi(b, open_dbi);
-	  }
+	   * in this partition to recycle a DBI, then retry.
+	   *
+	   * Critical: drop the AVL latch and entry mtx BEFORE peer
+	   * reclaim.  try_reclaim_peer_dbi() → lru_cleanup() takes the
+	   * victim's AVL partition with FLAG_LOCK; doing that while
+	   * holding lat deadlocks (same partition = self-deadlock on a
+	   * non-recursive mutex; other partition = AB-BA with a peer
+	   * create).  This matched the complete_multipart lockup under
+	   * MDB_DBS_FULL. */
 	  if (!dbi_opt) {
-	    ldpp_dout(dpp, 0) << "BucketCache: get_dbi failed for " << name
-	      << " after peer reclaim; abandoning incomplete entry" << dendl;
-	    /* b is on the LRU active list (refcnt=2) but not in the AVL
-	     * tree yet — drop both refs so unref deletes it, then retry. */
 	    b->mtx.unlock();
-	    lat.lock->unlock();
-	    lru.unref(b, cohort::lru::FLAG_NONE);
-	    lru.unref(b, cohort::lru::FLAG_NONE);
-	    if (++create_failures > 8) {
-	      ldpp_dout(dpp, 0) << "BucketCache: giving up get_dbi for "
-		<< name << dendl;
+	    lat.lock->unlock(); /* !LATCHED */
+	    for (int attempt = 0; !dbi_opt && attempt < 4; ++attempt) {
+	      if (!try_reclaim_peer_dbi(dpp, b)) {
+		break;
+	      }
+	      dbi_opt = lmdbs.get_dbi(b, open_dbi);
+	    }
+	    if (!dbi_opt) {
+	      ldpp_dout(dpp, 0) << "BucketCache: get_dbi failed for " << name
+		<< " after peer reclaim; abandoning incomplete entry" << dendl;
+	      /* b is on the LRU active list (refcnt=2) but not in the AVL
+	       * tree yet — drop both refs so unref deletes it, then retry. */
+	      lru.unref(b, cohort::lru::FLAG_NONE);
+	      lru.unref(b, cohort::lru::FLAG_NONE);
+	      if (++create_failures > 8) {
+		ldpp_dout(dpp, 0) << "BucketCache: giving up get_dbi for "
+		  << name << dendl;
+		return result;
+	      }
+	      goto retry;
+	    }
+	    /* Got a DBI without the original latch.  Re-join the AVL;
+	     * another thread may have published the same name meanwhile. */
+	    typename BucketCacheEntry<D, B>::bucket_avl_cache::Latch lat2;
+	    BucketCacheEntry<D, B>* existing =
+	      cache.find_latch(fac.hk, name, lat2,
+			       BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_LOCK);
+	    if (existing) {
+	      existing->mtx.lock();
+	      if (existing->deleted() ||
+		  ! lru.ref(existing, cohort::lru::FLAG_INITIAL)) {
+		lat2.lock->unlock();
+		existing->mtx.unlock();
+		lru.unref(b, cohort::lru::FLAG_NONE);
+		lru.unref(b, cohort::lru::FLAG_NONE);
+		goto retry;
+	      }
+	      lat2.lock->unlock();
+	      /* dbi_map already has this name from get_dbi(b); existing
+	       * shares that mapping.  Drop the incomplete LRU object. */
+	      lru.unref(b, cohort::lru::FLAG_NONE);
+	      lru.unref(b, cohort::lru::FLAG_NONE);
+	      if (! (flags & BucketCache<D, B>::FLAG_LOCK)) {
+		existing->mtx.unlock();
+	      }
+	      get<0>(result) = existing;
 	      return result;
 	    }
-	    goto retry;
+	    /* !existing — lat2 held with insert commit data */
+	    b->mtx.lock();
+	    b->set_env(env, *dbi_opt);
+	    cache.insert_latched(
+	      b, lat2, BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_UNLOCK);
+	    get<1>(result) |= BucketCache<D, B>::FLAG_CREATE;
+	    if (! (flags & BucketCache<D, B>::FLAG_LOCK)) {
+	      b->mtx.unlock();
+	    }
+	    get<0>(result) = b;
+	    return result;
 	  }
 	  b->set_env(env, *dbi_opt);
 
@@ -642,12 +690,14 @@ public:
     } /* get_bucket */
 
   /* Reclaim another cache entry that holds a DBI in the same LMDB
-   * partition as needy, freeing a slot for openDB.  Called with needy->mtx
-   * and the AVL latch for needy's partition held. */
+   * partition as needy, freeing a slot for openDB.
+   *
+   * Must NOT be called while holding an AVL partition latch or
+   * needy->mtx: lru_cleanup() removes the victim from the AVL with
+   * FLAG_LOCK, which deadlocks if lat is already held. */
   bool try_reclaim_peer_dbi(
       const DoutPrefixProvider* dpp,
-      BucketCacheEntry<D, B>* needy,
-      typename BucketCacheEntry<D, B>::bucket_avl_cache::Latch& lat)
+      BucketCacheEntry<D, B>* needy)
   {
     std::string victim_name = lmdbs.pick_other_mapped_name(needy);
     if (victim_name.empty()) {
@@ -656,15 +706,9 @@ public:
 
     uint64_t vhk = XXH64(victim_name.c_str(), victim_name.length(),
 			 BucketCacheEntry<D, B>::seed);
-    /* Same AVL partition: we already hold lat — find without re-locking.
-     * Different partition (lanes vs lmdb_count mismatch): take that lock. */
-    const bool same_avl_part =
-      (&cache.partition_of_scalar(vhk) == lat.p);
-    BucketCacheEntry<D, B>* victim = same_avl_part
-      ? cache.find(vhk, victim_name,
-		   BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_NONE)
-      : cache.find(vhk, victim_name,
-		   BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_LOCK);
+    BucketCacheEntry<D, B>* victim = cache.find(
+	vhk, victim_name,
+	BucketCacheEntry<D, B>::bucket_avl_cache::FLAG_LOCK);
     if (!victim || victim == needy) {
       return false;
     }
