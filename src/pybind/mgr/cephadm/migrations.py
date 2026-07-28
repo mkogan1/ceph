@@ -17,7 +17,7 @@ from orchestrator import OrchestratorError, DaemonDescription
 if TYPE_CHECKING:
     from .module import CephadmOrchestrator
 
-LAST_MIGRATION = 12
+LAST_MIGRATION = 13
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,12 @@ class Migrations:
             logger.info('Running migration 11 -> 12')
             if self.migrate_11_12():
                 self.set(12)
+
+        if self.mgr.migration_current == 12:
+            logger.info('Running migration 12 -> 13')
+            if self.migrate_12_13():
+                self.set(13)
+
 
     def migrate_0_1(self) -> bool:
         """
@@ -659,6 +665,54 @@ class Migrations:
         except Exception as e:
             logger.error(f'Migration 11->12 failed: {e}')
             return False
+
+    def migrate_12_13(self) -> bool:
+        """
+        Migration 12 -> 13
+        Normalize persisted service spec placement host patterns to lowercase.
+        Specs stored by older versions may contain uppercase host_pattern values
+        (e.g. 'MYHOST-[0-2]'). This patches the stored JSON directly rather
+        than going through spec_store.save(), which would set _needs_configuration
+        and emit a spurious 'service was created' event for every affected spec.
+        The in-memory spec is already correct (HostPattern.__init__ lowercases
+        fnmatch patterns on load).
+        """
+        from cephadm.inventory import SPEC_STORE_PREFIX
+        for spec in self.mgr.spec_store.all_specs.values():
+            if not spec.placement.host_pattern or not spec.placement.host_pattern.pattern:
+                continue
+            name = spec.service_name()
+            store_key = SPEC_STORE_PREFIX + name
+            raw = self.mgr.get_store(store_key)
+            if not raw:
+                continue
+            stored_data = json.loads(raw)
+            hp = stored_data.get('spec', {}).get('placement', {}).get('host_pattern')
+            if isinstance(hp, str):
+                stored_pattern = hp
+            elif isinstance(hp, dict):
+                if hp.get('pattern_type') == 'regex':
+                    continue
+                stored_pattern = hp.get('pattern', '')
+            else:
+                continue
+            normalized = stored_pattern.lower()
+            if stored_pattern == normalized:
+                continue
+            if isinstance(hp, str):
+                stored_data['spec']['placement']['host_pattern'] = normalized
+            else:
+                stored_data['spec']['placement']['host_pattern']['pattern'] = normalized
+            logger.info(
+                f'Normalizing host_pattern for {name} '
+                f'to lowercase: \'{stored_pattern}\' -> \'{normalized}\''
+            )
+            # Update only the persisted JSON; the in-memory ServiceSpec is
+            # already normalized by HostPattern.__init__ during spec_store.load().
+            # Using set_store() directly avoids triggering _needs_configuration
+            # and a spurious 'service was created' event via SpecStore.save().
+            self.mgr.set_store(store_key, json.dumps(stored_data, sort_keys=True))
+        return True
 
 
 def queue_migrate_rgw_spec(mgr: "CephadmOrchestrator", spec_dict: Dict[Any, Any]) -> None:
