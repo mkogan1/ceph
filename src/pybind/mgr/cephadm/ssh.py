@@ -8,7 +8,7 @@ from threading import Thread
 from contextlib import contextmanager
 from io import StringIO
 from shlex import quote
-from typing import TYPE_CHECKING, Optional, List, Tuple, Dict, Iterator, TypeVar, Awaitable, Union
+from typing import TYPE_CHECKING, Optional, List, Tuple, Dict, Iterator, TypeVar, Awaitable, Union, Any
 from orchestrator import OrchestratorError
 
 try:
@@ -149,6 +149,7 @@ class SSHManager:
     # SSH Channel Open Error codes (from RFC 4254)
     # Only retry on transient/recoverable errors
     CHANNEL_OPEN_RECOVERABLE_CODES = {
+        1,
         2,  # OPEN_CONNECT_FAILED - connection to target failed (may be transient)
         4,  # OPEN_RESOURCE_SHORTAGE - server lacks resources (may clear up)
     }
@@ -310,7 +311,13 @@ class SSHManager:
         # Retry logic for transient connection/channel errors
         for attempt in range(self.SSH_RETRY_COUNT):
             try:
-                r = await conn.run(str(rcmd), input=stdin)
+                run_kw: Dict[str, Any] = {}
+                if stdin is not None:
+                    run_kw['input'] = stdin
+                    # Bytes stdin: use encoding=None (else asyncssh expects str).
+                    if isinstance(stdin, bytes):
+                        run_kw['encoding'] = None
+                r = await conn.run(str(rcmd), **run_kw)
                 break  # Success, exit retry loop
             # Handle retryable exceptions (connection/channel errors)
             # Note: handle these Exceptions otherwise you might get a weird error like
