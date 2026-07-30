@@ -216,7 +216,20 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
         """Update configuration in EXPORT DEFAULT block (global fallback for all exports)."""
         return self.export_mgr.set_export_default(cluster_id, delegations.value)
 
-    @CLICommand('nfs cluster create', perm='rw')
+    @NFSCLICommand('nfs cluster rotate-key', perm='rw')
+    @object_format.Responder()
+    def _cmd_nfs_cluster_rotate_key(self,
+                                    cluster_id: str,
+                                    entity: Optional[List[str]] = None,
+                                    key_type: Optional[str] = None) -> Dict[str, Any]:
+        """Rotate NFS cluster/daemon and export auth keys; redeploy service if daemon keys change"""
+        return self.nfs.rotate_keys(
+            cluster_id=cluster_id,
+            entity=entity,
+            key_type=key_type
+        )
+
+    @NFSCLICommand('nfs cluster create', perm='rw')
     @object_format.EmptyResponder()
     def _cmd_nfs_cluster_create(self,
                                 cluster_id: str,
