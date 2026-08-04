@@ -3462,8 +3462,7 @@ def command_bootstrap(ctx):
             logger.info('Unable to set up "admin" label; assuming older version of Ceph')
 
     if ctx.ibm_build:
-        if ctx.automatically_accept_license:
-            cli(['orch', 'accept-license', '--image', ctx.image])
+        cli(['orch', 'accept-license', '--image', ctx.image])
 
     if ctx.apply_spec:
         logger.info('Applying %s to cluster' % ctx.apply_spec)

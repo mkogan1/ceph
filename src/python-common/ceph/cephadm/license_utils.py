@@ -7,7 +7,10 @@ from ceph.utils import datetime_now
 
 
 def get_license_acceptance_key_value_entry_name(ceph_version: str, license_text: str) -> str:
-    license_hash = hashlib.md5(str(license_text).encode('utf-8')).hexdigest()
+    license_hash = hashlib.md5(
+        str(license_text).encode('utf-8'),
+        usedforsecurity=False,
+    ).hexdigest()
     return f'{ceph_version.replace(" ", "_")}_license_{license_hash}'
 
 
