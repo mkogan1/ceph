@@ -545,6 +545,7 @@ namespace rgw {
     }
 
     main.init_lua();
+    main.start_lua_background();
 #ifdef WITH_RADOSGW_RADOS
     main.init_dedup();
 #endif

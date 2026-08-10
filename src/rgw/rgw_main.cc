@@ -176,6 +176,10 @@ int main(int argc, char *argv[])
     return r;
   }
 
+  // the lua background thread is started only after the frontends are running,
+  // so that the background script does not run with root privileges
+  main.start_lua_background();
+
 #if defined(HAVE_SYS_PRCTL_H)
   if (prctl(PR_SET_DUMPABLE, 1) == -1) {
     cerr << "warning: unable to set dumpable flag: " << cpp_strerror(errno) << std::endl;
