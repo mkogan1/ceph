@@ -1970,6 +1970,7 @@ class RgwService(CephService):
                 'ip': ispec.virtual_ip,
                 'frontend_port': ispec.frontend_port,
                 'monitor_port': daemon_spec.ports[1] if daemon_spec.ports else ispec.monitor_port,
+                'monitor_ips': [ispec.virtual_ip],
                 'local_host_ip': self.mgr.inventory.get_addr(daemon_spec.host),
                 'default_server_opts': [],
                 'health_check_interval': '2s',
