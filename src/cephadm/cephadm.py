@@ -3703,7 +3703,6 @@ def command_deploy_from(base_ctx: CephadmContext) -> None:
     configuration parameters from an input JSON configuration file.
     """
     config_data = read_configuration_source(base_ctx)
-    logger.debug('Loaded deploy configuration: %r', config_data)
     results: Dict[str, int] = {}  # individual rc for each daemon deployment
     lock = FileLock(base_ctx, base_ctx.fsid)
     lock.acquire()
@@ -3734,6 +3733,8 @@ def command_deploy_from(base_ctx: CephadmContext) -> None:
         ctx._conf = deepcopy(base_ctx._conf)
         ctx._args = deepcopy(base_ctx._args)
         apply_deploy_config_to_ctx(config, ctx)
+        if 'log_deploy_configuration' in ctx and ctx.log_deploy_configuration:
+            logger.debug('Loaded deploy configuration: %r', config_data)
         daemon_ctxs.append(ctx)
 
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -5866,6 +5867,14 @@ def _add_deploy_parser_args(
         action='store_true',
         default=False,
         help='Set LimitCORE=infinity in ceph unit files'
+    )
+    parser_deploy.add_argument(
+        '--log-deploy-configuration',
+        action='store_true',
+        default=False,
+        help=(
+            'Whether to log deploy config to cephadm.log. Could contain sensitive info '
+            'such as cephx keys. Only relevant at debug level logging.'
     )
 
 
