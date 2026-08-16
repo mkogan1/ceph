@@ -503,5 +503,5 @@ target_link_libraries(unittest_rgw_http_client
 if(WITH_RADOSGW_LANCEDB)
 add_executable(unittest_rgw_s3vector test_rgw_s3vector.cc)
 add_ceph_unittest(unittest_rgw_s3vector)
-target_link_libraries(unittest_rgw_s3vector ${rgw_libs} ${UNITTEST_LIBS})
+target_link_libraries(unittest_rgw_s3vector ${rgw_libs} heap_profiler ${UNITTEST_LIBS})
 endif()
