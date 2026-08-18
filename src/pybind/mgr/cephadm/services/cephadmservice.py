@@ -1511,6 +1511,25 @@ class RgwService(CephService):
     def allow_colo(self) -> bool:
         return True
 
+    def choose_next_action(
+        self,
+        scheduled_action: utils.Action,
+        daemon_type: Optional[str],
+        spec: Optional[ServiceSpec],
+        curr_deps: List[str],
+        last_deps: List[str],
+        daemon: Optional[DaemonDescription] = None,
+    ) -> utils.NextDaemonStep:
+        step = super().choose_next_action(
+            scheduled_action, daemon_type, spec, curr_deps, last_deps
+        )
+        # rgw_frontends can't be changed at runtime, so a reconfig
+        # won't actually apply the new config. We need a full redeploy
+        # to restart the daemon with the updated frontend settings.
+        if step.action is utils.Action.RECONFIG:
+            return utils.NextDaemonStep(utils.Action.REDEPLOY)
+        return step
+
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
