@@ -244,6 +244,15 @@ def config_hash(input_value: str) -> str:
     return hashlib.sha256(input_str).hexdigest()[:8]
 
 
+def md5_hash(input_value: str) -> str:
+    input_str = str(input_value).encode('utf-8')
+    hash_object = hashlib.md5(
+        input_str,
+        usedforsecurity=False
+    )
+    return hash_object.hexdigest()
+
+
 def get_node_proxy_status_value(data: Any, key: str, lower: bool = False) -> str:
     if not isinstance(data, dict):
         return ''
