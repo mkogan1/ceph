@@ -40,7 +40,7 @@ class Identity;
 namespace rgw {
 namespace IAM {
 
-enum {
+enum action_t {
   s3GetObject,
   s3GetObjectVersion,
   s3PutObject,
