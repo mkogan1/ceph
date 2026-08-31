@@ -37,9 +37,12 @@ bool posix_try_use_uring(const DoutPrefixProvider* dpp, optional_yield y,
 unsigned posix_sync_clamp_iodepth(const DoutPrefixProvider* dpp, unsigned qd,
                                   const char* iodepth_opt);
 
-/* Init this thread's ring from rgw_{posix,nsfs}_io_uring_* knobs.
+/* Init this thread's ring from knobs latched by the first
+ * posix_try_use_uring(). Beast strands do not pin a worker: after yield
+ * the coroutine may resume on a different thread, so this must be called
+ * on the current thread before every io_uring_get_sqe / io_uring_submit.
  * Returns true if the ring is ready. */
-bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp, bool nsfs);
+bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp);
 
 class UringReadWindow {
   struct Impl;

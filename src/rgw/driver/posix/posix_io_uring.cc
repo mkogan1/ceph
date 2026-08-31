@@ -33,6 +33,9 @@ namespace rgw::sal {
 
 namespace {
 
+/* Set by posix_try_use_uring(): 0=posix, 1=nsfs, -1=unset. */
+std::atomic<int> uring_driver_nsfs{-1};
+
 int pwrite_full(int fd, const char* buf, int64_t len, int64_t ofs,
                 const DoutPrefixProvider* dpp)
 {
@@ -152,7 +155,8 @@ bool posix_try_use_uring(const DoutPrefixProvider* dpp, optional_yield y,
   if (!posix_io_engine_is_uring(dpp->get_cct(), engine_opt)) {
     return false;
   }
-  if (!posix_uring_ensure_ring(dpp, nsfs)) {
+  uring_driver_nsfs.store(nsfs ? 1 : 0);
+  if (!posix_uring_ensure_ring(dpp)) {
     ldpp_dout(dpp, 0) << "WARNING: io_uring requested but ring init failed; "
                       << "falling back to sync engine" << dendl;
     return false;
@@ -306,6 +310,9 @@ struct ThreadIoUringState {
   }
 };
 
+/* Per-worker ring + eventfd reaper. Not request-affine: a strand may
+ * resume this coroutine on another io_context thread after yield, and
+ * that thread has a distinct (initially zeroed) instance. */
 thread_local ThreadIoUringState thread_uring_state;
 
 struct IoSlot {
@@ -361,6 +368,11 @@ int wait_slot(IoSlot& slot, optional_yield y)
 
 int submit_prepared(const DoutPrefixProvider* dpp)
 {
+  if (!posix_uring_ensure_ring(dpp)) {
+    ldpp_dout(dpp, 0) << "ERROR: URING: ring not ready on this thread"
+                      << dendl;
+    return -EIO;
+  }
   int submitted = io_uring_submit(&thread_uring_state.ring);
   if (submitted < 0) {
     ldpp_dout(dpp, 0) << "ERROR: URING: io_uring_submit failed: "
@@ -372,6 +384,11 @@ int submit_prepared(const DoutPrefixProvider* dpp)
 
 io_uring_sqe* get_sqe_retry(const DoutPrefixProvider* dpp)
 {
+  if (!posix_uring_ensure_ring(dpp)) {
+    ldpp_dout(dpp, 0) << "ERROR: URING: ring not ready on this thread"
+                      << dendl;
+    return nullptr;
+  }
   for (int i = 0; i < 8; ++i) {
     io_uring_sqe* sqe = io_uring_get_sqe(&thread_uring_state.ring);
     if (sqe) {
@@ -404,7 +421,7 @@ int prep_rw(const DoutPrefixProvider* dpp, IoSlot& slot, int fd, bool write)
 
 } // anonymous namespace
 
-bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp, bool nsfs)
+bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp)
 {
   if (thread_uring_state.initialized) {
     return true;
@@ -413,22 +430,32 @@ bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp, bool nsfs)
     return false;
   }
 
-  CephContext* cct = dpp->get_cct();
-  const char* prefix = nsfs ? "rgw_nsfs" : "rgw_posix";
-  unsigned entries = cct->_conf.get_val<uint64_t>(
-      std::string(prefix) + "_io_uring_queue_depth");
-  if (entries < POSIX_URING_MAX_IODEPTH) {
-    entries = POSIX_URING_MAX_IODEPTH;
+  int n = uring_driver_nsfs.load(std::memory_order_acquire);
+  if (n < 0) {
+    return false;
   }
-  entries = round_up_pow2(entries);
 
-  unsigned flags = 0;
-  unsigned idle_ms = 0;
-  if (cct->_conf.get_val<bool>(std::string(prefix) + "_io_uring_sqpoll")) {
-    flags |= IORING_SETUP_SQPOLL;
-    idle_ms = cct->_conf.get_val<uint64_t>(
-        std::string(prefix) + "_io_uring_sq_thread_idle_ms");
-  }
+  static std::once_flag once;
+  static unsigned entries;
+  static unsigned flags;
+  static unsigned idle_ms;
+  std::call_once(once, [dpp, n]() {
+    CephContext* cct = dpp->get_cct();
+    const char* prefix = n ? "rgw_nsfs" : "rgw_posix";
+    entries = cct->_conf.get_val<uint64_t>(
+        std::string(prefix) + "_io_uring_queue_depth");
+    if (entries < POSIX_URING_MAX_IODEPTH) {
+      entries = POSIX_URING_MAX_IODEPTH;
+    }
+    entries = round_up_pow2(entries);
+    flags = 0;
+    idle_ms = 0;
+    if (cct->_conf.get_val<bool>(std::string(prefix) + "_io_uring_sqpoll")) {
+      flags |= IORING_SETUP_SQPOLL;
+      idle_ms = cct->_conf.get_val<uint64_t>(
+          std::string(prefix) + "_io_uring_sq_thread_idle_ms");
+    }
+  });
 
   int ret = thread_uring_state.init(dpp, entries, flags, idle_ms);
   return ret == 0;
@@ -742,10 +769,9 @@ int UringWriteWindow::drain()
 
 #else /* !HAVE_LIBURING */
 
-bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp, bool nsfs)
+bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp)
 {
   (void)dpp;
-  (void)nsfs;
   return false;
 }
 
