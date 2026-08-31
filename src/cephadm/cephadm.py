@@ -1408,17 +1408,25 @@ def clean_cgroup(ctx: CephadmContext, fsid: str, unit_name: str) -> None:
                 cg_trim(p)
         path.rmdir()
 
-    for s in [0.5, 1.0, 2.0, False]:
+    deadline = time.monotonic() + 30.0
+
+    while True:
         try:
             cg_trim(cg_path)
-        except OSError:
-            if not s:
-                logger.warning(f'Failed 4 times to trim old cgroups <{cg_path}>. Giving up!')
-            else:
-                logger.warning(f'Failed to trim old cgroups <{cg_path}>. Retrying in {s} seconds...')
-                time.sleep(s)
-        else:
-            break
+            return
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            if time.monotonic() >= deadline:
+                raise Error(
+                    f'Timed out waiting for old cgroup '
+                    f'<{cg_path}> to be cleaned up: {e}'
+                )
+
+            logger.debug(
+                f'Failed to trim old cgroup <{cg_path}>. Retrying...'
+            )
+            time.sleep(1)
 
 
 def deploy_daemon_units(
