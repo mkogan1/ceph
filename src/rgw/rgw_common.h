@@ -1088,6 +1088,7 @@ enum RGWBucketFlags {
   BUCKET_MFA_ENABLED = 0X10,
   BUCKET_OBJ_LOCK_ENABLED = 0X20,
   BUCKET_DELETED = 0X40,
+  BUCKET_VECTOR = 0X80,
 };
 
 class RGWSI_Zone;
@@ -1148,6 +1149,7 @@ struct RGWBucketInfo {
   bool datasync_flag_enabled() const { return (flags & BUCKET_DATASYNC_DISABLED) == 0; }
   bool obj_lock_enabled() const { return (flags & BUCKET_OBJ_LOCK_ENABLED) != 0; }
   bool bucket_deleted() const { return (flags & BUCKET_DELETED) != 0; }
+  bool is_vector() const { return (flags & BUCKET_VECTOR) != 0; }
 
   bool has_swift_versioning() const {
     /* A bucket may be versioned through one mechanism only. */
