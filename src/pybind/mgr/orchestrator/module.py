@@ -25,6 +25,7 @@ from ceph.deployment.utils import unwrap_ipv6
 from ceph.utils import datetime_now
 from ceph.cephadm.images import NonCephImageServiceTypes
 from mgr_util import (
+    is_valid_container_image_ref,
     to_pretty_timedelta,
     format_bytes,
     NvmeofMetadataPoolHelper
@@ -2821,4 +2822,3 @@ Usage:
         completion = self.update_service(service_type.value, service_type.name, image)
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
-

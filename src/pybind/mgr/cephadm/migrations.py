@@ -148,7 +148,6 @@ class Migrations:
             if self.migrate_12_13():
                 self.set(13)
 
-
     def migrate_0_1(self) -> bool:
         """
         Migration 0 -> 1
