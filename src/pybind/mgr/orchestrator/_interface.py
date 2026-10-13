@@ -432,6 +432,19 @@ class Orchestrator(object):
         """
         raise NotImplementedError()
 
+    def set_host_topological_labels(
+        self,
+        host: str,
+        topological_labels: Optional[Union[str, List[str], Dict[str, str]]]
+    ) -> OrchResult[str]:
+        """
+        Update a host's topological labels
+
+        :param host: hostname
+        :param topological_labels: arbitrary relational host metadata
+        """
+        raise NotImplementedError()
+
     def get_hosts(self) -> OrchResult[List[HostSpec]]:
         """
         Report the hosts in the cluster.
@@ -783,6 +796,14 @@ class Orchestrator(object):
         """ set service of osd """
         raise NotImplementedError()
 
+    def get_osd_devices(self, osd_id: str) -> OrchResult:
+        """ Get devices used for a specific OSD"""
+        raise NotImplementedError()
+
+    def osd_rebuild(self, hostname: str, osd_id: str, rebuild_osds_sharing_devices: bool = False) -> OrchResult:
+        """Rebuild OSD. OSD must have been created after this feature was added"""
+        raise NotImplementedError()
+
     def blink_device_light(self, ident_fault: str, on: bool, locations: List['DeviceLightLoc']) -> OrchResult[List[str]]:
         """
         Instructs the orchestrator to enable or disable either the ident or the fault LED.
@@ -790,6 +811,12 @@ class Orchestrator(object):
         :param ident_fault: either ``"ident"`` or ``"fault"``
         :param on: ``True`` = on.
         :param locations: See :class:`orchestrator.DeviceLightLoc`
+        """
+        raise NotImplementedError()
+
+    def sos(self, hostname: str, sos_params: str) -> OrchResult:
+        """
+        use cephadm to issue a sos command in the host
         """
         raise NotImplementedError()
 
@@ -961,15 +988,46 @@ class Orchestrator(object):
         """Remove multiple settings from a tuned profile"""
         raise NotImplementedError
 
+    def display_license(self, image_name: str, license_language: str = 'en') -> OrchResult[str]:
+        """Display license for specific IBM ceph container image"""
+        raise NotImplementedError()
+
+    def enable_call_home(self, raise_automation_warning: bool) -> OrchResult[str]:
+        """Enable the call home module"""
+        raise NotImplementedError()
+
+    def accept_call_home(self) -> OrchResult[str]:
+        """Accept call home has been automatically enabled and clear warning"""
+        raise NotImplementedError()
+
+    def deny_call_home(self) -> OrchResult[str]:
+        """Disable automatically enabled call home agent module and clear warning"""
+        raise NotImplementedError()
+
+    def accept_license(self, image_name: str) -> OrchResult[str]:
+        """Accept license for specific IBM ceph container image"""
+        raise NotImplementedError()
+
     def upgrade_check(self, image: Optional[str], version: Optional[str]) -> OrchResult[str]:
         raise NotImplementedError()
 
     def upgrade_ls(self, image: Optional[str], tags: bool, show_all_versions: Optional[bool] = False) -> OrchResult[Dict[Any, Any]]:
         raise NotImplementedError()
 
-    def upgrade_start(self, image: Optional[str], version: Optional[str], daemon_types: Optional[List[str]],
-                      hosts: Optional[str], services: Optional[List[str]], limit: Optional[int],
-                      bucket_type: Optional[str] = None, bucket_name: Optional[str] = None) -> OrchResult[str]:
+    def upgrade_start(
+        self,
+        image: Optional[str],
+        version: Optional[str],
+        daemon_types: Optional[List[str]],
+        hosts: Optional[str],
+        services: Optional[List[str]],
+        limit: Optional[int],
+        bucket_type: Optional[str] = None,
+        bucket_name: Optional[str] = None,
+        no_osd_flags: bool = False,
+        topological_labels: Optional[Union[str, List[str]]] = None,
+        automatically_accept_license: bool = False,
+    ) -> OrchResult[str]:
         raise NotImplementedError()
 
     def upgrade_pause(self) -> OrchResult[str]:
@@ -1043,10 +1101,6 @@ def daemon_type_to_service(dtype: str) -> str:
         'agent': 'agent',
         'node-proxy': 'node-proxy',
         'snmp-gateway': 'snmp-gateway',
-        'elasticsearch': 'elasticsearch',
-        'jaeger-agent': 'jaeger-agent',
-        'jaeger-collector': 'jaeger-collector',
-        'jaeger-query': 'jaeger-query',
         'smb': 'smb',
     }
     return mapping[dtype]
@@ -1080,11 +1134,6 @@ def service_to_daemon_types(stype: str) -> List[str]:
         'agent': ['agent'],
         'node-proxy': ['node-proxy'],
         'snmp-gateway': ['snmp-gateway'],
-        'elasticsearch': ['elasticsearch'],
-        'jaeger-agent': ['jaeger-agent'],
-        'jaeger-collector': ['jaeger-collector'],
-        'jaeger-query': ['jaeger-query'],
-        'jaeger-tracing': ['elasticsearch', 'jaeger-query', 'jaeger-collector', 'jaeger-agent'],
         'smb': ['smb'],
     }
     return mapping[stype]

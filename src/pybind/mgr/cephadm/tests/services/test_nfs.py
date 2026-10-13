@@ -10,6 +10,7 @@ from orchestrator import DaemonDescriptionStatus
 from cephadm.serve import CephadmServe
 from cephadm.services.service_registry import service_registry
 from cephadm.services.cephadmservice import CephadmDaemonDeploySpec
+from cephadm import utils
 from cephadm.module import CephadmOrchestrator
 from ceph.deployment.service_spec import (
     NFSServiceSpec,
@@ -17,8 +18,16 @@ from ceph.deployment.service_spec import (
     RGWSpec,
     IngressSpec,
     SpecValidationError,
+    CertificateSource,
 )
 from cephadm.tests.fixtures import with_host, with_service, wait, async_side_effect
+from cephadm.tlsobject_types import TLSCredentials
+
+
+@pytest.fixture(scope='module', autouse=True)
+def _init_service_registry():
+    """Seed the registry so standalone tests can call get_service() directly."""
+    service_registry.init_services(MagicMock())
 
 
 cephadm_root_ca = """-----BEGIN CERTIFICATE-----\nMIIE7DCCAtSgAwIBAgIUE8b2zZ64geu2ns3Zfn3/4L+Cf6MwDQYJKoZIhvcNAQEL\nBQAwFzEVMBMGA1UEAwwMY2VwaGFkbS1yb290MB4XDTI0MDYyNjE0NDA1M1oXDTM0\nMDYyNzE0NDA1M1owFzEVMBMGA1UEAwwMY2VwaGFkbS1yb290MIICIjANBgkqhkiG\n9w0BAQEFAAOCAg8AMIICCgKCAgEAsZRJsdtTr9GLG1lWFql5SGc46ldFanNJd1Gl\nqXq5vgZVKRDTmNgAb/XFuNEEmbDAXYIRZolZeYKMHfn0pouPRSel0OsC6/02ZUOW\nIuN89Wgo3IYleCFpkVIumD8URP3hwdu85plRxYZTtlruBaTRH38lssyCqxaOdEt7\nAUhvYhcMPJThB17eOSQ73mb8JEC83vB47fosI7IhZuvXvRSuZwUW30rJanWNhyZq\neS2B8qw2RSO0+77H6gA4ftBnitfsE1Y8/F9Z/f92JOZuSMQXUB07msznPbRJia3f\nueO8gOc32vxd1A1/Qzp14uX34yEGY9ko2lW226cZO29IVUtXOX+LueQttwtdlpz8\ne6Npm09pXhXAHxV/OW3M28MdXmobIqT/m9MfkeAErt5guUeC5y8doz6/3VQRjFEn\nRpN0WkblgnNAQ3DONPc+Qd9Fi/wZV2X7bXoYpNdoWDsEOiE/eLmhG1A2GqU/mneP\nzQ6u79nbdwTYpwqHpa+PvusXeLfKauzI8lLUJotdXy9EK8iHUofibB61OljYye6B\nG3b8C4QfGsw8cDb4APZd/6AZYyMx/V3cGZ+GcOV7WvsC8k7yx5Uqasm/kiGQ3EZo\nuNenNEYoGYrjb8D/8QzqNUTwlEh27/ps80tO7l2GGTvWVZL0PRZbmLDvO77amtOf\nOiRXMoUCAwEAAaMwMC4wGwYDVR0RBBQwEocQAAAAAAAAAAAAAAAAAAAAATAPBgNV\nHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4ICAQAxwzX5AhYEWhTV4VUwUj5+\nqPdl4Q2tIxRokqyE+cDxoSd+6JfGUefUbNyBxDt0HaBq8obDqqrbcytxnn7mpnDu\nhtiauY+I4Amt7hqFOiFA4cCLi2mfok6g2vL53tvhd9IrsfflAU2wy7hL76Ejm5El\nA+nXlkJwps01Whl9pBkUvIbOn3pXX50LT4hb5zN0PSu957rjd2xb4HdfuySm6nW4\n4GxtVWfmGA6zbC4XMEwvkuhZ7kD2qjkAguGDF01uMglkrkCJT3OROlNBuSTSBGqt\ntntp5VytHvb7KTF7GttM3ha8/EU2KYaHM6WImQQTrOfiImAktOk4B3lzUZX3HYIx\n+sByO4P4dCvAoGz1nlWYB2AvCOGbKf0Tgrh4t4jkiF8FHTXGdfvWmjgi1pddCNAy\nn65WOCmVmLZPERAHOk1oBwqyReSvgoCFo8FxbZcNxJdlhM0Z6hzKggm3O3Dl88Xl\n5euqJjh2STkBW8Xuowkg1TOs5XyWvKoDFAUzyzeLOL8YSG+gXV22gPTUaPSVAqdb\nwd0Fx2kjConuC5bgTzQHs8XWA930U3XWZraj21Vaa8UxlBLH4fUro8H5lMSYlZNE\nJHRNW8BkznAClaFSDG3dybLsrzrBFAu/Qb5zVkT1xyq0YkepGB7leXwq6vjWA5Pw\nmZbKSphWfh0qipoqxqhfkw==\n-----END CERTIFICATE-----\n"""
@@ -98,6 +107,37 @@ class TestNFS:
                 nfs_generated_conf, _ = service_registry.get_service('nfs').generate_config(daemon_spec)
                 ganesha_conf = nfs_generated_conf['files']['ganesha.conf']
                 assert "Bind_addr = 1.2.3.7" in ganesha_conf
+
+    @patch("cephadm.serve.CephadmServe._run_cephadm")
+    @patch("cephadm.services.nfs.NFSService.fence_old_ranks", MagicMock())
+    @patch("cephadm.services.nfs.NFSService.run_grace_tool", MagicMock())
+    @patch("cephadm.services.nfs.NFSService.purge", MagicMock())
+    @patch("cephadm.services.nfs.NFSService.create_rados_config_obj", MagicMock())
+    def test_nfs_bind_addr_virtual_ip(self, _run_cephadm, cephadm_module: CephadmOrchestrator):
+        _run_cephadm.side_effect = async_side_effect(('{}', '', 0))
+
+        with with_host(cephadm_module, 'host1', addr='1.2.3.7'):
+            cephadm_module.cache.update_host_networks('host1', {
+                '1.2.3.0/24': {
+                    'if0': ['1.2.3.7']
+                }
+            })
+
+            nfs_spec = NFSServiceSpec(
+                service_id="foo",
+                placement=PlacementSpec(hosts=['host1']),
+                virtual_ip='1.2.3.100',
+                enable_haproxy_protocol=False
+            )
+
+            with with_service(cephadm_module, nfs_spec, status_running=True) as _:
+                dds = wait(cephadm_module, cephadm_module.list_daemons())
+                daemon_spec = CephadmDaemonDeploySpec.from_daemon_description(dds[0])
+
+                nfs_generated_conf, _ = service_registry.get_service('nfs').generate_config(daemon_spec)
+                ganesha_conf = nfs_generated_conf['files']['ganesha.conf']
+
+                assert "Bind_addr = 1.2.3.100" in ganesha_conf
 
     @patch("cephadm.serve.CephadmServe._run_cephadm")
     def test_ingress_without_haproxy_stats(self, _run_cephadm, cephadm_module: CephadmOrchestrator):
@@ -491,6 +531,46 @@ class TestNFS:
                 )
                 assert expected_tls_block in ganesha_conf
 
+    @patch("cephadm.serve.CephadmServe._run_cephadm")
+    @patch("cephadm.services.nfs.NFSService.fence_old_ranks", MagicMock())
+    @patch("cephadm.services.nfs.NFSService.run_grace_tool", MagicMock())
+    @patch("cephadm.services.nfs.NFSService.purge", MagicMock())
+    @patch("cephadm.services.nfs.NFSService.create_rados_config_obj", MagicMock())
+    def test_nfs_cephadm_signed_cert_includes_virtual_ip(
+            self, _run_cephadm, cephadm_module: CephadmOrchestrator):
+        """cephadm-signed NFS certs must include the managed VIP in SANs."""
+        _run_cephadm.side_effect = async_side_effect(('{}', '', 0))
+        vip = '1.2.3.100'
+        host_addr = '1.2.3.7'
+        tls_creds = TLSCredentials(
+            cert=ceph_generated_cert,
+            key=ceph_generated_key,
+            ca_cert=cephadm_root_ca,
+        )
+
+        with with_host(cephadm_module, 'test', addr=host_addr):
+            nfs_spec = NFSServiceSpec(
+                service_id='foo',
+                placement=PlacementSpec(hosts=['test']),
+                virtual_ip=vip,
+                ssl=True,
+                certificate_source=CertificateSource.CEPHADM_SIGNED.value,
+            )
+            with with_service(cephadm_module, nfs_spec):
+                nfs_svc = service_registry.get_service('nfs')
+                with patch.object(nfs_svc, 'get_certificates',
+                                  return_value=tls_creds) as get_certificates:
+                    nfs_svc.generate_config(
+                        CephadmDaemonDeploySpec(
+                            host='test',
+                            daemon_id='foo.test.0.0',
+                            service_name=nfs_spec.service_name(),
+                        ))
+                    get_certificates.assert_called()
+                    for args, kwargs in get_certificates.call_args_list:
+                        assert kwargs.get('ca_cert_required') is True
+                        assert kwargs.get('ips') == [host_addr, vip]
+
     @patch("cephadm.serve.CephadmServe._run_cephadm_json")
     @patch("cephadm.serve.CephadmServe._run_cephadm")
     @patch("cephadm.services.nfs.NFSService.fence_old_ranks", MagicMock())
@@ -846,3 +926,223 @@ def test_check_daemons_starts_keepalived_when_stopped_and_haproxy_running(
             for c in mock_cephadm._daemon_action.call_args_list
         )
         assert keepalived_started
+
+
+def test_nfs_choose_next_action_skips_legacy_default_deps():
+    nfs_svc = service_registry.get_service('nfs')
+    legacy_deps = [
+        'enable_rdma: False',
+        'rdma_port: None',
+        'tls_ktls: False',
+        'tls_debug: False',
+        'tls_min_version: None',
+        'tls_ciphers: None',
+    ]
+    step = nfs_svc.choose_next_action(
+        utils.Action.NO_ACTION,
+        'nfs',
+        None,
+        curr_deps=[],
+        last_deps=legacy_deps,
+    )
+    assert step.action is utils.Action.NO_ACTION
+
+
+def test_nfs_choose_next_action_detects_explicit_value_change():
+    nfs_svc = service_registry.get_service('nfs')
+    step = nfs_svc.choose_next_action(
+        utils.Action.NO_ACTION,
+        'nfs',
+        None,
+        curr_deps=['tls_ktls: True'],
+        last_deps=['tls_ktls: False'],
+    )
+    assert step.action is utils.Action.REDEPLOY
+
+
+# ---------------------------------------------------------------------------
+# Tests for configurable nfs_rados_command_timeout (IBMCEPH-14352)
+# ---------------------------------------------------------------------------
+
+
+class TestNFSRadosCommandTimeout:
+    """Verify that ganesha-rados-grace and rados subprocess calls use the
+    nfs_rados_command_timeout module option instead of a hardcoded value."""
+
+    def _make_nfs_service(self, module_options=None):
+        """Return an NFSService instance backed by a freshly constructed
+        CephadmOrchestrator module so that get_module_option() works."""
+        from cephadm.tests.fixtures import with_cephadm_module
+        from cephadm.services.service_registry import service_registry
+        # with_cephadm_module is a context manager; keep it alive via return
+        ctx = with_cephadm_module(module_options or {})
+        ctx.__enter__()
+        return ctx, service_registry.get_service('nfs')
+
+    # ------------------------------------------------------------------
+    # run_grace_tool: default timeout (30 s)
+    # ------------------------------------------------------------------
+    def test_run_grace_tool_uses_default_timeout(self):
+        import subprocess
+        from unittest.mock import patch, MagicMock
+        from cephadm.tests.fixtures import with_cephadm_module
+        from cephadm.services.service_registry import service_registry
+        from ceph.deployment.service_spec import NFSServiceSpec
+
+        with with_cephadm_module({}) as mgr:
+            assert mgr.nfs_rados_command_timeout == 30
+
+            nfs_svc = service_registry.get_service('nfs')
+            spec = NFSServiceSpec(service_id='mytest')
+
+            completed = MagicMock()
+            completed.returncode = 0
+            completed.stdout = b''
+
+            captured_timeout = []
+
+            def fake_run(cmd, stdout, stderr, timeout):
+                captured_timeout.append(timeout)
+                return completed
+
+            with patch.object(subprocess, 'run', side_effect=fake_run), \
+                 patch.object(nfs_svc, 'get_keyring_with_caps', return_value='[client.mgr.nfs.grace.nfs.mytest]\n\tkey = AQ==\n'), \
+                 patch.object(mgr, 'get_minimal_ceph_conf', return_value='[global]\n'), \
+                 patch.object(mgr, 'check_mon_command', return_value=None):
+                nfs_svc.run_grace_tool(spec, 'add', '0')
+
+            assert len(captured_timeout) == 1
+            assert captured_timeout[0] == 30
+
+    # ------------------------------------------------------------------
+    # run_grace_tool: custom configured timeout (60 s)
+    # ------------------------------------------------------------------
+    def test_run_grace_tool_uses_custom_timeout(self):
+        import subprocess
+        from unittest.mock import patch, MagicMock
+        from cephadm.tests.fixtures import with_cephadm_module
+        from cephadm.services.service_registry import service_registry
+        from ceph.deployment.service_spec import NFSServiceSpec
+
+        with with_cephadm_module({'nfs_rados_command_timeout': '60'}) as mgr:
+            assert mgr.nfs_rados_command_timeout == 60
+
+            nfs_svc = service_registry.get_service('nfs')
+            spec = NFSServiceSpec(service_id='mytest')
+
+            completed = MagicMock()
+            completed.returncode = 0
+            completed.stdout = b''
+
+            captured_timeout = []
+
+            def fake_run(cmd, stdout, stderr, timeout):
+                captured_timeout.append(timeout)
+                return completed
+
+            with patch.object(subprocess, 'run', side_effect=fake_run), \
+                 patch.object(nfs_svc, 'get_keyring_with_caps', return_value='[client.mgr.nfs.grace.nfs.mytest]\n\tkey = AQ==\n'), \
+                 patch.object(mgr, 'get_minimal_ceph_conf', return_value='[global]\n'), \
+                 patch.object(mgr, 'check_mon_command', return_value=None):
+                nfs_svc.run_grace_tool(spec, 'add', '0')
+
+            assert len(captured_timeout) == 1
+            assert captured_timeout[0] == 60
+
+    # ------------------------------------------------------------------
+    # create_rados_config_obj: both subprocess.run calls use the timeout
+    # ------------------------------------------------------------------
+    def test_create_rados_config_obj_uses_configurable_timeout(self):
+        import subprocess
+        from unittest.mock import patch, MagicMock
+        from cephadm.tests.fixtures import with_cephadm_module
+        from cephadm.services.service_registry import service_registry
+        from ceph.deployment.service_spec import NFSServiceSpec
+
+        with with_cephadm_module({'nfs_rados_command_timeout': '45'}) as mgr:
+            nfs_svc = service_registry.get_service('nfs')
+            spec = NFSServiceSpec(service_id='mytest')
+
+            captured_timeouts = []
+            call_count = [0]
+
+            def fake_run(cmd, stdout, stderr, timeout):
+                captured_timeouts.append(timeout)
+                r = MagicMock()
+                if call_count[0] == 0:
+                    # first call: "get" returns non-zero to trigger "put"
+                    r.returncode = 1
+                    r.stdout = b''
+                else:
+                    r.returncode = 0
+                    r.stdout = b''
+                call_count[0] += 1
+                return r
+
+            with patch.object(subprocess, 'run', side_effect=fake_run), \
+                 patch.object(mgr, 'get_ceph_option', return_value='/tmp/fake-keyring'), \
+                 patch.object(mgr, 'get_mgr_id', return_value='mgr.a'):
+                nfs_svc.create_rados_config_obj(spec)
+
+            # Both the "get" and the "put" calls must use the configured timeout
+            assert all(t == 45 for t in captured_timeouts), \
+                f"Expected all timeouts=45, got {captured_timeouts}"
+            assert len(captured_timeouts) == 2
+
+    # ------------------------------------------------------------------
+    # purge: rados rm uses the configurable timeout
+    # ------------------------------------------------------------------
+    def test_purge_uses_configurable_timeout(self):
+        import subprocess
+        from unittest.mock import patch, MagicMock
+        from cephadm.tests.fixtures import with_cephadm_module
+        from cephadm.services.service_registry import service_registry
+        from ceph.deployment.service_spec import NFSServiceSpec
+
+        with with_cephadm_module({'nfs_rados_command_timeout': '50'}) as mgr:
+            nfs_svc = service_registry.get_service('nfs')
+            spec = NFSServiceSpec(service_id='mytest')
+            mgr.spec_store._specs['nfs.mytest'] = MagicMock(spec=spec, spec_lock=MagicMock())
+            mgr.spec_store._specs['nfs.mytest'].spec = spec
+            mgr.spec_store.spec_created['nfs.mytest'] = datetime_now()
+
+            captured_timeouts = []
+
+            def fake_run(cmd, stdout, stderr, timeout):
+                captured_timeouts.append(timeout)
+                r = MagicMock()
+                r.returncode = 0
+                r.stderr = b''
+                return r
+
+            with patch.object(subprocess, 'run', side_effect=fake_run), \
+                 patch.object(mgr, 'get_ceph_option', return_value='/tmp/fake-keyring'), \
+                 patch.object(mgr, 'get_mgr_id', return_value='mgr.a'):
+                nfs_svc.purge('nfs.mytest')
+
+            assert len(captured_timeouts) == 1
+            assert captured_timeouts[0] == 50
+
+    # ------------------------------------------------------------------
+    # Option presence and defaults in MODULE_OPTIONS
+    # ------------------------------------------------------------------
+    def test_nfs_rados_command_timeout_option_registered(self):
+        from cephadm.module import CephadmOrchestrator
+        names = [o['name'] for o in CephadmOrchestrator.MODULE_OPTIONS]
+        assert 'nfs_rados_command_timeout' in names
+
+    def test_nfs_rados_command_timeout_default_is_30(self):
+        from cephadm.module import CephadmOrchestrator
+        opt = next(
+            o for o in CephadmOrchestrator.MODULE_OPTIONS
+            if o['name'] == 'nfs_rados_command_timeout'
+        )
+        assert opt['default'] == 30
+
+    def test_nfs_rados_command_timeout_type_is_secs(self):
+        from cephadm.module import CephadmOrchestrator
+        opt = next(
+            o for o in CephadmOrchestrator.MODULE_OPTIONS
+            if o['name'] == 'nfs_rados_command_timeout'
+        )
+        assert opt['type'] == 'secs'

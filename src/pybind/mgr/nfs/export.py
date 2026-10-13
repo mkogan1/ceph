@@ -11,24 +11,28 @@ from typing import (
     TypeVar,
     Callable,
     Set,
-    cast)
+    cast,
+)
 from os.path import normpath
 from ceph.fs.earmarking import EarmarkTopScope
+from ceph.fs.enctag import CephFSVolumeEncryptionTag, EncryptionTagException
 import cephfs
 
-from mgr_util import CephFSEarmarkResolver
+from mgr_util import CephFSEarmarkResolver, CephfsClient, open_filesystem
 from rados import TimedOut, ObjectNotFound
 
 from object_format import ErrorResponse
 from mgr_module import NFS_POOL_NAME as POOL_NAME, NFS_GANESHA_SUPPORTED_FSALS
 
 from .ganesha_conf import (
+    Client,
     CephFSFSAL,
     Export,
+    ExportDefault,
     GaneshaConfParser,
     RGWFSAL,
     format_block)
-from .qos_conf import QOS, QOSBandwidthControl, QOSOpsControl, QOSParams
+from .qos_conf import QOS, QOSBandwidthControl, QOSOpsControl, QOSParams, RawBlock
 from .export_utils import (
     export_qos_bw_checks,
     export_dict_qos_bw_ops_checks,
@@ -39,12 +43,15 @@ from .utils import (
     EXPORT_PREFIX,
     NonFatalError,
     export_obj_name,
+    export_default_obj_name,
     conf_obj_name,
     available_clusters,
     check_fs,
     get_nfs_spec_for_cluster,
     restart_nfs_service,
-    cephfs_path_is_dir)
+    cephfs_path_is_dir,
+    normalize_auth_entity
+)
 from .rados_utils import NFSRados
 
 if TYPE_CHECKING:
@@ -84,6 +91,26 @@ def validate_cephfs_path(mgr: 'Module', fs_name: str, path: str) -> None:
         raise NFSObjectNotFound(f"path {path} does not exist")
     except cephfs.Error as e:
         raise NFSException(e.args[1], -e.args[0])
+
+
+def get_enctag_from_path(mgr: 'Module', fs_name: str, path: str) -> Optional[str]:
+    """
+    Retrieve the encryption tag (enctag) from a CephFS path.
+    """
+    try:
+        cephfs_client = CephfsClient(mgr)
+        with open_filesystem(cephfs_client, fs_name) as fs_handle:
+            fs_enctag = CephFSVolumeEncryptionTag(fs_handle, path)
+            enctag = fs_enctag.get_tag()
+            return enctag if enctag else ""
+    except EncryptionTagException as e:
+        log.warning("Failed to get enctag for path %s: %s", path, e)
+        if e.errno == -errno.ENODATA:
+            return ""
+        raise NFSException(f"Failed to get enctag for path {path}: {e.error_str}", e.errno)
+    except Exception as e:
+        log.exception("Unexpected error getting enctag for path %s: %s", path, e)
+        raise NFSException(f"Failed to get enctag for path {path}: {e}", -errno.EIO)
 
 
 def _validate_cmount_path(cmount_path: str, path: str) -> None:
@@ -376,23 +403,47 @@ class ExportMgr:
 
     def create_export(self, addr: Optional[List[str]] = None, **kwargs: Any) -> Dict[str, Any]:
         self._validate_cluster_id(kwargs['cluster_id'])
-        # if addr(s) are provided, construct client list and adjust outer block
+
+        # Check if clients_config is provided
+        clients_config = kwargs.pop('clients_config', None)
+
         clients = []
+
+        if clients_config:
+            try:
+                client_list = json.loads(clients_config)
+                if not isinstance(client_list, list):
+                    raise NFSException(
+                        "clients_config must be a JSON list of client configurations",
+                        -errno.EINVAL)
+
+                for client_conf in client_list:
+                    # client config will be passed as it is in the client block.
+                    clients.append(client_conf)
+
+            except json.JSONDecodeError as e:
+                raise NFSException(f"Failed to parse clients_config (must be valid JSON): {e}", -errno.EINVAL)
+
+        # Add client_addr as an additional CLIENT block if provided
         if addr:
-            clients = [{
+            client_entry = {
                 'addresses': addr,
                 'access_type': 'ro' if kwargs['read_only'] else 'rw',
                 'squash': kwargs['squash'],
-            }]
-            kwargs['squash'] = 'none'
-        kwargs['clients'] = clients
+            }
+            clients.append(client_entry)
 
+        # When any client blocks are created, set export-level to 'none'
+        # so CLIENT blocks take precedence
         if clients:
-            kwargs['access_type'] = "none"
+            kwargs['squash'] = 'none'
+            kwargs['access_type'] = 'none'
         elif kwargs['read_only']:
-            kwargs['access_type'] = "RO"
+            kwargs['access_type'] = "ro"
         else:
-            kwargs['access_type'] = "RW"
+            kwargs['access_type'] = "rw"
+
+        kwargs['clients'] = clients
 
         if kwargs['cluster_id'] not in self.exports:
             self.exports[kwargs['cluster_id']] = []
@@ -491,6 +542,49 @@ class ExportMgr:
         export = self._fetch_export(cluster_id, pseudo_path)
         return export.to_dict() if export else None
 
+    def get_cephfs_export_user_ids(self, cluster_id: str) -> Set[str]:
+        """Return CephFS export user_ids for the cluster."""
+        return {
+            export.fsal.user_id
+            for export in self.exports.get(cluster_id, [])
+            if isinstance(export.fsal, CephFSFSAL) and export.fsal.user_id
+        }
+
+    def refresh_export_keys(
+            self,
+            cluster_id: str,
+            entities: List[str]
+    ) -> List[str]:
+        """
+        Re-fetch CephX keys for the given export entities and update matching
+        CephFS exports so Ganesha receives the new keyrings.
+        """
+        entity_set = {normalize_auth_entity(e) for e in entities}
+        updated_pseudos: List[str] = []
+
+        for export in list(self.exports.get(cluster_id, [])):
+            if not isinstance(export.fsal, CephFSFSAL) or not export.fsal.user_id:
+                continue
+            entity = f'client.{export.fsal.user_id}'
+            if entity not in entity_set:
+                continue
+
+            old_key = export.fsal.cephx_key
+            self._ensure_cephfs_export_user(export)
+            if export.fsal.cephx_key == old_key:
+                log.warning(
+                    "Export %s key for user %s did not change after rotate",
+                    export.pseudo, export.fsal.user_id
+                )
+            self.exports[cluster_id].remove(export)
+            self._update_export(cluster_id, export, need_nfs_service_restart=False)
+            updated_pseudos.append(export.pseudo)
+            log.info(
+                "Updated export %s with rotated key for user %s",
+                export.pseudo, export.fsal.user_id
+            )
+        return updated_pseudos
+
     # This method is used by the dashboard module (../dashboard/controllers/nfs.py)
     # Do not change interface without updating the Dashboard code
     def apply_export(self, cluster_id: str, export_config: str,
@@ -581,7 +675,7 @@ class ExportMgr:
         nfs_caps = [
             'mon', 'allow r',
             'osd', osd_cap,
-            'mds', f'allow rw path={path}'
+            'mds', f'allow all path={path}'
         ]
 
         ret, out, err = self.mgr.mon_command({
@@ -633,6 +727,36 @@ class ExportMgr:
                 )
         return None
 
+    def _validate_kmip_key_id_with_enctag(
+        self,
+        kmip_key_id: str,
+        fs_name: Optional[str],
+        path: Optional[str]
+    ) -> None:
+        """
+        Validate that kmip_key_id matches the subvolume's enctag for CephFS exports.
+        """
+        if not fs_name or not path:
+            log.debug(f"Skipping enctag validation for kmip_key_id '{kmip_key_id}': "
+                      f"fs_name={fs_name}, path={path} (likely not a CephFS export)")
+            return
+
+        enctag = get_enctag_from_path(self.mgr, fs_name, path)
+        if not enctag:
+            raise NFSInvalidOperation(
+                f"Cannot create export with kmip_key_id '{kmip_key_id}': "
+                f"subvolume at path '{path}' does not have an enctag set. "
+                "Please set the enctag on the subvolume using "
+                "'ceph fs subvolume enctag set' command."
+            )
+        if enctag != kmip_key_id:
+            raise NFSInvalidOperation(
+                f"Cannot create export: kmip_key_id '{kmip_key_id}' does not match "
+                f"subvolume enctag '{enctag}' at path '{path}'. "
+                "The kmip_key_id must match the enctag set on the subvolume."
+            )
+        log.info(f"Validated kmip_key_id '{kmip_key_id}' matches subvolume enctag at path '{path}'")
+
     def create_export_from_dict(self,
                                 cluster_id: str,
                                 ex_id: int,
@@ -650,9 +774,11 @@ class ExportMgr:
 
         fsal = ex_dict.get("fsal", {})
         fsal_type = fsal.get("name")
+
         if fsal_type == NFS_GANESHA_SUPPORTED_FSALS[1]:
             if '/' in path and path != '/':
                 raise NFSInvalidOperation('"/" is not allowed in path with bucket name')
+
         elif fsal_type == NFS_GANESHA_SUPPORTED_FSALS[0]:
             fs_name = fsal.get("fs_name")
             if not fs_name:
@@ -661,6 +787,11 @@ class ExportMgr:
                 raise FSNotFound(fs_name)
 
             validate_cephfs_path(self.mgr, fs_name, path)
+
+            # Validate kmip_key_id against subvolume enctag for CephFS
+            kmip_key_id = ex_dict.get("kmip_key_id")
+            if kmip_key_id:
+                self._validate_kmip_key_id_with_enctag(kmip_key_id, fs_name, path)
 
             # Check if earmark is set for the path, given path is of subvolume
             if earmark_resolver:
@@ -707,12 +838,18 @@ class ExportMgr:
                              xprtsec: Optional[str] = None,
                              cmount_path: Optional[str] = "/",
                              transports: Optional[List[str]] = None,
-                             earmark_resolver: Optional[CephFSEarmarkResolver] = None
+                             earmark_resolver: Optional[CephFSEarmarkResolver] = None,
+                             kmip_key_id: Optional[str] = None,
+                             export_delegation: Optional[str] = None
                              ) -> Dict[str, Any]:
 
         validate_cephfs_path(self.mgr, fs_name, path)
         if cmount_path != "/":
             _validate_cmount_path(cmount_path, path)  # type: ignore
+
+        # Validate kmip_key_id against subvolume enctag
+        if kmip_key_id:
+            self._validate_kmip_key_id_with_enctag(kmip_key_id, fs_name, path)
 
         pseudo_path = normalize_path(pseudo_path)
         # Get the protocols based on cluster's enable_nfsv3 setting
@@ -732,9 +869,12 @@ class ExportMgr:
             "sectype": sectype,
             "XprtSec": xprtsec,
             "protocols": protocols,
+            "kmip_key_id": kmip_key_id
         }
         if transports is not None:
             export_dict["transports"] = transports
+        if export_delegation:
+            export_dict['delegations'] = export_delegation
         if not self._fetch_export(cluster_id, pseudo_path):
             export = self.create_export_from_dict(
                 cluster_id,
@@ -752,6 +892,8 @@ class ExportMgr:
                 "cluster": cluster_id,
                 "mode": export.access_type,
             }
+            if export_delegation:
+                result["delegations"] = export_delegation
             return result
         raise NonFatalError("Export already exists")
 
@@ -766,7 +908,10 @@ class ExportMgr:
                           clients: list = [],
                           sectype: Optional[List[str]] = None,
                           xprtsec: Optional[str] = None,
-                          transports: Optional[List[str]] = None) -> Dict[str, Any]:
+                          transports: Optional[List[str]] = None,
+                          kmip_key_id: Optional[str] = None,
+                          export_delegation: Optional[str] = None
+                          ) -> Dict[str, Any]:
         pseudo_path = normalize_path(pseudo_path)
 
         if not bucket and not user_id:
@@ -788,9 +933,12 @@ class ExportMgr:
             "sectype": sectype,
             "XprtSec": xprtsec,
             "protocols": protocols,
+            "kmip_key_id": kmip_key_id
         }
         if transports is not None:
             export_dict["transports"] = transports
+        if export_delegation:
+            export_dict['delegations'] = export_delegation
         if not self._fetch_export(cluster_id, pseudo_path):
             export = self.create_export_from_dict(
                 cluster_id,
@@ -807,6 +955,8 @@ class ExportMgr:
                 "mode": export.access_type,
                 "squash": export.squash,
             }
+            if export_delegation:
+                result["delegations"] = export_delegation
             return result
         raise NonFatalError("Export already exists")
 
@@ -908,6 +1058,201 @@ class ExportMgr:
         self._update_export(cluster_id, new_export, need_nfs_service_restart)
 
         return {"pseudo": new_export.pseudo, "state": "updated"}
+
+    def modify_export(self, cluster_id: str, pseudo_path: str,
+                      export_delegation: Optional[str] = None,
+                      clients_config: Optional[str] = None) -> Dict[str, Any]:
+        # Update an existing export's configuration.
+        self._validate_cluster_id(cluster_id)
+
+        export = self._fetch_export(cluster_id, pseudo_path)
+        if not export:
+            raise NonFatalError(f"Export {pseudo_path} does not exist")
+
+        updates = []
+
+        # Validate at least one update is specified
+        if not export_delegation and not clients_config:
+            raise NFSInvalidOperation("Must specify --delegation and/or -i clients.json")
+
+        # Update export-level delegation if specified
+        if export_delegation:
+            export.delegation = export_delegation
+            updates.append(f"export-level delegation: {export_delegation}")
+
+        # Replace all CLIENT blocks with new config if provided
+        if clients_config:
+            try:
+                client_list = json.loads(clients_config)
+                if not isinstance(client_list, list):
+                    raise NFSException("clients_config must be a JSON list of client configurations",
+                                       -errno.EINVAL)
+
+                # Build new client list from JSON
+                new_clients = []
+                for client_conf in client_list:
+                    addresses = client_conf.get('addresses', [])
+                    if not addresses:
+                        raise NFSException("Each client must have at least one address",
+                                           -errno.EINVAL)
+
+                    new_client = Client.from_dict(client_conf)
+                    new_clients.append(new_client)
+
+                # Replace all existing clients with new ones
+                export.clients = new_clients
+                updates.append(f"replaced all CLIENT blocks with {len(new_clients)} new client(s)")
+
+            except json.JSONDecodeError as e:
+                raise NFSException(f"Failed to parse clients_config (must be valid JSON): {e}", -errno.EINVAL)
+
+        # Remove export from list before update
+        self.exports[cluster_id].remove(export)
+
+        # SINGLE Rados update call
+        self._update_export(cluster_id, export, need_nfs_service_restart=False)
+
+        return {
+            "pseudo": export.pseudo,
+            "updates": updates,
+            "state": "updated"
+        }
+
+    def get_export_default(self, cluster_id: str) -> Dict[str, Any]:
+        """Retrieve configuration from EXPORT DEFAULT block.
+
+        Args:
+            cluster_id: Cluster ID
+        Returns:
+            Dict with EXPORT DEFAULT configuration info
+        """
+        self._validate_cluster_id(cluster_id)
+
+        try:
+            rados_obj = self._rados(cluster_id)
+            # Read from separate export-default object
+            export_default_text = rados_obj.read_obj(export_default_obj_name(cluster_id))
+
+            if not export_default_text:
+                return {
+                    "cluster": cluster_id,
+                    "level": "EXPORT DEFAULT",
+                    "delegations": None,
+                    "message": "No EXPORT DEFAULT block configured for this cluster"
+                }
+
+            # Parse the EXPORT DEFAULT block
+            conf_parser = GaneshaConfParser(export_default_text)
+            blocks = conf_parser.parse()
+
+            if blocks and isinstance(blocks[0], RawBlock):
+                # Note: GaneshaConfParser lowercases all parameter names
+                delegation_value = blocks[0].values.get('delegations')
+                return {
+                    "cluster": cluster_id,
+                    "level": "EXPORT DEFAULT",
+                    "delegations": delegation_value,
+                    "message": "EXPORT DEFAULT delegation retrieved successfully"
+                }
+
+            return {
+                "cluster": cluster_id,
+                "level": "EXPORT DEFAULT",
+                "delegations": None,
+                "message": "No EXPORT DEFAULT block configured for this cluster"
+            }
+
+        except ObjectNotFound:
+            return {
+                "cluster": cluster_id,
+                "level": "EXPORT DEFAULT",
+                "delegations": None,
+                "message": "No EXPORT DEFAULT block configured for this cluster"
+            }
+        except Exception as e:
+            raise NonFatalError(f"Failed to retrieve EXPORT DEFAULT delegation: {e}")
+
+    def _create_export_default_object(self, cluster_id: str,
+                                      delegation: Optional[str] = None) -> None:
+        """Create the export-default rados object for a cluster.
+
+        Args:
+            cluster_id: Cluster ID
+            delegation: Optional initial delegation value (defaults to 'none')
+        """
+        rados_obj = self._rados(cluster_id)
+
+        # Create EXPORT DEFAULT block with initial delegation
+        if delegation is None:
+            delegation = "none"
+
+        export_default = ExportDefault(delegations=delegation)
+        export_default_text = format_block(export_default.to_export_default_block())
+
+        # Write to separate export-default object and update main config
+        rados_obj.write_obj(
+            export_default_text,
+            export_default_obj_name(cluster_id),
+            conf_obj_name(cluster_id))
+
+        log.info("Created export-default object for cluster %s with delegation %s",
+                 cluster_id, delegation)
+
+    def set_export_default(self, cluster_id: str,
+                           delegation: str) -> Dict[str, Any]:
+        """Update configuration in EXPORT DEFAULT block (global fallback for all exports).
+
+        This function updates the EXPORT DEFAULT block configuration.
+        Uses separate rados object for optimal performance with many exports.
+        Creates the export-default object if it doesn't exist.
+        Args:
+            cluster_id: Cluster ID
+            delegation: Delegation value(ro, rw, or none)
+        """
+        self._validate_cluster_id(cluster_id)
+
+        # Validate cluster exists
+        if cluster_id not in available_clusters(self.mgr):
+            raise NonFatalError(f"Cluster {cluster_id} does not exist")
+
+        try:
+            rados_obj = self._rados(cluster_id)
+
+            # Check if export-default object exists
+            existing_config = rados_obj.read_obj(export_default_obj_name(cluster_id))
+
+            if not existing_config:
+                # Create new export-default object
+                log.info("Creating new export-default object for cluster %s", cluster_id)
+                self._create_export_default_object(cluster_id, delegation)
+                action = "created"
+            else:
+                # Update existing export-default object
+                export_default = ExportDefault(delegations=delegation)
+                export_default_text = format_block(export_default.to_export_default_block())
+
+                # Write to separate export-default object and update main config
+                rados_obj.write_obj(
+                    export_default_text,
+                    export_default_obj_name(cluster_id),
+                    conf_obj_name(cluster_id))
+
+                log.info("Updated export-default object for cluster %s to delegation %s",
+                         cluster_id, delegation)
+                action = "updated"
+
+            return {
+                "cluster": cluster_id,
+                "level": "EXPORT DEFAULT",
+                "delegations": delegation,
+                "state": action,
+                "message": (f"EXPORT DEFAULT delegation {action} to {delegation}. "
+                            f"This applies to all exports without explicit client "
+                            f"or export-level delegation.")
+            }
+
+        except Exception as e:
+            raise NonFatalError(f"Failed to update EXPORT DEFAULT delegation: {e}")
 
     def _rados(self, cluster_id: str) -> NFSRados:
         """Return a new NFSRados object for the given cluster id."""

@@ -37,10 +37,36 @@ class IngressService(CephService):
     def haproxy_stats_key_name(self) -> str:
         return 'haproxy_monitor_ssl_key'
 
+    @staticmethod
+    def should_defer_haproxy_for_nfs(
+        mgr: "CephadmOrchestrator",
+        spec: IngressSpec,
+        hostname: str
+    ) -> bool:
+        """
+        Check if HAProxy deployment should be deferred on a specific host
+        waiting for NFS backend to be ready.
+        This ensures per-host ordering: NFS -> HAProxy -> Keepalived
+        """
+        if not spec.backend_service:
+            return False
+
+        # Check if NFS daemon already exists on this host
+        # If NFS is already running, HAProxy can be deployed
+        nfs_daemons = mgr.cache.get_daemons_by_service(spec.backend_service)
+        if any(d.hostname == hostname for d in nfs_daemons):
+            return False  # NFS already deployed, proceed with HAProxy
+
+        # Check if NFS is queued for deployment on this host
+        # If NFS is queued but not yet deployed, defer HAProxy to maintain ordering
+        queued_nfs = mgr.daemon_deploy_queue.get_queued_daemon_placements_by_service(spec.backend_service)
+        return any(p.hostname == hostname for p in queued_nfs)
+
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         if daemon_type == 'haproxy':
             return IngressService.get_haproxy_dependencies(mgr, spec)
         elif daemon_type == 'keepalived':
@@ -88,6 +114,20 @@ class IngressService(CephService):
         else:
             return self.keepalived_generate_config(daemon_spec)
         assert False, "unexpected daemon type"
+
+    def get_daemon_deployment_ordering(self, daemons: List[CephadmDaemonDeploySpec]) -> Dict[int, List[CephadmDaemonDeploySpec]]:
+        if not daemons:
+            return {}
+        dtype = daemons[0].daemon_type
+        if not any(d.daemon_type != dtype for d in daemons):
+            # if all the daemons we got are the same type we can
+            # just deploy them in parallel
+            return {0: daemons}
+        # if we got here, we should have both haproxy and keepalived daemons
+        ordering: Dict[int, List[CephadmDaemonDeploySpec]] = {}
+        ordering[0] = [d for d in daemons if d.daemon_type == 'haproxy']
+        ordering[1] = [d for d in daemons if d.daemon_type == 'keepalived']
+        return ordering
 
     def haproxy_prepare_create(
             self,
@@ -246,12 +286,19 @@ class IngressService(CephService):
         else:
             monitor_ips = [ip, host_ip]
 
+        if spec.virtual_ips_list:
+            cert_ips = [str(v).split('/')[0] for v in spec.virtual_ips_list if v]
+        elif ip and ip != '[::]':
+            cert_ips = [ip]
+        else:
+            cert_ips = [host_ip]
         monitor_ssl_file = None
-        cert_ips = [ip]
         if spec.monitor_ssl:
             if spec.monitor_cert_source == MonitorCertSource.REUSE_SERVICE_CERT.value:
                 monitor_ssl_file = 'haproxy.pem'
-                cert_ips.extend(monitor_ips)
+                for mip in monitor_ips:
+                    if mip and mip not in cert_ips:
+                        cert_ips.append(mip)
             else:
                 monitor_ssl_file = 'stats_haproxy.pem'
 
@@ -273,26 +320,51 @@ class IngressService(CephService):
                 'v4v6_flag': v4v6_flag,
                 'monitor_ssl_file': monitor_ssl_file,
                 'peer_hosts': peer_hosts,
-                'is_ipv6': is_ipv6(ip)
+                'is_ipv6': is_ipv6(ip),
+                'qat_support': spec.haproxy_qat_support,
             }
         )
-        config_files = {
+        final_config: Dict[str, Any] = {
             'files': {
                 "haproxy.cfg": haproxy_conf,
             }
         }
 
-        if spec.ssl:
-            tls_pair = self.get_certificates(daemon_spec)
-            combined_pem = tls_pair.cert + '\n' + tls_pair.key
-            config_files['files']['haproxy.pem'] = combined_pem
+        if spec.generate_cert:
+            tls_creds = self.mgr.cert_mgr.generate_cert(
+                daemon_spec.host,
+                self.mgr.inventory.get_addr(daemon_spec.host),
+            )
+            pem = ''.join([tls_creds.key, tls_creds.cert])
+            final_config['files']['haproxy.pem'] = pem
+        else:
+            if spec.ssl:
+                tls_pair = self.get_certificates(daemon_spec, ips=cert_ips)
+                combined_pem = tls_pair.cert + '\n' + tls_pair.key
+                final_config['files']['haproxy.pem'] = combined_pem
 
         if spec.monitor_ssl and spec.monitor_cert_source != MonitorCertSource.REUSE_SERVICE_CERT.value:
             tls_creds = self.get_stats_certs(spec, daemon_spec, monitor_ips)
             monitor_ssl_cert = [tls_creds.cert, tls_creds.key]
-            config_files['files']['stats_haproxy.pem'] = '\n'.join(monitor_ssl_cert)
+            final_config['files']['stats_haproxy.pem'] = '\n'.join(monitor_ssl_cert)
 
-        return config_files, self.get_haproxy_dependencies(self.mgr, spec)
+        if spec.verify_backend_ssl_cert:
+            if spec.generate_cert:
+                # ca cert for the backend should be our cephadm CA cert
+                final_config['files']['ca_cert.pem'] = self.mgr.cert_mgr.get_root_ca()
+            elif spec.verification_ca_cert:
+                # user provided ca cert we can use to verify the backend
+                final_config['files']['ca_cert.pem'] = spec.verification_ca_cert
+            else:
+                raise OrchestratorError(
+                    'Found ingress spec with "verify_backend_ssl_cert" set to true, but '
+                    'neither "generate_cert" nor "verification_ca_cert" fields set'
+                )
+
+        if spec.haproxy_qat_support:
+            final_config['qat_support'] = True
+
+        return final_config, self.get_haproxy_dependencies(self.mgr, spec)
 
     def get_stats_certs(
         self,

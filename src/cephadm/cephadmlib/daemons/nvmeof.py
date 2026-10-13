@@ -16,6 +16,10 @@ from ..deployment_utils import to_deployment_container
 from ..exceptions import Error
 from ..file_utils import makedirs, populate_files
 from ..call_wrappers import call
+from ceph.cephadm.constants import (
+    NVMEOF_ENCRYPTION_KEY_CONTAINER_PATH,
+    NVMEOF_ENCRYPTION_KEY_PATH_FILE,
+)
 
 
 logger = logging.getLogger()
@@ -78,6 +82,9 @@ class CephNvmeof(ContainerDaemonForm):
         mounts[
             os.path.join(data_dir, 'ceph-nvmeof.conf')
         ] = '/src/ceph-nvmeof.conf:z'
+        mounts[
+            os.path.join(data_dir, 'ceph-nvmeof.legacy.conf')
+        ] = '/remote-source/ceph-nvmeof/app/ceph-nvmeof.conf:z'
         mounts[os.path.join(data_dir, 'configfs')] = '/sys/kernel/config'
         mounts[log_dir] = '/var/log/ceph:z'
         if mtls_dir:
@@ -110,12 +117,15 @@ class CephNvmeof(ContainerDaemonForm):
             'client_cert',
             'client_key',
             'root_ca_cert',
-            'encryption_key',
         ]:
             if fn in files:
                 mounts[
                     os.path.join(data_dir, fn)
-                ] = f'/{fn.replace("_", ".")}'
+                ] = f'/certs/mtls/{fn.replace("_", ".")}'
+        if 'encryption_key' in files:
+            mounts[
+                os.path.join(data_dir, 'encryption_key')
+            ] = '/encryption.key'
         return mounts
 
     def customize_container_mounts(
@@ -135,6 +145,7 @@ class CephNvmeof(ContainerDaemonForm):
         mounts.update(self._get_huge_pages_mounts(self.files))
         mounts.update(self._get_dsa_mounts(self.files))
         mounts.update(self._get_tls_cert_key_mounts(data_dir, self.files))
+        mounts.update(self._get_external_encryption_key_mounts(self.files))
 
     def customize_container_binds(
         self, ctx: CephadmContext, binds: List[List[str]]
@@ -201,6 +212,9 @@ class CephNvmeof(ContainerDaemonForm):
         logger.info('Creating ceph-nvmeof config...')
         configfs_dir = os.path.join(data_dir, 'configfs')
         makedirs(configfs_dir, uid, gid, 0o755)
+
+        if 'ceph-nvmeof.conf' in self.files:
+            self.files['ceph-nvmeof.legacy.conf'] = self.files['ceph-nvmeof.conf']
 
         # populate files from the config-json
         populate_files(data_dir, self.files, uid, gid)
@@ -294,3 +308,17 @@ class CephNvmeof(ContainerDaemonForm):
                     pass
                 except ValueError:
                     pass
+
+    def _get_external_encryption_key_mounts(
+        self, files: Dict[str, str]
+    ) -> Dict[str, str]:
+        host_path = files.get(NVMEOF_ENCRYPTION_KEY_PATH_FILE)
+        if not host_path:
+            return {}
+
+        if not os.path.isfile(host_path):
+            raise Error(
+                f'NVMe-oF encryption key file does not exist on host: {host_path}'
+            )
+
+        return {host_path: f'{NVMEOF_ENCRYPTION_KEY_CONTAINER_PATH}:ro'}

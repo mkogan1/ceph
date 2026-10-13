@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 from orchestrator import OrchestratorError
+from functools import lru_cache
 import hashlib
 
 if TYPE_CHECKING:
@@ -67,10 +68,48 @@ ROTATION_CIPHER = 'aes256k'
 SERVICE_CIPHER = 'aes256k'
 
 
+def auth_allowed_cipher_names_from_mon_map(mon_map: Any) -> List[str]:
+    """Return auth_allowed_ciphers names from a MonMap dump (mgr get('mon_map'))."""
+    if not isinstance(mon_map, dict):
+        return []
+    raw = mon_map.get('auth_allowed_ciphers') or []
+    if isinstance(raw, str):
+        return [part.strip() for part in raw.split(',') if part.strip()]
+    if not isinstance(raw, list):
+        return []
+    names: List[str] = []
+    for item in raw:
+        if isinstance(item, dict):
+            name = item.get('name')
+            if name:
+                names.append(str(name))
+        elif isinstance(item, str) and item.strip():
+            names.append(item.strip())
+    return names
+
+
+def allowed_ciphers_are_aes256k_only(cipher_names: List[str]) -> bool:
+    """True when allowed ciphers are already restricted to aes256k (no legacy aes)."""
+    names = {name.strip() for name in cipher_names if name and name.strip()}
+    return names == {ROTATION_CIPHER}
+
+
+DEFAULT_SSH_CONFIG = """
+Host *
+  User root
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  ConnectTimeout=30
+"""
+
+FIPS_SSH_CIPHERS = 'aes256-ctr,aes128-ctr'
+
+
 class ContainerInspectInfo(NamedTuple):
     image_id: str
     ceph_version: Optional[str]
     repo_digests: Optional[List[str]]
+    image_vendor: Optional[str]
 
 
 class SpecialHostLabels(str, Enum):
@@ -101,9 +140,6 @@ class Action(str, Enum):
             return cls.NO_ACTION
         return cls(action)
 
-    def __str__(self) -> str:
-        return self.value
-
 
 @dataclass(frozen=True)
 class NextDaemonStep:
@@ -113,6 +149,21 @@ class NextDaemonStep:
     action: Action
     skip_restart_for_reconfig: bool = False
     send_signal_to_daemon: Optional[str] = None
+
+
+class LogrotateConfigType(str, Enum):
+    cephadm: str = 'cephadm'
+    cluster: str = 'cluster'
+
+    def to_json(self) -> str:
+        return self.value
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def config_key_entry(self) -> str:
+        return f'{self.value}_logrotate_config'
 
 
 def name_to_config_section(name: str) -> ConfEntity:
@@ -219,6 +270,15 @@ def config_hash(input_value: str) -> str:
     return hashlib.sha256(input_str).hexdigest()[:8]
 
 
+def md5_hash(input_value: str) -> str:
+    input_str = str(input_value).encode('utf-8')
+    hash_object = hashlib.md5(
+        input_str,
+        usedforsecurity=False
+    )
+    return hash_object.hexdigest()
+
+
 def get_node_proxy_status_value(data: Any, key: str, lower: bool = False) -> str:
     if not isinstance(data, dict):
         return ''
@@ -229,3 +289,61 @@ def get_node_proxy_status_value(data: Any, key: str, lower: bool = False) -> str
     if not isinstance(value, str):
         return ''
     return value.lower() if lower else value
+
+
+def get_config_option_meta(
+    mgr: 'CephadmOrchestrator',
+    key: str,
+    cache: Optional[dict[str, Optional[dict[str, Any]]]] = None,
+) -> Optional[dict[str, Any]]:
+    if cache is not None and key in cache:
+        return cache[key]
+
+    try:
+        ret, out, err = mgr.check_mon_command({
+            'prefix': 'config help',
+            'key': key,
+            'format': 'json',
+        })
+        meta = json.loads(out) if out else None
+    except Exception:
+        logger.exception("Failed to fetch config metadata for key %s", key)
+        meta = None
+
+    if cache is not None:
+        cache[key] = meta
+    return meta
+
+
+def can_apply_post_create(
+    mgr: 'CephadmOrchestrator',
+    key: str,
+    cache: Optional[dict[str, Optional[dict[str, Any]]]] = None,
+) -> bool:
+    meta = get_config_option_meta(mgr, key, cache)
+    if not meta:
+        return False
+    return bool(meta.get('can_update_at_runtime', False))
+
+
+@lru_cache(maxsize=1)
+def is_fips_enabled() -> bool:
+    try:
+        with open('/proc/sys/crypto/fips_enabled', 'r') as f:
+            return f.read().strip() == '1'
+    except OSError as error:
+        logger.debug(
+            'Unable to read /proc/sys/crypto/fips_enabled: %s',
+            error,
+        )
+        return False
+
+
+def get_default_ssh_config() -> str:
+    """Return the default cephadm SSH config for the local environment."""
+    ssh_config = DEFAULT_SSH_CONFIG
+
+    if is_fips_enabled():
+        ssh_config += f'  Ciphers {FIPS_SSH_CIPHERS}\n'
+
+    return ssh_config

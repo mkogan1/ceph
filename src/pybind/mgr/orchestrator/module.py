@@ -19,7 +19,7 @@ except ImportError:
 
 from ceph.deployment.inventory import Device  # noqa: F401; pylint: disable=unused-variable
 from ceph.deployment.drive_group import DriveGroupSpec, DeviceSelection, OSDMethod, OSDType
-from ceph.deployment.service_spec import PlacementSpec, ServiceSpec, service_spec_allow_invalid_from_json, TracingSpec
+from ceph.deployment.service_spec import PlacementSpec, ServiceSpec, service_spec_allow_invalid_from_json
 from ceph.deployment.hostspec import SpecValidationError
 from ceph.deployment.utils import unwrap_ipv6
 from ceph.utils import datetime_now
@@ -28,8 +28,7 @@ from mgr_util import (
     is_valid_container_image_ref,
     to_pretty_timedelta,
     format_bytes,
-    parse_combined_pem_file,
-    NvmeofMetadataPoolHelper,
+    NvmeofMetadataPoolHelper
 )
 from mgr_module import MgrModule, HandleCommandResult, Option
 from object_format import Format
@@ -199,10 +198,6 @@ class ServiceType(enum.Enum):
     iscsi = 'iscsi'
     nvmeof = 'nvmeof'
     snmp_gateway = 'snmp-gateway'
-    elasticsearch = 'elasticsearch'
-    jaeger_agent = 'jaeger-agent'
-    jaeger_collector = 'jaeger-collector'
-    jaeger_query = 'jaeger-query'
 
 
 class ServiceAction(enum.Enum):
@@ -228,7 +223,9 @@ class IngressType(enum.Enum):
 
     def canonicalize(self) -> "IngressType":
         if self == self.default:
-            return IngressType(self.haproxy_standard)
+            # Default to haproxy-protocol to preserve client IP addresses
+            # for proper IP-level export restrictions in NFS Ganesha
+            return IngressType(self.haproxy_protocol)
         return IngressType(self)
 
 
@@ -497,11 +494,20 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule):
     def _get_fail_fs_value(self) -> bool:
         return bool(self.get_module_option("fail_fs"))
 
+    @OrchestratorCLICommand.Write('orch sos')
+    def _sos(self, hostname: str, sos_params: str) -> HandleCommandResult:
+        """ Execute the sos command in the requested host
+        """
+        completion = self.sos(hostname, sos_params)
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
     @OrchestratorCLICommand.Write('orch host add')
     def _add_host(self,
                   hostname: str,
                   addr: Optional[str] = None,
                   labels: Optional[List[str]] = None,
+                  topological_labels: Optional[List[str]] = None,
                   maintenance: Optional[bool] = False) -> HandleCommandResult:
         """Add a host"""
         _status = 'maintenance' if maintenance else ''
@@ -513,7 +519,7 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule):
         if addr is not None:
             addr = unwrap_ipv6(addr)
 
-        s = HostSpec(hostname=hostname, addr=addr, labels=labels, status=_status)
+        s = HostSpec(hostname=hostname, addr=addr, labels=labels, status=_status, topological_labels=topological_labels)
 
         return self._apply_misc([s], False, Format.plain)
 
@@ -634,7 +640,12 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule):
 
         fields = mapping.get(category, ())
         for host in data.keys():
-            for sys_id, details in data[host].items():
+            host_data = data[host] or {}
+            if not any(host_data.values()):
+                # HOST + 'NO DATA' already fill the first two columns...
+                table.add_row([host, 'NO DATA'] + [''] * (len(table.field_names) - 2))
+                continue
+            for sys_id, details in host_data.items():
                 for k, v in details.items():
                     row = []
                     for field in fields:
@@ -721,6 +732,17 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule):
     def _update_set_addr(self, hostname: str, addr: str) -> HandleCommandResult:
         """Update a host address"""
         completion = self.update_host_addr(hostname, addr)
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @OrchestratorCLICommand.Write('orch host set-topological-labels')
+    def _update_host_topological_labels(
+        self,
+        hostname: str,
+        topological_labels: Optional[List[str]]
+    ) -> HandleCommandResult:
+        """Update a host topological labels. If nothing is passed, labels will be cleared"""
+        completion = self.set_host_topological_labels(hostname, topological_labels)
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
 
@@ -1283,13 +1305,17 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule):
         Sets the cert-key pair from -i <pem-file>, which must be a valid PEM file containing both the certificate and the private key.
         """
         if inbuf:
-            cert_content, key_content = parse_combined_pem_file(inbuf)
-            if not cert_content or not key_content:
-                raise OrchestratorError('Expected a combined PEM file with certificate and key pairs')
+            # inbuf may be a combined cert+key blob, a fullchain PEM (key +
+            # leaf + intermediates), or just a cert chain. Parsing/validating
+            # the PEM content is left entirely to cert_store_set_pair, which
+            # is implemented per-backend (e.g. cephadm) and already knows how
+            # to split and validate TLS PEM bundles — this avoids needing any
+            # PEM-parsing import here.
+            cert_content, key_content = inbuf, ''
         else:
-            cert_content, key_content = cert, key
-            if not cert_content or not key_content:
+            if not cert or not key:
                 raise OrchestratorError('This command requires passing cert/key pair by either using --cert/--key parameters or a combined PEM file using "-i" option.')
+            cert_content, key_content = cert, key
 
         completion = self.cert_store_set_pair(
             cert_content,
@@ -1533,6 +1559,14 @@ class OrchestratorCli(OrchestratorClientMixin, MgrModule):
             dg_specs = []
             for dg in drivegroups:
                 spec = DriveGroupSpec.from_json(dg)
+                # incentivize users to provide a service id for their OSD specs
+                # we can't make this part of the spec validation itself because
+                # it would cause us to drop previously working specs during upgrade,
+                # but we can do it for new specs
+                if not spec.service_id:
+                    raise SpecValidationError(
+                        'OSD spec with no service_id field found. Please provide a service_id for all OSD specs'
+                    )
                 if dry_run:
                     spec.preview_only = True
                 dg_specs.append(spec)
@@ -1688,6 +1722,22 @@ Usage:
     def _osd_set_spec(self, service_name: str, osd_id: List[str]) -> HandleCommandResult:
         """Set service spec affinity for osd"""
         completion = self.set_osd_spec(service_name, osd_id)
+        res = raise_if_exception(completion)
+
+        return HandleCommandResult(stdout=res)
+
+    @OrchestratorCLICommand.Write('orch osd get-devices')
+    def _osd_get_devices(self, osd_id: str) -> HandleCommandResult:
+        """Fetch the devices used by a certain OSD"""
+        completion = self.get_osd_devices(osd_id)
+        res = raise_if_exception(completion)
+
+        return HandleCommandResult(stdout=res)
+
+    @OrchestratorCLICommand.Write('orch osd rebuild')
+    def _osd_rebuild(self, hostname: str, osd_id: str, rebuild_osds_sharing_devices: bool = False) -> HandleCommandResult:
+        """Rebuild OSD. OSD must have been created after this command was added"""
+        completion = self.osd_rebuild(hostname, osd_id)
         res = raise_if_exception(completion)
 
         return HandleCommandResult(stdout=res)
@@ -1942,9 +1992,6 @@ Usage:
                 if dry_run and not isinstance(spec, HostSpec):
                     spec.preview_only = dry_run
 
-                if isinstance(spec, TracingSpec) and spec.service_type == 'jaeger-tracing':
-                    specs.extend(spec.get_tracing_specs())
-                    continue
                 specs.append(spec)
         else:
             # Note in this case there is only ever one spec
@@ -2240,28 +2287,6 @@ Usage:
         spec.validate()  # force any validation exceptions to be caught correctly
 
         return self._apply_misc([spec], dry_run, format, no_overwrite)
-
-    @OrchestratorCLICommand.Write('orch apply jaeger')
-    def _apply_jaeger(self,
-                      es_nodes: Optional[str] = None,
-                      without_query: bool = False,
-                      placement: Optional[str] = None,
-                      unmanaged: bool = False,
-                      dry_run: bool = False,
-                      format: Format = Format.plain,
-                      no_overwrite: bool = False,
-                      inbuf: Optional[str] = None) -> HandleCommandResult:
-        """Apply jaeger tracing services"""
-        if inbuf:
-            raise OrchestratorValidationError('unrecognized command -i; -h or --help for usage')
-
-        spec = TracingSpec(service_type='jaeger-tracing',
-                           es_nodes=es_nodes,
-                           without_query=without_query,
-                           placement=PlacementSpec.from_string(placement),
-                           unmanaged=unmanaged)
-        specs: List[ServiceSpec] = spec.get_tracing_specs()
-        return self._apply_misc(specs, dry_run, format, no_overwrite)
 
     @OrchestratorCLICommand.Write('orch apply smb')
     def _apply_smb(
@@ -2703,15 +2728,30 @@ Usage:
                        limit: Optional[int] = None,
                        ceph_version: Optional[str] = None,
                        crush_bucket_type: Optional[str] = None,
-                       crush_bucket_name: Optional[str] = None) -> HandleCommandResult:
+                       crush_bucket_name: Optional[str] = None,
+                       no_osd_flags: bool = False,
+                       topological_labels: Optional[List[str]] = None,
+                       automatically_accept_license: bool = False,
+                       ) -> HandleCommandResult:
         """Initiate upgrade"""
         self._upgrade_check_image_name(image, ceph_version)
 
         # Split comma-separated lists and trim whitespace so "mon, crash" and "mon,crash" are equivalent.
         dtypes = [d.strip() for d in daemon_types.split(',')] if daemon_types is not None else None
         service_names = [s.strip() for s in services.split(',')] if services is not None else None
-        completion = self.upgrade_start(image, ceph_version, dtypes, hosts, service_names, limit,
-                                        crush_bucket_type, crush_bucket_name)
+        completion = self.upgrade_start(
+            image,
+            ceph_version,
+            dtypes,
+            hosts,
+            service_names,
+            limit,
+            crush_bucket_type,
+            crush_bucket_name,
+            no_osd_flags,
+            topological_labels,
+            automatically_accept_license,
+        )
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
 
@@ -2733,6 +2773,51 @@ Usage:
     def _upgrade_stop(self) -> HandleCommandResult:
         """Stop an in-progress upgrade"""
         completion = self.upgrade_stop()
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @OrchestratorCLICommand.Write('orch display-license')
+    def _display_ibm_license(self, image: str, license_language: str = 'en') -> HandleCommandResult:
+        """
+        Fetch and display the IBM license for a given container image
+        """
+        completion = self.display_license(image, license_language)
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @OrchestratorCLICommand.Write('orch accept-license')
+    def _accept_ibm_license(self, image: str) -> HandleCommandResult:
+        """
+        Fetch and display the IBM license for a given container image
+        """
+        completion = self.accept_license(image)
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @OrchestratorCLICommand.Write('orch enable-call-home')
+    def _enable_call_home(self, raise_automation_warning: bool = False) -> HandleCommandResult:
+        """
+        Enable the call-home-agent module
+        """
+        completion = self.enable_call_home(raise_automation_warning)
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @OrchestratorCLICommand.Write('orch accept call-home-enabled')
+    def _accept_call_home_enablement(self) -> HandleCommandResult:
+        """
+        Accept call home has been automatically enabled and clear warning
+        """
+        completion = self.accept_call_home()
+        raise_if_exception(completion)
+        return HandleCommandResult(stdout=completion.result_str())
+
+    @OrchestratorCLICommand.Write('orch deny call-home-enabled')
+    def _deny_call_home_enablement(self) -> HandleCommandResult:
+        """
+        Disable automatically enabled call home agent module and clear warning
+        """
+        completion = self.deny_call_home()
         raise_if_exception(completion)
         return HandleCommandResult(stdout=completion.result_str())
 

@@ -1,10 +1,11 @@
+import enum
 import logging
 import threading
 from typing import Any, Dict, List, Optional, Tuple
+import yaml
 
 import object_format
 import orchestrator
-import yaml
 from mgr_module import CLICheckNonemptyFileInput, MgrModule, Option
 from mgr_util import CephFSEarmarkResolver
 from orchestrator.module import IngressType
@@ -16,6 +17,13 @@ from .qos_conf import QOSBandwidthControl, QOSOpsControl, QOSType, UserQoSType
 from .utils import available_clusters, cephfs_client_for_mgr
 
 log = logging.getLogger(__name__)
+
+
+class Delegation(enum.Enum):
+    """NFS Delegation types"""
+    ro = "ro"
+    rw = "rw"
+    none = "none"
 
 
 class Module(orchestrator.OrchestratorClientMixin, MgrModule):
@@ -46,9 +54,17 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             xprtsec: Optional[str] = None,
             cmount_path: Optional[str] = "/",
             transports: Optional[List[str]] = None,
-            skip_notify_nfs_server: bool = False
+            skip_notify_nfs_server: bool = False,
+            kmip_key_id: Optional[str] = None,
+            delegations: Optional[Delegation] = None,
+            inbuf: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create a CephFS export"""
+        """Create a CephFS export
+
+        Args:
+            export_delegations: Delegation at export level (applies to all clients)
+            inbuf: JSON file with client configuration list .
+        """
         self.export_mgr.skip_notify_nfs_server = skip_notify_nfs_server
         earmark_resolver = CephFSEarmarkResolver(
             self, client=cephfs_client_for_mgr(self))
@@ -65,7 +81,10 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             xprtsec=xprtsec,
             cmount_path=cmount_path,
             transports=transports,
-            earmark_resolver=earmark_resolver
+            earmark_resolver=earmark_resolver,
+            kmip_key_id=kmip_key_id,
+            export_delegation=delegations.value if delegations else None,
+            clients_config=inbuf
         )
 
     @NFSCLICommand('nfs export create rgw', perm='rw')
@@ -82,9 +101,17 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             sectype: Optional[List[str]] = None,
             xprtsec: Optional[str] = None,
             transports: Optional[List[str]] = None,
-            skip_notify_nfs_server: bool = False
+            skip_notify_nfs_server: bool = False,
+            kmip_key_id: Optional[str] = None,
+            delegations: Optional[Delegation] = None,
+            inbuf: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Create an RGW export"""
+        """Create an RGW export
+
+        Args:
+            export_delegations: Delegation at export level (applies to all clients)
+            inbuf: JSON file with client configuration list.
+        """
         self.export_mgr.skip_notify_nfs_server = skip_notify_nfs_server
         return self.export_mgr.create_export(
             fsal_type='rgw',
@@ -98,6 +125,9 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             sectype=sectype,
             xprtsec=xprtsec,
             transports=transports,
+            kmip_key_id=kmip_key_id,
+            export_delegation=delegations.value if delegations else None,
+            clients_config=inbuf
         )
 
     @NFSCLICommand('nfs export rm', perm='rw')
@@ -138,7 +168,26 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
         """Fetch a export of a NFS cluster given the pseudo path/binding (DEPRECATED)"""
         return self.export_mgr.get_export(cluster_id=cluster_id, pseudo_path=pseudo_path)
 
-    @NFSCLICommand('nfs export apply', perm='rw')
+    @CLICommand('nfs export update', perm='rw')
+    @object_format.Responder()
+    def _cmd_nfs_export_update(self,
+                               cluster_id: str,
+                               pseudo_path: str,
+                               delegations: Optional[Delegation] = None,
+                               inbuf: Optional[str] = None) -> Dict[str, Any]:
+        """Update an existing NFS export configuration.
+
+        This command is intended to update export-level delegations and client configurations.
+        Client configuration should be provided via an input file (JSON format) using -i option.
+        """
+        return self.export_mgr.modify_export(
+            cluster_id=cluster_id,
+            pseudo_path=pseudo_path,
+            export_delegation=delegations.value if delegations else None,
+            clients_config=inbuf
+        )
+
+    @CLICommand('nfs export apply', perm='rw')
     @CLICheckNonemptyFileInput(desc='Export JSON or Ganesha EXPORT specification')
     @object_format.Responder()
     def _cmd_nfs_export_apply(self,
@@ -152,6 +201,34 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
         return self.export_mgr.apply_export(cluster_id, export_config=inbuf,
                                             earmark_resolver=earmark_resolver)
 
+    @CLICommand('nfs cluster get-export-default', perm='r')
+    @object_format.Responder()
+    def _cmd_nfs_cluster_get_export_default(self,
+                                            cluster_id: str) -> Dict[str, Any]:
+        """Retrieve configuration from EXPORT DEFAULT block (global fallback for all exports)."""
+        return self.export_mgr.get_export_default(cluster_id)
+
+    @CLICommand('nfs cluster set-export-default', perm='rw')
+    @object_format.Responder()
+    def _cmd_nfs_cluster_set_export_default(self,
+                                            cluster_id: str,
+                                            delegations: Delegation) -> Dict[str, Any]:
+        """Update configuration in EXPORT DEFAULT block (global fallback for all exports)."""
+        return self.export_mgr.set_export_default(cluster_id, delegations.value)
+
+    @NFSCLICommand('nfs cluster rotate-key', perm='rw')
+    @object_format.Responder()
+    def _cmd_nfs_cluster_rotate_key(self,
+                                    cluster_id: str,
+                                    entity: Optional[List[str]] = None,
+                                    key_type: Optional[str] = None) -> Dict[str, Any]:
+        """Rotate NFS cluster/daemon and export auth keys; redeploy service if daemon keys change"""
+        return self.nfs.rotate_keys(
+            cluster_id=cluster_id,
+            entity=entity,
+            key_type=key_type
+        )
+
     @NFSCLICommand('nfs cluster create', perm='rw')
     @object_format.EmptyResponder()
     def _cmd_nfs_cluster_create(self,
@@ -164,11 +241,17 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                 enable_rdma: bool = False,
                                 rdma_port: Optional[int] = None,
                                 enable_nfsv3: bool = False,
-                                inbuf: Optional[str] = None) -> None:
+                                enable_virtual_server: bool = False,
+                                bind_addrs: Optional[str] = None,
+                                monitoring_addrs: Optional[str] = None,
+                                monitoring_port: Optional[int] = None,
+                                inbuf: Optional[str] = None
+                                ) -> None:
         """Create an NFS Cluster"""
         cluster_qos_config = None
         ssl_cert = ssl_key = ssl_ca_cert = tls_min_version = tls_ciphers = None
         ssl = tls_ktls = tls_debug = False
+        kmip_cert = kmip_key = kmip_ca_cert = kmip_host_list = None
         if inbuf:
             config = yaml.safe_load(inbuf)
             cluster_qos_config = config.get('cluster_qos_config')
@@ -180,12 +263,36 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             tls_ktls = config.get('tls_ktls')
             tls_debug = config.get('tls_debug')
             tls_ciphers = config.get('tls_ciphers')
+            kmip_cert = config.get('kmip_cert')
+            kmip_key = config.get('kmip_key')
+            kmip_ca_cert = config.get('kmip_ca_cert')
+            kmip_host_list = config.get('kmip_host_list')
+
+        # Parse bind_addrs and monitoring_addrs from CLI format
+        ip_addrs = None
+        if bind_addrs:
+            ip_addrs = {}
+            for pair in bind_addrs.split(','):
+                if ':' in pair:
+                    host, ip = pair.split(':', 1)
+                    ip_addrs[host.strip()] = ip.strip()
+
+        monitoring_ip_addrs = None
+        if monitoring_addrs:
+            monitoring_ip_addrs = {}
+            for pair in monitoring_addrs.split(','):
+                if ':' in pair:
+                    host, ip = pair.split(':', 1)
+                    monitoring_ip_addrs[host.strip()] = ip.strip()
 
         return self.nfs.create_nfs_cluster(cluster_id=cluster_id, placement=placement,
                                            virtual_ip=virtual_ip, ingress=ingress,
                                            ingress_mode=ingress_mode, port=port,
                                            cluster_qos_config=cluster_qos_config,
                                            enable_nfsv3=enable_nfsv3,
+                                           ip_addrs=ip_addrs,
+                                           monitoring_ip_addrs=monitoring_ip_addrs,
+                                           monitoring_port=monitoring_port,
                                            ssl=ssl,
                                            ssl_cert=ssl_cert,
                                            ssl_key=ssl_key,
@@ -195,7 +302,10 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                            tls_min_version=tls_min_version,
                                            tls_ciphers=tls_ciphers,
                                            enable_rdma=enable_rdma,
-                                           rdma_port=rdma_port)
+                                           rdma_port=rdma_port,
+                                           enable_virtual_server=enable_virtual_server,
+                                           kmip_cert=kmip_cert, kmip_key=kmip_key,
+                                           kmip_ca_cert=kmip_ca_cert, kmip_host_list=kmip_host_list)
 
     @NFSCLICommand('nfs cluster rm', perm='rw')
     @object_format.EmptyResponder()
@@ -317,48 +427,6 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
                                                     pseudo_path=pseudo_path,
                                                     bw_obj=bw_obj)
 
-    def enable_cluster_qos_bw(self, cluster_id: str,
-                              qos_type: str,
-                              combined_bw_ctrl: bool,
-                              **kwargs: Any
-                              ) -> None:
-        qos = UserQoSType(qos_type)
-        try:
-            # by default it will take 0 which is expected by this function
-            bw_obj = QOSBandwidthControl(enable_bw_ctrl=True,
-                                         combined_bw_ctrl=combined_bw_ctrl,
-                                         export_writebw=kwargs.get('max_export_write_bw', '0'),
-                                         export_readbw=kwargs.get('max_export_read_bw', '0'),
-                                         client_writebw=kwargs.get('max_client_write_bw', '0'),
-                                         client_readbw=kwargs.get('max_client_read_bw', '0'),
-                                         export_rw_bw=kwargs.get('max_export_combined_bw', '0'),
-                                         client_rw_bw=kwargs.get('max_client_combined_bw', '0'))
-        except Exception as e:
-            raise object_format.ErrorResponse.wrap(e)
-        return self.nfs.enable_cluster_qos_bw(cluster_id=cluster_id,
-                                              qos_type=QOSType[qos.value],
-                                              bw_obj=bw_obj)
-
-    def enable_export_qos_bw(self, cluster_id: str,
-                             pseudo_path: str,
-                             combined_bw_ctrl: bool,
-                             **kwargs: Any
-                             ) -> None:
-        try:
-            bw_obj = QOSBandwidthControl(enable_bw_ctrl=True,
-                                         combined_bw_ctrl=combined_bw_ctrl,
-                                         export_writebw=kwargs.get('max_export_write_bw', '0'),
-                                         export_readbw=kwargs.get('max_export_read_bw', '0'),
-                                         client_writebw=kwargs.get('max_client_write_bw', '0'),
-                                         client_readbw=kwargs.get('max_client_read_bw', '0'),
-                                         export_rw_bw=kwargs.get('max_export_combined_bw', '0'),
-                                         client_rw_bw=kwargs.get('max_client_combined_bw', '0'))
-        except Exception as e:
-            raise object_format.ErrorResponse.wrap(e)
-        return self.export_mgr.enable_export_qos_bw(cluster_id=cluster_id,
-                                                    pseudo_path=pseudo_path,
-                                                    bw_obj=bw_obj)
-
     @CLICommand('nfs export qos get', perm='r')
     @object_format.Responder()
     def _cmd_export_qos_get(self, cluster_id: str, pseudo_path: str) -> Dict[str, int]:
@@ -438,35 +506,6 @@ class Module(orchestrator.OrchestratorClientMixin, MgrModule):
             ops_obj = QOSOpsControl(enable_iops_ctrl=True,
                                     max_export_iops=max_export_iops,
                                     max_client_iops=max_client_iops)
-        except Exception as e:
-            raise object_format.ErrorResponse.wrap(e)
-        return self.export_mgr.enable_export_qos_ops(cluster_id=cluster_id,
-                                                     pseudo_path=pseudo_path,
-                                                     ops_obj=ops_obj)
-
-    def enable_cluster_qos_ops(self, cluster_id: str,
-                               qos_type: str,
-                               **kwargs: Any
-                               ) -> None:
-        qos = UserQoSType(qos_type)
-        try:
-            ops_obj = QOSOpsControl(enable_iops_ctrl=True,
-                                    max_export_iops=kwargs.get('max_export_iops', 0),
-                                    max_client_iops=kwargs.get('max_client_iops', 0))
-        except Exception as e:
-            raise object_format.ErrorResponse.wrap(e)
-        return self.nfs.enable_cluster_qos_ops(cluster_id=cluster_id,
-                                               qos_type=QOSType[qos.value],
-                                               ops_obj=ops_obj)
-
-    def enable_export_qos_ops(self, cluster_id: str,
-                              pseudo_path: str,
-                              **kwargs: Any
-                              ) -> None:
-        try:
-            ops_obj = QOSOpsControl(enable_iops_ctrl=True,
-                                    max_export_iops=kwargs.get('max_export_iops', 0),
-                                    max_client_iops=kwargs.get('max_client_iops', 0))
         except Exception as e:
             raise object_format.ErrorResponse.wrap(e)
         return self.export_mgr.enable_export_qos_ops(cluster_id=cluster_id,

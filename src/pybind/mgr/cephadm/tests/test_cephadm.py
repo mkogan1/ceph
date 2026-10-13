@@ -258,6 +258,41 @@ class TestCephadm(object):
             cephadm_module._add_host(HostSpec('test2'))
 
     @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('[]'))
+    @mock.patch("cephadm.utils.resolve_ip")
+    def test_re_add_host_resets_conn_on_addr_change(self, resolve_ip, cephadm_module):
+        resolve_ip.return_value = '192.168.122.1'
+        cephadm_module._add_host(HostSpec('test', '192.168.122.1'))
+        assert cephadm_module.inventory.get_addr('test') == '192.168.122.1'
+
+        with mock.patch.object(cephadm_module.ssh, 'reset_con') as mock_reset:
+            resolve_ip.return_value = '192.168.122.2'
+            cephadm_module._add_host(HostSpec('test', '192.168.122.2'))
+            mock_reset.assert_called_once_with('test')
+        assert cephadm_module.inventory.get_addr('test') == '192.168.122.2'
+
+    @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('[]'))
+    @mock.patch("cephadm.utils.resolve_ip")
+    def test_re_add_host_no_reset_on_same_addr(self, resolve_ip, cephadm_module):
+        resolve_ip.return_value = '192.168.122.1'
+        cephadm_module._add_host(HostSpec('test', '192.168.122.1'))
+
+        with mock.patch.object(cephadm_module.ssh, 'reset_con') as mock_reset:
+            cephadm_module._add_host(HostSpec('test', '192.168.122.1'))
+            mock_reset.assert_not_called()
+
+    @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('[]'))
+    @mock.patch("cephadm.utils.resolve_ip")
+    def test_update_host_addr_resets_conn_before_check(self, resolve_ip, cephadm_module):
+        resolve_ip.return_value = '192.168.122.1'
+        cephadm_module._add_host(HostSpec('test', '192.168.122.1'))
+
+        with mock.patch.object(cephadm_module.ssh, 'reset_con') as mock_reset:
+            resolve_ip.return_value = '192.168.122.2'
+            cephadm_module.update_host_addr('test', '192.168.122.2')
+            mock_reset.assert_called_with('test')
+            assert mock_reset.call_count == 2
+
+    @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('[]'))
     def test_service_ls(self, cephadm_module):
         with with_host(cephadm_module, 'test'):
             c = cephadm_module.list_daemons(refresh=True)
@@ -550,6 +585,107 @@ class TestCephadm(object):
                 assert cephadm_module.cache.get_scheduled_daemon_action('test', daemon_name) is None
 
     @mock.patch("cephadm.serve.CephadmServe._run_cephadm")
+    def test_osd_check_daemons_skip_when_not_ok_to_stop(
+        self, _run_cephadm, cephadm_module: CephadmOrchestrator
+    ):
+        """_check_daemons must NOT act on an OSD that needs an autonomous
+        reconfig/redeploy when the cluster reports it is not ok-to-stop.
+        The action must be deferred to the next serve-loop iteration."""
+        from mgr_module import HandleCommandResult
+        _run_cephadm.side_effect = async_side_effect(('{}', '', 0))
+
+        with with_host(cephadm_module, 'test'):
+            with with_osd_daemon(cephadm_module, _run_cephadm, 'test', 1) as dd:
+                # No scheduled action — the action will be derived autonomously
+                # (extra ceph config changed → reconfig).
+                assert cephadm_module.cache.get_scheduled_daemon_action(
+                    'test', dd.name()) is None
+
+                cephadm_module._set_extra_ceph_conf('[osd]\ndebug_osd=5')
+
+                # Simulate ok-to-stop returning failure.
+                with mock.patch.object(
+                    cephadm_module.osd_service,
+                    'ok_to_stop',
+                    return_value=HandleCommandResult(
+                        retval=-1, stdout='', stderr='not safe to stop osd.1'
+                    ),
+                ) as mock_ok_to_stop:
+                    with mock.patch.object(
+                        cephadm_module, '_daemon_action'
+                    ) as mock_daemon_action:
+                        CephadmServe(cephadm_module)._check_daemons()
+
+                # ok-to-stop must have been checked
+                mock_ok_to_stop.assert_called_once_with(['1'])
+                # the daemon action must NOT have been called
+                mock_daemon_action.assert_not_called()
+
+    @mock.patch("cephadm.serve.CephadmServe._run_cephadm")
+    def test_osd_check_daemons_proceeds_when_ok_to_stop(
+        self, _run_cephadm, cephadm_module: CephadmOrchestrator
+    ):
+        """_check_daemons MUST act on an OSD that needs an autonomous
+        reconfig/redeploy when the cluster confirms it is ok-to-stop."""
+        from mgr_module import HandleCommandResult
+        _run_cephadm.side_effect = async_side_effect(('{}', '', 0))
+
+        with with_host(cephadm_module, 'test'):
+            with with_osd_daemon(cephadm_module, _run_cephadm, 'test', 1) as dd:
+                assert cephadm_module.cache.get_scheduled_daemon_action(
+                    'test', dd.name()) is None
+
+                cephadm_module._set_extra_ceph_conf('[osd]\ndebug_osd=5')
+
+                # Simulate ok-to-stop returning success.
+                with mock.patch.object(
+                    cephadm_module.osd_service,
+                    'ok_to_stop',
+                    return_value=HandleCommandResult(
+                        retval=0, stdout='osd.1 is safe to restart', stderr=''
+                    ),
+                ) as mock_ok_to_stop:
+                    with mock.patch.object(
+                        cephadm_module, '_daemon_action'
+                    ) as mock_daemon_action:
+                        CephadmServe(cephadm_module)._check_daemons()
+
+                # ok-to-stop must have been checked
+                mock_ok_to_stop.assert_called_once_with(['1'])
+                # the daemon action MUST have been called
+                mock_daemon_action.assert_called_once()
+
+    @mock.patch("cephadm.serve.CephadmServe._run_cephadm")
+    def test_osd_check_daemons_scheduled_action_skips_ok_to_stop(
+        self, _run_cephadm, cephadm_module: CephadmOrchestrator
+    ):
+        """When a user explicitly schedules a redeploy/reconfig for an OSD via
+        'ceph orch daemon redeploy osd.X', the ok-to-stop guard must NOT block
+        it — the user made an explicit decision."""
+        _run_cephadm.side_effect = async_side_effect(('{}', '', 0))
+
+        with with_host(cephadm_module, 'test'):
+            with with_osd_daemon(cephadm_module, _run_cephadm, 'test', 1) as dd:
+                # Explicitly schedule a redeploy (user-initiated).
+                cephadm_module._schedule_daemon_action(dd.name(), 'redeploy')
+                assert cephadm_module.cache.get_scheduled_daemon_action(
+                    'test', dd.name()) == 'redeploy'
+
+                with mock.patch.object(
+                    cephadm_module.osd_service,
+                    'ok_to_stop',
+                ) as mock_ok_to_stop:
+                    with mock.patch.object(
+                        cephadm_module, '_daemon_action'
+                    ) as mock_daemon_action:
+                        CephadmServe(cephadm_module)._check_daemons()
+
+                # ok-to-stop must NOT have been consulted for a user-scheduled action
+                mock_ok_to_stop.assert_not_called()
+                # the daemon action must still have run
+                mock_daemon_action.assert_called_once()
+
+    @mock.patch("cephadm.serve.CephadmServe._run_cephadm")
     def test_daemon_check_extra_config(self, _run_cephadm, cephadm_module: CephadmOrchestrator):
         _run_cephadm.side_effect = async_side_effect(('{}', '', 0))
 
@@ -609,6 +745,7 @@ class TestCephadm(object):
                                 "config": "[mon.test]\npublic network = 127.0.0.0/8\n"
                             },
                         },
+                        "skip_port_check": False,
                     }),
                     error_ok=True,
                     use_current_daemon_image=True,
@@ -665,6 +802,7 @@ class TestCephadm(object):
                             },
                             "crush_location": "datacenter=a",
                         },
+                        "skip_port_check": False,
                     }),
                     error_ok=True,
                     use_current_daemon_image=False,
@@ -708,6 +846,7 @@ class TestCephadm(object):
                             "config": "",
                             "keyring": "[client.crash.test]\nkey = None\n",
                         },
+                        "skip_port_check": False,
                     }),
                     error_ok=True,
                     use_current_daemon_image=False,
@@ -751,6 +890,7 @@ class TestCephadm(object):
                             ],
                         },
                         "config_blobs": {},
+                        "skip_port_check": False,
                     }),
                     error_ok=True,
                     use_current_daemon_image=False,
@@ -802,6 +942,7 @@ class TestCephadm(object):
                             ],
                         },
                         "config_blobs": {},
+                        "skip_port_check": False,
                     }),
                     error_ok=True,
                     use_current_daemon_image=False,
@@ -857,6 +998,7 @@ class TestCephadm(object):
                             ],
                         },
                         "config_blobs": {},
+                        "skip_port_check": False,
                     }),
                     error_ok=True,
                     use_current_daemon_image=False,
@@ -1079,6 +1221,28 @@ class TestCephadm(object):
                 [('nfs', 'foo2.host2')],
                 {'14649': {'id': 'nfs.foo-rgw.host1-rgw'}, '14650': {'id': 'nfs.foo2.host2-rgw'}},
             ),
+            # rgw-smb test cases
+            # Test 1: rgw-smb daemon matches smb daemon in cache - no stray
+            (
+                [('rgw-smb', '12345')],
+                [('smb', 'testcluster.a')],
+                [],
+                {'12345': {'id': 'smb.rgw.cluster.testcluster'}},
+            ),
+            # Test 2: multiple rgw-smb daemons match multiple smb daemons - no strays
+            (
+                [('rgw-smb', '12345'), ('rgw-smb', '12346')],
+                [('smb', 'cluster1.a'), ('smb', 'cluster2.b')],
+                [],
+                {'12345': {'id': 'smb.rgw.cluster.cluster1'}, '12346': {'id': 'smb.rgw.cluster.cluster2'}},
+            ),
+            # Test 3: rgw-smb daemon metadata doesn't match any smb daemon in cache - should be stray
+            (
+                [('rgw-smb', '12347')],
+                [('smb', 'cluster1.a'), ('smb', 'cluster2.b')],
+                [('rgw-smb', '12347')],
+                {'12347': {'id': 'smb.rgw.cluster.nonexistent'}},
+            ),
         ]
     )
     def test_check_for_stray_daemons(
@@ -1103,7 +1267,13 @@ class TestCephadm(object):
             # populate cephadm daemon cache
             dm = {}
             for daemon_type, daemon_id in cephadm_daemons:
-                dd = DaemonDescription(daemon_type=daemon_type, daemon_id=daemon_id)
+                # For SMB daemons, get based on service_name
+                if daemon_type == 'smb' and '.' in daemon_id:
+                    cluster_name = daemon_id.split('.')[0]
+                    dd = DaemonDescription(daemon_type=daemon_type, daemon_id=daemon_id,
+                                           service_name=f'smb.{cluster_name}')
+                else:
+                    dd = DaemonDescription(daemon_type=daemon_type, daemon_id=daemon_id)
                 dm[dd.name()] = dd
             cephadm_module.cache.update_host_daemons('host1', dm)
 
@@ -1682,7 +1852,7 @@ class TestCephadm(object):
                 placement=PlacementSpec(hosts=[HostPlacementSpec('test', '', 'x')], count=1),
                 unmanaged=True)
             ),  # noqa: E124
-            ('client.nfs.x', True, ServiceSpec(
+            ('client.nfs.id', True, ServiceSpec(
                 service_type='nfs',
                 service_id='id',
                 placement=PlacementSpec(hosts=[HostPlacementSpec('test', '', 'x')], count=1),
@@ -1771,6 +1941,46 @@ class TestCephadm(object):
                 'CEPHADM_INVALID_CONFIG_OPTION']['summary']
             assert 'Ignoring invalid mgr config option test' in cephadm_module.health_checks[
                 'CEPHADM_INVALID_CONFIG_OPTION']['detail']
+
+    @mock.patch("cephadm.module.CephadmOrchestrator.check_mon_command")
+    @mock.patch("cephadm.module.CephadmOrchestrator.get_foreign_ceph_option")
+    def test_remove_service_config(self, get_foreign_ceph_option, check_mon_command, cephadm_module: CephadmOrchestrator):
+        get_foreign_ceph_option.return_value = 'foo'
+        ps = PlacementSpec(hosts=['test'], count=1)
+        spec = ServiceSpec('nfs', service_id='a', placement=ps, config={'rados_replica_read_policy': 'localize'})
+        CephadmServe(cephadm_module)._remove_service_config(spec)
+        check_mon_command.assert_called_once_with({
+            'prefix': 'config rm',
+            'name': 'rados_replica_read_policy',
+            'who': 'client.nfs.a',
+        })
+
+    @mock.patch("cephadm.module.CephadmOrchestrator.check_mon_command")
+    @mock.patch("cephadm.module.CephadmOrchestrator.get_foreign_ceph_option")
+    def test_remove_service_config_skips_invalid(self, get_foreign_ceph_option, check_mon_command, cephadm_module: CephadmOrchestrator):
+        get_foreign_ceph_option.side_effect = KeyError
+        ps = PlacementSpec(hosts=['test'], count=1)
+        spec = ServiceSpec('nfs', placement=ps, config={'invalid_key': 'val'})
+        CephadmServe(cephadm_module)._remove_service_config(spec)
+        check_mon_command.assert_not_called()
+
+    @mock.patch("cephadm.module.CephadmOrchestrator.check_mon_command")
+    @mock.patch("cephadm.module.CephadmOrchestrator.get_foreign_ceph_option")
+    @mock.patch("cephadm.module.CephadmOrchestrator._kick_serve_loop")
+    def test_remove_service_cleans_spec_config(
+        self, _kick_serve_loop, get_foreign_ceph_option, check_mon_command, cephadm_module: CephadmOrchestrator
+    ):
+        get_foreign_ceph_option.return_value = 'foo'
+        ps = PlacementSpec(hosts=['test'], count=1)
+        spec = ServiceSpec('rgw', service_id='foo', placement=ps, config={'rgw_frontends': 'beast port=8080'})
+        cephadm_module.spec_store.save(spec)
+        cephadm_module.remove_service('rgw.foo')
+        check_mon_command.assert_called_once_with({
+            'prefix': 'config rm',
+            'name': 'rgw_frontends',
+            'who': 'client.rgw.foo',
+        })
+        assert 'rgw.foo' in cephadm_module.spec_store.spec_deleted
 
     @mock.patch("cephadm.module.CephadmOrchestrator.get_foreign_ceph_option")
     @mock.patch("cephadm.serve.CephadmServe._run_cephadm")
@@ -2352,9 +2562,9 @@ class TestCephadm(object):
             CephadmServe(cephadm_module)._write_all_client_files()
             # Make sure both ceph conf locations (default and per fsid) are called
             _write_file.assert_has_calls([mock.call('test', '/etc/ceph/ceph.conf', b'',
-                                          0o644, 0, 0, None),
+                                          0o644, 0, 0, None, False),
                                          mock.call('test', '/var/lib/ceph/fsid/config/ceph.conf', b'',
-                                          0o644, 0, 0, None)]
+                                          0o644, 0, 0, None, False)]
                                          )
             ceph_conf_files = cephadm_module.cache.get_host_client_files('test')
             assert len(ceph_conf_files) == 2
@@ -2366,10 +2576,10 @@ class TestCephadm(object):
             CephadmServe(cephadm_module)._write_all_client_files()
             _write_file.assert_has_calls([mock.call('test',
                                                     '/etc/ceph/ceph.conf',
-                                                    b'[mon]\nk=v\n', 0o644, 0, 0, None),
+                                                    b'[mon]\nk=v\n', 0o644, 0, 0, None, False),
                                           mock.call('test',
                                                     '/var/lib/ceph/fsid/config/ceph.conf',
-                                                    b'[mon]\nk=v\n', 0o644, 0, 0, None)])
+                                                    b'[mon]\nk=v\n', 0o644, 0, 0, None, False)])
             # reload
             cephadm_module.cache.last_client_files = {}
             cephadm_module.cache.load()

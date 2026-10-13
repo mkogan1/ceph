@@ -24,7 +24,10 @@ from .fixtures import (
 from pyfakefs import fake_filesystem
 from pyfakefs import fake_filesystem_unittest
 
-from cephadmlib.constants import DEFAULT_REGISTRY
+from cephadmlib.constants import (
+    DEFAULT_REGISTRY,
+    IBM_DISPLAY_LICENSE_CALL_HOME_NOTICE,
+)
 
 _cephadm = import_cephadm()
 
@@ -1616,6 +1619,74 @@ class TestMaintenance:
         assert retval.startswith('failed')
 
 
+class TestMaintenanceExitDisabledServices(object):
+    fsid = '00000000-0000-0000-0000-000000000001'
+
+    @staticmethod
+    def _nfs_daemon_entry(fsid: str):
+        from cephadmlib.daemon_identity import DaemonIdentity
+        from cephadmlib.listing import DaemonEntry
+
+        identity = DaemonIdentity.from_name(fsid, 'nfs.foo.host1')
+        return DaemonEntry(
+            identity=identity,
+            status={
+                'style': 'cephadm:v1',
+                'name': 'nfs.foo.host1',
+                'fsid': fsid,
+                'systemd_unit': identity.unit_name,
+            },
+            data_dir='/var/lib/ceph',
+        )
+
+    @mock.patch('cephadmlib.systemd.call')
+    def test_start_disabled_services_after_maintenance_exit(self, _call):
+        from cephadmlib.systemd import start_disabled_services_after_maintenance_exit
+
+        ctx = _cephadm.CephadmContext()
+        ctx.fsid = self.fsid
+        entry = self._nfs_daemon_entry(self.fsid)
+        nfs_unit = entry.identity.unit_name
+        with mock.patch('cephadmlib.systemd.daemons_matching', return_value=[entry]):
+            _call.return_value = '', '', 0
+            start_disabled_services_after_maintenance_exit(ctx)
+        _call.assert_any_call(
+            ctx, ['systemctl', 'start', nfs_unit],
+            verbosity=_cephadm.CallVerbosity.DEBUG)
+
+    @mock.patch('os.listdir', return_value=[])
+    @mock.patch('cephadmlib.systemd.daemons_matching')
+    @mock.patch('cephadmlib.systemd.call')
+    @mock.patch('cephadm.call')
+    @mock.patch('cephadm.logger')
+    @mock.patch('cephadm.systemd_target_state')
+    @mock.patch('cephadm.target_exists')
+    def test_exit_starts_disabled_services(
+            self, _target_exists, _target_state, _logger, _cephadm_call,
+            _systemd_call, _daemons_matching, _listdir):
+        entry = self._nfs_daemon_entry(TestMaintenance.fsid)
+        nfs_unit = entry.identity.unit_name
+
+        def _matching(ctx, fsid=None, daemon_type=None):
+            if daemon_type == 'nfs':
+                return [entry]
+            return []
+
+        _daemons_matching.side_effect = _matching
+        _cephadm_call.side_effect = [('', '', 0), ('', '', 0)]
+        _systemd_call.return_value = '', '', 0
+        _target_state.return_value = False
+        _target_exists.return_value = True
+        ctx: _cephadm.CephadmContext = _cephadm.cephadm_init_ctx(
+            ['host-maintenance', 'exit', '--fsid', TestMaintenance.fsid])
+        ctx.container_engine = mock_podman()
+        retval = _cephadm.change_maintenance_mode(ctx)
+        assert retval.startswith('success')
+        _systemd_call.assert_any_call(
+            ctx, ['systemctl', 'start', nfs_unit],
+            verbosity=_cephadm.CallVerbosity.DEBUG)
+
+
 class TestMonitoring(object):
     @mock.patch('cephadmlib.daemons.monitoring.call')
     def test_get_version_alertmanager(self, _call):
@@ -2225,6 +2296,7 @@ class TestIscsi:
             ctx.config_json = json.dumps(config_json)
             ctx.fsid = fsid
             _cephadm.get_parm.return_value = config_json
+            ctx.limit_core_infinity = False
 
             ident = _cephadm.DaemonIdentity(fsid, 'iscsi', 'daemon_id')
 
@@ -2243,7 +2315,8 @@ if ! grep -qs /var/lib/ceph/9b9d7609-f4d5-4aba-94c8-effa764d96c9/iscsi.daemon_id
 """
             with open('/var/lib/ceph/9b9d7609-f4d5-4aba-94c8-effa764d96c9/iscsi.daemon_id/sidecar-tcmu.run') as f:
                 contents = f.read()
-            assert contents == """#!/bin/sh
+            assert contents == """if ! grep -qs /var/lib/ceph/9b9d7609-f4d5-4aba-94c8-effa764d96c9/iscsi.daemon_id/configfs /proc/mounts; then mount -t configfs none /var/lib/ceph/9b9d7609-f4d5-4aba-94c8-effa764d96c9/iscsi.daemon_id/configfs; fi
+#!/bin/sh
 # sidecar: tcmu
 
 set -e
@@ -2656,6 +2729,108 @@ class TestPull:
                 assert ctx.image == 'cephadm_image_param'
 
 
+class TestInspectImage:
+    @mock.patch('cephadm.call_throws')
+    @mock.patch('cephadm.CephContainer.run')
+    def test_vendor_ibm(self, _run, _call_throws, capsys):
+        _call_throws.return_value = ('deadbeef,', '', 0)
+        _run.side_effect = [
+            'ceph version 19.2.0-139.el9cp squid (stable)\n',
+            'IBM Storage Ceph 8 (Container)\n',
+        ]
+        cmd = ['--image', 'example', 'inspect-image']
+        with with_cephadm_ctx(cmd) as ctx:
+            _cephadm.command_inspect_image(ctx)
+            out = json.loads(capsys.readouterr().out)
+        assert out['image_vendor'] == 'ibm'
+        assert out['redhat_storage_release'].startswith('IBM Storage Ceph')
+
+    @mock.patch('cephadm.call_throws')
+    @mock.patch('cephadm.CephContainer.run')
+    def test_vendor_redhat(self, _run, _call_throws, capsys):
+        _call_throws.return_value = ('deadbeef,', '', 0)
+        _run.side_effect = [
+            'ceph version 19.2.1-354.el9cp squid (stable)\n',
+            'Red Hat Ceph Storage Server 8 (Container)\n',
+        ]
+        cmd = ['--image', 'example', 'inspect-image']
+        with with_cephadm_ctx(cmd) as ctx:
+            _cephadm.command_inspect_image(ctx)
+            out = json.loads(capsys.readouterr().out)
+        assert out['image_vendor'] == 'redhat'
+        assert out['redhat_storage_release'].startswith('Red Hat Ceph Storage')
+
+
+class TestLicenseLanguage:
+    def test_license_basename_suffix(self):
+        assert _cephadm._license_basename_from_language('en') == 'LA_en'
+        assert _cephadm._license_basename_from_language('zh_TW') == 'LA_zh_TW'
+        assert _cephadm._license_basename_from_language('  de  ') == 'LA_de'
+
+    def test_license_basename_rejects_la_prefix(self):
+        with pytest.raises(_cephadm.Error, match='part after LA_'):
+            _cephadm._license_basename_from_language('LA_en')
+
+    def test_license_basename_rejects_empty(self):
+        with pytest.raises(_cephadm.Error, match='must not be empty'):
+            _cephadm._license_basename_from_language('')
+        with pytest.raises(_cephadm.Error, match='must not be empty'):
+            _cephadm._license_basename_from_language('   ')
+
+    def test_license_basename_rejects_invalid_chars(self):
+        with pytest.raises(_cephadm.Error, match='Invalid license language'):
+            _cephadm._license_basename_from_language('en;rm')
+
+    @mock.patch('cephadm.CephContainer')
+    def test_pull_license_from_image_uses_container(self, mock_cc):
+        mock_cc.return_value.run.return_value = 'IBM license text\n'
+        with with_cephadm_ctx(['--image', 'registry/ceph:v1', 'version']) as ctx:
+            out = _cephadm._pull_license_from_image(ctx, 'registry/ceph:v1', 'fr')
+        assert out == 'IBM license text\n'
+        mock_cc.assert_called_once()
+        _args, kwargs = mock_cc.call_args
+        assert kwargs['envs'] == ['LICENSE_BASENAME=LA_fr']
+        assert kwargs['entrypoint'] == '/bin/sh'
+        assert _args[1] == 'registry/ceph:v1'
+
+    @mock.patch('cephadm.CephContainer')
+    def test_pull_license_from_image_wraps_runtime_error(self, mock_cc):
+        mock_cc.return_value.run.side_effect = RuntimeError('container failed')
+        with with_cephadm_ctx(['--image', 'registry/ceph:v1', 'version']) as ctx:
+            with pytest.raises(_cephadm.Error, match='Failed to read IBM license file LA_en'):
+                _cephadm._pull_license_from_image(ctx, 'registry/ceph:v1', 'en')
+
+    @mock.patch('cephadm.sys.stdin.isatty', return_value=False)
+    @mock.patch('cephadm._pull_image')
+    @mock.patch('cephadm.CephContainer')
+    def test_command_display_license_plain(self, mock_cc, _pull_image, _isatty, capsys):
+        mock_cc.return_value.run.return_value = 'plain license\n'
+        cmd = ['--image', 'registry/ceph:v1', 'display-license', '--license-language', 'de']
+        with with_cephadm_ctx(cmd) as ctx:
+            rc = _cephadm.command_display_license(ctx)
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert out.startswith(IBM_DISPLAY_LICENSE_CALL_HOME_NOTICE)
+        assert out.endswith('plain license\n')
+        _pull_image.assert_called_once_with(ctx, 'registry/ceph:v1', False)
+        _args, kwargs = mock_cc.call_args
+        assert kwargs['envs'] == ['LICENSE_BASENAME=LA_de']
+
+    @mock.patch('cephadm.CephContainer')
+    @mock.patch('cephadm._pull_image')
+    def test_command_display_license_json(self, _pull_image, mock_cc, capsys):
+        mock_cc.return_value.run.return_value = 'line1\nline2\n'
+        cmd = ['--image', 'registry/ceph:v1', 'display-license', '--json']
+        with with_cephadm_ctx(cmd) as ctx:
+            rc = _cephadm.command_display_license(ctx)
+        assert rc == 0
+        blob = json.loads(capsys.readouterr().out)
+        assert blob == {
+            'call_home_notice': IBM_DISPLAY_LICENSE_CALL_HOME_NOTICE,
+            'license': 'line1\nline2\n',
+        }
+
+
 class TestApplySpec:
 
     def test_extract_host_info_from_applied_spec(self, cephadm_fs):
@@ -2775,6 +2950,7 @@ class TestSNMPGateway:
             ctx.fsid = fsid
             ctx.tcp_ports = '9464'
             _cephadm.get_parm.return_value = self.V2c_config
+            ctx.limit_core_infinity = False
 
             ident = _cephadm.DaemonIdentity(fsid, 'snmp-gateway', 'daemon_id')
             c = _cephadm.get_container(ctx, ident)
@@ -2804,6 +2980,7 @@ class TestSNMPGateway:
             ctx.fsid = fsid
             ctx.tcp_ports = '9465'
             _cephadm.get_parm.return_value = self.V3_no_priv_config
+            ctx.limit_core_infinity = False
 
             ident = _cephadm.DaemonIdentity(fsid, 'snmp-gateway', 'daemon_id')
             c = _cephadm.get_container(ctx, ident)
@@ -2833,6 +3010,7 @@ class TestSNMPGateway:
             ctx.fsid = fsid
             ctx.tcp_ports = '9464'
             _cephadm.get_parm.return_value = self.V3_priv_config
+            ctx.limit_core_infinity = False
 
             ident = _cephadm.DaemonIdentity(fsid, 'snmp-gateway', 'daemon_id')
             c = _cephadm.get_container(ctx, ident)
@@ -2862,6 +3040,7 @@ class TestSNMPGateway:
             ctx.fsid = fsid
             ctx.tcp_ports = '9464'
             _cephadm.get_parm.return_value = self.no_destination_config
+            ctx.limit_core_infinity = False
 
             with pytest.raises(Exception) as e:
                 c = _cephadm.get_container(
@@ -2878,6 +3057,7 @@ class TestSNMPGateway:
             ctx.fsid = fsid
             ctx.tcp_ports = '9464'
             _cephadm.get_parm.return_value = self.bad_version_config
+            ctx.limit_core_infinity = False
 
             with pytest.raises(Exception) as e:
                 c = _cephadm.get_container(
@@ -3038,74 +3218,6 @@ class TestSysctl:
             "fs.aio-max-nr = 1048576",
             "  vm.max_map_count       =            65530    ",
         ]
-
-class TestJaeger:
-    single_es_node_conf = {
-        'elasticsearch_nodes': 'http://192.168.0.1:9200'}
-    multiple_es_nodes_conf = {
-        'elasticsearch_nodes': 'http://192.168.0.1:9200,http://192.168.0.2:9300'}
-    agent_conf = {
-        'collector_nodes': 'test:14250'}
-
-    def test_single_es(self, cephadm_fs):
-        fsid = 'ca734440-3dc6-11ec-9b98-5254002537a6'
-        with with_cephadm_ctx(['--image=quay.io/jaegertracing/jaeger-collector:1.29'], list_networks={}) as ctx:
-            import json
-            ctx.config_json = json.dumps(self.single_es_node_conf)
-            ctx.fsid = fsid
-            ident = _cephadm.DaemonIdentity(fsid, 'jaeger-collector', 'daemon_id')
-            c = _cephadm.get_container(ctx, ident)
-            _cephadm.create_daemon_dirs(ctx, ident, 0, 0)
-            _cephadm.deploy_daemon_units(
-                ctx,
-                ident,
-                0, 0,
-                c,
-                True, True
-            )
-            with open(f'/var/lib/ceph/{fsid}/jaeger-collector.daemon_id/unit.run', 'r') as f:
-                run_cmd = f.readlines()[-1].rstrip()
-                assert run_cmd.endswith('SPAN_STORAGE_TYPE=elasticsearch -e ES_SERVER_URLS=http://192.168.0.1:9200 quay.io/jaegertracing/jaeger-collector:1.29')
-
-    def test_multiple_es(self, cephadm_fs):
-        fsid = 'ca734440-3dc6-11ec-9b98-5254002537a6'
-        with with_cephadm_ctx(['--image=quay.io/jaegertracing/jaeger-collector:1.29'], list_networks={}) as ctx:
-            import json
-            ctx.config_json = json.dumps(self.multiple_es_nodes_conf)
-            ctx.fsid = fsid
-            ident = _cephadm.DaemonIdentity(fsid, 'jaeger-collector', 'daemon_id')
-            c = _cephadm.get_container(ctx, ident)
-            _cephadm.create_daemon_dirs(ctx, ident, 0, 0)
-            _cephadm.deploy_daemon_units(
-                ctx,
-                ident,
-                0, 0,
-                c,
-                True, True
-            )
-            with open(f'/var/lib/ceph/{fsid}/jaeger-collector.daemon_id/unit.run', 'r') as f:
-                run_cmd = f.readlines()[-1].rstrip()
-                assert run_cmd.endswith('SPAN_STORAGE_TYPE=elasticsearch -e ES_SERVER_URLS=http://192.168.0.1:9200,http://192.168.0.2:9300 quay.io/jaegertracing/jaeger-collector:1.29')
-
-    def test_jaeger_agent(self, cephadm_fs):
-        fsid = 'ca734440-3dc6-11ec-9b98-5254002537a6'
-        with with_cephadm_ctx(['--image=quay.io/jaegertracing/jaeger-agent:1.29'], list_networks={}) as ctx:
-            import json
-            ctx.config_json = json.dumps(self.agent_conf)
-            ctx.fsid = fsid
-            ident = _cephadm.DaemonIdentity(fsid, 'jaeger-agent', 'daemon_id')
-            c = _cephadm.get_container(ctx, ident)
-            _cephadm.create_daemon_dirs(ctx, ident, 0, 0)
-            _cephadm.deploy_daemon_units(
-                ctx,
-                ident,
-                0, 0,
-                c,
-                True, True
-            )
-            with open(f'/var/lib/ceph/{fsid}/jaeger-agent.daemon_id/unit.run', 'r') as f:
-                run_cmd = f.readlines()[-1].rstrip()
-                assert run_cmd.endswith('quay.io/jaegertracing/jaeger-agent:1.29 --reporter.grpc.host-port=test:14250 --processor.jaeger-compact.server-host-port=6799')
 
 class TestRescan(fake_filesystem_unittest.TestCase):
 
@@ -3274,3 +3386,60 @@ class TestRmClusterConfigCleanup(fake_filesystem_unittest.TestCase):
 
         assert os.path.exists('/etc/ceph/ceph.conf')
         assert os.path.isdir('/etc/ceph/ceph.conf')
+
+
+class TestExec(object):
+    """Test cases for the 'cephadm exec' command"""
+
+    @mock.patch.object(_cephadm, 'call')
+    @mock.patch('cephadm.logger')
+    def test_exec_non_zero_exit(self, _logger, mock_call):
+        """Test command execution with non-zero exit code"""
+        mock_call.return_value = ('', 'command not found\n', 127)
+
+        cmd = ['exec', '--command', 'nonexistent_command']
+        with with_cephadm_ctx(cmd, mock_cephadm_call_fn=False) as ctx:
+            ctx.command = ['nonexistent_command']
+            ctx.timeout = 300
+            retval = _cephadm.command_exec(ctx)
+            assert retval == 127
+
+    @mock.patch('subprocess.run')
+    @mock.patch('cephadm.logger')
+    def test_exec_empty_command_list(self, _logger, mock_run):
+        """Test command_exec with empty command list"""
+        cmd = ['exec', '--command']
+        with with_cephadm_ctx(cmd) as ctx:
+            ctx.command = []
+            ctx.timeout = 300
+            with pytest.raises(_cephadm.Error, match='No command provided to execute'):
+                _cephadm.command_exec(ctx)
+
+    @mock.patch.object(_cephadm, 'call')
+    @mock.patch('cephadm.logger')
+    @mock.patch('sys.stdout')
+    @mock.patch('sys.stderr')
+    def test_exec_with_stdout_and_stderr(self, mock_stderr, mock_stdout, _logger, mock_call):
+        """Test command execution with both stdout and stderr"""
+        mock_call.return_value = ('Standard output\n', 'Standard error\n', 2)
+
+        cmd = ['exec', '--command', 'test_command']
+        with with_cephadm_ctx(cmd, mock_cephadm_call_fn=False) as ctx:
+            ctx.command = ['test_command']
+            ctx.timeout = 300
+            retval = _cephadm.command_exec(ctx)
+            assert retval == 2
+            mock_stdout.write.assert_called_once_with('Standard output\n')
+            mock_stderr.write.assert_called_once_with('Standard error\n')
+
+    @mock.patch.object(_cephadm, 'call')
+    @mock.patch('cephadm.logger')
+    def test_exec_general_exception(self, _logger, mock_call):
+        """Test command execution with general exception"""
+        mock_call.side_effect = Exception('Unexpected error')
+        cmd = ['exec', '--command', 'test']
+        with with_cephadm_ctx(cmd, mock_cephadm_call_fn=False) as ctx:
+            ctx.command = ['test']
+            ctx.timeout = 300
+            retval = _cephadm.command_exec(ctx)
+            assert retval == 1

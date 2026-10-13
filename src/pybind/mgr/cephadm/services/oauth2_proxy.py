@@ -27,7 +27,8 @@ class OAuth2ProxyService(CephadmService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         # adding dependency as redirect_url calculation depends on the mgmt-gateway
         deps = [
             f'{d.name()}:{d.ports[0]}' if d.ports else d.name()
@@ -83,7 +84,7 @@ class OAuth2ProxyService(CephadmService):
             }
         }
 
-        return daemon_config, sorted(OAuth2ProxyService.get_dependencies(self.mgr))
+        return daemon_config, self.sorted_dependencies(self.mgr, svc_spec, daemon_spec.daemon_type)
 
     def post_remove(self, daemon: DaemonDescription, is_failed_deploy: bool) -> None:
         """

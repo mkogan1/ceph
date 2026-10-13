@@ -82,6 +82,49 @@ is met, the default binding will happen on all available network interfaces.
 By default, only the NFSv4 protocol is enabled. NFSv3 can be enabled by setting
 ``enable_nfsv3`` to ``true`` in the service specification.
 
+CephFS client logging
+---------------------
+
+When an NFS export uses the CephFS backend, Ganesha acts as a libcephfs client.
+To troubleshoot CephFS client issues, cephadm can mount a host log directory into
+the Ganesha container and add a ``[client]`` section to the daemon ``ceph.conf``.
+
+This is disabled by default. To enable it, set ``enable_cephfs_client_log: true``
+in the NFS service spec.
+
+Example:
+
+.. code-block:: yaml
+
+    service_type: nfs
+    service_id: mynfs
+    placement:
+      count: 1
+    spec:
+      enable_cephfs_client_log: true
+
+The following optional parameters are also available:
+
+* ``cephfs_client_log_level`` (integer): libcephfs client debug level. Default is
+  ``10`` when logging is enabled.
+* ``cephfs_client_log_dir`` (string): host path to mount into the container at
+  ``/var/log/ceph``. When unset, defaults to ``/var/log/ceph/<cluster-fsid>``.
+
+Example with custom log level and directory:
+
+.. code-block:: yaml
+
+    service_type: nfs
+    service_id: mynfs
+    placement:
+      count: 1
+    spec:
+      enable_cephfs_client_log: true
+      cephfs_client_log_level: 20
+      cephfs_client_log_dir: /var/log/ceph/<fsid>
+
+Client log files appear under the mounted host log directory.
+
 NFS over RDMA
 -------------
 
@@ -114,6 +157,71 @@ Example with RDMA enabled:
    ``networks``) with ``enable_rdma``, ensure the network interface for that
    address is RDMA-capable. On the host, run ``rdma link show`` and confirm the
    netdev for the interface with the bind IP is listed.
+
+Transparent State Migration (TSM)
+----------------------------------
+
+Transparent State Migration (TSM) is a high-availability feature that allows NFS
+clients to maintain their state (open files, locks, etc.) when failing over to
+another NFS server. TSM is disabled by default.
+
+To enable TSM, set ``enable_tsm: true`` in the NFS service spec. You can optionally
+set ``tsm_port`` to use a custom TSM port. If omitted, NFS Ganesha uses its default.
+
+Example with TSM enabled:
+
+.. code-block:: yaml
+
+    service_type: nfs
+    service_id: mynfs
+    placement:
+      count: 1
+      hosts: [host1]
+    spec:
+      port: 2049
+      enable_tsm: true
+      tsm_port: 5000   # optional
+
+.. note::
+   * TSM is configured in the NFS_CORE_PARAM block of the ganesha.conf file.
+   * When using daemon colocation, each colocated daemon requires a unique ``tsm_port``
+     in the ``colocation_ports`` list. See :ref:`colocation-with-tsm` for a complete example.
+
+Ceph Client Object Cache
+------------------------
+
+NFS Ganesha's Ceph FSAL supports Ceph client object caching. These settings apply
+only to **CephFS** exports (not RGW exports). Object caching is **disabled by
+default** (``enable_client_object_cache: false``); enabling it increases Ganesha
+memory use. Tune it via the NFS service specification:
+
+* ``enable_client_object_cache`` (bool, default ``false``) — enable Ceph client object caching
+* ``client_object_cache_size`` (int or size string, optional) — maximum size of the object
+  cache. Accepts an integer number of bytes, or a size string with units
+  ``KB``, ``MB``, ``GB``, ``KiB``, ``MiB``, or ``GiB`` (for example,
+  ``512KiB``, ``100MB``, ``1GiB``).
+* ``client_object_cache_max_dirty`` (int or size string, optional) — maximum dirty data in
+  the object cache (same units as above). When both size fields are set,
+  ``client_object_cache_size`` must be greater than ``client_object_cache_max_dirty``.
+
+Example with object caching enabled:
+
+.. code-block:: yaml
+
+    service_type: nfs
+    service_id: mynfs
+    placement:
+      count: 1
+      hosts: [host1]
+    spec:
+      port: 2049
+      enable_client_object_cache: true
+      client_object_cache_size: 1MiB
+      client_object_cache_max_dirty: 0
+
+These values are converted to bytes when written into a ``CEPH`` block in
+``ganesha.conf`` (as ``client_oc``, ``client_oc_size``, and
+``client_oc_max_dirty``) when object caching is enabled.
 
 NFS Daemon Colocation
 ----------------------
@@ -172,6 +280,7 @@ In this configuration, 4 daemons total are deployed (2 per host), distributed ac
      to cover the node down scenario (or ``count_per_host - 1`` when using ``count_per_host``).
    * Each entry must specify ``data_port``, ``monitoring_port``, and ``qos_cluster_port``.
      When ``enable_rdma`` is true, each entry must also include ``rdma_port``.
+     When ``enable_tsm`` is true, each entry must also include ``tsm_port``.
    * If ``colocation_ports`` is not specified, ports will be automatically
      incremented for colocated daemons (e.g., 2049 → 2050 → 2051 for data ports,
      and 9587 → 9588 → 9589 for monitoring ports).
@@ -203,6 +312,54 @@ run on each host:
 
 This will deploy exactly 3 NFS daemons on each of the 3 hosts (9 daemons total),
 with custom ports for the 2nd and 3rd daemons on each host.
+
+Colocation with TSM
+~~~~~~~~~~~~~~~~~~~
+
+When TSM (Transparent State Migration) is enabled with colocation, each colocated daemon
+requires a unique ``tsm_port`` in addition to the standard ports. This example demonstrates
+both TSM colocation and the failure scenario where daemons may be redeployed to maintain
+the desired count:
+
+.. code-block:: yaml
+
+    service_type: nfs
+    service_id: mynfs
+    placement:
+      count: 2
+      hosts:
+        - host1
+        - host2
+    spec:
+      port: 2049
+      monitoring_port: 9587
+      enable_tsm: true
+      tsm_port: 36369
+      colocation_ports:
+        - data_port: 3049
+          monitoring_port: 9588
+          cluster_qos_port: 31312
+          tsm_port: 36370
+
+**Normal operation** - 2 daemons total deployed (1 per host), distributed across
+``host1`` and ``host2``:
+
+* **host1, daemon 1**: ``port: 2049``, ``monitoring_port: 9587``, ``cluster_qos_port: 31311``, ``tsm_port: 36369``
+* **host2, daemon 1**: ``port: 2049``, ``monitoring_port: 9587``, ``cluster_qos_port: 31311``, ``tsm_port: 36369``
+
+**Failure scenario** - If ``host2`` becomes unavailable:
+
+* Cephadm automatically redeploys the daemon from ``host2`` onto ``host1``
+* Result: Both daemons now run on ``host1`` (temporarily colocated)
+* **host1, daemon 1**: ``port: 2049``, ``monitoring_port: 9587``, ``cluster_qos_port: 31311``, ``tsm_port: 36369``
+* **host1, daemon 2**: ``data_port: 3049``, ``monitoring_port: 9588``, ``cluster_qos_port: 31312``, ``tsm_port: 36370``
+* When ``host2`` recovers, cephadm may rebalance the daemons back to the original distribution
+
+.. note::
+   * Always provide ``colocation_ports`` entries equal to ``count - 1`` (or ``count_per_host - 1``)
+     to ensure sufficient port configurations for the worst-case scenario where all daemons
+     end up on a single host due to failures.
+   * If ``colocation_ports`` is not specified, cephadm will auto-increment ports as needed.
 
 TLS/SSL Example
 ---------------
@@ -303,6 +460,160 @@ parameter constraints.
         enable_bw_control: true
         max_export_write_bw: 100MB
         max_export_read_bw: 100MB
+
+The specification can then be applied by running the following command:
+
+.. prompt:: bash #
+
+   ceph orch apply -i nfs.yaml
+
+gRPC/mTLS Example
+-----------------
+
+Cephadm generates and manages gRPC certificates automatically by default
+(``cephadm-signed``). Administrators can also provide their own certificates
+using ``inline`` or ``reference`` certificate sources.
+
+.. note::
+   gRPC and TLS (NFS data plane) are separate security domains and always use
+   separate certificates, even when both are enabled. The gRPC server certificate
+   authenticates the management endpoint; the TLS certificate (``ssl``) authenticates
+   NFS file share access.
+
+Here's an example NFS service specification with inline gRPC/mTLS certificates:
+
+.. code-block:: yaml
+
+    service_type: nfs
+    service_id: mynfs
+    placement:
+      hosts:
+      - ceph-node-0
+    spec:
+      port: 2049
+      grpc_certificate_source: inline
+      grpc_server_cert: |
+        -----BEGIN CERTIFICATE-----
+        (PEM cert contents here)
+        -----END CERTIFICATE-----
+      grpc_server_key: |
+        -----BEGIN PRIVATE KEY-----
+        (PEM key contents here)
+        -----END PRIVATE KEY-----
+      grpc_client_cert: |
+        -----BEGIN CERTIFICATE-----
+        (PEM cert contents here)
+        -----END CERTIFICATE-----
+      grpc_client_key: |
+        -----BEGIN PRIVATE KEY-----
+        (PEM key contents here)
+        -----END PRIVATE KEY-----
+      grpc_ca_cert: |
+        -----BEGIN CERTIFICATE-----
+        (PEM CA cert contents here)
+        -----END CERTIFICATE-----
+
+This example configures an NFS service with gRPC using inline certificates.
+
+gRPC Parameters
+~~~~~~~~~~~~~~~
+
+* ``grpc_certificate_source`` (string): Specifies the source of the gRPC
+  certificates. Options include:
+
+  - ``cephadm-signed`` (default): Cephadm automatically generates and signs a
+    per-host gRPC server certificate (with the host IP in the SAN field) and a
+    per-service client certificate, all using its internal cluster CA.
+  - ``inline``: Provide all five certificates and keys directly in the
+    specification.
+  - ``reference``: Certificates are pre-loaded into certmgr store and referenced
+    by name. Only ``grpc_certificate_source: reference`` is needed in the spec.
+    Pre-load all five objects before applying the spec using the exact registered
+    names and the correct scope flags:
+
+    .. prompt:: bash #
+
+       # Server cert + key — SERVICE scope (--service-name only, no --hostname)
+       # The server cert must include the IP addresses of ALL NFS hosts in
+       # its SAN field so that gRPC clients can verify every daemon.
+       ceph orch certmgr cert set nfs_grpc_server_cert \
+           --service-name nfs.<svc_id> -i server.crt
+       ceph orch certmgr key set nfs_grpc_server_key \
+           --service-name nfs.<svc_id> -i server.key
+
+       # Client cert + key — SERVICE scope (--service-name only, no --hostname)
+       ceph orch certmgr cert set nfs_grpc_client_cert \
+           --service-name nfs.<svc_id> -i client.crt
+       ceph orch certmgr key set nfs_grpc_client_key \
+           --service-name nfs.<svc_id> -i client.key
+
+       # CA cert — SERVICE scope (--service-name only, no --hostname)
+       ceph orch certmgr cert set nfs_grpc_ca_cert \
+           --service-name nfs.<svc_id> -i ca.crt
+
+    If a previous deployment auto-generated any of these objects, add ``--force``
+    to override them.
+
+* ``grpc_server_cert`` (string): The gRPC server certificate in PEM format.
+  Required when using ``inline`` certificate source. Must include the NFS host
+  IP in the Subject Alternative Name (SAN) field.
+
+* ``grpc_server_key`` (string): The gRPC server private key in PEM format.
+  Required when using ``inline`` certificate source.
+
+* ``grpc_client_cert`` (string): The gRPC client certificate in PEM format.
+  Required when using ``inline`` certificate source. Must be signed by the same
+  CA as the server certificate (``grpc_ca_cert``). No SAN or IP required in the
+  certificate itself.
+
+* ``grpc_client_key`` (string): The gRPC client private key in PEM format.
+  Required when using ``inline`` certificate source.
+
+* ``grpc_ca_cert`` (string): The CA certificate in PEM format used by the gRPC
+  server to verify client certificates. Required when using ``inline``
+  certificate source.
+
+.. note::
+   When ``grpc_certificate_source`` is set to ``inline``, all five fields
+   (``grpc_server_cert``, ``grpc_server_key``, ``grpc_client_cert``,
+   ``grpc_client_key``, ``grpc_ca_cert``) must be provided.
+
+Accessing gRPC Client Certificates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cephadm deploys a client cert bundle for every NFS service to all manager hosts,
+regardless of the certificate source. Each service gets its own sub-directory:
+
+.. code-block:: text
+
+   /var/lib/ceph/<fsid>/nfs_grpc-client-certs/
+   ├── nfs.<svc_id1>/
+   │   ├── ca.crt
+   │   ├── client.crt
+   │   └── client.key
+   └── nfs.<svc_id2>/
+       ├── ca.crt
+       ├── client.crt
+       └── client.key
+
+Inside a cephadm shell the base path is mounted at ``/srv/ceph/``:
+
+.. prompt:: bash #
+
+   cephadm shell
+   ls /srv/ceph/<fsid>/nfs_grpc-client-certs/
+   # nfs.mynfs/
+
+   grpcurl \
+     --cacert /srv/ceph/<fsid>/nfs_grpc-client-certs/nfs.<svc_id>/ca.crt \
+     --cert   /srv/ceph/<fsid>/nfs_grpc-client-certs/nfs.<svc_id>/client.crt \
+     --key    /srv/ceph/<fsid>/nfs_grpc-client-certs/nfs.<svc_id>/client.key \
+     <nfs-host>:<grpc-port> list
+
+.. note::
+   For ``reference`` mode the bundle is only deployed when the client cert and CA
+   have been pre-loaded into certmgr. If they are absent the folder is not created
+   and the admin should use their own cert files directly.
 
 The specification can then be applied by running the following command:
 

@@ -1,3 +1,4 @@
+import copy
 import ipaddress
 import hashlib
 import logging
@@ -52,6 +53,12 @@ def get_placement_hosts(
         if spec.placement.host_pattern:
             matching_hostnames = spec.placement.filter_matching_hostspecs(hosts)
             host_specs = [h for h in host_specs if h.hostname in matching_hostnames]
+    elif spec.placement.labels:
+        host_specs = []
+        for label in spec.placement.labels:
+            for host in [h for h in hosts if label in h.labels]:
+                if host.hostname not in [h.hostname for h in host_specs]:
+                    host_specs.append(HostPlacementSpec(hostname=host.hostname, network='', name=''))
     elif spec.placement.host_pattern:
         matching_hostnames = spec.placement.filter_matching_hostspecs(hosts)
         host_specs = [
@@ -169,10 +176,28 @@ class DaemonPlacement(NamedTuple):
         # new port/ips as part of the upgrade process
         if not upgrade_in_progress:
             if self.ports:
-                if self.ports != dd.ports and dd.ports:
-                    return False
+                if self.ports and dd.ports and self.ports != dd.ports:
+                    # If the existing daemon ports are a leading subset of the
+                    # new spec ports, the extra ports were added as new defaults
+                    # (e.g. after an upgrade).  Treat the daemon as still matching
+                    # so we avoid a spurious redeploy purely because new default
+                    # ports appeared in the spec.
+                    if self.ports[:len(dd.ports)] != dd.ports:
+                        return False
                 if self.ip and dd.ip and self.ip != dd.ip:
                     return False
+        return True
+
+    def matches_daemon_ignore_network(self, dd: DaemonDescription) -> bool:
+        """True if daemon matches this placement on type, host, and name (ignoring port/ip).
+        Used to detect when only port/ip changed so we can redeploy instead of remove+add.
+        """
+        if self.daemon_type != dd.daemon_type:
+            return False
+        if self.hostname != dd.hostname:
+            return False
+        if self.name and self.name != dd.daemon_id:
+            return False
         return True
 
     def matches_rank_map(
@@ -229,6 +254,7 @@ class HostAssignment(object):
                  blocking_daemon_hosts: Optional[List[orchestrator.HostSpec]] = None,
                  upgrade_in_progress: bool = False,
                  host_selector: Optional[HostSelector] = None,
+                 use_same_port: bool = False,
                  ):
         assert spec
         self.spec = spec  # type: ServiceSpec
@@ -249,6 +275,7 @@ class HostAssignment(object):
         self.rank_map = rank_map
         self.upgrade_in_progress = upgrade_in_progress
         self.host_selector = host_selector
+        self.use_same_port = use_same_port
 
     def hosts_by_label(self, label: str) -> List[orchestrator.HostSpec]:
         return [h for h in self.hosts if label in h.labels]
@@ -293,6 +320,13 @@ class HostAssignment(object):
                     f'Cannot place {self.spec.one_line_str()}: No matching '
                     f'hosts for label {self.spec.placement.label}')
 
+        if self.spec.placement.labels:
+            for label in self.spec.placement.labels:
+                if not self.hosts_by_label(label):
+                    raise OrchestratorValidationError(
+                        f'Cannot place {self.spec.one_line_str()}: No matching '
+                        f'hosts for label {label}')
+
     def place_per_host_daemons(
             self,
             slots: List[DaemonPlacement],
@@ -326,7 +360,7 @@ class HostAssignment(object):
         return slots, to_add, to_remove
 
     def place(self):
-        # type: () -> Tuple[List[DaemonPlacement], List[DaemonPlacement], List[orchestrator.DaemonDescription]]
+        # type: () -> Tuple[List[DaemonPlacement], List[DaemonPlacement], List[orchestrator.DaemonDescription], List[orchestrator.DaemonDescription]]
         """
         Generate a list of HostPlacementSpec taking into account:
 
@@ -340,7 +374,7 @@ class HostAssignment(object):
 
         count = self.spec.placement.count
 
-        # get candidate hosts based on [hosts, label, host_pattern]
+        # get candidate hosts based on [hosts, label(s), host_pattern]
         candidates = self.get_candidates()  # type: List[DaemonPlacement]
         all_candidates = candidates
         if self.primary_daemon_type in RESCHEDULE_FROM_OFFLINE_HOSTS_TYPES:
@@ -369,7 +403,11 @@ class HostAssignment(object):
                             r.extend([dp.renumber_ports(i) for dp in ls])
                     return r
             for offset in range(num):
-                r.extend([dp.renumber_ports(offset) for dp in ls])
+                if self.use_same_port:
+                    # if we're using same port, offset by 0 always
+                    r.extend([dp.renumber_ports(0) for dp in ls])
+                else:
+                    r.extend([dp.renumber_ports(offset) for dp in ls])
             return r
 
         # consider enough slots to fulfill target count-per-host or count
@@ -404,6 +442,7 @@ class HostAssignment(object):
         to_add: List[DaemonPlacement] = []
         to_remove: List[orchestrator.DaemonDescription] = []
         ranks: List[int] = list(range(len(all_candidates if len(all_candidates) > len(candidates) else candidates)))
+        to_redeploy: List[orchestrator.DaemonDescription] = []
         others: List[DaemonPlacement] = candidates.copy()
         for dd in daemons:
             found = False
@@ -421,6 +460,31 @@ class HostAssignment(object):
                     existing_slots.append(p)
                     found = True
                     break
+            if not found and not self.upgrade_in_progress:
+                # Check if only port/ip changed: same daemon slot, redeploy with new config
+                for p in others:
+                    if (p.matches_daemon_ignore_network(dd) and p.matches_rank_map(dd, self.rank_map, ranks)
+                            and ((p.ports or dd.ports) and p.ports != (dd.ports or [])
+                                 or (p.ip or dd.ip) and p.ip != dd.ip)):
+                        others.remove(p)
+                        if dd.is_active:
+                            existing_active.append(dd)
+                        else:
+                            existing_standby.append(dd)
+                        if dd.rank is not None:
+                            assert dd.rank_generation is not None
+                            p = p.assign_rank(dd.rank, dd.rank_generation)
+                            ranks.remove(dd.rank)
+                        existing_slots.append(p)
+                        # update daemon description to reflect new port/ip so redeploy uses updated config
+                        if p.ports:
+                            dd.ports = list(p.ports)
+                        if p.ip is not None:
+                            dd.ip = p.ip
+
+                        to_redeploy.append(dd)
+                        found = True
+                        break
             if not found:
                 to_remove.append(dd)
 
@@ -438,7 +502,37 @@ class HostAssignment(object):
         unreachable_hostnames = [
             h.hostname for h in self.unreachable_hosts
         ]
-        if not count:
+        if self.spec.placement.labels and self.spec.placement.count_per_label:
+            hosts_to_avoid = list(set(blocking_daemon_hostnames + unreachable_hostnames))
+            candidate_host_hostnames = [dd.hostname for dd in others if dd.hostname not in hosts_to_avoid]
+            candidate_hosts = [h for h in self.hosts if h.hostname in candidate_host_hostnames]
+            known_daemon_hosts = [h for h in self.hosts if h.hostname in [dd.hostname for dd in existing]]
+            label_host_mapping, already_present_label_mapping = self.generate_count_per_label_placement(
+                candidate_hosts,
+                self.spec.placement.labels,
+                self.spec.placement.count_per_label,
+                known_daemon_hosts
+            )
+            logger.debug(f'count-per-host generated placement mapping: {label_host_mapping}')
+            mapped_hosts: List[orchestrator.HostSpec] = []
+            for hosts in label_host_mapping.values():
+                mapped_hosts.extend(hosts)
+            if not mapped_hosts:
+                # if we aren't adding, check if we're removing
+                selected_already_present_hosts: List[orchestrator.HostSpec] = []
+                for hosts in already_present_label_mapping.values():
+                    selected_already_present_hosts.extend(hosts)
+                selected_already_present_hostnames = [h.hostname for h in selected_already_present_hosts]
+                for slot in existing_slots:
+                    daemon = [dd for dd in existing if dd.hostname == slot.hostname][0]
+                    if slot.hostname not in selected_already_present_hostnames:
+                        to_remove.append(daemon)
+                existing_slots = [
+                    h for h in existing_slots if h.hostname in selected_already_present_hostnames
+                ]
+            to_add = [DaemonPlacement(daemon_type=self.primary_daemon_type,
+                                      hostname=h.hostname, ports=self.ports_start) for h in mapped_hosts]
+        elif not count:
             to_add = [
                 dd for dd in others if (
                     dd.hostname not in blocking_daemon_hostnames
@@ -506,7 +600,8 @@ class HostAssignment(object):
                 # remove from  existing_slots
                 non_matching_hostnames = {dd.hostname for dd in non_matching_daemons}
                 existing_slots = [slot for slot in existing_slots if slot.hostname not in non_matching_hostnames]
-                return self.place_per_host_daemons(existing_slots, [], to_remove)
+                slots, add, remove = self.place_per_host_daemons(existing_slots, [], to_remove)
+                return slots, add, remove, to_redeploy
 
             if self.related_service_daemons:
                 # prefer to put daemons on the same host(s) as daemons of the related service
@@ -546,7 +641,8 @@ class HostAssignment(object):
                 to_add[i] = to_add[i].assign_rank_generation(ranks[i], self.rank_map)
 
         logger.debug('Combine hosts with existing daemons %s + new hosts %s' % (existing, to_add))
-        return self.place_per_host_daemons(existing_slots + to_add, to_add, to_remove)
+        slots, add, remove = self.place_per_host_daemons(existing_slots + to_add, to_add, to_remove)
+        return slots, add, remove, to_redeploy
 
     def find_ip_on_host(self, hostname: str, subnets: List[str]) -> Optional[str]:
         for subnet in subnets:
@@ -641,5 +737,92 @@ class HostAssignment(object):
             in_maintenance[h.hostname] = False
         unreachable_hosts = [h.hostname for h in self.unreachable_hosts]
         candidates = [
-            c for c in candidates if c.hostname not in unreachable_hosts or in_maintenance[c.hostname]]
+            c for c in candidates if c.hostname not in unreachable_hosts and not in_maintenance[c.hostname]]
         return candidates
+
+    def generate_count_per_label_placement(
+        self,
+        candidate_hosts: List[orchestrator.HostSpec],
+        labels: List[str],
+        count_per_label: int,
+        known_daemon_hosts: List[orchestrator.HostSpec]
+    ) -> Tuple[Dict[str, List[orchestrator.HostSpec]], Dict[str, List[orchestrator.HostSpec]]]:
+        # For this particular case we need to sort hosts into groups by label
+        # and pick count_per_label hosts per each label to place daemons on.
+        # World's ugliest function
+        label_to_candidate_hosts: Dict[str, List[orchestrator.HostSpec]] = {label: [] for label in labels}
+        label_to_known_daemon_hosts: Dict[str, List[orchestrator.HostSpec]] = {label: [] for label in labels}
+        for label in label_to_candidate_hosts.keys():
+            label_to_candidate_hosts[label] = [
+                h
+                for h in candidate_hosts
+                if label in list(h.labels)
+            ]
+            label_to_known_daemon_hosts[label] = [
+                h
+                for h in known_daemon_hosts
+                if label in list(h.labels)
+            ]
+        count_candidate_host_per_label = {k: len(v) for k, v in label_to_candidate_hosts.items()}
+        count_known_daemon_host_per_label = {k: len(v) for k, v in label_to_known_daemon_hosts.items()}
+        matched_all = False
+        label_host_mapping: Dict[str, List[orchestrator.HostSpec]] = {}
+        label_already_present_host_mapping: Dict[str, List[orchestrator.HostSpec]] = {}
+        while not matched_all:
+            label_with_least_hosts = list(label_to_candidate_hosts.keys())[0]
+            label_with_least_hosts_host_count = (
+                count_candidate_host_per_label[label_with_least_hosts]
+                + count_known_daemon_host_per_label[label_with_least_hosts]
+            )
+            print(label_with_least_hosts)
+            print(label_with_least_hosts_host_count)
+            for label in count_candidate_host_per_label.keys():
+                host_count = (
+                    count_candidate_host_per_label[label]
+                    + count_known_daemon_host_per_label[label]
+                )
+                print(f'QWEWE - {host_count}')
+                if host_count < label_with_least_hosts_host_count:
+                    label_with_least_hosts = label
+                    label_with_least_hosts_host_count = host_count
+            potential_hosts = label_to_candidate_hosts[label_with_least_hosts]
+            selected_hosts: List[orchestrator.HostSpec] = []
+            already_present_hosts: List[orchestrator.HostSpec] = []
+            # hosts that already have daemons should not be selected
+            # as we are building a "to add" list here rather than
+            # a list of all the hosts that will have daemons
+            for host in label_to_known_daemon_hosts[label_with_least_hosts]:
+                if len(already_present_hosts) == count_per_label:
+                    break
+                already_present_hosts.append(host)
+            already_present_hostnames = [h.hostname for h in already_present_hosts]
+            for k in label_to_known_daemon_hosts.keys():
+                label_to_known_daemon_hosts[k] = [
+                    h for h in label_to_known_daemon_hosts[k] if h.hostname not in already_present_hostnames
+                ]
+            print(f'{label_with_least_hosts} - {already_present_hosts}')
+            print(f'{label_with_least_hosts} - {potential_hosts}')
+            if len(already_present_hosts + potential_hosts) < count_per_label:
+                raise OrchestratorValidationError(f'Not enough hosts with label {label_with_least_hosts} '
+                                                  f'to place {count_per_label} daemons\nSo far selected label to '
+                                                  f'host mapping is {label_host_mapping} and hosts that already '
+                                                  f'have daemons mapping is {label_already_present_host_mapping}')
+            if len(already_present_hosts) < count_per_label:
+                selected_hosts.extend(potential_hosts[:(count_per_label - len(already_present_hosts))])
+            label_host_mapping[label_with_least_hosts] = selected_hosts
+            label_already_present_host_mapping[label_with_least_hosts] = already_present_hosts
+            new_label_to_candidate_hosts = copy.deepcopy(label_to_candidate_hosts)
+            for k, v in new_label_to_candidate_hosts.items():
+                new_label_to_candidate_hosts[k] = [
+                    h for h in v if (
+                        h not in label_host_mapping[label_with_least_hosts]
+                        and h not in already_present_hosts
+                    )
+                ]
+            new_label_to_candidate_hosts.pop(label_with_least_hosts, None)
+            label_to_candidate_hosts = new_label_to_candidate_hosts
+            if not label_to_candidate_hosts:
+                matched_all = True
+            else:
+                count_candidate_host_per_label = {k: len(v) for k, v in label_to_candidate_hosts.items()}
+        return label_host_mapping, label_already_present_host_mapping

@@ -19,6 +19,7 @@ from ceph.deployment.service_spec import (
     OAuth2ProxySpec,
     PlacementSpec,
     PrometheusSpec,
+    CertificateSource,
     RGWSpec,
     ServiceSpec,
     YamlLiteralString,
@@ -326,6 +327,56 @@ def test_rgw_servicespec_parse(realm, zone, frontend_type, raise_exception, msg)
     else:
         spec.validate()
 
+
+RGW_FRONTEND_TEST_CERT = """-----BEGIN CERTIFICATE-----\nMIICxjCCAa4CEQDIZSujNBlKaLJzmvntjukjMA0GCSqGSIb3DQEBDQUAMCExDTAL\nBgNVBAoMBENlcGgxEDAOBgNVBAMMB2NlcGhhZG0wHhcNMjIwNzEzMTE0NzA3WhcN\nMzIwNzEwMTE0NzA3WjAhMQ0wCwYDVQQKDARDZXBoMRAwDgYDVQQDDAdjZXBoYWRt\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyyMe4DMA+MeYK7BHZMHB\nq7zjliEOcNgxomjU8qbf5USF7Mqrf6+/87XWqj4pCyAW8x0WXEr6A56a+cmBVmt+\nqtWDzl020aoId6lL5EgLLn6/kMDCCJLq++Lg9cEofMSvcZh+lY2f+1p+C+00xent\nrLXvXGOilAZWaQfojT2BpRnNWWIFbpFwlcKrlg2G0cFjV5c1m6a0wpsQ9JHOieq0\nSvwCixajwq3CwAYuuiU1wjI4oJO4Io1+g8yB3nH2Mo/25SApCxMXuXh4kHLQr/T4\n4hqisvG4uJYgKMcSIrWj5o25mclByGi1UI/kZkCUES94i7Z/3ihx4Bad0AMs/9tw\nFwIDAQABMA0GCSqGSIb3DQEBDQUAA4IBAQAf+pwz7Gd7mDwU2LY0TQXsK6/8KGzh\nHuX+ErOb8h5cOAbvCnHjyJFWf6gCITG98k9nxU9NToG0WYuNm/max1y/54f0dtxZ\npUo6KSNl3w6iYCfGOeUIj8isi06xMmeTgMNzv8DYhDt+P2igN6LenqWTVztogkiV\nxQ5ZJFFLEw4sN0CXnrZX3t5ruakxLXLTLKeE0I91YJvjClSBGkVJq26wOKQNHMhx\npWxeydQ5EgPZY+Aviz5Dnxe8aB7oSSovpXByzxURSabOuCK21awW5WJCGNpmqhWK\nZzACBDEstccj57c4OGV0eayHJRsluVr2e9NHRINZA3qdB37e6gsI1xHo\n-----END CERTIFICATE-----\n"""
+
+RGW_FRONTEND_TEST_KEY = """-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDLIx7gMwD4x5gr\nsEdkwcGrvOOWIQ5w2DGiaNTypt/lRIXsyqt/r7/ztdaqPikLIBbzHRZcSvoDnpr5\nyYFWa36q1YPOXTbRqgh3qUvkSAsufr+QwMIIkur74uD1wSh8xK9xmH6VjZ/7Wn4L\n7TTF6e2ste9cY6KUBlZpB+iNPYGlGc1ZYgVukXCVwquWDYbRwWNXlzWbprTCmxD0\nkc6J6rRK/AKLFqPCrcLABi66JTXCMjigk7gijX6DzIHecfYyj/blICkLExe5eHiQ\nctCv9PjiGqKy8bi4liAoxxIitaPmjbmZyUHIaLVQj+RmQJQRL3iLtn/eKHHgFp3Q\nAyz/23AXAgMBAAECggEAVoTB3Mm8azlPlaQB9GcV3tiXslSn+uYJ1duCf0sV52dV\nBzKW8s5fGiTjpiTNhGCJhchowqxoaew+o47wmGc2TvqbpeRLuecKrjScD0GkCYyQ\neM2wlshEbz4FhIZdgS6gbuh9WaM1dW/oaZoBNR5aTYo7xYTmNNeyLA/jO2zr7+4W\n5yES1lMSBXpKk7bDGKYY4bsX2b5RLr2Grh2u2bp7hoLABCEvuu8tSQdWXLEXWpXo\njwmV3hc6tabypIa0mj2Dmn2Dmt1ppSO0AZWG/WAizN3f4Z0r/u9HnbVrVmh0IEDw\n3uf2LP5o3msG9qKCbzv3lMgt9mMr70HOKnJ8ohMSKQKBgQDLkNb+0nr152HU9AeJ\nvdz8BeMxcwxCG77iwZphZ1HprmYKvvXgedqWtS6FRU+nV6UuQoPUbQxJBQzrN1Qv\nwKSlOAPCrTJgNgF/RbfxZTrIgCPuK2KM8I89VZv92TSGi362oQA4MazXC8RAWjoJ\nSu1/PHzK3aXOfVNSLrOWvIYeZQKBgQD/dgT6RUXKg0UhmXj7ExevV+c7oOJTDlMl\nvLngrmbjRgPO9VxLnZQGdyaBJeRngU/UXfNgajT/MU8B5fSKInnTMawv/tW7634B\nw3v6n5kNIMIjJmENRsXBVMllDTkT9S7ApV+VoGnXRccbTiDapBThSGd0wri/CuwK\nNWK1YFOeywKBgEDyI/XG114PBUJ43NLQVWm+wx5qszWAPqV/2S5MVXD1qC6zgCSv\nG9NLWN1CIMimCNg6dm7Wn73IM7fzvhNCJgVkWqbItTLG6DFf3/DPODLx1wTMqLOI\nqFqMLqmNm9l1Nec0dKp5BsjRQzq4zp1aX21hsfrTPmwjxeqJZdioqy2VAoGAXR5X\nCCdSHlSlUW8RE2xNOOQw7KJjfWT+WAYoN0c7R+MQplL31rRU7dpm1bLLRBN11vJ8\nMYvlT5RYuVdqQSP6BkrX+hLJNBvOLbRlL+EXOBrVyVxHCkDe+u7+DnC4epbn+N8P\nLYpwqkDMKB7diPVAizIKTBxinXjMu5fkKDs5n+sCgYBbZheYKk5M0sIxiDfZuXGB\nkf4mJdEkTI1KUGRdCwO/O7hXbroGoUVJTwqBLi1tKqLLarwCITje2T200BYOzj82\nqwRkCXGtXPKnxYEEUOiFx9OeDrzsZV00cxsEnX0Zdj+PucQ/J3Cvd0dWUspJfLHJ\n39gnaegswnz9KMQAvzKFdg==\n-----END PRIVATE KEY-----\n"""
+
+RGW_FRONTEND_ENCRYPTED_KEY = """-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIB\n-----END ENCRYPTED PRIVATE KEY-----\n"""
+
+
+def _rgw_frontend_ssl_certificate_spec(pem):
+    return {
+        'service_type': 'rgw',
+        'service_id': 'foo',
+        'spec': {
+            'ssl': True,
+            'rgw_frontend_ssl_certificate': pem,
+        },
+    }
+
+
+def test_rgw_frontend_ssl_certificate_combined_pem_is_split_by_validate():
+    spec = ServiceSpec.from_json(_rgw_frontend_ssl_certificate_spec(
+        RGW_FRONTEND_TEST_KEY + RGW_FRONTEND_TEST_CERT
+    ))
+
+    assert spec.certificate_source == CertificateSource.INLINE.value
+    assert spec.rgw_frontend_ssl_certificate is None
+    assert spec.ssl_cert == RGW_FRONTEND_TEST_CERT
+    assert spec.ssl_key == RGW_FRONTEND_TEST_KEY
+
+
+def test_rgw_frontend_ssl_certificate_chain_without_key_is_left_unchanged():
+    pem = RGW_FRONTEND_TEST_CERT + RGW_FRONTEND_TEST_CERT
+
+    spec = ServiceSpec.from_json(_rgw_frontend_ssl_certificate_spec(pem))
+
+    assert spec.rgw_frontend_ssl_certificate == pem
+    assert spec.ssl_cert is None
+    assert spec.ssl_key is None
+
+
+def test_rgw_frontend_ssl_certificate_parser_error_is_left_unchanged():
+    pem = RGW_FRONTEND_ENCRYPTED_KEY + RGW_FRONTEND_TEST_CERT
+
+    spec = ServiceSpec.from_json(_rgw_frontend_ssl_certificate_spec(pem))
+
+    assert spec.rgw_frontend_ssl_certificate == pem
+    assert spec.ssl_cert is None
+    assert spec.ssl_key is None
+
+
 def test_osd_unmanaged():
     osd_spec = {"placement": {"host_pattern": "*"},
                 "service_id": "all-available-devices",
@@ -465,6 +516,7 @@ service_type: nfs
 service_id: mynfs
 service_name: nfs.mynfs
 spec:
+  grpc_certificate_source: cephadm-signed
   idmap_conf:
     general:
       local-realms: domain.org
@@ -649,6 +701,247 @@ def test_nfs_spec_from_json_rdma():
     out = spec.to_json()
     assert out.get('spec', {}).get('enable_rdma') is True
     assert out.get('spec', {}).get('rdma_port') == 1234
+
+
+def test_nfs_spec_tsm_default():
+    """NFS spec without TSM: enable_tsm is False."""
+    spec = NFSServiceSpec(service_id='mynfs', placement=PlacementSpec(count=1))
+    assert spec.enable_tsm is False
+    assert spec.tsm_port is None
+    assert spec.get_port_start() == [2049, 9587, 31311]
+    assert spec.get_colocation_port_fields() == ['data_port', 'monitoring_port', 'cluster_qos_port']
+
+
+def test_nfs_spec_tsm_enabled():
+    """NFS spec with enable_tsm: get_port_start returns 4 ports, default tsm_port 36369."""
+    spec = NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=2),
+        enable_tsm=True,
+    )
+    assert spec.enable_tsm is True
+    assert spec.tsm_port is None
+    assert spec.get_port_start() == [2049, 9587, 31311, 36369]
+    assert spec.get_colocation_port_fields() == ['data_port', 'monitoring_port', 'cluster_qos_port', 'tsm_port']
+
+
+def test_nfs_spec_tsm_custom_port():
+    """NFS spec with enable_tsm and custom tsm_port."""
+    spec = NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=2),
+        enable_tsm=True,
+        tsm_port=40000,
+    )
+    assert spec.enable_tsm is True
+    assert spec.tsm_port == 40000
+    assert spec.get_port_start() == [2049, 9587, 31311, 40000]
+    assert spec.get_colocation_port_fields() == ['data_port', 'monitoring_port', 'cluster_qos_port', 'tsm_port']
+    
+
+def test_nfs_spec_colocation_with_tsm_and_rdma():
+    """NFS spec with both TSM and RDMA colocation."""
+    spec = NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=3),
+        enable_tsm=True,
+        enable_rdma=True,
+        colocation_ports=[
+            {'data_port': 3049, 'monitoring_port': 9597, 'cluster_qos_port': 31312, 'tsm_port': 36370, 'rdma_port': 20050},
+            {'data_port': 4049, 'monitoring_port': 9607, 'cluster_qos_port': 31313, 'tsm_port': 36371, 'rdma_port': 20051},
+        ]
+    )
+    spec.validate()
+    assert spec.enable_tsm is True
+    assert spec.enable_rdma is True
+    assert spec.get_colocation_port_fields() == ['data_port', 'monitoring_port', 'cluster_qos_port', 'rdma_port', 'tsm_port']
+
+def test_nfs_spec_from_json_tsm():
+    """NFS spec enable_tsm and tsm_port roundtrip via from_json/to_json."""
+    data = {
+        'service_id': 'mynfs',
+        'service_type': 'nfs',
+        'placement': {'count': 2},
+        'spec': {
+            'enable_tsm': True,
+            'tsm_port': 40000,
+        },
+    }
+    spec = NFSServiceSpec.from_json(data)
+    assert spec.enable_tsm is True
+    assert spec.tsm_port == 40000
+    out = spec.to_json()
+    assert out.get('spec', {}).get('enable_tsm') is True
+    assert out.get('spec', {}).get('tsm_port') == 40000
+
+
+def test_nfs_spec_tsm_requires_min_two_daemons():
+    """TSM with placement count < 2 must fail validation."""
+    with pytest.raises(SpecValidationError, match="requires placement count >= 2"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_tsm=True,
+        ).validate()
+
+
+def test_nfs_spec_tsm_count_two_succeeds():
+    """TSM with placement count == 2 must pass validation."""
+    NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=2),
+        enable_tsm=True,
+    ).validate()
+
+
+def test_nfs_spec_tsm_single_host_fails():
+    """TSM with a single explicit host must fail validation."""
+    with pytest.raises(SpecValidationError, match="requires at least 2 hosts"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(hosts=['host1']),
+            enable_tsm=True,
+        ).validate()
+
+
+def test_nfs_spec_tsm_two_hosts_succeeds():
+    """TSM with two explicit hosts must pass validation."""
+    NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(hosts=['host1', 'host2']),
+        enable_tsm=True,
+    ).validate()
+
+
+def test_nfs_spec_client_object_cache_from_json_roundtrip():
+    """Object-cache fields roundtrip via from_json/to_json, preserving size strings."""
+    data = {
+        'service_id': 'mynfs',
+        'service_type': 'nfs',
+        'placement': {'count': 1},
+        'spec': {
+            'enable_client_object_cache': True,
+            'client_object_cache_size': '1MiB',
+            'client_object_cache_max_dirty': '512KiB',
+        },
+    }
+    spec = NFSServiceSpec.from_json(data)
+    assert spec.enable_client_object_cache is True
+    assert spec.client_object_cache_size == '1MiB'
+    assert spec.client_object_cache_max_dirty == '512KiB'
+    out = spec.to_json()
+    assert out.get('spec', {}).get('enable_client_object_cache') is True
+    assert out.get('spec', {}).get('client_object_cache_size') == '1MiB'
+    assert out.get('spec', {}).get('client_object_cache_max_dirty') == '512KiB'
+
+
+def test_nfs_spec_client_object_cache_size_units():
+    """Size fields accept KiB/MB/GiB strings and remain unchanged after validate."""
+    spec = NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=1),
+        enable_client_object_cache=True,
+        client_object_cache_size='1MiB',
+        client_object_cache_max_dirty='512KiB',
+    )
+    spec.validate()
+    assert spec.client_object_cache_size == '1MiB'
+    assert spec.client_object_cache_max_dirty == '512KiB'
+
+    data = {
+        'service_id': 'mynfs',
+        'service_type': 'nfs',
+        'placement': {'count': 1},
+        'spec': {
+            'enable_client_object_cache': True,
+            'client_object_cache_size': '100MB',
+            'client_object_cache_max_dirty': '0',
+        },
+    }
+    spec = NFSServiceSpec.from_json(data)
+    assert spec.client_object_cache_size == '100MB'
+    assert spec.client_object_cache_max_dirty == '0'
+
+
+def test_nfs_spec_client_object_cache_validation():
+    """client_object_cache_size/max_dirty must be valid and size > max_dirty."""
+    with pytest.raises(SpecValidationError, match="client_object_cache_size"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_client_object_cache=True,
+            client_object_cache_size=-1,
+        ).validate()
+
+    with pytest.raises(SpecValidationError, match="client_object_cache_max_dirty"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_client_object_cache=True,
+            client_object_cache_max_dirty=-5,
+        ).validate()
+
+    with pytest.raises(SpecValidationError, match="client_object_cache_size"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_client_object_cache=True,
+            client_object_cache_size='not-a-size',
+        ).validate()
+
+    with pytest.raises(SpecValidationError, match="must be greater than"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_client_object_cache=True,
+            client_object_cache_size='1MiB',
+            client_object_cache_max_dirty='2MiB',
+        ).validate()
+
+    with pytest.raises(SpecValidationError, match="must be greater than"):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_client_object_cache=True,
+            client_object_cache_size='1MiB',
+            client_object_cache_max_dirty='1MiB',
+        ).validate()
+
+    # Valid: size greater than max_dirty
+    NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=1),
+        enable_client_object_cache=True,
+        client_object_cache_size='1MiB',
+        client_object_cache_max_dirty='512KiB',
+    ).validate()
+
+
+def test_nfs_spec_cephfs_client_log_dir_path():
+    """cephfs_client_log_dir must be an absolute path and not '/' when set."""
+    spec = NFSServiceSpec(
+        service_id='mynfs',
+        placement=PlacementSpec(count=1),
+        enable_cephfs_client_log=True,
+        cephfs_client_log_dir='/var/log/ceph/custom',
+    )
+    spec.validate()
+
+    with pytest.raises(SpecValidationError, match='absolute path'):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_cephfs_client_log=True,
+            cephfs_client_log_dir='relative/log/dir',
+        ).validate()
+
+    with pytest.raises(SpecValidationError, match='filesystem root'):
+        NFSServiceSpec(
+            service_id='mynfs',
+            placement=PlacementSpec(count=1),
+            enable_cephfs_client_log=True,
+            cephfs_client_log_dir='/',
+        ).validate()
 
 
 def test_repr():
@@ -1476,7 +1769,8 @@ def test_extra_args_handling(y, ec_args, ee_args, ec_final_args, ee_final_args):
         for args in spec_obj.extra_entrypoint_args:
             ee_res.extend(args.to_args())
         assert ee_res == ee_final_args
-  
+ 
+
 def test_osd_has_default_termination_grace_when_missing():
     
     spec_data = """
@@ -1652,3 +1946,19 @@ def test_tuned_profile_spec_profile_name_validation(spec_yaml, expect_error, err
         assert spec.placement is not None
         # round-trip
         assert TunedProfileSpec.from_json(spec.to_json()).profile_name == spec.profile_name
+
+
+def test_multiple_labels_to_from_string_and_json():
+    placement = PlacementSpec(labels=['foo', 'bar'], count_per_label=2)
+    from_json_placement = PlacementSpec.from_json({'labels': ['foo', 'bar'], 'count_per_label': 2})
+    from_string_placement = PlacementSpec.from_string('labels:foo,bar;count-per-label:2')
+    assert placement == from_json_placement
+    assert placement == from_string_placement
+    assert PlacementSpec.from_json(placement.to_json()) == placement
+    assert PlacementSpec.from_string(placement.pretty_str()) == placement
+    assert all(label in placement.labels for label in ['foo', 'bar'])
+    assert all(label in from_json_placement.labels for label in ['foo', 'bar'])
+    assert all(label in from_string_placement.labels for label in ['foo', 'bar'])
+    assert placement.count_per_label == 2
+    assert from_json_placement.count_per_label == 2
+    assert from_string_placement.count_per_label == 2

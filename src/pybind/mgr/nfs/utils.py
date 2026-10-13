@@ -1,3 +1,4 @@
+import enum
 import functools
 import logging
 import stat
@@ -11,6 +12,8 @@ from mgr_util import CephfsClient, open_filesystem
 from mgr_module import NFS_POOL_NAME as POOL_NAME
 
 from rados import Rados, LIBRADOS_ALL_NSPACES, ObjectNotFound
+
+from .exception import NFSInvalidOperation
 
 if TYPE_CHECKING:
     from nfs.module import Module
@@ -47,9 +50,30 @@ class ManualRestartRequired(NonFatalError):
         super().__init__(" ".join((msg, "(Manual Restart of NFS Pods required)")))
 
 
+def normalize_auth_entity(entity: str) -> str:
+    """Return a full auth entity name (client.<user_id>)."""
+    entity = entity.strip()
+    if not entity:
+        raise NFSInvalidOperation("empty auth entity")
+    if entity.startswith('client.'):
+        return entity
+    return f'client.{entity}'
+
+
+def entity_belongs_to_nfs_cluster(entity: str, cluster_id: str) -> bool:
+    """True if entity is the cluster key or any key under that NFS cluster."""
+    prefix = f'client.nfs.{cluster_id}'
+    return entity == prefix or entity.startswith(prefix + '.')
+
+
 def export_obj_name(export_id: int) -> str:
     """Return a rados object name for the export."""
     return f"{EXPORT_PREFIX}{export_id}"
+
+
+def export_default_obj_name(cluster_id: str) -> str:
+    """Return a rados object name for the export default block."""
+    return f"export-default-{cluster_id}"
 
 
 def conf_obj_name(cluster_id: str) -> str:
@@ -130,6 +154,15 @@ def restart_nfs_service(mgr: 'Module', cluster_id: str) -> None:
     orchestrator.raise_if_exception(completion)
 
 
+def redeploy_nfs_service(mgr: 'Module', cluster_id: str) -> None:
+    '''
+    Redeploy NFS daemons so they pick up rotated daemon keyrings.
+    '''
+    completion = mgr.service_action(action='redeploy',
+                                    service_name='nfs.' + cluster_id)
+    orchestrator.raise_if_exception(completion)
+
+
 def check_fs(mgr: 'Module', fs_name: str) -> bool:
     '''
     This method checks if given fs is valid
@@ -151,3 +184,10 @@ def cephfs_path_is_dir(mgr: 'Module', fs: str, path: str) -> None:
                               cephfs.AT_SYMLINK_NOFOLLOW)
         if not stat.S_ISDIR(stx.get('mode')):
             raise NotADirectoryError()
+
+
+class NFSRadosObjectType(enum.Enum):
+    # class for the type of things the nfs module writes to rados
+    export = 'export'
+    nfs_config = 'nfs_config'  # primarily for pointing to ganesha towards its exports
+    common_config = 'common_config'

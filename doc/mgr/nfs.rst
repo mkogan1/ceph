@@ -178,6 +178,36 @@ orchestration, these commands check service status:
    ceph orch ls --service_name=ingress.nfs.<cluster_id>
 
 
+Rotate NFS Cluster Keys
+-----------------------
+
+.. prompt:: bash #
+
+   ceph nfs cluster rotate-key <cluster_id> [<entity>...] [--key-type <type>]
+
+Rotate auth keys belonging to an NFS cluster. ``<cluster_id>`` is required.
+
+If no ``<entity>`` values are given, all auth entities for the cluster are
+rotated, including daemon/recovery keyrings (for example
+``client.nfs.<cluster_id>`` and ``client.nfs.<daemon_id>-rgw``) and CephFS
+export keyrings (``client.nfs.<cluster_id>.<fs_name>.<hash>``).
+
+If one or more ``<entity>`` values are given, only those entities are rotated.
+Each entity must belong to the cluster (the ``client.`` prefix is optional).
+
+``--key-type <type>`` is optional and is passed through to ``ceph auth rotate``
+(for example ``aes256k``).
+
+After export keys are rotated, matching CephFS exports are updated with the new
+keyrings. After any daemon keys are rotated, the NFS service is redeployed
+(``ceph orch redeploy nfs.<cluster_id>``).
+
+For example::
+
+   ceph nfs cluster rotate-key cephfs-nfs1 --key-type aes256k
+   ceph nfs cluster rotate-key cephfs-nfs1 client.nfs.cephfs-nfs1.cephfs.c44692f7 --key-type aes256k
+
+
 Updating an NFS Cluster
 -----------------------
 
@@ -256,7 +286,7 @@ Example use cases include:
 
    .. prompt:: bash #
 
-      ceph auth get-or-create client.<user_id> mon 'allow r' osd 'allow rw pool=.nfs namespace=<nfs_cluster_name>, allow rw tag cephfs data=<fs_name>' mds 'allow rw path=<export_path>'
+      ceph auth get-or-create client.<user_id> mon 'allow r' osd 'allow rw pool=.nfs namespace=<nfs_cluster_name>, allow rw tag cephfs data=<fs_name>' mds 'allow all path=<export_path>'
 
 View Customized NFS Ganesha Configuration
 -----------------------------------------
@@ -562,7 +592,8 @@ Create CephFS Export
 
 .. prompt:: bash #
 
-   ceph nfs export create cephfs --cluster-id <cluster_id> --pseudo-path <pseudo_path> --fsname <fsname> [--readonly] [--path=/path/in/cephfs] [--client_addr <value>...] [--squash <value>] [--sectype <value>...] [--cmount_path <value>] [--xprtsec <value>] [--transports <value>...]
+
+   ceph nfs export create cephfs --cluster-id <cluster_id> --pseudo-path <pseudo_path> --fsname <fsname> [--readonly] [--path=/path/in/cephfs] [--client_addr <value>...] [--squash <value>] [--sectype <value>...] [--cmount_path <value>] [--xprtsec <value>] [--transports <value>...] [--delegations <value>] [-i <client spec_file>]
 
 This creates export RADOS objects containing the export block, where
 
@@ -603,6 +634,10 @@ Valid values are ``tls``, ``mtls`` and ``none``.
 ``<cmount_path>`` specifies the path within the CephFS to mount this export on. It is
 allowed to be any complete path hierarchy between ``/`` and the ``EXPORT {path}``. (i.e. if ``EXPORT { Path }`` parameter is ``/foo/bar`` then cmount_path could be ``/``, ``/foo`` or ``/foo/bar``).
 
+``<delegations>`` specifies the NFSv4 delegations supported by the export. Valid values are "rw", "ro", "none".
+
+``<client spec_file> `` specifies the path to a file containing a client specification.
+
 .. note:: If this and the other ``EXPORT { FSAL {} }`` options are the same between multiple exports, those exports will share a single CephFS client.
           If not specified, the default is ``/``.
 
@@ -635,9 +670,9 @@ RGW bucket export
 To export a *bucket*:
 
 .. prompt:: bash #
+ceph nfs export create rgw --cluster-id <cluster_id> --pseudo-path <pseudo_path> --bucket <bucket_name> [--user-id <user-id>] [--readonly] [--client_addr <value>...] [--squash <value>] [--sectype <value>...] [--xprtsec <value>] [--transports <value>...] [--delegations <value>] [-i <client spec_file>]
 
-   ceph nfs export create rgw --cluster-id <cluster_id> --pseudo-path <pseudo_path> --bucket <bucket_name> [--user-id <user-id>] [--readonly] [--client_addr <value>...] [--squash <value>] [--sectype <value>...] [--xprtsec <value>] [--transports <value>...]
-
+   
 For example, to export ``mybucket`` via NFS cluster ``mynfs`` at the
 pseudo-path ``/bucketdata`` to any host in the ``192.168.10.0/24`` network
 
@@ -683,6 +718,8 @@ client preferring the supplied methods left-to-right.
 ``<transports>`` is optional. Valid values are ``TCP``, ``UDP``, and ``RDMA``.
 Multiple values may be passed. If omitted, defaults apply (e.g. TCP and RDMA
 when the cluster has RDMA enabled).
+``<delegations>`` specifies the NFSv4 delegations supported by the export. Valid values are "rw", "ro", "none".
+``<client spec_file> `` specifies the path to a file containing a client specification.
 
 .. note:: Specifying values for sectype that require Kerberos will only
    function on servers that are configured to support Kerberos. Setting up
@@ -706,6 +743,63 @@ For example, to export *myuser* via NFS cluster *mynfs* at the pseudo-path */myu
 .. prompt:: bash #
 
    ceph nfs export create rgw --cluster-id mynfs --pseudo-path /bucketdata --user-id myuser --client_addr 192.168.10.0/24
+
+
+Update Export
+-------------
+
+.. prompt:: bash #
+
+   ceph nfs export update <cluster_id> <pseudo_path> [--delegations <value>] [-i client_spec]
+
+This updates the export delegations permissions in an NFS Ganesha cluster, where:
+
+``<cluster_id>`` is the NFS Ganesha cluster ID.
+
+``<pseudo_path>`` is the pseudo root path (must be an absolute path).
+
+``<delegations>`` is the delegation permissions.
+
+``<client_spec>`` is the client specification.
+
+
+A client block can be modified by importing a JSON description in the same format:
+
+.. prompt:: bash #
+
+   ceph nfs export update <cluster_id> <pseudo_path> -i <json_file>
+
+This imports a JSON description of a client block.
+
+For example:
+
+.. prompt:: bash #
+
+   ceph nfs export update mynfs /pseudo_path -i client_spec.json
+
+Set Cluster Export Default
+---------------------------
+
+.. prompt:: bash #
+
+   ceph nfs cluster set-export-default <cluster_id> [--delegations <value>]
+
+This sets the default export delegations permissions in an NFS Ganesha cluster, where:
+
+``<cluster_id>`` is the NFS Ganesha cluster ID.
+
+``<delegations>`` is the delegation permissions.
+
+Get Cluster Export Default
+---------------------------
+
+.. prompt:: bash #
+
+   ceph nfs cluster get-export-default <cluster_id>
+
+This gets the default export delegations permissions in an NFS Ganesha cluster, where:
+
+``<cluster_id>`` is the NFS Ganesha cluster ID.
 
 
 Delete Export
@@ -1063,6 +1157,12 @@ There are two methds for examining NFS-Ganesha logs:
 
 The NFS log level can be adjusted using the ``nfs cluster config set`` command
 (see :ref:`nfs-cluster-set`).
+
+To enable libcephfs client debug logging for CephFS-backed exports, set
+``enable_cephfs_client_log: true`` in the NFS service spec. See
+:ref:`deploy-cephadm-nfs-ganesha` for details. Client logs are written to the
+host directory ``/var/log/ceph/<cluster-fsid>`` (or a custom path set via
+``cephfs_client_log_dir``).
 
 
 .. _nfs-ganesha-config:

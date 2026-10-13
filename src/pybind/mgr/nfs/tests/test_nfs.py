@@ -16,7 +16,7 @@ from ceph.utils import with_units_to_int, bytes_to_human
 from nfs import Module
 from nfs.export import ExportMgr, normalize_path
 from nfs.utils import cephfs_client_for_mgr
-from nfs.ganesha_conf import GaneshaConfParser, Export
+from nfs.ganesha_conf import GaneshaConfParser, Export, format_block
 from nfs.qos_conf import (
     RawBlock,
     QOS,
@@ -378,8 +378,7 @@ QOS_BLOCK {
                 "dir_chunk": 0
             }),
             RawBlock('NFSV4', values={
-                "recoverybackend": "rados_cluster",
-                "minor_versions": [1, 2]
+                "recoverybackend": "rados_cluster"
             }),
             RawBlock('RADOS_KV', values={
                 "pool": NFS_POOL_NAME,
@@ -409,7 +408,6 @@ NFS_CORE_PARAM {
 
         NFSv4 {
            RecoveryBackend = rados_cluster;
-           Minor_Versions = 1, 2;
         }
 
         RADOS_KV {
@@ -1270,6 +1268,139 @@ NFS_CORE_PARAM {
         assert export.clients[0].addresses == ["192.168.1.0/8"]
         assert export.cluster_id == self.cluster_id
 
+    def test_rotate_keys(self):
+        self._do_mock_test(self._do_test_rotate_keys)
+
+    def test_rotate_keys_all_entities(self):
+        self._do_mock_test(self._do_test_rotate_keys_all_entities)
+
+    def test_rotate_keys_rejects_foreign_entity(self):
+        self._do_mock_test(self._do_test_rotate_keys_rejects_foreign_entity)
+
+    def _do_test_rotate_keys(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = nfs_mod.export_mgr
+        cluster = nfs_mod.nfs
+
+        conf.create_export(
+            fsal_type='cephfs',
+            cluster_id=self.cluster_id,
+            fs_name='myfs',
+            path='/',
+            pseudo_path='/cephfs_rotate',
+            read_only=False,
+            squash='none',
+        )
+        conf.create_export(
+            fsal_type='cephfs',
+            cluster_id=self.cluster_id,
+            fs_name='myfs',
+            path='/',
+            pseudo_path='/cephfs_rotate2',
+            read_only=False,
+            squash='none',
+        )
+
+        entity = 'client.nfs.foo.myfs.86ca58ef'
+        rotated_key = 'rotated-export-key'
+
+        def mock_create_user_key(self, cluster_id, entity_name, path, fs_name):
+            return rotated_key
+
+        with mock.patch.object(nfs_mod, 'check_mon_command') as check_mon, \
+                mock.patch.object(ExportMgr, '_create_user_key', mock_create_user_key), \
+                mock.patch('nfs.cluster.redeploy_nfs_service') as redeploy:
+            result = cluster.rotate_keys(
+                cluster_id=self.cluster_id,
+                entity=[entity, 'nfs.foo.myfs.86ca58ef'],
+                key_type='aes256k',
+            )
+
+        check_mon.assert_called_once_with({
+            'prefix': 'auth rotate',
+            'entity': entity,
+            'key_type': 'aes256k',
+        })
+        redeploy.assert_not_called()
+        assert result['cluster_id'] == self.cluster_id
+        assert result['rotated'] == [entity]
+        assert result['export_keys'] == [entity]
+        assert result['daemon_keys'] == []
+        assert result['key_type'] == 'aes256k'
+        assert result['service_redeployed'] is False
+        assert sorted(result['updated_exports']) == ['/cephfs_rotate', '/cephfs_rotate2']
+
+        for pseudo in ('/cephfs_rotate', '/cephfs_rotate2'):
+            export = conf._fetch_export(self.cluster_id, pseudo)
+            assert export is not None
+            assert export.fsal.cephx_key == rotated_key
+
+    def _do_test_rotate_keys_all_entities(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = nfs_mod.export_mgr
+        cluster = nfs_mod.nfs
+
+        conf.create_export(
+            fsal_type='cephfs',
+            cluster_id=self.cluster_id,
+            fs_name='myfs',
+            path='/',
+            pseudo_path='/cephfs_rotate_all',
+            read_only=False,
+            squash='none',
+        )
+
+        export_entity = 'client.nfs.foo.myfs.86ca58ef'
+        daemon_entity = 'client.nfs.foo.0.0.host.hash-rgw'
+        cluster_entity = 'client.nfs.foo'
+        rotated_key = 'rotated-export-key'
+
+        def mock_create_user_key(self, cluster_id, entity_name, path, fs_name):
+            return rotated_key
+
+        auth_ls = {
+            'auth_dump': [
+                {'entity': cluster_entity},
+                {'entity': daemon_entity},
+                {'entity': export_entity},
+                {'entity': 'client.nfs.other.fs.deadbeef'},
+            ]
+        }
+
+        def mock_check_mon(cmd):
+            if cmd.get('prefix') == 'auth ls':
+                return mock.Mock(stdout=json.dumps(auth_ls), retval=0, stderr='')
+            return mock.Mock(stdout='', retval=0, stderr='')
+
+        with mock.patch.object(nfs_mod, 'check_mon_command', side_effect=mock_check_mon) as check_mon, \
+                mock.patch.object(ExportMgr, '_create_user_key', mock_create_user_key), \
+                mock.patch('nfs.cluster.redeploy_nfs_service') as redeploy:
+            result = cluster.rotate_keys(cluster_id=self.cluster_id, key_type='aes256k')
+
+        rotate_calls = [
+            c.args[0] for c in check_mon.call_args_list
+            if c.args[0].get('prefix') == 'auth rotate'
+        ]
+        rotated = [c['entity'] for c in rotate_calls]
+        assert sorted(rotated) == sorted([cluster_entity, daemon_entity, export_entity])
+        assert all(c.get('key_type') == 'aes256k' for c in rotate_calls)
+        redeploy.assert_called_once_with(nfs_mod, self.cluster_id)
+        assert result['service_redeployed'] is True
+        assert sorted(result['daemon_keys']) == sorted([cluster_entity, daemon_entity])
+        assert result['export_keys'] == [export_entity]
+        assert result['updated_exports'] == ['/cephfs_rotate_all']
+
+    def _do_test_rotate_keys_rejects_foreign_entity(self):
+        nfs_mod = Module('nfs', '', '')
+        cluster = nfs_mod.nfs
+
+        with pytest.raises(Exception) as e:
+            cluster.rotate_keys(
+                cluster_id=self.cluster_id,
+                entity=['client.nfs.other.fs.deadbeef'],
+            )
+        assert 'does not belong to NFS cluster' in str(e.value)
+
     def test_create_export_default_transports_rdma_cluster(self):
         """When cluster has enable_rdma=True, new exports get default Transports = tcp, RDMA."""
         self._do_mock_test(self._do_test_create_export_default_transports_rdma_cluster)
@@ -1389,7 +1520,7 @@ EXPORT {
         assert export.export_id
         assert export.path == "/"
         assert export.pseudo == "/cephfs3"
-        assert export.access_type == "RW"
+        assert export.access_type == "rw"
         assert export.squash == "root"
         assert export.protocols == [4]
         assert export.fsal.name == "CEPH"
@@ -1417,6 +1548,390 @@ EXPORT {
                 )
         assert "Invalid cmount_path: '/invalid'" in str(e.value)
 
+    # Delegation values for parameterized tests
+    DELEGATION_VALUE = ['rw', 'ro', 'none']
+    @pytest.mark.parametrize("delegation", DELEGATION_VALUE)
+    def test_create_export_cephfs_with_delegation(self, delegation):
+        self._do_mock_test(self._do_test_create_export_cephfs_with_delegation, delegation)
+
+    def _do_test_create_export_cephfs_with_delegation(self, delegation):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+
+        ls = conf.list_exports(cluster_id=self.cluster_id)
+        assert len(ls) == 3
+
+        pseudo = f'/cephfs_deleg_{delegation}'
+        r = conf.create_export(
+            fsal_type='cephfs',
+            cluster_id=self.cluster_id,
+            fs_name='myfs',
+            path='/',
+            pseudo_path=pseudo,
+            read_only=False,
+            squash='root',
+            addr=["192.168.1.0/8"],
+            export_delegation=delegation,
+        )
+        assert r["bind"] == pseudo
+        assert r.get("delegations") == delegation
+
+        ls = conf.list_exports(cluster_id=self.cluster_id)
+        assert len(ls) == 4
+
+        export = conf._fetch_export('foo', pseudo)
+        assert export.export_id
+        assert export.pseudo == pseudo
+        assert export.fsal.name == "CEPH"
+        assert export.delegation == delegation
+        assert len(export.clients) == 1
+        assert export.clients[0].delegation is None
+
+    @pytest.mark.parametrize("delegation", DELEGATION_VALUE)
+    def test_create_export_cephfs_with_delegation_no_clients(self, delegation):
+        self._do_mock_test(self._do_test_create_export_cephfs_with_delegation_no_clients, delegation)
+
+    def _do_test_create_export_cephfs_with_delegation_no_clients(self, delegation):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+
+        ls = conf.list_exports(cluster_id=self.cluster_id)
+        assert len(ls) == 3
+
+        pseudo = f'/cephfs_deleg_export_{delegation}'
+        r = conf.create_export(
+            fsal_type='cephfs',
+            cluster_id=self.cluster_id,
+            fs_name='myfs',
+            path='/',
+            pseudo_path=pseudo,
+            read_only=False,
+            squash='root',
+            export_delegation=delegation,
+        )
+        assert r["bind"] == pseudo
+        assert r["delegations"] == delegation
+
+        ls = conf.list_exports(cluster_id=self.cluster_id)
+        assert len(ls) == 4
+
+        export = conf._fetch_export('foo', pseudo)
+        assert export.export_id
+        assert export.pseudo == pseudo
+        assert export.delegation == delegation
+        assert len(export.clients) == 0
+
+    def test_create_export_rgw_with_delegation(self):
+        self._do_mock_test(self._do_test_create_export_rgw_with_delegation)
+
+    def _do_test_create_export_rgw_with_delegation(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+
+        ls = conf.list_exports(cluster_id=self.cluster_id)
+        assert len(ls) == 3
+
+        r = conf.create_export(
+            fsal_type='rgw',
+            cluster_id=self.cluster_id,
+            bucket='bucket',
+            pseudo_path='/rgw_deleg',
+            read_only=False,
+            squash='root',
+            addr=["192.168.0.0/16"],
+            export_delegation='rw',
+        )
+        assert r["bind"] == "/rgw_deleg"
+        assert r.get("delegations") == "rw"
+
+        ls = conf.list_exports(cluster_id=self.cluster_id)
+        assert len(ls) == 4
+
+        export = conf._fetch_export('foo', '/rgw_deleg')
+        assert export.export_id
+        assert export.pseudo == "/rgw_deleg"
+        # export_delegation applies at export level
+        assert export.delegation == 'rw'
+        assert export.fsal.name == "RGW"
+        # When addr is provided, client is created but inherits export delegation
+        assert len(export.clients) == 1
+        assert export.clients[0].delegation is None  # Client inherits from export
+
+    def test_create_export_cephfs_with_clients_config_addr_and_delegation(self):
+        self._do_mock_test(self._do_test_create_export_cephfs_with_clients_config_addr_and_delegation)
+
+    def _do_test_create_export_cephfs_with_clients_config_addr_and_delegation(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+
+        # Clients_config JSON with delegation
+        clients_config_json = json.dumps([
+            {
+                'addresses': ['192.168.10.0/24'],
+                'access_type': 'RW',
+                'squash': 'no_root_squash',
+                'delegations': 'rw'
+            },
+            {
+                'addresses': ['172.16.0.0/16'],
+                'access_type': 'RO',
+                'squash': 'all_squash',
+                'delegations': 'ro'
+            }
+        ])
+
+        # Create export with clients_config, addr, and export_delegation all together
+        r = conf.create_export(
+            fsal_type='cephfs',
+            cluster_id=self.cluster_id,
+            fs_name='myfs',
+            path='/',
+            pseudo_path='/cephfs_mixed_config',
+            read_only=False,
+            squash='root',
+            clients_config=clients_config_json,
+            addr=['10.10.10.0/24'],
+            export_delegation='rw',
+        )
+
+        export = conf._fetch_export('foo', '/cephfs_mixed_config')
+        
+        # Check export-level delegation
+        assert export.delegation == 'rw'
+        
+        # Check client delegations
+        assert len(export.clients) == 3
+        assert export.clients[0].delegation == 'rw' 
+        assert export.clients[1].delegation == 'ro' 
+        assert export.clients[2].delegation is None  
+
+    def test_update_export_with_delegation(self):
+        self._do_mock_test(self._do_test_update_export_with_delegation)
+
+    def _do_test_update_export_with_delegation(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # First apply an export without delegation
+        r = conf.apply_export(self.cluster_id, json.dumps({
+            'export_id': 10,
+            'path': '/',
+            'pseudo': '/deleg_update_test',
+            'cluster_id': self.cluster_id,
+            'access_type': 'RW',
+            'squash': 'no_root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [],
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        }))
+        assert len(r.changes) == 1
+        
+        # Verify no delegation initially
+        export = conf._fetch_export('foo', '/deleg_update_test')
+        assert export.delegation is None
+        
+        # Now apply with delegation
+        r = conf.apply_export(self.cluster_id, json.dumps({
+            'export_id': 10,
+            'path': '/',
+            'pseudo': '/deleg_update_test',
+            'cluster_id': self.cluster_id,
+            'access_type': 'RW',
+            'squash': 'no_root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [],
+            'delegations': 'rw',
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        }))
+        assert len(r.changes) == 1
+        
+        # Verify delegation is set
+        export = conf._fetch_export('foo', '/deleg_update_test')
+        assert export.delegation == 'rw'
+
+    def test_update_export_with_ganesha_conf_with_Delegation_Ucase(self):
+        self._do_mock_test(self._do_test_update_export_with_ganesha_conf_with_Delegation_Ucase)
+
+    def _do_test_update_export_with_ganesha_conf_with_Delegation_Ucase(self):
+        export_conf = """
+EXPORT {
+    FSAL {
+        name = "CEPH";
+        filesystem = "a";
+        cmount_path = "/";
+    }
+    export_id = 20;
+    path = "/";
+    pseudo = "/ganesha_deleg_test";
+    access_type = "RW";
+    squash = "no_root_squash";
+    Delegations = "rw";
+    protocols = 4;
+    transports = "TCP";
+}
+"""
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        r = conf.apply_export(self.cluster_id, export_conf)
+        assert len(r.changes) == 1
+
+        export = conf._fetch_export('foo', '/ganesha_deleg_test')
+        assert export.delegation == 'rw'  # Write -> rw
+
+    def test_update_export_with_ganesha_conf_delegation_lcase(self):
+        self._do_mock_test(self._do_test_update_export_with_ganesha_conf_delegation_lcase)
+
+    def _do_test_update_export_with_ganesha_conf_delegation_lcase(self):
+        # Test lowercase "delegation" parameter in Ganesha config
+        export_conf = """
+EXPORT {
+    FSAL {
+        name = "CEPH";
+        filesystem = "a";
+        cmount_path = "/";
+    }
+    export_id = 21;
+    path = "/";
+    pseudo = "/ganesha_deleg_lcase";
+    access_type = "RW";
+    squash = "no_root_squash";
+    delegations = ro;
+    protocols = 4;
+    transports = "TCP";
+}
+"""
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        r = conf.apply_export(self.cluster_id, export_conf)
+        assert len(r.changes) == 1
+
+        export = conf._fetch_export('foo', '/ganesha_deleg_lcase')
+        assert export.delegation == 'ro'  # Read -> ro
+
+    def test_modify_export_delegation(self):
+        self._do_mock_test(self._do_test_modify_export_delegation)
+
+    def _do_test_modify_export_delegation(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # First create an export without delegation
+        r = conf.apply_export(self.cluster_id, json.dumps({
+            'export_id': 30,
+            'path': '/',
+            'pseudo': '/modify_deleg_test',
+            'cluster_id': self.cluster_id,
+            'access_type': 'RW',
+            'squash': 'no_root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [],
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        }))
+        assert len(r.changes) == 1
+        
+        # Verify no delegation initially
+        export = conf._fetch_export('foo', '/modify_deleg_test')
+        assert export.delegation is None
+        
+        # Use modify_export to add delegation
+        result = conf.modify_export(
+            cluster_id=self.cluster_id,
+            pseudo_path='/modify_deleg_test',
+            export_delegation='rw'
+        )
+        
+        assert result['state'] == 'updated'
+        assert 'export-level delegation: rw' in result['updates']
+        
+        # Verify delegation is now set
+        export = conf._fetch_export('foo', '/modify_deleg_test')
+        assert export.delegation == 'rw'
+
+    def test_get_export_default_delegation_not_configured(self):
+        self._do_mock_test(self._do_test_get_export_default_delegation_not_configured)
+
+    def _do_test_get_export_default_delegation_not_configured(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # Get EXPORT DEFAULT delegation when not configured
+        result = conf.get_export_default(self.cluster_id)
+        
+        assert result['cluster'] == self.cluster_id
+        assert result['level'] == 'EXPORT DEFAULT'
+        assert result['delegations'] is None
+        assert 'No EXPORT DEFAULT block configured' in result['message']
+
+    def test_set_export_default_delegation(self):
+        self._do_mock_test(self._do_test_set_export_default_delegation)
+
+    def _do_test_set_export_default_delegation(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # Set EXPORT DEFAULT delegation
+        result = conf.set_export_default(self.cluster_id, 'rw')
+        
+        assert result['cluster'] == self.cluster_id
+        assert result['level'] == 'EXPORT DEFAULT'
+        assert result['delegations'] == 'rw'
+        assert result['state'] == 'created'
+        
+        # Verify we can retrieve it
+        get_result = conf.get_export_default(self.cluster_id)
+        assert get_result['delegations'] == 'rw'
+
+    def test_update_export_default_delegation(self):
+        self._do_mock_test(self._do_test_update_export_default_delegation)
+
+    def _do_test_update_export_default_delegation(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # First set EXPORT DEFAULT delegation
+        result = conf.set_export_default(self.cluster_id, 'rw')
+        assert result['state'] == 'created'
+        
+        # Now update it
+        result = conf.set_export_default(self.cluster_id, 'ro')
+        assert result['state'] == 'updated'
+        assert result['delegations'] == 'ro'
+        
+        # Verify the update
+        get_result = conf.get_export_default(self.cluster_id)
+        assert get_result['delegations'] == 'ro'
+
+    def test_set_export_default_delegation_none(self):
+        self._do_mock_test(self._do_test_set_export_default_delegation_none)
+
+    def _do_test_set_export_default_delegation_none(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # Set EXPORT DEFAULT delegation to 'none'
+        result = conf.set_export_default(self.cluster_id, 'none')
+        
+        assert result['delegations'] == 'none'
+        
+        # Verify
+        get_result = conf.get_export_default(self.cluster_id)
+        assert get_result['delegations'] == 'none'
+
     def _do_test_cluster_ls(self):
         nfs_mod = Module('nfs', '', '')
         cluster = NFSCluster(nfs_mod)
@@ -1432,7 +1947,12 @@ EXPORT {
         cluster = NFSCluster(nfs_mod)
 
         out = cluster.show_nfs_cluster_info(self.cluster_id)
-        assert out == {"foo": {"virtual_ip": None, "backend": []}}
+        assert out == {"foo": {
+            "deployment_type": "standalone",
+            "virtual_ip": None,
+            "backend": [],
+            "placement": {}
+        }}
 
     def test_cluster_info(self):
         self._do_mock_test(self._do_test_cluster_info)
@@ -1456,6 +1976,92 @@ EXPORT {
 
     def test_cluster_config(self):
         self._do_mock_test(self._do_test_cluster_config)
+
+    def test_is_log_only_config(self):
+        from nfs.cluster import _is_log_only_config
+
+        assert _is_log_only_config("LOG { Default_log_level = FULL_DEBUG; }")
+        assert _is_log_only_config(
+            "LOG { COMPONENTS { FSAL = FULL_DEBUG; NFS4 = FULL_DEBUG; } }")
+
+        assert not _is_log_only_config("EXPORT { Export_Id = 1; }")
+        assert not _is_log_only_config("NFS_CORE_PARAM { some_val = 1; }")
+
+        assert not _is_log_only_config(
+            "LOG { Default_log_level = FULL_DEBUG; } EXPORT { Export_Id = 1; }")
+
+        assert not _is_log_only_config("not valid ganesha config {{{")
+        assert not _is_log_only_config("")
+
+        # GaneshaConfParser does not strip comments; a comment before the
+        # LOG block gets merged into the block name, so the config is not
+        # recognised as LOG-only.  This is the safe fallback (restart).
+        assert not _is_log_only_config(
+            "# Enable debug\nLOG { Default_log_level = FULL_DEBUG; }")
+
+
+    def _do_test_cluster_config_log_only_no_restart(self):
+        nfs_mod = Module('nfs', '', '')
+        cluster = NFSCluster(nfs_mod)
+
+        log_config = "LOG {\n    Default_log_level = FULL_DEBUG;\n}\n"
+        with mock.patch('nfs.cluster.restart_nfs_service') as mock_restart:
+            cluster.set_nfs_cluster_config(self.cluster_id, log_config)
+            mock_restart.assert_not_called()
+
+    def test_cluster_config_log_only_no_restart(self):
+        self._do_mock_test(self._do_test_cluster_config_log_only_no_restart)
+
+    def _do_test_cluster_config_non_log_restarts(self):
+        nfs_mod = Module('nfs', '', '')
+        cluster = NFSCluster(nfs_mod)
+
+        export_config = "EXPORT {\n    Export_Id = 100;\n}\n"
+        with mock.patch('nfs.cluster.restart_nfs_service') as mock_restart:
+            cluster.set_nfs_cluster_config(self.cluster_id, export_config)
+            mock_restart.assert_called_once()
+
+    def test_cluster_config_non_log_restarts(self):
+        self._do_mock_test(self._do_test_cluster_config_non_log_restarts)
+
+    def _do_test_cluster_config_mixed_restarts(self):
+        nfs_mod = Module('nfs', '', '')
+        cluster = NFSCluster(nfs_mod)
+
+        mixed_config = ("LOG {\n    Default_log_level = FULL_DEBUG;\n}\n"
+                        "EXPORT {\n    Export_Id = 100;\n}\n")
+        with mock.patch('nfs.cluster.restart_nfs_service') as mock_restart:
+            cluster.set_nfs_cluster_config(self.cluster_id, mixed_config)
+            mock_restart.assert_called_once()
+
+    def test_cluster_config_mixed_restarts(self):
+        self._do_mock_test(self._do_test_cluster_config_mixed_restarts)
+
+    def _do_test_cluster_config_reset_log_only_no_restart(self):
+        nfs_mod = Module('nfs', '', '')
+        cluster = NFSCluster(nfs_mod)
+
+        log_config = "LOG {\n    Default_log_level = FULL_DEBUG;\n}\n"
+        cluster.set_nfs_cluster_config(self.cluster_id, log_config)
+        with mock.patch('nfs.cluster.restart_nfs_service') as mock_restart:
+            cluster.reset_nfs_cluster_config(self.cluster_id)
+            mock_restart.assert_not_called()
+
+    def test_cluster_config_reset_log_only_no_restart(self):
+        self._do_mock_test(self._do_test_cluster_config_reset_log_only_no_restart)
+
+    def _do_test_cluster_config_reset_non_log_restarts(self):
+        nfs_mod = Module('nfs', '', '')
+        cluster = NFSCluster(nfs_mod)
+
+        export_config = "EXPORT {\n    Export_Id = 100;\n}\n"
+        cluster.set_nfs_cluster_config(self.cluster_id, export_config)
+        with mock.patch('nfs.cluster.restart_nfs_service') as mock_restart:
+            cluster.reset_nfs_cluster_config(self.cluster_id)
+            mock_restart.assert_called_once()
+
+    def test_cluster_config_reset_non_log_restarts(self):
+        self._do_mock_test(self._do_test_cluster_config_reset_non_log_restarts)
 
     def test_qos_from_dict(self):
         qos = QOS.from_dict(self.qos_cluster_dict, True)
@@ -1792,6 +2398,75 @@ EXPORT {
     def test_export_qos_bw_ops(self, qos_type, clust_bw_params, clust_ops_params, export_bw_params, export_ops_params):
         self._do_mock_test(self._do_test_export_qos_bw_ops, qos_type, clust_bw_params, clust_ops_params, export_bw_params, export_ops_params)
 
+    def _do_test_nfs_byok_export(self):
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        
+        # Mock get_enctag_from_path to return matching enctag for validation to pass
+        with mock.patch('nfs.export.get_enctag_from_path', return_value='12345'):
+            conf.create_export(
+                fsal_type='cephfs',
+                cluster_id=self.cluster_id,
+                fs_name='myfs',
+                path='/',
+                pseudo_path='/cephfs4',
+                read_only=False,
+                squash='root',
+                kmip_key_id='12345'
+            )
+        export = conf._fetch_export(self.cluster_id, '/cephfs4')
+        block = format_block(export.to_export_block())
+        assert block.startswith('EXPORT {\n    kmip_key_id = "12345";')
+
+    def test_nfs_byok_export(self):
+        self._do_mock_test(self._do_test_nfs_byok_export)
+
+    def _do_test_nfs_byok_export_enctag_validation_missing(self):
+        """Test that export creation fails when kmip_key_id is provided but enctag is not set"""
+        from object_format import ErrorResponse
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        # Mock get_enctag_from_path to return empty string (enctag not set)
+        with mock.patch('nfs.export.get_enctag_from_path', return_value=''):
+            with pytest.raises(ErrorResponse) as exc_info:
+                conf.create_export(
+                    fsal_type='cephfs',
+                    cluster_id=self.cluster_id,
+                    fs_name='myfs',
+                    path='/',
+                    pseudo_path='/cephfs_enctag_test1',
+                    read_only=False,
+                    squash='root',
+                    kmip_key_id='KEY-12345'
+                )
+            assert "does not have an enctag set" in str(exc_info.value)
+
+    def test_nfs_byok_export_enctag_validation_missing(self):
+        self._do_mock_test(self._do_test_nfs_byok_export_enctag_validation_missing)
+
+    def _do_test_nfs_byok_export_enctag_validation_success(self):
+        """Test that export creation succeeds when kmip_key_id matches enctag"""
+        nfs_mod = Module('nfs', '', '')
+        conf = ExportMgr(nfs_mod)
+        # Mock get_enctag_from_path to return matching enctag
+        with mock.patch('nfs.export.get_enctag_from_path', return_value='KEY-12345'):
+            conf.create_export(
+                fsal_type='cephfs',
+                cluster_id=self.cluster_id,
+                fs_name='myfs',
+                path='/',
+                pseudo_path='/cephfs_enctag_test3',
+                read_only=False,
+                squash='root',
+                kmip_key_id='KEY-12345'
+            )
+        export = conf._fetch_export(self.cluster_id, '/cephfs_enctag_test3')
+        assert export is not None
+        block = format_block(export.to_export_block())
+        assert 'kmip_key_id = "KEY-12345"' in block
+
+    def test_nfs_byok_export_enctag_validation_success(self):
+        self._do_mock_test(self._do_test_nfs_byok_export_enctag_validation_success)
 
 @pytest.mark.parametrize(
     "path,expected",
@@ -1817,6 +2492,50 @@ def test_ganesha_validate_squash():
     _validate_squash("root")
     with pytest.raises(NFSInvalidOperation):
         _validate_squash("toot")
+
+
+def test_nfs_service_spec_with_tsm():
+    """Test NFSServiceSpec with TSM parameters."""
+    cluster_id = "foo"
+    
+    # Test with TSM enabled
+    spec_with_tsm = NFSServiceSpec(
+        service_id=cluster_id,
+        enable_tsm=True,
+        tsm_port=5000
+    )
+    assert spec_with_tsm.enable_tsm is True
+    assert spec_with_tsm.tsm_port == 5000
+
+    # Test with TSM disabled (default)
+    spec_without_tsm = NFSServiceSpec(service_id=cluster_id)
+    assert spec_without_tsm.enable_tsm is False
+    assert spec_without_tsm.tsm_port is None
+
+    # Test with TSM enabled but no port specified
+    spec_tsm_no_port = NFSServiceSpec(
+        service_id=cluster_id,
+        enable_tsm=True
+    )
+    assert spec_tsm_no_port.enable_tsm is True
+    assert spec_tsm_no_port.tsm_port is None
+
+
+def test_nfs_service_spec_tsm_serialization():
+    """Test that TSM parameters are properly serialized."""
+    cluster_id = "foo"
+    spec = NFSServiceSpec(
+        service_id=cluster_id,
+        enable_tsm=True,
+        tsm_port=6000
+    )
+    # Convert to dict and back
+    spec_dict = spec.to_json()
+    assert 'enable_tsm' in spec_dict['spec']
+    assert spec_dict['spec']['enable_tsm'] is True
+    assert 'tsm_port' in spec_dict['spec']
+    assert spec_dict['spec']['tsm_port'] == 6000
+
 
 
 def test_ganesha_validate_access_type():
@@ -1855,3 +2574,299 @@ class TestCephfsClientForMgr:
             r2 = mgr_util.CephFSEarmarkResolver(mgr=mgr, client=cephfs_client_for_mgr(mgr))
             assert r1._cephfs_client is r2._cephfs_client
             mock_cephfs_cls.assert_called_once_with(mgr)
+
+class TestNFSDelegation:
+    """Test cases for NFS delegation support."""
+    
+    cluster_id = "foo"
+    
+    # Export with delegation at export level
+    export_with_delegation = """
+EXPORT {
+    FSAL {
+        name = "CEPH";
+        filesystem = "a";
+        cmount_path = "/";
+    }
+    export_id = 1;
+    path = "/";
+    pseudo = "/cephfs_deleg";
+    access_type = "RW";
+    squash = "no_root_squash";
+    Delegations = "rw";
+    attr_expiration_time = 0;
+    security_label = true;
+    protocols = 4;
+    transports = "TCP";
+}
+"""
+
+    # Export with delegation at client level
+    export_with_client_delegation = """
+EXPORT {
+    FSAL {
+        name = "CEPH";
+        filesystem = "a";
+        cmount_path = "/";
+    }
+    export_id = 2;
+    path = "/data";
+    pseudo = "/cephfs_client_deleg";
+    access_type = "RW";
+    squash = "no_root_squash";
+    attr_expiration_time = 0;
+    security_label = true;
+    protocols = 4;
+    transports = "TCP";
+
+    CLIENT {
+        Clients = 192.168.1.0/24;
+        Access_Type = RW;
+        Squash = no_root_squash;
+        Delegations = "ro";
+    }
+}
+"""
+
+    # Export with both export and client level delegation (client takes priority)
+    export_with_both_delegations = """
+EXPORT {
+    FSAL {
+        name = "CEPH";
+        filesystem = "a";
+        cmount_path = "/";
+    }
+    export_id = 3;
+    path = "/mixed";
+    pseudo = "/cephfs_both_deleg";
+    access_type = "RW";
+    squash = "no_root_squash";
+    Delegations = "rw";
+    attr_expiration_time = 0;
+    security_label = true;
+    protocols = 4;
+    transports = "TCP";
+
+    CLIENT {
+        Clients = 192.168.2.0/24;
+        Delegations = "ro";
+    }
+
+    CLIENT {
+        Clients = 192.168.3.0/24;
+        Delegations = "none";
+    }
+}
+"""
+
+    def test_export_parser_with_delegation(self) -> None:
+        """Test parsing export block with delegation at export level."""
+        blocks = GaneshaConfParser(self.export_with_delegation).parse()
+        assert isinstance(blocks, list)
+        assert len(blocks) == 1
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        
+        assert export.export_id == 1
+        assert export.pseudo == "/cephfs_deleg"
+        assert export.delegation == "rw"
+
+    def test_export_parser_with_client_delegation(self) -> None:
+        """Test parsing export block with delegation at client level."""
+        blocks = GaneshaConfParser(self.export_with_client_delegation).parse()
+        assert isinstance(blocks, list)
+        assert len(blocks) == 1
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        
+        assert export.export_id == 2
+        assert export.pseudo == "/cephfs_client_deleg"
+        assert export.delegation is None  # No export-level delegation
+        assert len(export.clients) == 1
+        assert export.clients[0].delegation == "ro"
+
+    def test_export_parser_with_both_delegations(self) -> None:
+        """Test parsing export block with both export and client level delegation."""
+        blocks = GaneshaConfParser(self.export_with_both_delegations).parse()
+        assert isinstance(blocks, list)
+        assert len(blocks) == 1
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        
+        assert export.export_id == 3
+        assert export.pseudo == "/cephfs_both_deleg"
+        assert export.delegation == "rw"
+        assert len(export.clients) == 2
+        assert export.clients[0].delegation == "ro"
+        assert export.clients[1].delegation == "none"
+
+    def test_export_to_dict_with_delegation(self) -> None:
+        """Test export to_dict includes delegation when set."""
+        blocks = GaneshaConfParser(self.export_with_delegation).parse()
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        ex_dict = export.to_dict()
+        
+        assert 'delegations' in ex_dict
+        assert ex_dict['delegations'] == 'rw'
+
+    def test_export_to_dict_without_delegation(self) -> None:
+        """Test export to_dict does not include delegation key when not set."""
+        # Use export_1 from TestNFS which has no delegation
+        export_1 = """
+EXPORT {
+    Export_ID=1;
+    Protocols = 4;
+    Path = /;
+    Pseudo = /cephfs_a/;
+    Access_Type = RW;
+    FSAL {
+        Name = CEPH;
+        Filesystem = "a";
+    }
+}
+"""
+        blocks = GaneshaConfParser(export_1).parse()
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        ex_dict = export.to_dict()
+        
+        assert 'delegations' not in ex_dict
+
+    def test_export_to_dict_client_with_delegation(self) -> None:
+        """Test export to_dict includes client delegation when set."""
+        blocks = GaneshaConfParser(self.export_with_client_delegation).parse()
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        ex_dict = export.to_dict()
+        
+        assert len(ex_dict['clients']) == 1
+        assert 'delegations' in ex_dict['clients'][0]
+        assert ex_dict['clients'][0]['delegations'] == 'ro'
+
+    def test_export_from_dict_with_delegation(self) -> None:
+        """Test creating export from dict with delegation."""
+        export = Export.from_dict(1, {
+            'export_id': 1,
+            'path': '/',
+            'cluster_id': self.cluster_id,
+            'pseudo': '/test_deleg',
+            'access_type': 'RW',
+            'squash': 'root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [],
+            'delegations': 'rw',
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        })
+        
+        assert export.delegation == 'rw'
+
+    def test_export_from_dict_with_client_delegation(self) -> None:
+        """Test creating export from dict with client delegation."""
+        export = Export.from_dict(2, {
+            'export_id': 2,
+            'path': '/',
+            'cluster_id': self.cluster_id,
+            'pseudo': '/test_client_deleg',
+            'access_type': 'RW',
+            'squash': 'root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [{
+                'addresses': ['192.168.1.0/24'],
+                'access_type': 'RW',
+                'squash': 'no_root_squash',
+                'delegations': 'ro'
+            }],
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        })
+        
+        assert export.delegation is None
+        assert len(export.clients) == 1
+        assert export.clients[0].delegation == 'ro'
+
+    def test_export_to_export_block_with_delegation(self) -> None:
+        """Test export to_export_block includes delegation."""
+        blocks = GaneshaConfParser(self.export_with_delegation).parse()
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        
+        # Convert to export block
+        export_block = export.to_export_block()
+        
+        # Should have Delegations in values
+        assert 'Delegations' in export_block.values
+        assert export_block.values['Delegations'] == 'rw'
+
+    def test_export_from_to_dict_roundtrip_with_delegation(self) -> None:
+        """Test export from_dict -> to_dict roundtrip preserves delegation."""
+        original_dict = {
+            'export_id': 1,
+            'path': '/',
+            'cluster_id': self.cluster_id,
+            'pseudo': '/roundtrip',
+            'access_type': 'RW',
+            'squash': 'no_root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [{
+                'addresses': ['10.0.0.0/8'],
+                'access_type': 'RW',
+                'squash': 'no_root_squash',
+                'delegations': 'rw'
+            }],
+            'delegations': 'ro',
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        }
+        
+        export = Export.from_dict(1, original_dict)
+        result_dict = export.to_dict()
+        
+        assert result_dict['delegations'] == original_dict['delegations']
+        assert result_dict['clients'][0]['delegations'] == original_dict['clients'][0]['delegations']
+
+    def test_export_from_to_export_block_roundtrip_with_delegation(self) -> None:
+        """Test export from_export_block -> to_export_block roundtrip preserves delegation."""
+        blocks = GaneshaConfParser(self.export_with_both_delegations).parse()
+        export = Export.from_export_block(blocks[0], self.cluster_id)
+        
+        # Convert to block and back
+        new_block = export.to_export_block()
+        export2 = Export.from_export_block(new_block, self.cluster_id)
+        
+        assert export.delegation == export2.delegation
+        assert len(export.clients) == len(export2.clients)
+        for i, client in enumerate(export.clients):
+            assert client.delegation == export2.clients[i].delegation
+
+    @pytest.mark.parametrize("delegation", ["ro", "rw", "none"])
+    def test_export_validate_with_valid_delegation(self, delegation) -> None:
+        """Test export validation passes with valid delegation values."""
+        export = Export.from_dict(1, {
+            'export_id': 1,
+            'path': '/',
+            'cluster_id': self.cluster_id,
+            'pseudo': '/valid_deleg',
+            'access_type': 'RW',
+            'squash': 'no_root_squash',
+            'security_label': True,
+            'protocols': [4],
+            'transports': ['TCP'],
+            'clients': [],
+            'delegations': delegation,
+            'fsal': {
+                'name': 'CEPH',
+                'fs_name': 'a',
+            }
+        })
+        
+        nfs_mod = Module('nfs', '', '')
+        with mock.patch('nfs.ganesha_conf.check_fs', return_value=True):
+            export.validate(nfs_mod)  # Should not raise
+

@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import logging
 import re
 import socket
@@ -10,14 +11,23 @@ from mgr_module import NFS_POOL_NAME as POOL_NAME
 from object_format import ErrorResponse
 from orchestrator.module import IngressType
 
-from .exception import ClusterNotFound, NFSInvalidOperation
 from .ganesha_conf import GaneshaConfParser, format_block
 from .qos_conf import QOS, QOSBandwidthControl, QOSOpsControl, QOSParams, \
     QOSType, validate_clust_qos_msg_interval
+from .exception import NFSInvalidOperation, ClusterNotFound, NFSObjectNotFound
+from .utils import (
+    ManualRestartRequired,
+    NonFatalError,
+    available_clusters,
+    conf_obj_name,
+    restart_nfs_service,
+    redeploy_nfs_service,
+    user_conf_obj_name,
+    USER_CONF_PREFIX,
+    qos_conf_obj_name,
+    normalize_auth_entity,
+    entity_belongs_to_nfs_cluster)
 from .rados_utils import NFSRados
-from .utils import USER_CONF_PREFIX, ManualRestartRequired, NonFatalError, \
-    available_clusters, conf_obj_name, qos_conf_obj_name, restart_nfs_service, \
-    user_conf_obj_name
 
 if TYPE_CHECKING:
     from mgr_module import MgrModule
@@ -27,6 +37,159 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+# Mapping from old integer values to new string values for QoS type migration
+QOS_TYPE_INT_TO_STR_MAP = {
+    1: "Per_Export",
+    2: "Per_Client",
+    3: "Per_Export_Per_Client"
+}
+
+
+def update_qos_type_for_cluster(mgr: 'MgrModule', cluster_id: str) -> bool:
+    """
+    Migrate QoS type from integer to string for a specific cluster.
+    This function is used during Ceph upgrade (cephadm migration 8 -> 9) to
+    convert QoS type values from the old integer format (1, 2, 3) to the new
+    string format ("Per_Export", "Per_Client", "Per_Export_Per_Client").
+    """
+    from rados import ObjectNotFound
+
+    rados_obj = NFSRados(mgr.rados, cluster_id)
+    qos_conf_name = qos_conf_obj_name(cluster_id)
+    try:
+        conf = rados_obj.read_obj(qos_conf_name)
+        if not conf:
+            log.debug('QoS config not found for cluster %s', cluster_id)
+            return False
+        qos_blocks = GaneshaConfParser(conf).parse()
+        if not qos_blocks:
+            log.debug('No QoS blocks found in config for cluster %s', cluster_id)
+            return False
+
+        qos_block = qos_blocks[0]
+        qos_type_value = qos_block.values.get(QOSParams.qos_type.value)
+        if qos_type_value is None:
+            log.debug('No qos_type found in QoS config for cluster %s', cluster_id)
+            return False
+
+        # Check if the value is an integer (old format)
+        if isinstance(qos_type_value, int):
+            if qos_type_value not in QOS_TYPE_INT_TO_STR_MAP:
+                log.error('Invalid QoS type integer value %s for cluster %s', qos_type_value, cluster_id)
+                return False
+            new_qos_type_value = QOS_TYPE_INT_TO_STR_MAP[qos_type_value]
+            log.debug('Updating QoS type for cluster %s: %s -> %s', cluster_id, qos_type_value, new_qos_type_value)
+
+            qos_block.values[QOSParams.qos_type.value] = new_qos_type_value
+
+            updated_conf = format_block(qos_block)
+            rados_obj.update_obj(updated_conf, qos_conf_name, conf_obj_name(cluster_id),
+                                 should_notify=False)
+            log.debug('Successfully updated QoS type for cluster %s', cluster_id)
+        return True
+    except ObjectNotFound:
+        log.debug('QoS config object not found for cluster %s', cluster_id)
+        return False
+    except Exception as e:
+        log.exception('Error updating QoS type for cluster %s: %s', cluster_id, e)
+        raise
+
+
+def update_nfs_client_caps(mgr: 'MgrModule', cluster_id: str) -> bool:
+    """
+    Update NFS export user auth capabilities to include MDS 'allow all' permissions.
+    This function is used during Ceph upgrade (cephadm migration 11 -> 12) to
+    update MDS capabilities from 'allow rw' to 'allow all' for KMIP-based
+    encryption (BYOK) support.
+    """
+    import json
+
+    try:
+        # Get all auth entities
+        ret, out, err = mgr.mon_command({
+            'prefix': 'auth ls',
+            'format': 'json',
+        })
+
+        if ret != 0:
+            log.error('Could not list auth entities: %s', err)
+            return False
+
+        auth_list = json.loads(out)
+        updated_count = 0
+
+        # Find all NFS export users for this cluster
+        for auth_entry in auth_list.get('auth_dump', []):
+            entity = auth_entry.get('entity', '')
+
+            if not entity.startswith(f'client.nfs.{cluster_id}.'):
+                continue
+
+            caps = auth_entry.get('caps', {})
+            mds_cap = caps.get('mds', '')
+
+            if 'allow all' in mds_cap:
+                log.debug('%s already has correct MDS permissions', entity)
+                continue
+
+            if not mds_cap:
+                log.debug('%s has no MDS cap, skipping', entity)
+                continue
+
+            # Update if has 'allow rw'
+            if 'allow rw' in mds_cap:
+                path_match = re.search(r'path=([^\s,]+)', mds_cap)
+                path = path_match.group(1) if path_match else '/volumes'
+
+                # Update capabilities
+                ret, out, err = mgr.mon_command({
+                    'prefix': 'auth caps',
+                    'entity': entity,
+                    'caps': [
+                        'mon', caps.get('mon', 'allow r'),
+                        'osd', caps.get('osd', ''),
+                        'mds', f'allow all path={path}'
+                    ],
+                })
+
+                if ret == 0:
+                    log.info('Updated export user %s: mds=allow all path=%s', entity, path)
+                    updated_count += 1
+                else:
+                    log.error('Failed to update caps for %s: %s', entity, err)
+
+        if updated_count > 0:
+            log.info('Updated %d NFS export users for cluster %s', updated_count, cluster_id)
+        else:
+            log.debug('No NFS export users needed updates for cluster %s', cluster_id)
+
+        return True
+
+    except Exception as e:
+        log.exception('Error updating NFS client caps for %s: %s', cluster_id, e)
+        return False
+
+
+def _is_log_only_config(nfs_config: str) -> bool:
+    """Return True if nfs_config contains only LOG block(s).
+
+    NFS-Ganesha picks up LOG changes via RADOS watch/notify without
+    requiring a daemon restart.  If the config is empty, unparseable,
+    or contains any non-LOG top-level block, return False so the caller
+    falls back to the safe restart path.
+    """
+    try:
+        blocks = GaneshaConfParser(nfs_config).parse()
+    except Exception:
+        log.warning("Failed to parse user config, assuming restart is needed")
+        return False
+    if not blocks:
+        return False
+    block_names = [b.block_name for b in blocks]
+    log.debug("Parsed user config blocks: %s", block_names)
+    return all(name == 'LOG' for name in block_names)
+
+
 def resolve_ip(hostname: str) -> str:
     try:
         r = socket.getaddrinfo(hostname, None, flags=socket.AI_CANONNAME,
@@ -34,8 +197,8 @@ def resolve_ip(hostname: str) -> str:
         # pick first v4 IP, if present
         for a in r:
             if a[0] == socket.AF_INET:
-                return a[4][0]
-        return r[0][4][0]
+                return cast(str, a[4][0])
+        return cast(str, r[0][4][0])
     except socket.gaierror as e:
         raise NFSInvalidOperation(f"Cannot resolve IP for host {hostname}: {e}")
 
@@ -160,6 +323,14 @@ class NFSCluster:
             tls_ciphers: Optional[str] = None,
             enable_rdma: bool = False,
             rdma_port: Optional[int] = None,
+            enable_virtual_server: bool = False,
+            kmip_cert: Optional[str] = None,
+            kmip_key: Optional[str] = None,
+            kmip_ca_cert: Optional[str] = None,
+            kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
+            ip_addrs: Optional[Dict[str, str]] = None,
+            monitoring_ip_addrs: Optional[Dict[str, str]] = None,
+            monitoring_port: Optional[int] = None,
     ) -> None:
         if not port:
             port = 2049   # default nfs port
@@ -187,7 +358,6 @@ class NFSCluster:
                 keepalive_only = True
                 ganesha_port = port
                 frontend_port = None
-
             spec = NFSServiceSpec(service_type='nfs', service_id=cluster_id,
                                   placement=pspec,
                                   # use non-default port so we don't conflict with ingress
@@ -205,7 +375,15 @@ class NFSCluster:
                                   tls_min_version=tls_min_version,
                                   tls_ciphers=tls_ciphers,
                                   enable_rdma=enable_rdma,
-                                  rdma_port=rdma_port)
+                                  rdma_port=rdma_port,
+                                  enable_virtual_server=enable_virtual_server,
+                                  kmip_cert=kmip_cert,
+                                  kmip_key=kmip_key,
+                                  kmip_ca_cert=kmip_ca_cert,
+                                  kmip_host_list=kmip_host_list,
+                                  ip_addrs=ip_addrs,
+                                  monitoring_ip_addrs=monitoring_ip_addrs,
+                                  monitoring_port=monitoring_port)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
             ispec = IngressSpec(service_type='ingress',
@@ -235,7 +413,15 @@ class NFSCluster:
                                   tls_min_version=tls_min_version,
                                   tls_ciphers=tls_ciphers,
                                   enable_rdma=enable_rdma,
-                                  rdma_port=rdma_port)
+                                  rdma_port=rdma_port,
+                                  enable_virtual_server=enable_virtual_server,
+                                  kmip_cert=kmip_cert,
+                                  kmip_key=kmip_key,
+                                  kmip_ca_cert=kmip_ca_cert,
+                                  kmip_host_list=kmip_host_list,
+                                  ip_addrs=ip_addrs,
+                                  monitoring_ip_addrs=monitoring_ip_addrs,
+                                  monitoring_port=monitoring_port)
             completion = self.mgr.apply_nfs(spec)
             orchestrator.raise_if_exception(completion)
         log.debug("Successfully deployed nfs daemons with cluster id %s and placement %s",
@@ -243,7 +429,10 @@ class NFSCluster:
 
     def create_empty_rados_obj(self, cluster_id: str) -> None:
         common_conf = conf_obj_name(cluster_id)
-        self._rados(cluster_id).write_obj('', conf_obj_name(cluster_id))
+        self._rados(cluster_id).write_obj(
+            '',
+            conf_obj_name(cluster_id),
+        )
         log.info("Created empty object:%s", common_conf)
 
     def delete_config_obj(self, cluster_id: str) -> None:
@@ -271,6 +460,14 @@ class NFSCluster:
             tls_ciphers: Optional[str] = None,
             enable_rdma: bool = False,
             rdma_port: Optional[int] = None,
+            enable_virtual_server: bool = False,
+            kmip_cert: Optional[str] = None,
+            kmip_key: Optional[str] = None,
+            kmip_ca_cert: Optional[str] = None,
+            kmip_host_list: Optional[List[Union[str, Dict[str, Union[str, int]]]]] = None,
+            ip_addrs: Optional[Dict[str, str]] = None,
+            monitoring_ip_addrs: Optional[Dict[str, str]] = None,
+            monitoring_port: Optional[int] = None,
     ) -> None:
         try:
             if virtual_ip:
@@ -295,11 +492,11 @@ class NFSCluster:
 
             if cluster_id not in available_clusters(self.mgr):
                 self._call_orch_apply_nfs(
-                    cluster_id,
-                    placement,
-                    virtual_ip,
-                    ingress_mode,
-                    port,
+                    cluster_id=cluster_id,
+                    placement=placement,
+                    virtual_ip=virtual_ip,
+                    ingress_mode=ingress_mode,
+                    port=port,
                     cluster_qos_config=cluster_qos_config,
                     enable_nfsv3=enable_nfsv3,
                     ssl=ssl,
@@ -311,7 +508,15 @@ class NFSCluster:
                     tls_min_version=tls_min_version,
                     tls_ciphers=tls_ciphers,
                     enable_rdma=enable_rdma,
-                    rdma_port=rdma_port
+                    rdma_port=rdma_port,
+                    enable_virtual_server=enable_virtual_server,
+                    kmip_cert=kmip_cert,
+                    kmip_key=kmip_key,
+                    kmip_ca_cert=kmip_ca_cert,
+                    kmip_host_list=kmip_host_list,
+                    ip_addrs=ip_addrs,
+                    monitoring_ip_addrs=monitoring_ip_addrs,
+                    monitoring_port=monitoring_port
                 )
                 return
             raise NonFatalError(f"{cluster_id} cluster already exists")
@@ -335,6 +540,122 @@ class NFSCluster:
             log.exception(f"Failed to delete NFS Cluster {cluster_id}")
             raise ErrorResponse.wrap(e)
 
+    def _resolve_entities(
+            self,
+            cluster_id: str,
+            entity: Optional[List[str]]
+    ) -> List[str]:
+        if not entity:
+            return self._list_cluster_auth_entities(cluster_id)
+        entities: List[str] = []
+        for raw in entity:
+            normalized = normalize_auth_entity(raw)
+            if not entity_belongs_to_nfs_cluster(normalized, cluster_id):
+                raise NFSInvalidOperation(
+                    f"{normalized} does not belong to NFS cluster {cluster_id}"
+                )
+            entities.append(normalized)
+        # remove duplicates if any
+        return list(dict.fromkeys(entities))
+
+    def _list_cluster_auth_entities(self, cluster_id: str) -> List[str]:
+        """Return all auth entities belonging to this NFS cluster."""
+        result = self.mgr.check_mon_command({
+            'prefix': 'auth ls',
+            'format': 'json',
+        })
+        try:
+            auth_data = json.loads(result.stdout)
+        except ValueError as e:
+            raise NFSInvalidOperation(f"Failed to parse auth ls output: {e}")
+
+        auth_dump = auth_data.get('auth_dump', []) if isinstance(auth_data, dict) else auth_data
+        return [
+            entry['entity']
+            for entry in auth_dump
+            if isinstance(entry, dict)
+            and entry.get('entity')
+            and entity_belongs_to_nfs_cluster(entry['entity'], cluster_id)
+        ]
+
+    def _auth_rotate(self, entity: str, cluster_id: str, key_type: Optional[str]) -> None:
+        log.info(
+            "Rotating NFS key %s for cluster %s%s",
+            entity, cluster_id,
+            f" with key_type {key_type}" if key_type else ""
+        )
+        rotate_cmd: Dict[str, str] = {
+            'prefix': 'auth rotate',
+            'entity': entity,
+        }
+        if key_type:
+            rotate_cmd['key_type'] = key_type
+        self.mgr.check_mon_command(rotate_cmd)
+
+    def rotate_keys(
+            self,
+            cluster_id: str,
+            entity: Optional[List[str]] = None,
+            key_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Rotate NFS auth keys for a cluster.
+
+        If entities are omitted, rotate all cluster keys (daemon/recovery and
+        CephFS export keys). Export configs are refreshed after export-key
+        rotation. The NFS service is redeployed when any daemon key is rotated.
+        """
+        try:
+            if cluster_id not in available_clusters(self.mgr):
+                raise ClusterNotFound()
+
+            entities = self._resolve_entities(cluster_id, entity)
+            if not entities:
+                raise NFSObjectNotFound(
+                    f"No auth entities found for NFS cluster {cluster_id}"
+                )
+
+            export_user_ids = self.mgr.export_mgr.get_cephfs_export_user_ids(cluster_id)
+            export_entities = [
+                ent for ent in entities if ent[len('client.'):] in export_user_ids
+            ]
+            daemon_entities = [
+                ent for ent in entities if ent[len('client.'):] not in export_user_ids
+            ]
+
+            for ent in entities:
+                self._auth_rotate(ent, cluster_id, key_type)
+
+            updated_exports: List[str] = []
+            if export_entities:
+                updated_exports = self.mgr.export_mgr.refresh_export_keys(
+                    cluster_id, export_entities
+                )
+
+            service_redeployed = False
+            if daemon_entities:
+                log.info(
+                    "Redeploying NFS service nfs.%s after rotating daemon keys: %s",
+                    cluster_id, daemon_entities
+                )
+                redeploy_nfs_service(self.mgr, cluster_id)
+                service_redeployed = True
+
+            result: Dict[str, Any] = {
+                "cluster_id": cluster_id,
+                "rotated": entities,
+                "export_keys": export_entities,
+                "daemon_keys": daemon_entities,
+                "updated_exports": updated_exports,
+                "service_redeployed": service_redeployed,
+            }
+            if key_type:
+                result["key_type"] = key_type
+            return result
+        except Exception as e:
+            log.exception("Failed to rotate NFS keys for cluster %s", cluster_id)
+            raise ErrorResponse.wrap(e)
+
     def list_nfs_cluster(self) -> List[str]:
         try:
             return available_clusters(self.mgr)
@@ -343,56 +664,132 @@ class NFSCluster:
             raise ErrorResponse.wrap(e)
 
     def _show_nfs_cluster_info(self, cluster_id: str) -> Dict[str, Any]:
+        """
+        Retrieve and format NFS cluster information including daemon status,
+        placement, and ingress configuration.
+        """
+        # Get all NFS daemons
         completion = self.mgr.list_daemons(daemon_type='nfs')
-        # Here completion.result is a list DaemonDescription objects
-        clusters = orchestrator.raise_if_exception(completion)
-        backends: List[Dict[str, Union[Any]]] = []
+        all_nfs_daemons = orchestrator.raise_if_exception(completion)
 
-        for cluster in clusters:
-            if cluster_id == cluster.service_id():
-                assert cluster.hostname
-                try:
-                    if cluster.ip:
-                        ip = cluster.ip
-                    else:
-                        c = self.mgr.get_hosts()
-                        orchestrator.raise_if_exception(c)
-                        hosts = [h for h in c.result or []
-                                 if h.hostname == cluster.hostname]
-                        if hosts:
-                            ip = resolve_ip(hosts[0].addr)
-                        else:
-                            # sigh
-                            ip = resolve_ip(cluster.hostname)
-                    backends.append({
-                        "hostname": cluster.hostname,
-                        "ip": ip,
-                        "port": cluster.ports[0] if cluster.ports else None
-                    })
-                except orchestrator.OrchestratorError:
-                    continue
+        # Filter daemons for this cluster
+        cluster_daemons = [d for d in all_nfs_daemons if d.service_id() == cluster_id]
 
-        r: Dict[str, Any] = {
-            'virtual_ip': None,
-            'backend': backends,
-        }
-        sc = self.mgr.describe_service(service_type='ingress')
-        services = orchestrator.raise_if_exception(sc)
-        for i in services:
-            spec = cast(IngressSpec, i.spec)
-            if spec.backend_service == f'nfs.{cluster_id}':
-                r['virtual_ip'] = i.virtual_ip.split('/')[0] if i.virtual_ip else None
-                if i.ports:
-                    r['port'] = i.ports[0]
-                    if len(i.ports) > 1:
-                        r['monitor_port'] = i.ports[1]
+        # Cache hosts data to avoid O(n) orchestrator calls
+        hosts_map = {}
+        try:
+            hosts_completion = self.mgr.get_hosts()
+            hosts = orchestrator.raise_if_exception(hosts_completion)
+            hosts_map = {h.hostname: h for h in hosts}
+        except orchestrator.OrchestratorError:
+            log.debug("Failed to get hosts for IP resolution")
+
+        # Determine ingress configuration
+        ingress_mode: Optional[IngressType] = None
+        virtual_ip: Optional[str] = None
+        ingress_port: Optional[int] = None
+        monitor_port: Optional[int] = None
+
+        sc = self.mgr.describe_service(
+            service_type='ingress',
+            service_name=f'ingress.nfs.{cluster_id}'
+        )
+        try:
+            ingress_services = orchestrator.raise_if_exception(sc)
+            if ingress_services:
+                svc = ingress_services[0]
+                spec = cast(IngressSpec, svc.spec)
+                virtual_ip = svc.virtual_ip.split('/')[0] if svc.virtual_ip else None
                 if spec.keepalive_only:
                     ingress_mode = IngressType.keepalive_only
                 elif spec.enable_haproxy_protocol:
                     ingress_mode = IngressType.haproxy_protocol
                 else:
                     ingress_mode = IngressType.haproxy_standard
-                r['ingress_mode'] = ingress_mode.value
+                if svc.ports:
+                    ingress_port = svc.ports[0]
+                    if len(svc.ports) > 1:
+                        monitor_port = svc.ports[1]
+        except orchestrator.OrchestratorError:
+            # No ingress service found for this cluster
+            log.debug(f"No ingress service found for NFS cluster {cluster_id}")
+
+        # Build backend list with daemon information
+        backends: List[Dict[str, Any]] = []
+        for daemon in cluster_daemons:
+            if not daemon.hostname:
+                continue
+
+            try:
+                # Resolve daemon IP
+                if daemon.ip:
+                    ip = daemon.ip
+                elif daemon.hostname in hosts_map:
+                    # Use cached host data
+                    ip = resolve_ip(hosts_map[daemon.hostname].addr)
+                else:
+                    # Fallback to hostname resolution
+                    ip = resolve_ip(daemon.hostname)
+
+                # Get daemon status
+                status = orchestrator.DaemonDescriptionStatus.to_str(daemon.status)
+
+                backends.append({
+                    "hostname": daemon.hostname,
+                    "ip": ip,
+                    "port": daemon.ports[0] if daemon.ports and len(daemon.ports) > 0 else None,
+                    "status": status
+                })
+            except orchestrator.OrchestratorError:
+                log.warning(
+                    "Failed to get info for NFS daemon"
+                    f" on {daemon.hostname} in cluster {cluster_id}")
+                continue
+
+        # Sort backends by hostname for consistent output
+        backends.sort(key=lambda x: x["hostname"])
+
+        # Determine deployment type based on ingress configuration and actual daemon count
+        deployment_type = "standalone"
+        placement = None
+
+        # Get NFS service spec for placement information first
+        nfs_sc = self.mgr.describe_service(
+            service_type='nfs',
+            service_name=f'nfs.{cluster_id}'
+        )
+        nfs_services = orchestrator.raise_if_exception(nfs_sc)
+        for svc in nfs_services:
+            if svc.spec.service_id == cluster_id:
+                placement = svc.spec.placement
+                break
+
+        if ingress_mode:
+            # Determine deployment type from placement spec (source of truth)
+            # Note: Using placement.count instead of len(backends) to avoid race conditions
+            if placement and placement.count and placement.count > 1:
+                deployment_type = "active-active"
+            elif len(backends) > 1:
+                # Fallback to actual daemon count if placement.count not set
+                deployment_type = "active-active"
+            else:
+                deployment_type = "active-passive"
+
+        # Build result dictionary
+        r: Dict[str, Any] = {
+            'deployment_type': deployment_type,
+            'virtual_ip': virtual_ip,
+            'backend': backends,
+            'placement': placement.to_json() if placement else {},
+        }
+
+        # Add ingress configuration to result
+        if ingress_mode:
+            r['ingress_mode'] = ingress_mode.value
+        if ingress_port is not None:
+            r['port'] = ingress_port
+        if monitor_port is not None:
+            r['monitor_port'] = monitor_port
 
         log.debug("Successfully fetched %s info: %s", cluster_id, r)
         return r
@@ -436,7 +833,14 @@ class NFSCluster:
                 rados_obj.write_obj(nfs_config, user_conf_obj_name(cluster_id),
                                     conf_obj_name(cluster_id))
                 log.debug("Successfully saved %s's user config: \n %s", cluster_id, nfs_config)
-                restart_nfs_service(self.mgr, cluster_id)
+                if _is_log_only_config(nfs_config):
+                    log.debug("LOG-only config detected for %s, "
+                              "skipping restart (RADOS notify will reload)",
+                              cluster_id)
+                else:
+                    log.debug("Non-LOG config detected for %s, "
+                              "restarting NFS service", cluster_id)
+                    restart_nfs_service(self.mgr, cluster_id)
                 return
             raise ClusterNotFound()
         except NotImplementedError:
@@ -451,9 +855,17 @@ class NFSCluster:
                 rados_obj = self._rados(cluster_id)
                 if not rados_obj.check_config(USER_CONF_PREFIX):
                     raise NonFatalError("NFS-Ganesha User Config does not exist")
+                existing_conf = rados_obj.read_obj(user_conf_obj_name(cluster_id))
                 rados_obj.remove_obj(user_conf_obj_name(cluster_id),
                                      conf_obj_name(cluster_id))
-                restart_nfs_service(self.mgr, cluster_id)
+                if existing_conf and _is_log_only_config(existing_conf):
+                    log.debug("LOG-only config removed for %s, "
+                              "skipping restart (RADOS notify will reload)",
+                              cluster_id)
+                else:
+                    log.debug("Non-LOG config removed for %s, "
+                              "restarting NFS service", cluster_id)
+                    restart_nfs_service(self.mgr, cluster_id)
                 return
             raise ClusterNotFound()
         except NotImplementedError:

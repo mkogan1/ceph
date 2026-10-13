@@ -17,12 +17,19 @@ from threading import Event
 
 from ceph.deployment.service_spec import PrometheusSpec
 from cephadm.cert_mgr import CertMgr
+from .utils import get_default_ssh_config
 from cephadm.tlsobject_store import TLSObjectScope, TLSObjectException
+from ceph.deployment.tls_utils import (
+    SSLConfigException,
+    contains_private_key,
+    contains_multiple_pem_blocks,
+    parse_tls_pem_bundle
+)
 
 import string
 from typing import List, Dict, Optional, Callable, Tuple, TypeVar, \
     Any, Set, TYPE_CHECKING, cast, NamedTuple, Sequence, \
-    Awaitable, Iterator
+    Awaitable, Iterator, Union
 
 import datetime
 import os
@@ -32,8 +39,13 @@ import subprocess
 from prettytable import PrettyTable
 
 from ceph.cephadm.images import DefaultImages
+from ceph.cephadm.license_utils import (
+    get_license_acceptance_key_value_entry_name,
+    generate_license_acceptance_key_value_entry,
+)
 from ceph.deployment import inventory
 from ceph.deployment.drive_group import DriveGroupSpec, OSDType
+from ceph.deployment.hostspec import normalize_hostname
 from ceph.deployment.service_spec import (
     ServiceSpec,
     PlacementSpec,
@@ -49,6 +61,7 @@ from ceph.utils import str_to_datetime, datetime_to_str, datetime_now
 from ceph.cryptotools.select import choose_crypto_caller
 from cephadm.serve import CephadmServe
 from cephadm.services.cephadmservice import CephadmDaemonDeploySpec
+from cephadm.services.osd import OsdIdClaims
 from cephadm.http_server import CephadmHttpServer
 from cephadm.agent import CephadmAgentHelpers
 from cephadm.services.service_registry import service_registry
@@ -58,7 +71,6 @@ from mgr_module import (
     MgrModule,
     HandleCommandResult,
     Option,
-    OptionLevel,
     NotifyType,
     MonCommandFailed,
 )
@@ -97,11 +109,21 @@ from .inventory import (
     TunedProfileStore,
     NodeProxyCache,
     OrchSecretNotFound,
+    CoredumpctlOverrides,
+    DaemonDeployQueue,
+    DaemonRemovalQueue,
 )
 from .upgrade import CephadmUpgrade
 from .template import TemplateMgr
-from .utils import CEPH_IMAGE_TYPES, RESCHEDULE_FROM_OFFLINE_HOSTS_TYPES, forall_hosts, \
-    cephadmNoImage, SpecialHostLabels
+from .utils import (
+    CEPH_IMAGE_TYPES,
+    RESCHEDULE_FROM_OFFLINE_HOSTS_TYPES,
+    forall_hosts,
+    cephadmNoImage,
+    SpecialHostLabels,
+    LogrotateConfigType,
+    is_fips_enabled
+)
 from .configchecks import CephadmConfigChecks
 from .offline_watcher import OfflineHostWatcher
 from .tuned_profiles import TunedProfileUtils
@@ -143,13 +165,15 @@ def host_exists(hostname_position: int = 1) -> Callable:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             this = args[0]  # self object
-            hostname = args[hostname_position]
+            hostname = normalize_hostname(args[hostname_position])
             if hostname not in this.cache.get_hosts():
                 candidates = ','.join([h for h in this.cache.get_hosts() if h.startswith(hostname)])
                 help_msg = f"Did you mean {candidates}?" if candidates else ""
                 raise OrchestratorError(
                     f"Cannot find host '{hostname}' in the inventory. {help_msg}")
 
+            args = list(args)  # type: ignore
+            args[hostname_position] = hostname
             return func(*args, **kwargs)
         return wrapper
     return inner
@@ -336,6 +360,12 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             desc='Automatically convert image tags to image digest to ensure that all daemons use the same image'
         ),
         Option(
+            'upgrade_preflight_checks',
+            type='bool',
+            default=False,
+            desc='Enable pre-upgrade validation (health/OSDs/PGs) before starting an upgrade',
+        ),
+        Option(
             'config_checks_enabled',
             type='bool',
             default=False,
@@ -428,6 +458,12 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             'Set to true to keep autoscaling on during upgrade.'
         ),
         Option(
+            'upgrade_osd_flags',
+            type='str',
+            default='noout,noscrub,nodeep-scrub',
+            desc='Comma separated list of OSD flags to set for the duration of an upgrade'
+        ),
+        Option(
             'service_discovery_port',
             type='int',
             default=8765,
@@ -447,7 +483,6 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         ),
         Option(
             'certificate_check_debug_mode',
-            level=OptionLevel.DEV,
             type='bool',
             default=False,
             desc='FOR TESTING ONLY: This flag forces the certificate check instead of waiting for certificate_check_period.',
@@ -528,6 +563,52 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             default='169.254.1.1',
             desc="Default IP address for RedFish API (OOB management)."
         ),
+        Option(
+            'sudo_hardening',
+            type='bool',
+            default=False,
+            desc='Enable sudo hardening by routing all command execution through invoker.py. '
+                 'When enabled, cephadm and bash commands are validated and executed via '
+                 'the secure invoker wrapper.'
+        ),
+        Option(
+            'set_coredump_overrides',
+            type='bool',
+            default=True,
+            desc='Whether cephadm should use a systemd drop-in to modify coredump settings'
+        ),
+        Option(
+            'coredump_max_size',
+            type='int',
+            default=32,
+            desc='Size cephadm should override the max coredump size to in Gigabytes'
+        ),
+        Option(
+            'call_home_needs_acceptance',
+            type='bool',
+            default=False,
+            desc='Internal option for tracking call home acceptance. Do no modify'
+        ),
+        Option(
+            'nfs_rados_command_timeout',
+            type='secs',
+            default=30,
+            desc='Timeout (in seconds) for rados and ganesha-rados-grace commands '
+                 'issued by the NFS service (e.g. add/remove from the grace table, '
+                 'create/remove the rados config object). Increase this value if '
+                 'your cluster is under heavy load and these operations time out.',
+        ),
+        Option(
+            'log_deploy_configuration',
+            type='bool',
+            default=False,
+            desc=(
+                'Whether to log deploy config for daemons cephadm deploys in both the cephadm mgr '
+                'module and cephadm.log on individual hosts. Useful for debugging and developers, '
+                'but these log statements may contain sensitive info such as cephx keys. Only relevant '
+                'when logging at debug level'
+            )
+        ),
     ]
     for image in DefaultImages:
         MODULE_OPTIONS.append(Option(image.key, default=image.image_ref, desc=image.desc))
@@ -550,6 +631,9 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             self.paused = True
         else:
             self.paused = False
+
+        self.sudo_hardening = False
+        self.invoker_path = '/usr/libexec/cephadm_invoker.py'
 
         # for mypy which does not run the code
         if TYPE_CHECKING:
@@ -575,10 +659,6 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             self.container_image_snmp_gateway = ''
             self.container_image_nginx = ''
             self.container_image_oauth2_proxy = ''
-            self.container_image_elasticsearch = ''
-            self.container_image_jaeger_agent = ''
-            self.container_image_jaeger_collector = ''
-            self.container_image_jaeger_query = ''
             self.container_image_samba = ''
             self.container_image_samba_metrics = ''
             self.warn_on_stray_hosts = True
@@ -622,21 +702,30 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
             self.apply_spec_fails: List[Tuple[str, str]] = []
             self.max_osd_draining_count = 10
             self.max_parallel_osd_upgrades = 16
+            self.upgrade_osd_flags = 'noout,noscrub,nodeep-scrub'
             self.device_enhanced_scan = False
             self.inventory_list_all = False
             self.cgroups_split = True
             self.log_refresh_metadata = False
+            self.nfs_rados_command_timeout = 30
             self.default_cephadm_command_timeout = 0
             self.cephadm_log_destination = ''
             self.oob_default_addr = ''
             self.ssh_keepalive_interval = 0
             self.ssh_keepalive_count_max = 0
+            self.sudo_hardening = False
+            self.invoker_path = '/usr/libexec/cephadm_invoker.py'
             self.certificate_duration_days = 0
             self.certificate_renewal_threshold_days = 0
             self.certificate_automated_rotation_enabled = False
             self.certificate_check_debug_mode = False
             self.certificate_check_period = 0
             self.cephadm_binary_logging_level = 'debug'
+            self.set_coredump_overrides = True
+            self.coredump_max_size = 0
+            self.call_home_needs_acceptance = False
+            self.cephadm_binary_logging_level = 'debug'
+            self.log_deploy_configuration = False
 
         self.notify(NotifyType.mon_map, None)
         self.config_notify()
@@ -736,8 +825,13 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         self.recently_altered_daemons: Dict[str, datetime.datetime] = {}
 
         self.ceph_volume: CephVolume = CephVolume(self)
+        self.osd_id_claims: OsdIdClaims = OsdIdClaims(self)
 
         self.last_stray_daemon_check: Optional[datetime.datetime] = None
+        self.daemon_deploy_queue = DaemonDeployQueue()
+        self.daemon_removal_queue = DaemonRemovalQueue()
+
+        self.created_ganesha_pool = False
 
     def shutdown(self) -> None:
         self.log.debug('shutdown')
@@ -770,6 +864,19 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         self.cert_mgr.register_cert('nvmeof', 'nvmeof_root_ca_cert', TLSObjectScope.SERVICE)
         # register haproxy monitor ssl cert and key
         self.cert_mgr.register_cert_key_pair('ingress', 'haproxy_monitor_ssl_cert', 'haproxy_monitor_ssl_key', TLSObjectScope.SERVICE)
+        # register per-feature SMB TLS cert names
+        for _smb_feature in ['remote_control', 'keybridge']:
+            self.cert_mgr.register_cert_key_pair(
+                'smb',
+                f'smb_{_smb_feature}_ssl_cert',
+                f'smb_{_smb_feature}_ssl_key',
+                TLSObjectScope.SERVICE,
+                f'smb_{_smb_feature}_ca_cert',
+            )
+        # register NFS gRPC certs before store loads so persisted certs survive mgr restart
+        self.cert_mgr.register_cert_key_pair('nfs', 'nfs_grpc_server_cert', 'nfs_grpc_server_key', TLSObjectScope.SERVICE)
+        self.cert_mgr.register_cert_key_pair('nfs', 'nfs_grpc_client_cert', 'nfs_grpc_client_key', TLSObjectScope.SERVICE)
+        self.cert_mgr.register_cert('nfs', 'nfs_grpc_ca_cert', TLSObjectScope.SERVICE)
 
         self.cert_mgr.init_tlsobject_store()
 
@@ -1005,8 +1112,8 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         suffix = daemon_type not in [
             'mon', 'crash', 'ceph-exporter', 'node-proxy',
             'prometheus', 'node-exporter', 'grafana', 'alertmanager',
-            'container', 'agent', 'snmp-gateway', 'loki', 'promtail', 'alloy',
-            'elasticsearch', 'jaeger-collector', 'jaeger-agent', 'jaeger-query', 'mgmt-gateway', 'oauth2-proxy'
+            'container', 'agent', 'snmp-gateway', 'loki', 'promtail',
+            'alloy', 'mgmt-gateway', 'oauth2-proxy'
         ]
         if forcename:
             if len([d for d in existing if d.daemon_id == forcename]):
@@ -1137,6 +1244,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         self.offline_watcher.set_hosts(list(set([h for h in hosts_to_watch if h is not None])))
 
     def offline_hosts_remove(self, host: str) -> None:
+        host = normalize_hostname(host)
         if host in self.offline_hosts:
             self.offline_hosts.remove(host)
             self._invalidate_all_host_metadata_and_kick_serve(host)
@@ -1206,6 +1314,90 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
 
         return True, err, ret
 
+    def _setup_user_on_host(self, host: str, user: str, ssh_pub_key: str,
+                            addr: Optional[str] = None) -> None:
+        """
+        Setup sudoers and copy SSH key by calling cephadm setup-ssh-user command.
+        User must already exist on the host.
+        For root user, only SSH key is copied (sudoers setup is skipped).
+        """
+        self.log.debug('Setting up user %s on host %s', user, host)
+        try:
+            out, err, code = self.wait_async(
+                CephadmServe(self)._run_cephadm(
+                    host,
+                    cephadmNoImage,
+                    'setup-ssh-user',
+                    ['--ssh-user', user, '--ssh-pub-key', ssh_pub_key],
+                    addr=addr,
+                    error_ok=False,
+                    no_fsid=True
+                )
+            )
+            if code != 0:
+                msg = f'Failed to setup user {user} on host {host}: {err}'
+                self.log.error(msg)
+                raise OrchestratorError(msg)
+            self.log.info('Successfully set up user %s on host %s', user, host)
+        except OrchestratorError:
+            raise
+        except Exception as e:
+            msg = f'Failed to setup user {user} on host {host}: {e}'
+            self.log.exception(msg)
+            raise OrchestratorError(msg)
+
+    def _setup_user_on_all_hosts(self, user: str) -> None:
+        """
+        Setup sudoers and copy SSH key on all hosts in the cluster.
+        For root user, only SSH key is copied (sudoers setup is skipped).
+        """
+        if not self.ssh_pub:
+            raise OrchestratorError(
+                'No SSH public key configured. '
+                'Please generate or set SSH keys first using '
+                '`ceph cephadm generate-key` or `ceph cephadm set-pub-key`.'
+            )
+
+        hosts = self.cache.get_hosts()
+        if not hosts:
+            self.log.warning('No hosts in inventory, skipping user setup')
+            return
+
+        self.log.info('Setting up user %s on %s host(s)', user, len(hosts))
+
+        @forall_hosts
+        def setup_user_on_host(host: str) -> Tuple[str, Optional[str]]:
+            """Returns (host, error_message) tuple. error_message is None on success."""
+            try:
+                assert self.ssh_pub
+                self._setup_user_on_host(host, user, self.ssh_pub)
+                return (host, None)
+            except Exception as e:
+                self.log.error('Failed to setup user %s on host %s: %s', user, host, e)
+                return (host, str(e))
+
+        results = setup_user_on_host(hosts)
+        failed_hosts = [(host, error) for host, error in results if error is not None]
+        if failed_hosts:
+            self.log.error('Failed to setup user %s on %s of %s host(s)', user, len(failed_hosts), len(hosts))
+            error_parts = [f'Failed to setup user {user} on the following hosts:']
+            for host, error in failed_hosts:
+                error_parts.append(f'  - {host}: {error}')
+            error_parts.extend([
+                f'\nPlease ensure user {user} exists on these hosts and retry:',
+                f'  1. Create user: useradd -m -s /bin/bash {user}',
+                f'  2. Retry: ceph cephadm set-user {user}',
+                '\nOr manually complete the setup:',
+                f'  1. Setup sudoers: echo "{user} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/{user}',
+                f'  2. Set permissions: chmod 440 /etc/sudoers.d/{user}',
+                '  3. Copy SSH key: ceph cephadm get-pub-key > ~/ceph.pub',
+                f'  4. Add key: ssh-copy-id -f -i ~/ceph.pub {user}@HOST',
+                '\nAnd use --skip-pre-steps flag to skip automatic setup.'
+            ])
+            raise OrchestratorError('\n'.join(error_parts))
+
+        self.log.info('Successfully set up user %s on all %s host(s)', user, len(hosts))
+
     def _validate_and_set_ssh_val(self, what: str, new: Optional[str], old: Optional[str]) -> None:
         self.set_store(what, new)
         self.ssh._reconfig_ssh()
@@ -1259,7 +1451,7 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         ssh_config = self.get_store("ssh_config")
         if ssh_config:
             return HandleCommandResult(stdout=ssh_config)
-        return HandleCommandResult(stdout=DEFAULT_SSH_CONFIG)
+        return HandleCommandResult(stdout=get_default_ssh_config())
 
     @CephadmCLICommand.Write('cephadm generate-key')
     def _generate_key(self) -> Tuple[int, str, str]:
@@ -1267,16 +1459,31 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         Generate a cluster SSH key (if not present)
         """
         if not self.ssh_pub or not self.ssh_key:
-            self.log.info('Generating ssh key...')
+            fips_enabled = is_fips_enabled()
+            key_type = 'rsa' if fips_enabled else 'ed25519'
+            self.log.info(
+                'Generating %s ssh key%s...',
+                key_type,
+                ' for FIPS mode' if fips_enabled else '',
+            )
             tmp_dir = TemporaryDirectory()
             path = tmp_dir.name + '/key'
+            args = [
+                '/usr/bin/ssh-keygen',
+                '-t', key_type,
+            ]
+
+            if fips_enabled:
+                args.extend(['-b', '4096'])
+
+            args.extend([
+                '-C', 'ceph-%s' % self._cluster_fsid,
+                '-N', '',
+                '-f', path,
+            ])
+
             try:
-                subprocess.check_call([
-                    '/usr/bin/ssh-keygen',
-                    '-C', 'ceph-%s' % self._cluster_fsid,
-                    '-N', '',
-                    '-f', path
-                ])
+                subprocess.check_call(args)
                 with open(path, 'r') as f:
                     secret = f.read()
                 with open(path + '.pub', 'r') as f:
@@ -1369,13 +1576,29 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
 
     @CephadmCLICommand.Read(
         'cephadm set-user')
-    def set_ssh_user(self, user: str) -> Tuple[int, str, str]:
+    def set_ssh_user(self, user: str, skip_pre_steps: bool = False) -> Tuple[int, str, str]:
         """
-        Set user for SSHing to cluster hosts, passwordless sudo will be needed for non-root users
+        Set user for SSHing to cluster hosts, passwordless sudo will be needed for non-root users.
+
+        This command will automatically setup passwordless sudo for the user and
+        copy SSH public key to the user's authorized_keys.
+        Use --skip-pre-steps if you have already manually configured the user on all hosts.
         """
         current_user = self.ssh_user
         if user == current_user:
             return 0, "value unchanged", ""
+
+        if user != 'root' and not skip_pre_steps:
+            self.log.info('Setting up SSH user %s on all cluster hosts', user)
+            try:
+                self._setup_user_on_all_hosts(user)
+            except OrchestratorError as e:
+                self.log.error('Failed to setup user %s: %s', user, e)
+                return -errno.EINVAL, '', str(e)
+            except Exception as e:
+                msg = f'Failed to setup user {user} on all hosts: {e}'
+                self.log.exception(msg)
+                return -errno.EINVAL, '', msg
 
         self._validate_and_set_ssh_val('ssh_user', user, current_user)
         current_ssh_config = self._get_ssh_config()
@@ -1486,6 +1709,138 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
                 if item.startswith('host %s ' % host):
                     self.event.set()
         return 0, '%s (%s) ok' % (host, addr), '\n'.join(err)
+
+    def _prepare_host_for_sudo_hardening(
+        self,
+        host: str,
+        cephadm_args: List[str],
+        addr: Optional[str] = None
+    ) -> Tuple[str, bool, str]:
+        """
+        Prepare a host for sudo hardening by executing 'cephadm prepare-host-sudo-hardening' command.
+        """
+        try:
+            self.log.debug('Preparing host %s for sudo hardening...', host)
+            addr = addr or (self.inventory.get_addr(host) if host in self.inventory else None)
+
+            with self.async_timeout_handler(host, 'cephadm prepare-host-sudo-hardening'):
+                out, err, code = self.wait_async(
+                    CephadmServe(self)._run_cephadm(
+                        host, cephadmNoImage, 'prepare-host-sudo-hardening', cephadm_args,
+                        addr=addr, error_ok=True, no_fsid=True))
+            if code:
+                error_msg = '\n'.join(err) if err else 'Unknown error'
+                self.log.error('Failed to prepare host %s: %s', host, error_msg)
+                return (host, False, error_msg)
+            self.log.debug('Successfully prepared host %s', host)
+            return (host, True, '')
+        except Exception as e:
+            error_msg = str(e)
+            self.log.exception('Exception while preparing host %s: %s', host, error_msg)
+            return (host, False, error_msg)
+
+    @forall_hosts
+    def _prepare_hosts_for_sudo_hardening(
+        self,
+        host: str,
+        cephadm_args: List[str],
+        addr: Optional[str] = None
+    ) -> Tuple[str, bool, str]:
+        return self._prepare_host_for_sudo_hardening(host, cephadm_args, addr)
+
+    @CephadmCLICommand.Write('cephadm prepare-host-and-enable-sudo-hardening')
+    def _prepare_host_and_enable_sudo_hardening(
+        self,
+        user: str,
+        host_label: Optional[str] = None
+    ) -> Tuple[int, str, str]:
+        """
+        Prepare hosts and enable sudo hardening for the cluster.
+        This command performs a complete sudo hardening setup:
+        1. Prepare each host for sudo hardening (install cephadm, configure sudoers) - executed on all hosts
+        2. Set SSH user to the specified user for cluster operations (without pre-steps)
+        3. Enable sudo hardening globally for the cluster
+        """
+        if not self.ssh_pub:
+            return 1, '', 'Error: No SSH public key configured. Run "ceph cephadm generate-key" first.'
+        if host_label:
+            hosts_to_prepare = [h for h in self.cache.get_hosts()
+                                if self.inventory.has_label(h, host_label)]
+        else:
+            hosts_to_prepare = self.cache.get_hosts()
+        if not hosts_to_prepare:
+            return 1, '', 'Error: No hosts found'
+        self.log.debug('Preparing %s host(s) in the cluster: %s', len(hosts_to_prepare), ", ".join(hosts_to_prepare))
+
+        # Prepare arguments for the cephadm command
+        args = []
+        args.extend(['--ssh-user', user])
+        args.extend(['--ssh-pub-key', self.ssh_pub])
+        ceph_version = self._get_cephadm_version_for_host_prep()
+        if ceph_version:
+            args.extend(['--cephadm-version', ceph_version])
+
+        # Step 1: Prepare each host for sudo hardening (executed on all target hosts in parallel)
+        self.log.debug('Step 1: Preparing %s host(s) for sudo hardening in parallel', len(hosts_to_prepare))
+        host_args = [(host, args) for host in hosts_to_prepare]
+        try:
+            host_results = self._prepare_hosts_for_sudo_hardening(host_args)
+        except Exception as e:
+            self.log.exception('Failed to prepare hosts in parallel: %s', e)
+            return 1, '', f'Failed to prepare hosts: {str(e)}'
+        failed_hosts = []
+        for hostname, success, error_msg in host_results:
+            if not success:
+                failed_hosts.append(hostname)
+        if failed_hosts:
+            return 1, '', f'Failed to prepare {len(failed_hosts)} host(s): {", ".join(failed_hosts)}'
+        self.log.debug('All %s hosts prepared successfully', len(hosts_to_prepare))
+
+        # Step 2: Enable sudo hardening globally
+        self.log.debug('Step 2: Enabling sudo hardening...')
+        try:
+            if not self.sudo_hardening:
+                self.set_module_option('sudo_hardening', True)
+                self.sudo_hardening = True
+        except Exception as e:
+            error_msg = f'Failed to enable sudo hardening: {e}'
+            self.log.exception(error_msg)
+            return 1, '', error_msg
+
+        # Step 3: Set SSH user for cluster operations
+        self.log.debug('Step 3: Setting SSH user to %s for cluster operations', user)
+        try:
+            # Call set_ssh_user with skip_pre_steps=True since we've already prepared the hosts
+            current_user = self.ssh_user
+            if current_user != user:
+                retval, out_msg, err_msg = self.set_ssh_user(user, skip_pre_steps=True)
+                if retval != 0:
+                    error_msg = f'Failed to set SSH user: {err_msg}'
+                    self.log.error(error_msg)
+                    return 1, '', error_msg
+        except Exception as e:
+            error_msg = f'Failed to set SSH user: {e}'
+            self.log.exception(error_msg)
+            return 1, '', error_msg
+
+        success_msg = (
+            f'Sudo hardening is now active for all cluster operations.\n'
+            f'Affected hosts: {", ".join(hosts_to_prepare)}\n'
+        )
+        self.log.debug(success_msg)
+        return 0, success_msg, ''
+
+    @CephadmCLICommand.Write(
+        'orch write-custom-logrotate')
+    def write_custom_logrotate_config(self, logrotate_type: LogrotateConfigType, inbuf: Optional[str] = None) -> Tuple[int, str, str]:
+        """Write logrotate file with custom template to all cluster hosts"""
+        if not inbuf:
+            raise OrchestratorError('write-custom-logrotate requires "-i LOGROTATE_CONFIG"')
+
+        self.set_store(logrotate_type.config_key_entry, inbuf)
+        self.cache.distribute_custom_logrotate_config()
+        self._kick_serve_loop()
+        return 0, f'Scheduled all hosts to receive new {str(logrotate_type)} logrotate config', ''
 
     @CephadmCLICommand.Write(
         prefix='cephadm set-extra-ceph-conf')
@@ -1829,12 +2184,8 @@ class CephadmOrchestrator(orchestrator.Orchestrator, MgrModule):
         else:
             images = {
                 'alertmanager': self.container_image_alertmanager,
-                'elasticsearch': self.container_image_elasticsearch,
                 'grafana': self.container_image_grafana,
                 'haproxy': self.container_image_haproxy,
-                'jaeger-agent': self.container_image_jaeger_agent,
-                'jaeger-collector': self.container_image_jaeger_collector,
-                'jaeger-query': self.container_image_jaeger_query,
                 'keepalived': self.container_image_keepalived,
                 'loki': self.container_image_loki,
                 'node-exporter': self.container_image_node_exporter,
@@ -1911,6 +2262,47 @@ Then run the following:
             raise OrchestratorError(str(e))
         return ip_addr
 
+    def _get_cephadm_version_for_host_prep(self) -> Optional[str]:
+        """Extract cephadm version from cluster version string."""
+        try:
+            if self.version:
+                parts = self.version.split()
+                if len(parts) > 2 and parts[0] == 'ceph' and parts[1] == 'version':
+                    return parts[2]
+        except Exception as e:
+            self.log.debug(f'Could not determine cluster version: {e}')
+        return None
+
+    def _prepare_new_host_for_sudo_hardening(self, hostname: str, addr: str) -> None:
+        """
+        Prepare a new host for sudo hardening before adding to inventory.
+        Raises OrchestratorError on failure.
+        """
+        if not self.ssh_pub:
+            raise OrchestratorError('No SSH public key configured')
+        if not self.ssh_user:
+            raise OrchestratorError('No SSH user configured')
+
+        self.log.info('Preparing new host %s for sudo hardening with root', hostname)
+
+        # Build arguments
+        ceph_version = self._get_cephadm_version_for_host_prep()
+        if ceph_version:
+            self.log.debug('Will install cephadm version %s on %s', ceph_version, hostname)
+        cephadm_args = ['--ssh-user', self.ssh_user, '--ssh-pub-key', self.ssh_pub]
+        if ceph_version:
+            cephadm_args.extend(['--cephadm-version', ceph_version])
+
+        # Execute preparation
+        _, success, error_msg = self._prepare_host_for_sudo_hardening(
+            hostname, cephadm_args, addr
+        )
+        if not success:
+            raise OrchestratorError(
+                f'Failed to prepare host {hostname} for sudo hardening: {error_msg}'
+            )
+        self.log.info('Successfully prepared host %s for sudo hardening', hostname)
+
     def _add_host(self, spec):
         # type: (HostSpec) -> str
         """
@@ -1919,7 +2311,20 @@ Then run the following:
         :param host: host name
         """
         HostSpec.validate(spec)
-        ip_addr = self._check_valid_addr(spec.hostname, spec.addr)
+        # Drop the cached SSH connection when re-adding a host with a new
+        # address. Otherwise check-host may reuse the old connection and
+        # validate the wrong machine.
+        addr_changed = spec.hostname in self.inventory and self.inventory.get_addr(spec.hostname) != spec.addr
+        if addr_changed:
+            self.ssh.reset_con(spec.hostname)
+        try:
+            ip_addr = self._check_valid_addr(spec.hostname, spec.addr)
+        except Exception:
+            # Validation failed. Clear the connection we just created to the
+            # wrong address so future operations use a fresh connection.
+            if addr_changed:
+                self.ssh.reset_con(spec.hostname)
+            raise
         if spec.addr == spec.hostname and ip_addr:
             spec.addr = ip_addr
 
@@ -1955,6 +2360,16 @@ Then run the following:
             self.update_maintenance_healthcheck()
         self.event.set()  # refresh stray health check
         self.log.info('Added host %s' % spec.hostname)
+
+        if self.sudo_hardening and self.ssh_user and self.ssh_user != 'root':
+            try:
+                self._prepare_new_host_for_sudo_hardening(spec.hostname, spec.addr)
+            except Exception as e:
+                self.log.exception('Sudo hardening preparation failed for %s: %s', spec.hostname, e)
+                raise OrchestratorError(
+                    f'Failed to prepare host {spec.hostname} for sudo hardening. '
+                    f'Host was not added to the cluster. Error: {e}'
+                )
         return "Added host '{}' with addr '{}'".format(spec.hostname, spec.addr)
 
     @handle_orch_error
@@ -2039,6 +2454,8 @@ Then run the following:
         :param force: bypass running daemons check
         :param offline: remove offline host
         """
+        original_host = host
+        host = normalize_hostname(host)
 
         # check if host is offline
         host_offline = host in self.offline_hosts
@@ -2107,7 +2524,7 @@ Then run the following:
 
             cmd_args = {
                 'prefix': 'osd crush rm',
-                'name': host
+                'name': original_host
             }
             run_cmd(cmd_args)
 
@@ -2115,7 +2532,7 @@ Then run the following:
             try:
                 self.check_mon_command({
                     'prefix': 'osd crush remove',
-                    'name': host,
+                    'name': original_host,
                 })
             except MonCommandFailed as e:
                 self.log.error(f'Couldn\'t remove host {host} from CRUSH map: {str(e)}')
@@ -2134,12 +2551,26 @@ Then run the following:
 
     @handle_orch_error
     def update_host_addr(self, host: str, addr: str) -> str:
+        host = normalize_hostname(host)
+        # Drop the cached connection before validating so check-host
+        # runs on the new address, not the old one.
+        self.ssh.reset_con(host)
         self._check_valid_addr(host, addr)
         self.inventory.set_addr(host, addr)
         self.ssh.reset_con(host)
         self.event.set()  # refresh stray health check
         self.log.info('Set host %s addr to %s' % (host, addr))
         return "Updated host '{}' addr to '{}'".format(host, addr)
+
+    @handle_orch_error
+    def set_host_topological_labels(
+        self,
+        host: str,
+        topological_labels: Optional[Union[str, List[str], Dict[str, str]]]
+    ) -> str:
+        self.inventory.set_topological_labels(host, topological_labels)
+        self.log.info('Set host %s topological_labels to %s' % (host, topological_labels))
+        return "Updated host '{}' topological_labels to '{}'".format(host, topological_labels)
 
     @handle_orch_error
     def get_hosts(self):
@@ -2174,6 +2605,7 @@ Then run the following:
 
     @handle_orch_error
     def remove_host_label(self, host: str, label: str, force: bool = False) -> str:
+        host = normalize_hostname(host)
         # if we remove the _admin label from the only host that has it we could end up
         # removing the only instance of the config and keyring and cause issues
         if not force and label == SpecialHostLabels.ADMIN:
@@ -2233,6 +2665,7 @@ Then run the following:
 
     @handle_orch_error
     def host_ok_to_stop(self, hostname: str) -> str:
+        hostname = normalize_hostname(hostname)
         if hostname not in self.cache.get_hosts():
             raise OrchestratorError(f'Cannot find host "{hostname}"', errno=errno.EINVAL)
 
@@ -2520,6 +2953,48 @@ Then run the following:
 
         return f'{msg}'
 
+    def set_host_coredump_overrides(self, host: str, settings: CoredumpctlOverrides) -> None:
+        with self.async_timeout_handler(host, 'cephadm _orch set-coredump-overrides'):
+            # Note that the way we infer an fsid relies on daemons being on the
+            # host and as there may not be any present when running this we should
+            # pass this explicitly (handled by no_fsid parameter to _run_cephadm)
+            out, err, code = self.wait_async(
+                CephadmServe(self)._run_cephadm(
+                    host,
+                    cephadmNoImage,
+                    ['_orch', 'set-coredump-overrides'],
+                    settings.to_args(),
+                    no_fsid=False,
+                    error_ok=True
+                )
+            )
+        if code:
+            raise OrchestratorError(
+                f'Unable to set coredumpctl overrides on {host}\n rc: {code}\n out: {out}\n err: {err}'
+            )
+        self.cache.update_last_coredumpctl_overrides(host, settings)
+
+    def rm_host_coredump_overrides(self, host: str) -> None:
+        with self.async_timeout_handler(host, 'cephadm _orch set-coredump-overrides'):
+            # Note that the way we infer an fsid relies on daemons being on the
+            # host and as there may not be any present when running this we should
+            # pass this explicitly (handled by no_fsid parameter to _run_cephadm)
+            out, err, code = self.wait_async(
+                CephadmServe(self)._run_cephadm(
+                    host,
+                    cephadmNoImage,
+                    ['_orch', 'set-coredump-overrides'],
+                    ['--cleanup'],
+                    no_fsid=False,
+                    error_ok=True
+                )
+            )
+        if code:
+            raise OrchestratorError(
+                f'Unable to remove coredumpctl overrides on {host}\n rc: {code}\n out: {out}\n err: {err}'
+            )
+        self.cache.clear_last_max_coredumpctl_overrides(host)
+
     def get_minimal_ceph_conf(self) -> str:
         _, config, _ = self.check_mon_command({
             "prefix": "config generate-minimal-conf",
@@ -2756,7 +3231,7 @@ Then run the following:
             daemon_spec = service_registry.get_service(daemon_type_to_service(
                 daemon_spec.daemon_type)).prepare_create(daemon_spec)
         with self.async_timeout_handler(daemon_spec.host, f'cephadm deploy ({daemon_spec.daemon_type} daemon)'):
-            self.wait_async(CephadmServe(self)._create_daemon(daemon_spec, reconfig=True))
+            self.wait_async(CephadmServe(self)._create_daemon([daemon_spec], reconfig=True))
 
         # try to be clever, or fall back to restarting the daemon
         rc = -1
@@ -2823,7 +3298,8 @@ Then run the following:
                        action: str,
                        image: Optional[str] = None,
                        skip_restart_for_reconfig: bool = False,
-                       send_signal_to_daemon: Optional[str] = None) -> str:
+                       send_signal_to_daemon: Optional[str] = None,
+                       spec: Optional[ServiceSpec] = None) -> str:
         self._daemon_action_set_image(action, image, daemon_spec.daemon_type,
                                       daemon_spec.daemon_id)
 
@@ -2838,19 +3314,32 @@ Then run the following:
         if action == 'redeploy' or action == 'reconfig' or (action == 'restart' and self._mon_public_network_changed(daemon_spec)):
             if action == 'restart':
                 action = 'redeploy'  # to ensure proper behavior since we want redeploy
+        if action == 'redeploy' or action == 'reconfig':
+            if spec:
+                svc_type = spec.service_type
+            else:
+                svc_type = daemon_type_to_service(daemon_spec.daemon_type)
             if daemon_spec.daemon_type != 'osd':
-                daemon_spec = service_registry.get_service(daemon_type_to_service(
-                    daemon_spec.daemon_type)).prepare_create(daemon_spec)
+                daemon_spec = service_registry.get_service(svc_type).prepare_create(daemon_spec)
             else:
                 # for OSDs, we still need to update config, just not carry out the full
                 # prepare_create function
                 daemon_spec.final_config, daemon_spec.deps = self.osd_service.generate_config(
                     daemon_spec)
             with self.async_timeout_handler(daemon_spec.host, f'cephadm deploy ({daemon_spec.daemon_type} daemon)'):
-                return self.wait_async(
-                    CephadmServe(self)._create_daemon(daemon_spec, reconfig=(action == 'reconfig'),
-                                                      skip_restart_for_reconfig=skip_restart_for_reconfig,
-                                                      send_signal_to_daemon=send_signal_to_daemon))
+                successes, failures = self.wait_async(
+                    CephadmServe(self)._create_daemon(
+                        [daemon_spec],
+                        reconfig=(action == 'reconfig'),
+                        skip_restart_for_reconfig=skip_restart_for_reconfig,
+                        send_signal_to_daemon=send_signal_to_daemon
+                    )
+                )
+                # we're only deploying one daemon here, so we expect successes or failures to container one entry
+                for res in [successes, failures]:
+                    if daemon_spec.name() in res:
+                        return res[daemon_spec.name()]
+                raise OrchestratorError(f'Expected results for {daemon_spec.name()} but got {successes} and {failures}')
 
         actions = {
             'start': ['reset-failed', 'start'],
@@ -2925,9 +3414,11 @@ Then run the following:
         # Track user-initiated stop/start actions
         if action == 'stop':
             d.update_user_stopped_status(True)
+            assert d.hostname is not None
             self.cache.save_host(d.hostname)
         elif action in ['start', 'restart']:
             d.update_user_stopped_status(False)
+            assert d.hostname is not None
             self.cache.save_host(d.hostname)
 
         self._daemon_action_set_image(action, image, d.daemon_type, d.daemon_id)
@@ -2972,7 +3463,7 @@ Then run the following:
         if not args:
             raise OrchestratorError('Unable to find daemon(s) %s' % (names), errno=errno.EINVAL)
         self.log.info('Remove daemons %s' % ' '.join([a[0] for a in args]))
-        return self._remove_daemons(args)
+        return [msg for msgs in self._remove_daemons(args) for msg in msgs]
 
     @handle_orch_error
     def remove_service(self, service_name: str, force: bool = False) -> str:
@@ -3002,14 +3493,19 @@ Then run the following:
                 raise OrchestratorError(
                     f'If {service_name} is removed then the following OSDs will remain, --force to proceed anyway\n{msg}')
         elif service_name.startswith('nfs.'):
-            # check if its using old node id style and remove from mon store
-            nfs_services = self.get_store('nfs_services_with_old_nodeid')
-            if nfs_services:
-                nfs_services = nfs_services.split(',')
-                if service_name in nfs_services:
-                    nfs_services.remove(service_name)
-                    val = ','.join(nfs_services) if nfs_services else None
-                    self.set_store('nfs_services_with_old_nodeid', val)
+            # check if its using old node id style or user id and remove from mon store
+            mon_keys = ['nfs_services_with_old_nodeid', 'nfs_services_with_old_userid']
+            for key in mon_keys:
+                nfs_services = self.get_store(key)
+                if nfs_services:
+                    nfs_services = nfs_services.split(',')
+                    if service_name in nfs_services:
+                        nfs_services.remove(service_name)
+                        val = ','.join(nfs_services) if nfs_services else None
+                        self.set_store(key, val)
+
+        spec = self.spec_store[service_name].spec
+        CephadmServe(self)._remove_service_config(spec)
 
         found = self.spec_store.rm(service_name)
         if found and service_name.startswith('osd.'):
@@ -3072,9 +3568,10 @@ Then run the following:
             str: output from the zap command
         """
 
+        host = normalize_hostname(host)
         self.log.info('Zap device %s:%s' % (host, path))
 
-        if host not in self.inventory.keys():
+        if host not in self.inventory:
             raise OrchestratorError(
                 f"Host '{host}' is not a member of the cluster")
 
@@ -3167,6 +3664,29 @@ Then run the following:
                 ident_fault, host, dev, 'on' if on else 'off')
 
         return blink(locs)
+
+    @handle_orch_error
+    def sos(self, hostname: str, sos_params: str) -> str:
+        """ Execute the sos report command in the requested host
+        """
+
+        result = ''
+        self.log.info(f'Sending <sos {sos_params}> command to host {hostname}')
+        cmd_args = shlex.split(sos_params)
+
+        with self.async_timeout_handler(hostname, f'cephadm sos {sos_params}'):
+            out, err, code = self.wait_async(CephadmServe(self)._run_cephadm(
+                hostname, cephadmNoImage, 'sos', cmd_args, no_fsid=True,
+                error_ok=True))
+        if code:
+            msg = f'Error {code}:{err} executing <sos {sos_params}> in host {hostname}: {out}'
+            self.log.error(msg)
+            raise OrchestratorError(msg)
+        else:
+            self.log.info(f'Host {hostname} executed command sos {sos_params}: {out}')
+            result = out[0] if len(out) == 1 else '\n'.join(out)
+
+        return result
 
     def get_osd_uuid_map(self, only_up=False):
         # type: (bool) -> Dict[str, str]
@@ -3428,15 +3948,34 @@ Then run the following:
             previews_for_specs.update({host: osd_reports})
         return previews_for_specs
 
+    def _calc_daemon_deps(self,
+                          spec: Optional[ServiceSpec],
+                          daemon_type: str,
+                          daemon_id: str,
+                          hostname: str) -> List[str]:
+        if spec is not None:
+            svc_type = spec.service_type
+        else:
+            svc_type = daemon_type_to_service(daemon_type)
+        svc_cls = service_registry.get_service(svc_type)
+        deps = svc_cls.get_dependencies(self, spec, daemon_type, hostname) if svc_cls else []
+        return sorted(deps)
+
     @forall_hosts
-    def _remove_daemons(self, name: str, host: str) -> str:
-        return CephadmServe(self)._remove_daemon(name, host)
+    def _remove_daemons(self, name: str, host: str) -> List[str]:
+        return self.wait_async(CephadmServe(self)._remove_daemon([name], host))
 
     def _check_pool_exists(self, pool: str, service_name: str) -> None:
         logger.info(f'Checking pool "{pool}" exists for service {service_name}')
         if not self.rados.pool_exists(pool):
             raise OrchestratorError(f'Cannot find pool "{pool}" for '
                                     f'service {service_name}')
+
+    def create_nfs_pool(self) -> None:  # type: ignore
+        from nfs.cluster import create_ganesha_pool
+
+        create_ganesha_pool(self)
+        self.created_ganesha_pool = True
 
     def _add_daemon(self,
                     daemon_type: str,
@@ -3497,11 +4036,19 @@ Then run the following:
             )
             daemons.append(sd)
 
+        # TODO: make this one able to pass multiple daemon specs to _create_daemon
+        # as well. Currently it just ends up looping through and passing a length
+        # one list of daemon specs. I'm ignoring it for now as we only use this
+        # for manually adding daemons to unmanaged services
         @forall_hosts
         def create_func_map(*args: Any) -> str:
             daemon_spec = service_registry.get_service(daemon_type).prepare_create(*args)
             with self.async_timeout_handler(daemon_spec.host, f'cephadm deploy ({daemon_spec.daemon_type} daemon)'):
-                return self.wait_async(CephadmServe(self)._create_daemon(daemon_spec))
+                successes, failures = self.wait_async(CephadmServe(self)._create_daemon([daemon_spec]))
+                for res in [successes, failures]:
+                    if daemon_spec.name() in res:
+                        return res[daemon_spec.name()]
+                raise OrchestratorError(f'Expected results for {daemon_spec.name()} but got {successes} and {failures}')
 
         return create_func_map(args)
 
@@ -3768,6 +4315,8 @@ Then run the following:
             context = f"host '{hostname}'"
         elif consumer:
             context = f"'{consumer}'"
+        else:
+            context = "global scope"
 
         raise OrchestratorError(
             f"Certificate '{cert_name}' for {context} is not editable (defined as inline in the spec or generated by cephadm)."
@@ -3787,6 +4336,36 @@ Then run the following:
 
         if consumer not in self.cert_mgr.list_consumers():
             raise OrchestratorError(f"Invalid service: {consumer}. Please use 'ceph orch certmgr bindings ls' to list valid bindings.")
+
+        # --- Fullchain PEM auto-detection -----------------------------------
+        # When the user passes a fullchain PEM (private key + cert chain bundled
+        # in a single blob) as the ``cert`` argument the key is extracted here so
+        # the rest of the function always operates on a clean cert-only PEM and an
+        # explicit key string. A cert blob with multiple CERTIFICATE blocks but no
+        # embedded key (e.g. leaf + intermediates) is also normalised here, even
+        # when a separate --key argument was supplied.
+        if contains_private_key(cert) and key:
+            raise OrchestratorError(
+                'Received a fullchain PEM (cert blob contains an embedded private key) '
+                'but a separate --key argument was also provided. '
+                'Please either supply the fullchain PEM without a separate key, '
+                'or supply a plain certificate PEM with the key separately.'
+            )
+        if contains_private_key(cert) or contains_multiple_pem_blocks(cert):
+            try:
+                cert, split_key = parse_tls_pem_bundle(cert)
+            except SSLConfigException as exc:
+                raise OrchestratorError(f'Failed to parse fullchain PEM: {exc}') from exc
+            if split_key:
+                key = split_key
+        # --------------------------------------------------------------------
+
+        if not cert or not key:
+            raise OrchestratorError(
+                'A certificate and a private key are both required to set a cert/key pair. '
+                'Provide a fullchain PEM (certificate with an embedded private key) or supply '
+                'the private key separately.'
+            )
 
         # Check the certificate validity status
         target = service_name or hostname
@@ -3830,6 +4409,25 @@ Then run the following:
         hostname: str = "",
         force: bool = False
     ) -> str:
+
+        # --- Reject embedded key material on the cert-only path -------------
+        # This endpoint has no key parameter to redirect a key to, so a cert
+        # blob with an embedded private key must be rejected outright rather
+        # than silently persisted under the cert object. A multi-block,
+        # key-free cert chain is still normalised via parse_tls_pem_bundle.
+        if contains_private_key(cert):
+            raise OrchestratorError(
+                'The certificate PEM contains private key material. '
+                "Use 'ceph orch certmgr cert-key set' instead of "
+                "'ceph orch certmgr cert set', or provide the bundle through a "
+                'service spec field that supports fullchain PEM input.'
+            )
+        if contains_multiple_pem_blocks(cert):
+            try:
+                cert, _ = parse_tls_pem_bundle(cert)
+            except SSLConfigException as exc:
+                raise OrchestratorError(f'Failed to parse certificate PEM: {exc}') from exc
+        # ----------------------------------------------------------------------
 
         debug_mode = self.certificate_check_debug_mode and force
         if not debug_mode:
@@ -4071,7 +4669,7 @@ Then run the following:
             rank_map=rank_map
         )
         ha.validate()
-        hosts, to_add, to_remove = ha.place()
+        hosts, to_add, to_remove, _ = ha.place()
 
         return {
             'service_name': spec.service_name(),
@@ -4177,6 +4775,77 @@ Then run the following:
             and bool(nvmeof_spec.group)
         )
 
+    def _check_and_migrate_legacy_rgw_frontend_ssl_field(self, spec: ServiceSpec) -> None:
+        """
+        Strictly validate and migrate RGW's legacy ``rgw_frontend_ssl_certificate``
+        field when a spec is applied through cephadm.
+
+        ``RGWSpec.validate()`` already attempts a best-effort, non-destructive
+        migration of this legacy field during spec deserialization. That path must
+        not raise on parsing failures because it is also used when loading stored
+        specs from the config-key store during mgr restart, failover, or upgrade.
+        Failing there could prevent an existing RGW spec from being loaded.
+
+        This helper is intentionally stricter and is meant for the user-facing apply
+        path only, before the spec is persisted. If a newly applied RGW spec still
+        uses ``rgw_frontend_ssl_certificate``, require it to contain a valid combined
+        PEM bundle with one unencrypted private key and at least one certificate. On
+        success, migrate it to ``ssl_cert`` / ``ssl_key`` and clear the legacy field.
+        On failure, raise ``OrchestratorError`` so bad new input is rejected instead
+        of being stored.
+        """
+
+        if spec.service_type != 'rgw':
+            return
+
+        from ceph.deployment.service_spec import RGWSpec
+        spec = cast(RGWSpec, spec)
+
+        if not spec.ssl:
+            return
+
+        # If ssl_cert is already set, do not touch the legacy field. The new
+        # ssl_cert/ssl_key fields take precedence.
+        if spec.ssl_cert:
+            return
+
+        legacy_cert = spec.rgw_frontend_ssl_certificate
+        if legacy_cert is None:
+            return
+
+        from ceph.deployment.tls_utils import SSLConfigException, parse_tls_pem_bundle
+
+        if isinstance(legacy_cert, list):
+            combined_cert = '\n'.join(legacy_cert)
+        else:
+            combined_cert = legacy_cert
+
+        try:
+            ssl_cert, ssl_key = parse_tls_pem_bundle(combined_cert)
+        except SSLConfigException as e:
+            raise OrchestratorError(
+                'Failed to parse rgw_frontend_ssl_certificate field. '
+                'Expected a PEM bundle containing an unencrypted private key '
+                'and at least one certificate: private key + leaf certificate '
+                '+ optional intermediate CA certificates. '
+                f'Parser error: {e}'
+            ) from e
+
+        if not (ssl_cert and ssl_key):
+            raise OrchestratorError(
+                'Invalid rgw_frontend_ssl_certificate field. '
+                'Expected a combined PEM bundle containing both an unencrypted '
+                'private key and at least one certificate: private key + leaf '
+                'certificate + optional intermediate CA certificates. '
+                'A certificate chain without the private key is not valid for '
+                'this field.'
+            )
+
+        spec.ssl_cert = ssl_cert
+        spec.ssl_key = ssl_key
+        spec.certificate_source = CertificateSource.INLINE.value
+        spec.rgw_frontend_ssl_certificate = None
+
     def _apply_service_spec(self, spec: ServiceSpec) -> str:
         if spec.placement.is_empty():
             # fill in default placement
@@ -4204,10 +4873,6 @@ Then run the following:
                 'snmp-gateway': PlacementSpec(count=1),
                 'mgmt-gateway': PlacementSpec(count=1),
                 'oauth2-proxy': PlacementSpec(count=1),
-                'elasticsearch': PlacementSpec(count=1),
-                'jaeger-agent': PlacementSpec(host_pattern='*'),
-                'jaeger-collector': PlacementSpec(count=1),
-                'jaeger-query': PlacementSpec(count=1),
                 'node-proxy': PlacementSpec(host_pattern='*'),
                 SMBService.TYPE: PlacementSpec(count=1),
             }
@@ -4221,6 +4886,7 @@ Then run the following:
         host_count = len(self.inventory.keys())
         max_count = self.max_count_per_host
 
+        self._check_and_migrate_legacy_rgw_frontend_ssl_field(spec)
         cert_warning = self._check_cert_source(spec)
 
         if spec.service_type == 'nvmeof':
@@ -4465,9 +5131,20 @@ Then run the following:
         return self.upgrade.upgrade_ls(image, tags, show_all_versions)
 
     @handle_orch_error
-    def upgrade_start(self, image: str, version: str, daemon_types: Optional[List[str]] = None, host_placement: Optional[str] = None,
-                      services: Optional[List[str]] = None, limit: Optional[int] = None,
-                      bucket_type: Optional[str] = None, bucket_name: Optional[str] = None) -> str:
+    def upgrade_start(
+        self,
+        image: str,
+        version: str,
+        daemon_types: Optional[List[str]] = None,
+        host_placement: Optional[str] = None,
+        services: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        bucket_type: Optional[str] = None,
+        bucket_name: Optional[str] = None,
+        no_osd_flags: bool = False,
+        topological_labels: Optional[Union[str, List[str]]] = None,
+        automatically_accept_license: bool = False,
+    ) -> str:
         if self.inventory.get_host_with_state("maintenance"):
             raise OrchestratorError("Upgrade aborted - you have host(s) in maintenance state")
         if self.offline_hosts:
@@ -4475,6 +5152,9 @@ Then run the following:
                 f"Upgrade aborted - Some host(s) are currently offline: {self.offline_hosts}")
         if daemon_types is not None and services is not None:
             raise OrchestratorError('--daemon-types and --services are mutually exclusive')
+        if bool(topological_labels) and (bucket_type is not None or bucket_name is not None):
+            raise OrchestratorError(
+                '--topological_labels cannot be combined with --crush_bucket_type or --crush_bucket_name')
         if daemon_types is not None:
             # Strip any whitespace around daemon types provided via the CLI so that
             # `--daemon_types "mon, crash"` is treated the same as `--daemon_types "mon,crash"`.
@@ -4488,14 +5168,41 @@ Then run the following:
                 if service not in self.spec_store:
                     raise OrchestratorError(f'Upgrade aborted - Got unknown service name "{service}".\n'
                                             f'Known services are: {self.spec_store.all_specs.keys()}')
-        hosts: Optional[List[str]] = None
+
+        tlabels: Optional[Dict[str, str]] = HostSpec.parse_topological_labels(topological_labels)
+        all_hosts = list(self.inventory.all_specs())
+        tlabel_matching_hosts: Set[str] = set()
+        if tlabels:
+            for host in all_hosts:
+                if host.matches_topological_labels(tlabels):
+                    tlabel_matching_hosts.add(host.hostname)
+            if not tlabel_matching_hosts:
+                raise OrchestratorError(
+                    f'Upgrade aborted - topological_labels parameter "{topological_labels}" did not match any hosts')
+
+        host_filter_matching_hosts: Optional[List[str]] = None
         if host_placement is not None:
-            all_hosts = list(self.inventory.all_specs())
             placement = PlacementSpec.from_string(host_placement)
-            hosts = placement.filter_matching_hostspecs(all_hosts)
-            if not hosts:
+            host_filter_matching_hosts = placement.filter_matching_hostspecs(all_hosts)
+            if not host_filter_matching_hosts:
                 raise OrchestratorError(
                     f'Upgrade aborted - hosts parameter "{host_placement}" provided did not match any hosts')
+
+        hosts = None
+        if host_filter_matching_hosts and tlabel_matching_hosts:
+            hosts = []
+            for hostname in host_filter_matching_hosts:
+                if hostname in tlabel_matching_hosts:
+                    hosts.append(hostname)
+            if not hosts:
+                raise OrchestratorError(
+                    'Upgrade aborted - hosts parameter and topological_labels together did not match any hosts. '
+                    f'Individually host placement "{host_placement}" matched {host_filter_matching_hosts} and '
+                    f'topological labels "{topological_labels}" matched {tlabel_matching_hosts}')
+        elif host_filter_matching_hosts:
+            hosts = host_filter_matching_hosts
+        elif tlabel_matching_hosts:
+            hosts = list(tlabel_matching_hosts)
 
         if hosts and (bucket_type is not None or bucket_name is not None):
             raise OrchestratorError(
@@ -4511,7 +5218,7 @@ Then run the following:
                     f'Upgrade aborted - --limit arg must be a positive integer, not {limit}')
 
         return self.upgrade.upgrade_start(
-            image, version, daemon_types, hosts, services, limit, bucket_type, bucket_name)
+            image, version, daemon_types, hosts, services, limit, bucket_type, bucket_name, no_osd_flags, automatically_accept_license)
 
     @handle_orch_error
     def upgrade_pause(self) -> str:
@@ -4530,12 +5237,82 @@ Then run the following:
         return self.upgrade.update_service(service_type, service_image, image)
 
     @handle_orch_error
+    def display_license(self, image_name: str, license_language: str = 'en') -> str:
+        self.wait_async(CephadmServe(self)._get_container_image_info(image_name))
+        license = self.wait_async(
+            CephadmServe(self)._get_container_ibm_license(image_name, license_language)
+        )
+        return license
+
+    @handle_orch_error
+    def accept_license(self, image_name: str) -> str:
+        image_info = self.wait_async(CephadmServe(self)._get_container_image_info(image_name))
+        license = self.wait_async(CephadmServe(self)._get_container_ibm_license(image_name, 'en'))
+        ceph_version = image_info.ceph_version or 'unknown_version'
+        entry_key = get_license_acceptance_key_value_entry_name(ceph_version, license)
+        entry_content = generate_license_acceptance_key_value_entry(
+            ceph_version,
+            license,
+            image_info.image_id
+        )
+        self.set_store(entry_key, entry_content)
+        self.remove_health_warning('IBM_LICENSE_NOT_ACCEPTED')
+        return f'Accepted license for image with id <{image_info.image_id}> with ceph version {image_info.ceph_version}'
+
+    def raise_call_home_warning(self) -> None:
+        self.log.info('Raising warning for call home automatic enablement')
+        self.set_health_warning(
+            'CALL_HOME_ENABLED_AUTOMATICALLY',
+            'Call home module enabled automatically',
+            1,
+            ['The call home agent mgr module has been enabled automatically as IBM license was accepted '
+             'and a bootstrap or upgrade operation occurred. To clear this warning either run `ceph orch '
+             'accept call-home-enabled` if call home is desired or ceph orch deny call-home-enabled to turn off the module']
+        )
+        self.call_home_needs_acceptance = True
+        self.set_module_option('call_home_needs_acceptance', True)
+
+    @handle_orch_error
+    def enable_call_home(self, raise_automation_warning: bool = False) -> str:
+        if raise_automation_warning:
+            self.raise_call_home_warning()
+        self.check_mon_command({
+            'prefix': 'mgr module enable',
+            'module': 'call_home_agent'
+        })
+        return (
+            'Call home agent module enabled.'
+            + ' Health warning about automatic enablement raised' if raise_automation_warning else ''
+        )
+
+    @handle_orch_error
+    def accept_call_home(self) -> str:
+        self.log.info('Clearing call home warning as call home was accepted')
+        self.remove_health_warning('CALL_HOME_ENABLED_AUTOMATICALLY')
+        self.call_home_needs_acceptance = False
+        self.set_module_option('call_home_needs_acceptance', False)
+        return 'Health warning for call home enablement cleared'
+
+    @handle_orch_error
+    def deny_call_home(self) -> str:
+        self.log.info('Clearing call home warning as call home was denied')
+        self.remove_health_warning('CALL_HOME_ENABLED_AUTOMATICALLY')
+        self.check_mon_command({
+            'prefix': 'mgr module disable',
+            'module': 'call_home_agent'
+        })
+        self.call_home_needs_acceptance = False
+        self.set_module_option('call_home_needs_acceptance', False)
+        return 'Call home agent module disabled and health warning for call home enablement cleared'
+
+    @handle_orch_error
     def replace_device(self,
                        hostname: str,
                        device: str,
                        clear: bool = False,
                        yes_i_really_mean_it: bool = False) -> Any:
         output: str = ''
+        hostname = normalize_hostname(hostname)
 
         self.ceph_volume.lvm_list.get_data(hostname=hostname)
 
@@ -4543,7 +5320,7 @@ Then run the following:
             output = self.ceph_volume.clear_replace_header(hostname, device)
         else:
             osds_to_zap: List[str] = []
-            if hostname not in list(self.inventory.keys()):
+            if hostname not in self.inventory:
                 raise OrchestratorError(f'{hostname} invalid host.')
 
             if device not in self.ceph_volume.lvm_list.all_devices():
@@ -4692,6 +5469,87 @@ Then run the following:
             self.cache.invalidate_host_daemons(host)
         self._kick_serve_loop()
         return f"Updated service for osd {','.join(success_osds)}" + (f" and failed for {','.join(failed_osds)}" if failed_osds else "")
+
+    @handle_orch_error
+    def get_osd_devices(self, osd_id: str) -> str:
+        """
+        Get devices used by a specific OSD
+        """
+        return json.dumps(self._get_osd_devices(osd_id), indent=4)
+
+    def _get_osd_devices(self, osd_id: str) -> Dict[str, List[str]]:
+        try:
+            osd: DaemonDescription = self.cache.get_daemon(f'osd.{osd_id}')
+        except OrchestratorError:
+            raise OrchestratorError(f'Failed to find OSD with id {osd_id}')
+
+        assert osd.hostname is not None
+        osd_metadata: dict = self.wait_async(CephadmServe(self)._run_cephadm_json(
+            osd.hostname, 'osd', 'ceph-volume',
+            [
+                '--',
+                'lvm', 'list',
+                '--format', 'json',
+            ])
+        )
+        if str(osd_id) not in osd_metadata.keys():
+            raise OrchestratorError(f'No data for osd with id {osd_id} found in ceph-volume lvm list on {osd.hostname}')
+
+        devices: Dict[str, List[str]] = {}
+        for dev_info in osd_metadata.get(str(osd_id), {}):
+            type = dev_info.get('type')  # block, db, wal
+            devs = dev_info.get('devices')  # list of device paths
+            devices[type] = devs
+
+        return devices
+
+    @handle_orch_error
+    def osd_rebuild(self, hostname: str, osd_id: str, rebuild_osds_sharing_devices: bool = False) -> str:
+        """
+        Get devices used by a specific OSD
+        """
+        try:
+            self.cache.get_daemon(f'osd.{osd_id}', host=hostname)
+        except OrchestratorError:
+            return f'Failed to find OSD with id {osd_id} on host {hostname} in inventory'
+
+        try:
+            self.cache.get_specific_osd_cv_commands(str(osd_id), host=hostname)
+        except OrchestratorError as e:
+            return f'{str(e)}'
+
+        self.ceph_volume.lvm_list.get_data(hostname)
+        device_osd_mapping = self.ceph_volume.lvm_list.device_osd_mapping()
+        osds_to_zap = []
+        shared_devices = []
+        for dev_list in self._get_osd_devices(osd_id).values():
+            for dev in dev_list:
+                osds_to_zap.extend(device_osd_mapping[dev]['osd_ids'])
+                if self.ceph_volume.lvm_list.is_shared_device(dev):
+                    shared_devices.append(dev)
+        osds_to_zap = list(set(osds_to_zap))
+        shared_devices = list(set(shared_devices))
+
+        if shared_devices:
+            if not rebuild_osds_sharing_devices:
+                raise OrchestratorError(
+                    f'{shared_devices} are being shared between OSDs.\n'
+                    f'Rebuilding osd.{osd_id} requires also rebuilding OSD(s): {osds_to_zap}.\n'
+                    'To rebuild all OSDs pass --rebuild_osds_sharing_devices'
+                )
+
+        self.remove_osds(
+            osds_to_zap,
+            replace=True,
+            force=True,
+            zap=True,
+            no_destroy=False
+        )
+        self.cache.set_osds_for_rebuild(hostname, [int(osd_id) for osd_id in osds_to_zap])
+        if len(osds_to_zap) > 1:
+            return f'Scheduled OSDs {osds_to_zap} for rebuild'
+        else:
+            return f'Scheduled OSD {osds_to_zap} for rebuild'
 
     @handle_orch_error
     @host_exists()

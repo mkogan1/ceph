@@ -15,9 +15,9 @@ from cephadm.upgrade import (
 )
 from cephadm.ssh import HostConnectionError
 from cephadm.utils import ContainerInspectInfo
-from orchestrator import OrchestratorError, DaemonDescription
+from orchestrator import OrchestratorError, DaemonDescription, HostSpec
 from .fixtures import _run_cephadm, wait, with_host, with_service, \
-    receive_agent_metadata, async_side_effect
+    with_cephadm_module, receive_agent_metadata, async_side_effect
 
 from typing import List, Tuple, Optional
 
@@ -77,6 +77,54 @@ def test_upgrade_start_services_mutually_exclusive_with_bucket(cephadm_module: C
 
 
 @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
+def test_upgrade_start_preflight_disabled_by_default():
+    with with_cephadm_module() as m:
+        # Provide non-OK health and broken OSD/PG state; preflight is disabled by default so this must not block.
+        m.mock_store_set('_ceph_get', 'health', {
+            'json': json.dumps({
+                'status': 'HEALTH_WARN',
+                'checks': {
+                    'SOME_WARN': {'muted': False},
+                },
+            }),
+        })
+        m.mock_store_set('_ceph_get', 'osd_map', {
+            'osds': [{'osd': 0, 'up': 0, 'in': 0}],
+        })
+        m.mock_store_set('_ceph_get', 'pg_dump', {
+            'pg_stats': [{'pgid': '1.0', 'state': 'active+undersized', 'up': [0], 'acting': [0]}],
+        })
+        with with_host(m, 'test'):
+            with with_host(m, 'test2'):
+                with with_service(m, ServiceSpec('mgr', placement=PlacementSpec(count=2)), status_running=True):
+                    assert wait(m, m.upgrade_start('image_id', None)) == 'Initiating upgrade to image_id'
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
+def test_upgrade_start_preflight_enabled_blocks():
+    with with_cephadm_module(module_options={'upgrade_preflight_checks': True}) as m:
+        m.mock_store_set('_ceph_get', 'health', {
+            'json': json.dumps({
+                'status': 'HEALTH_WARN',
+                'checks': {
+                    'SOME_WARN': {'muted': False},
+                },
+            }),
+        })
+        m.mock_store_set('_ceph_get', 'osd_map', {
+            'osds': [{'osd': 0, 'up': 0, 'in': 0}],
+        })
+        m.mock_store_set('_ceph_get', 'pg_dump', {
+            'pg_stats': [{'pgid': '1.0', 'state': 'active+undersized', 'up': [0], 'acting': [0]}],
+        })
+        with with_host(m, 'test'):
+            with with_host(m, 'test2'):
+                with with_service(m, ServiceSpec('mgr', placement=PlacementSpec(count=2)), status_running=True):
+                    with pytest.raises(OrchestratorError, match=r'Upgrade blocked by pre-upgrade checks'):
+                        wait(m, m.upgrade_start('image_id', None))
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
 def test_upgrade_start_offline_hosts(cephadm_module: CephadmOrchestrator):
     with with_host(cephadm_module, 'test'):
         with with_host(cephadm_module, 'test2'):
@@ -95,6 +143,45 @@ def test_upgrade_daemons_offline_hosts(cephadm_module: CephadmOrchestrator):
                 _to_upgrade = [(DaemonDescription(daemon_type='crash', daemon_id='test2', hostname='test2'), True)]
                 with pytest.raises(HostConnectionError, match=r"connection failure reason"):
                     cephadm_module.upgrade._upgrade_daemons(_to_upgrade, 'target_image', ['digest1'])
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm(json.dumps({'repo_digests': ['digest1']})))
+def test_upgrade_daemons_limit_counts_only_actual_upgrades(cephadm_module: CephadmOrchestrator):
+    cephadm_module.inventory.add_host(HostSpec('host1'))
+    cephadm_module.inventory.add_host(HostSpec('host2'))
+    cephadm_module.update_host_addr('host1', '1::4')
+    cephadm_module.update_host_addr('host2', '1::5')
+    cephadm_module.upgrade.upgrade_state = UpgradeState(
+        'target_image',
+        0,
+        total_count=1,
+        remaining_count=1,
+    )
+    # Verify --limit counts only real upgrades, not redeploy-only daemons.
+    to_upgrade = [
+        (DaemonDescription(daemon_type='crash', daemon_id='0', hostname='host1'), False),
+        (DaemonDescription(daemon_type='crash', daemon_id='1', hostname='host2'), False),
+        (DaemonDescription(daemon_type='mgr', daemon_id='x', hostname='host1'), True),
+    ]
+    results = [
+        ('host1', {'crash.0': 'ok', 'mgr.x': 'ok'}, {}),
+        ('host2', {}, {}),
+    ]
+    with mock.patch.object(
+        cephadm_module.upgrade,
+        '_redeploy_daemons',
+        side_effect=async_side_effect(results),
+    ) as redeploy, mock.patch.object(
+        cephadm_module.upgrade,
+        '_save_upgrade_state',
+    ):
+        cephadm_module.upgrade._upgrade_daemons(to_upgrade, 'target_image', ['digest1'])
+
+    redeploy.assert_called_once()
+    deployed = redeploy.call_args[0][0]
+    deployed_names = [d[0].name() for d in deployed]
+    assert deployed_names == ['crash.0', 'mgr.x']
+    assert cephadm_module.upgrade.upgrade_state.remaining_count == 0
 
 
 @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
@@ -245,6 +332,99 @@ def test_upgrade_state_crush_roundtrip():
     assert restored
     assert restored.crush_bucket_type == 'rack'
     assert restored.crush_bucket_name == 'rack1'
+
+
+def _test_osd_dd(osd_id: int, digests: List[str]) -> DaemonDescription:
+    return DaemonDescription(
+        daemon_type='osd',
+        daemon_id=str(osd_id),
+        hostname=f'host{osd_id}',
+        container_image_digests=digests,
+    )
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
+def test_cache_empty_bucket_from_ok_to_upgrade_report(
+        cephadm_module: CephadmOrchestrator):
+    # Empty osds_in_crush_bucket is cached as set(), not None.
+    cephadm_module.upgrade._ok_to_upgrade_osds_in_crush_bucket = None
+    report = OkToUpgradeMonReport(
+        ok_to_upgrade=True,
+        all_osds_upgraded=False,
+        osds_ok_to_upgrade=[],
+        osds_in_crush_bucket=[],
+        osds_upgraded=[],
+        bad_no_version=[],
+    )
+    cephadm_module.upgrade._cache_osds_in_crush_bucket_from_ok_to_upgrade_report(
+        report)
+    assert cephadm_module.upgrade._ok_to_upgrade_osds_in_crush_bucket == set()
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
+def test_get_upgrade_info_bucket_scope_progress(cephadm_module: CephadmOrchestrator):
+    # Upgrade progress denominator uses bucket OSD count, not cluster-wide total.
+    cephadm_module.upgrade.upgrade_state = UpgradeState(
+        'target', 'pid',
+        target_digests=['digest1'],
+        target_version='19.2.3',
+        daemon_types=['osd'],
+        crush_bucket_type='rack',
+        crush_bucket_name='rack1',
+    )
+    cephadm_module.upgrade._ok_to_upgrade_osds_in_crush_bucket = {
+        'osd.0', 'osd.1', 'osd.2',
+    }
+    all_osds = [
+        _test_osd_dd(0, ['digest1']),
+        _test_osd_dd(1, ['digest1']),
+        _test_osd_dd(2, ['old-digest']),
+        _test_osd_dd(3, ['digest1']),
+        _test_osd_dd(4, ['digest1']),
+    ]
+    with mock.patch.object(
+            cephadm_module.cache, 'get_daemons', return_value=all_osds):
+        progress, _ = cephadm_module.upgrade._get_upgrade_info()
+    assert progress == '2/3 daemons upgraded'
+
+
+@mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
+def test_get_upgrade_info_refreshes_bucket_osds_for_upgrade_status(
+        cephadm_module: CephadmOrchestrator):
+    # Status path refreshes cold bucket cache via max_osds=0 before computing progress.
+    cephadm_module.upgrade.upgrade_state = UpgradeState(
+        'target', 'pid',
+        target_digests=['digest1'],
+        target_version='19.2.3',
+        daemon_types=['osd'],
+        crush_bucket_type='rack',
+        crush_bucket_name='rack1',
+    )
+    bucket_rep = OkToUpgradeMonReport(
+        ok_to_upgrade=True,
+        all_osds_upgraded=False,
+        osds_ok_to_upgrade=[],
+        osds_in_crush_bucket=[0, 1, 2],
+        osds_upgraded=[0, 1],
+        bad_no_version=[],
+    )
+    all_osds = [
+        _test_osd_dd(0, ['digest1']),
+        _test_osd_dd(1, ['digest1']),
+        _test_osd_dd(2, ['old-digest']),
+        _test_osd_dd(3, ['digest1']),
+        _test_osd_dd(4, ['digest1']),
+    ]
+    with mock.patch(
+            'cephadm.upgrade.request_osd_ok_to_upgrade_report',
+            return_value=bucket_rep,
+    ) as mock_request:
+        with mock.patch.object(
+                cephadm_module.cache, 'get_daemons', return_value=all_osds):
+            progress, _ = cephadm_module.upgrade._get_upgrade_info()
+    mock_request.assert_called_once()
+    assert mock_request.call_args.kwargs['max_osds'] == 0
+    assert progress == '2/3 daemons upgraded'
 
 
 @mock.patch("cephadm.serve.CephadmServe._run_cephadm", _run_cephadm('{}'))
@@ -1052,3 +1232,121 @@ def test_staggered_upgrade_validation(
     else:
         cephadm_module.upgrade._validate_upgrade_filters(
             'new_image_name', daemon_types, hosts, services)
+
+
+@mock.patch("cephadm.module.HostCache.get_daemons")
+def test_filtered_scope_up_to_date(
+    get_daemons: mock.MagicMock,
+    cephadm_module: CephadmOrchestrator,
+) -> None:
+    target_digest = 'new_image@repo_digest'
+    old_digest = 'old_image@repo_digest'
+
+    cephadm_module.upgrade.upgrade_state = UpgradeState(
+        'target_image',
+        '0',
+        target_digests=[target_digest],
+        daemon_types=['mon'],
+        hosts=['trial031'],
+    )
+
+    get_daemons.return_value = [
+        DaemonDescription(
+            daemon_type='mon',
+            daemon_id='a',
+            hostname='trial031',
+            container_image_digests=[target_digest],
+        ),
+        DaemonDescription(
+            daemon_type='mon',
+            daemon_id='c',
+            hostname='trial031',
+            container_image_digests=[old_digest],
+        ),
+    ]
+
+    assert not cephadm_module.upgrade._filtered_scope_up_to_date(
+        [target_digest], 'target_image',
+    )
+
+    get_daemons.return_value[1].container_image_digests = [target_digest]
+    assert cephadm_module.upgrade._filtered_scope_up_to_date(
+        [target_digest], 'target_image',
+    )
+
+
+@mock.patch.object(CephadmUpgrade, '_mark_upgrade_complete')
+@mock.patch.object(CephadmUpgrade, '_filtered_scope_up_to_date', return_value=False)
+@mock.patch.object(CephadmUpgrade, '_handle_need_upgrade_self')
+@mock.patch.object(CephadmUpgrade, '_to_upgrade', return_value=(True, []))
+@mock.patch.object(
+    CephadmUpgrade, '_detect_need_upgrade', return_value=(False, [], [], 0),
+)
+@mock.patch.object(CephadmUpgrade, '_set_container_images')
+@mock.patch.object(CephadmUpgrade, '_complete_osd_upgrade')
+@mock.patch.object(CephadmUpgrade, '_complete_mds_upgrade')
+@mock.patch.object(CephadmUpgrade, '_update_upgrade_progress')
+@mock.patch.object(CephadmUpgrade, 'get_distinct_container_image_settings', return_value={})
+@mock.patch("cephadm.module.CephadmOrchestrator.lookup_release_name", return_value='tentacle')
+@mock.patch("cephadm.module.CephadmOrchestrator.check_mon_command", return_value=(0, '{}', ''))
+@mock.patch("cephadm.module.CephadmOrchestrator.set_container_image")
+@mock.patch("cephadm.module.CephadmOrchestrator.get_active_mgr_digests")
+@mock.patch("cephadm.module.CephadmOrchestrator.get", return_value={
+    'min_mon_release': 19,
+    'require_osd_release': 'tentacle',
+    'have_local_config_map': True,
+})
+@mock.patch(
+    "cephadm.module.CephadmOrchestrator.version",
+    new_callable=mock.PropertyMock,
+    return_value='ceph version 19.3.0-0 (hash)',
+)
+@mock.patch("cephadm.module.HostCache.get_daemons")
+def test_do_upgrade_limit_exhausted_marks_complete_without_scope_check(
+    get_daemons: mock.MagicMock,
+    _version: mock.MagicMock,
+    _get: mock.MagicMock,
+    get_active_mgr_digests: mock.MagicMock,
+    _set_container_image: mock.MagicMock,
+    _check_mon_command: mock.MagicMock,
+    _lookup_release_name: mock.MagicMock,
+    _get_distinct_container_image_settings: mock.MagicMock,
+    _update_upgrade_progress: mock.MagicMock,
+    _complete_mds_upgrade: mock.MagicMock,
+    _complete_osd_upgrade: mock.MagicMock,
+    _set_container_images: mock.MagicMock,
+    _detect_need_upgrade: mock.MagicMock,
+    _to_upgrade: mock.MagicMock,
+    _handle_need_upgrade_self: mock.MagicMock,
+    filtered_scope: mock.MagicMock,
+    mark_complete: mock.MagicMock,
+    cephadm_module: CephadmOrchestrator,
+) -> None:
+    target_digest = 'new_image@repo_digest'
+    old_digest = 'old_image@repo_digest'
+    get_active_mgr_digests.return_value = [target_digest]
+    get_daemons.return_value = [
+        DaemonDescription(
+            daemon_type='osd',
+            daemon_id=str(i),
+            hostname='host1',
+            container_image_digests=[target_digest] if i < 2 else [old_digest],
+        )
+        for i in range(8)
+    ]
+
+    cephadm_module.upgrade.upgrade_state = UpgradeState(
+        'target_image',
+        '0',
+        target_id='image_id',
+        target_digests=[target_digest],
+        target_version='19.3.0-0',
+        daemon_types=['osd'],
+        total_count=2,
+        remaining_count=0,
+    )
+
+    cephadm_module.upgrade._do_upgrade()
+
+    mark_complete.assert_called_once()
+    filtered_scope.assert_not_called()

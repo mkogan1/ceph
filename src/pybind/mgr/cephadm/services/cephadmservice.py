@@ -2,7 +2,9 @@ import errno
 import re
 import json
 import logging
+import random
 import socket
+import string
 import time
 from abc import ABCMeta, abstractmethod
 import ipaddress
@@ -21,7 +23,8 @@ from ceph.deployment.service_spec import (
     RGWSpec,
     ServiceSpec,
     CertificateSource,
-    RequiresCertificatesEntry
+    RequiresCertificatesEntry,
+    IngressSpec,
 )
 from ceph.deployment.utils import is_ipv6, unwrap_ipv6, wrap_ipv6
 from mgr_util import build_url, merge_dicts
@@ -43,7 +46,13 @@ from ceph.cephadm.d3n_types import (
 from cephadm.services.rgw_d3n import D3NDevicePlanner
 from .service_registry import register_cephadm_service
 from cephadm.tlsobject_types import TLSObjectScope, TLSCredentials, EMPTY_TLS_CREDENTIALS
-from cephadm.ssl_cert_utils import extract_ips_and_fqdns_from_cert
+from ceph.deployment.tls_utils import (
+    extract_ips_and_fqdns_from_cert,
+    parse_tls_pem_bundle,
+    contains_private_key,
+    contains_multiple_pem_blocks,
+    SSLConfigException,
+)
 
 if TYPE_CHECKING:
     from cephadm.module import CephadmOrchestrator
@@ -60,7 +69,7 @@ def get_auth_entity(daemon_type: str, daemon_id: str, host: str = "") -> AuthEnt
     """
     # despite this mapping entity names to daemons, self.TYPE within
     # the CephService class refers to service types, not daemon types
-    if daemon_type in ['rgw', 'rbd-mirror', 'cephfs-mirror', 'nfs', "iscsi", 'nvmeof', 'ingress', 'ceph-exporter']:
+    if daemon_type in ['rgw', 'rbd-mirror', 'cephfs-mirror', "iscsi", 'nvmeof', 'ingress', 'ceph-exporter', 'crash']:
         return AuthEntity(f'client.{daemon_type}.{daemon_id}')
     elif daemon_type in ['crash', 'agent', 'node-proxy']:
         if host == "":
@@ -330,6 +339,7 @@ class CephadmService(metaclass=ABCMeta):
         mgr: "CephadmOrchestrator",
         spec: Optional[ServiceSpec] = None,
         daemon_type: Optional[str] = None,
+        hostname: Optional[str] = None
     ) -> List[str]:
 
         ssl_enabled = getattr(spec, 'ssl', False)
@@ -373,12 +383,21 @@ class CephadmService(metaclass=ABCMeta):
             self.mgr.cert_mgr.save_self_signed_cert_key_pair(svc_name, tls_creds, host=daemon_spec.host, label=label)
         return tls_creds
 
+    def _get_certificates_from_spec_ssl_certificates(
+        self,
+        svc_spec: ServiceSpec,
+        daemon_spec: CephadmDaemonDeploySpec,
+        feature: Optional[str] = None
+    ) -> TLSCredentials:
+        return EMPTY_TLS_CREDENTIALS
+
     def get_certificates(self,
                          daemon_spec: CephadmDaemonDeploySpec,
                          ips: List[str] = [],
                          fqdns: List[str] = [],
                          custom_sans: List[str] = [],
-                         ca_cert_required: bool = False
+                         ca_cert_required: bool = False,
+                         feature: Optional[str] = None
                          ) -> TLSCredentials:
 
         svc_spec = cast(ServiceSpec, self.mgr.spec_store[daemon_spec.service_name].spec)
@@ -398,6 +417,7 @@ class CephadmService(metaclass=ABCMeta):
             ips=ips,
             fqdns=fqdns,
             custom_sans=custom_sans,
+            feature=feature,
         )
 
     def get_certificates_generic(
@@ -414,6 +434,8 @@ class CephadmService(metaclass=ABCMeta):
         custom_sans: Optional[List[str]] = None,
         ips: Optional[List[str]] = None,
         fqdns: Optional[List[str]] = None,
+        feature: Optional[str] = None,
+        label: Optional[str] = None,
     ) -> TLSCredentials:
 
         ips = ips or [self.mgr.inventory.get_addr(daemon_spec.host)]
@@ -423,12 +445,15 @@ class CephadmService(metaclass=ABCMeta):
         cert_source = getattr(svc_spec, cert_source_attr, None)
         logger.debug(f'Getting certificate for {svc_spec.service_name()} using source: {cert_source}')
 
-        if cert_source == CertificateSource.INLINE.value:
+        if feature is not None:
+            return self._get_certificates_from_spec_ssl_certificates(svc_spec, daemon_spec, feature)
+        elif cert_source == CertificateSource.INLINE.value:
             return self._get_certificates_from_spec(svc_spec, daemon_spec, cert_attr, key_attr, cert_name, key_name, ca_cert_attr, ca_cert_name)
         elif cert_source == CertificateSource.REFERENCE.value:
             return self._get_certificates_from_certmgr_store(svc_spec, fqdns, cert_name, key_name, ca_cert_name)
         elif cert_source == CertificateSource.CEPHADM_SIGNED.value:
-            return self._get_cephadm_signed_certificates(svc_spec, daemon_spec, ips, fqdns, custom_sans)
+            return self._get_cephadm_signed_certificates(
+                svc_spec, daemon_spec, ips, fqdns, custom_sans, label=label)
         else:
             logger.error(f'Invalid cert_source: {cert_source}')
             return EMPTY_TLS_CREDENTIALS
@@ -446,6 +471,14 @@ class CephadmService(metaclass=ABCMeta):
     ) -> TLSCredentials:
         """
         Fetch and persist the TLS certificate and key for a service spec.
+
+        Supports fullchain PEM input: when the ``cert_attr`` field on the spec
+        contains a combined PEM blob (private key + one or more certificate
+        blocks), the key is automatically extracted and stored separately so
+        that downstream consumers always receive clean cert-only and key-only
+        values.  The ``key_attr`` field must be empty when a fullchain PEM is
+        used; an error is raised if both are provided simultaneously.
+
         Returns:
             A TLSCredentials if both are available; otherwise EMPTY_TLS_CREDENTIALS.
         """
@@ -459,6 +492,38 @@ class CephadmService(metaclass=ABCMeta):
 
         service_name = svc_spec.service_name()
         host = daemon_spec.host
+
+        # --- Fullchain PEM auto-detection ------------------------------------
+        # Enterprise CAs often output key + chain as a single blob.  When
+        # the cert field embeds a private key we split it here so the rest of
+        # the stack remains unaware of multi-block PEM input. A cert blob with
+        # multiple CERTIFICATE blocks but no embedded key (e.g. leaf +
+        # intermediates) is also normalised here, even if a separate key
+        # field is set.
+        if cert and contains_private_key(cert) and key:
+            logger.error(
+                f"Service '{service_name}': '{cert_attr}' is a fullchain PEM "
+                f"(contains an embedded private key) but '{key_attr}' is also "
+                f"set. Please supply a fullchain PEM without a separate key, "
+                f"or a plain certificate PEM with the key field."
+            )
+            return EMPTY_TLS_CREDENTIALS
+        if cert and (contains_private_key(cert) or contains_multiple_pem_blocks(cert)):
+            try:
+                cert, split_key = parse_tls_pem_bundle(cert)
+                logger.debug(
+                    "certmgr: split fullchain PEM from spec for service '%s' "
+                    "(cert_attr=%s)", service_name, cert_attr
+                )
+            except SSLConfigException as exc:
+                logger.error(
+                    f"Service '{service_name}': failed to parse fullchain PEM "
+                    f"from '{cert_attr}': {exc}"
+                )
+                return EMPTY_TLS_CREDENTIALS
+            if split_key:
+                key = split_key
+        # ---------------------------------------------------------------------
 
         missing = []
         if not cert:
@@ -511,24 +576,62 @@ class CephadmService(metaclass=ABCMeta):
         ips: List[str],
         fqdns: List[str],
         custom_sans: List[str],
+        label: Optional[str] = None,
     ) -> TLSCredentials:
+        """Generate or reuse a cephadm-signed per-host server cert.
+
+        When label is provided the cert is stored under a dedicated storage key
+        so it does not conflict with the service's primary TLS cert (e.g. label='grpc').
+        When label is None the standard unlabeled TLS path is used.
+        """
+        svc_name = svc_spec.service_name()
+
+        if label:
+            self.mgr.cert_mgr.register_self_signed_cert_key_pair(svc_name, label=label)
+            creds = self.mgr.cert_mgr.get_self_signed_tls_credentials(svc_name, daemon_spec.host, label)
+            if creds:
+                cert_ips, cert_fqdns = extract_ips_and_fqdns_from_cert(creds.cert)
+                if sorted(cert_ips) == sorted(ips) and sorted(cert_fqdns) == sorted(fqdns):
+                    return creds
+            creds = self.mgr.cert_mgr.generate_cert(fqdns, ips)
+            self.mgr.cert_mgr.save_self_signed_cert_key_pair(svc_name, creds, host=daemon_spec.host, label=label)
+            return creds
 
         custom_sans = custom_sans or svc_spec.custom_sans or []
         ips = ips or [self.mgr.inventory.get_addr(daemon_spec.host)]
         fqdns = fqdns or [self.mgr.get_fqdn(daemon_spec.host)]
-        tls_creds = self.mgr.cert_mgr.get_self_signed_tls_credentials(svc_spec.service_name(), daemon_spec.host)
+        tls_creds = self.mgr.cert_mgr.get_self_signed_tls_credentials(svc_name, daemon_spec.host)
         if tls_creds:
             combined_fqdns = sorted(set(s.lower() for s in fqdns + custom_sans))
             cert_ips, cert_fqdns = extract_ips_and_fqdns_from_cert(tls_creds.cert)
             if sorted(cert_ips) == sorted(ips) and sorted(cert_fqdns) == sorted(combined_fqdns):
-                # Nothing has changed, use the stored certifiactes
                 return tls_creds
 
-        # Either there were not certs or ips/fqdns have changed generate new cets
         tls_creds = self.mgr.cert_mgr.generate_cert(fqdns, ips, custom_sans)
-        self.mgr.cert_mgr.save_self_signed_cert_key_pair(svc_spec.service_name(), tls_creds, host=daemon_spec.host)
-
+        self.mgr.cert_mgr.save_self_signed_cert_key_pair(svc_name, tls_creds, host=daemon_spec.host)
         return tls_creds
+
+    def _get_or_generate_service_cert(
+        self,
+        cert_name: str,
+        key_name: str,
+        cn: str,
+        svc_name: str,
+    ) -> Tuple[str, str]:
+        """Fetch a SERVICE-scoped cert/key from cert_mgr; generate a simple cert if absent.
+
+        The generated cert carries only a CN with no host IP or FQDN in the SAN,
+        making it suitable for client certificates not bound to a specific host.
+        Returns (cert_pem, key_pem).
+        """
+        cert = self.mgr.cert_mgr.get_cert(cert_name, service_name=svc_name)
+        key = self.mgr.cert_mgr.get_key(key_name, service_name=svc_name)
+        if not (cert and key):
+            creds = self.mgr.cert_mgr.generate_cert([cn], [cn])
+            cert, key = creds.cert, creds.key
+            self.mgr.cert_mgr.save_cert(cert_name, cert, service_name=svc_name)
+            self.mgr.cert_mgr.save_key(key_name, key, service_name=svc_name)
+        return cert, key
 
     def allow_colo(self) -> bool:
         """
@@ -643,6 +746,14 @@ class CephadmService(metaclass=ABCMeta):
         service apply. Not for every daemon.
         """
         pass
+
+    def get_daemon_deployment_ordering(self, daemons: List[CephadmDaemonDeploySpec]) -> Dict[int, List[CephadmDaemonDeploySpec]]:
+        # for services that need to deploy their daemons in a certain order
+        # this will return a dict of ints (the integers are arbitrary and just count up)
+        # to a list of daemons it is okay to deploy in parallel. The expectation being
+        # we'll deploy all the daemons in the "0" entry, then all in "1" etc.
+        # The default behavior will just be to put all daemons in the "0" entry
+        return {0: daemons}
 
     def daemon_check_post(self, daemon_descrs: List[DaemonDescription]) -> None:
         """The post actions needed to be done after daemons are checked"""
@@ -1002,9 +1113,10 @@ class CephService(CephadmService):
 
     def post_remove(self, daemon: DaemonDescription, is_failed_deploy: bool) -> None:
         super().post_remove(daemon, is_failed_deploy=is_failed_deploy)
-        self.remove_keyring(daemon)
+        if daemon.daemon_type != 'nfs':
+            self.remove_keyring(daemon)
 
-    def get_auth_entity(self, daemon_id: str, host: str = "") -> AuthEntity:
+    def get_auth_entity(self, daemon_id: str, host: str = "", rados_user: str = '') -> AuthEntity:
         return get_auth_entity(self.TYPE, daemon_id, host=host)
 
     def get_config_and_keyring(self,
@@ -1399,10 +1511,57 @@ class RgwService(CephService):
     def allow_colo(self) -> bool:
         return True
 
+    def choose_next_action(
+        self,
+        scheduled_action: utils.Action,
+        daemon_type: Optional[str],
+        spec: Optional[ServiceSpec],
+        curr_deps: List[str],
+        last_deps: List[str],
+        daemon: Optional[DaemonDescription] = None,
+    ) -> utils.NextDaemonStep:
+        step = super().choose_next_action(
+            scheduled_action, daemon_type, spec, curr_deps, last_deps
+        )
+        # rgw_frontends can't be changed at runtime, so a reconfig
+        # won't actually apply the new config. We need a full redeploy
+        # to restart the daemon with the updated frontend settings.
+        if step.action is utils.Action.RECONFIG:
+            return utils.NextDaemonStep(utils.Action.REDEPLOY)
+        return step
+
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
+
+        if daemon_type == 'haproxy':
+            # haproxy concentrator daemon. Deps are rgw daemons deployed on the same host
+            # that we put in as the backend servers in the haproxy config
+            assert spec is not None
+            assert hostname is not None
+            daemons = mgr.cache.get_daemons_by_service(spec.service_name())
+            deps = []
+            for d in daemons:
+                if (
+                    d.daemon_type == 'rgw'
+                    and d.ports
+                    and d.hostname == hostname
+                ):
+                    deps.extend([
+                        str(d.name()),
+                        d.ip or str(utils.resolve_ip(mgr.inventory.get_addr(str(d.hostname)))),
+                        str(d.ports[0])
+                    ])
+            return sorted(deps)
+        elif daemon_type and daemon_type != 'rgw':
+            # we should only be getting rgw or concentrator daemons here
+            raise OrchestratorError(
+                f'RGWService was asked for deps for unexpected daemon type: {daemon_type}'
+            )
+
+        # if we're here, it's a normal rgw daemon
         deps = []
         # we keep the following deps calculation for backward compatibility
         # as old RGW specs use rgw_frontend_ssl_certificate instead of modern
@@ -1414,8 +1573,28 @@ class RgwService(CephService):
                 ssl_cert = '\n'.join(ssl_cert)
             deps.append(f'ssl-cert:{utils.config_hash(ssl_cert)}')
 
+        # track frontend config so that changes to allow_port_reuse,
+        # rgw_frontend_extra_args or frontend type trigger a redeploy
+        if rgw_spec:
+            frontend_parts = []
+            if rgw_spec.rgw_frontend_type:
+                frontend_parts.append(f'type={rgw_spec.rgw_frontend_type}')
+            if rgw_spec.rgw_frontend_extra_args:
+                frontend_parts.append(f'extra_args={rgw_spec.rgw_frontend_extra_args}')
+            frontend_parts.append(f'allow_port_reuse={rgw_spec.allow_port_reuse}')
+            deps.append(f'frontend:{utils.md5_hash(str(frontend_parts))}')
+
         parent_deps = super().get_dependencies(mgr, spec, daemon_type)
         return sorted(deps + parent_deps)
+
+    def per_host_daemon_type(self, spec: Optional[ServiceSpec] = None) -> Optional[str]:
+        if spec:
+            rgw_spec = cast(RGWSpec, spec)
+            if getattr(rgw_spec, 'concentrator', None) == 'haproxy':
+                # if we are doing a concentrator setup, we need to deploy one
+                # haproxy daemon on each host that will receive RGW daemons
+                return 'haproxy'
+        return None
 
     def set_realm_zg_zone(self, spec: RGWSpec) -> None:
         assert self.TYPE == spec.service_type
@@ -1528,6 +1707,9 @@ class RgwService(CephService):
         )
 
     def prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
+        if self.is_concentrator_daemon_spec(daemon_spec):
+            return self.concentrator_prepare_create(daemon_spec)
+
         assert self.TYPE == daemon_spec.daemon_type
         super().prepare_certificates(daemon_spec)
         rgw_id, _ = daemon_spec.daemon_id, daemon_spec.host
@@ -1548,10 +1730,19 @@ class RgwService(CephService):
                 port = ports[0]
 
         if spec.ssl:
-            san_list = spec.zonegroup_hostnames or []
-            custom_sans = san_list + [f"*.{h}" for h in san_list] if spec.wildcard_enabled else san_list
-            tls_creds = self.get_certificates(daemon_spec, custom_sans)
-            pem = f'{tls_creds.key.rstrip()}\n{tls_creds.cert.lstrip()}'
+
+            legacy_pem = spec.rgw_frontend_ssl_certificate
+            if legacy_pem and not spec.ssl_cert:
+                if isinstance(legacy_pem, list):
+                    pem = '\n'.join(legacy_pem)
+                else:
+                    pem = legacy_pem
+            else:
+                san_list = spec.zonegroup_hostnames or []
+                custom_sans = san_list + [f"*.{h}" for h in san_list] if spec.wildcard_enabled else san_list
+                tls_creds = self.get_certificates(daemon_spec, custom_sans=custom_sans)
+                pem = f'{tls_creds.key.rstrip()}\n{tls_creds.cert.lstrip()}'
+
             rgw_cert_name = daemon_spec.name() if spec.generate_cert else spec.service_name()
             ret, out, err = self.mgr.check_mon_command({
                 'prefix': 'config-key set',
@@ -1622,6 +1813,9 @@ class RgwService(CephService):
                     args.append(f"port={port}")
         else:
             raise OrchestratorError(f'Invalid rgw_frontend_type parameter: {ftype}. Valid values are: beast, civetweb.')
+
+        if spec.allow_port_reuse:
+            args.append('so_reuseport=1')
 
         if spec.rgw_frontend_extra_args is not None:
             args.extend(spec.rgw_frontend_extra_args)
@@ -1719,7 +1913,116 @@ class RgwService(CephService):
 
         return daemon_spec
 
+    def is_concentrator_daemon_spec(self, daemon_spec: CephadmDaemonDeploySpec) -> bool:
+        # rgw daemons themselves are not concentrators
+        if daemon_spec.daemon_type == self.TYPE:
+            return False
+
+        rgw_spec = cast(RGWSpec, self.mgr.spec_store[daemon_spec.service_name].spec)
+        concentrator_type = getattr(rgw_spec, 'concentrator', None)
+        if daemon_spec.daemon_type != concentrator_type:
+            raise OrchestratorError(
+                f'RgwService prepare_create was asked to prepare daemon type of {daemon_spec.daemon_type} '
+                f'which is not type "rgw" or the {rgw_spec.service_name()}\'s concentrator type (found type "{concentrator_type}")'
+            )
+        # if we got here, the daemon_spec type matches the service spec's concentrator type
+        return True
+
+    def concentrator_prepare_create(self, daemon_spec: CephadmDaemonDeploySpec) -> CephadmDaemonDeploySpec:
+        rgw_spec = cast(RGWSpec, self.mgr.spec_store[daemon_spec.service_name].spec)
+        if daemon_spec.daemon_type == 'haproxy':
+            return self.haproxy_concentrator_prepare_create(
+                daemon_spec,
+                rgw_spec
+            )
+        raise OrchestratorError(
+            f'Got unknown RGW concentrator type {daemon_spec.daemon_type} attempting to apply '
+            f'the {rgw_spec.service_name()} service'
+        )
+
+    def haproxy_concentrator_prepare_create(
+            self,
+            daemon_spec: CephadmDaemonDeploySpec,
+            rgw_spec: RGWSpec
+    ) -> CephadmDaemonDeploySpec:
+        ispec = IngressSpec(
+            service_id='',
+            backend_service=rgw_spec.service_name(),
+            # not actually a "virtual" ip but this allows us to re-use
+            # the existing ingress spec class when rendering the template
+            virtual_ip=self.mgr.inventory.get_addr(daemon_spec.host),
+            frontend_port=rgw_spec.concentrator_frontend_port,
+            monitor_port=rgw_spec.concentrator_monitor_port,
+        )
+
+        # either find or create monitoring password
+        pw_key = f'{daemon_spec.name()}/monitor_password'
+        spec_password = getattr(rgw_spec, 'concentrator_monitor_password', None)
+        password = self.mgr.get_store(pw_key)
+        if not password and not spec_password:
+            # no password in mon store or spec, generate one
+            password = ''.join(random.choice(string.ascii_lowercase) for _ in range(8))
+            self.mgr.set_store(pw_key, password)
+        elif spec_password:
+            # password is in spec. If spec and mon store mismatch, update mon store.
+            # This covers the case of both the password not being in the mon store
+            # and it being there but being different from what we found in the spec
+            if password != spec_password:
+                self.mgr.set_store(pw_key, spec_password)
+            password = spec_password
+        else:
+            # Last case is password in mon store but not spec, at which point it is most
+            # likely a previously generated random password and we should just leave it.
+            # I know that means we don't actually need this else block but having it here
+            # helps make it clear all cases are being covered
+            pass
+
+        # we want "servers" to be only the RGW daemons for this service deployed
+        # on the same host as we are going to deploy this haproxy daemon
+        daemons = self.mgr.cache.get_daemons_by_service(rgw_spec.service_name())
+        servers = [
+            {
+                'name': d.name(),
+                'ip': d.ip or utils.resolve_ip(self.mgr.inventory.get_addr(str(d.hostname))),
+                'port': d.ports[0],
+            } for d in daemons if d.daemon_type == 'rgw' and d.ports and d.hostname == daemon_spec.host
+        ]
+        v4v6_flag = "v4v6" if ispec.virtual_ip == "[::]" else ""
+        haproxy_conf = self.mgr.template.render(
+            'services/ingress/haproxy.cfg.j2',
+            {
+                'spec': ispec,
+                'backend_spec': rgw_spec,
+                'mode': 'tcp',
+                'servers': servers,
+                'user': rgw_spec.concentrator_monitor_user,
+                'password': password,
+                'ip': ispec.virtual_ip,
+                'frontend_port': ispec.frontend_port,
+                'monitor_port': daemon_spec.ports[1] if daemon_spec.ports else ispec.monitor_port,
+                'monitor_ips': [ispec.virtual_ip],
+                'local_host_ip': self.mgr.inventory.get_addr(daemon_spec.host),
+                'default_server_opts': [],
+                'health_check_interval': '2s',
+                'v4v6_flag': v4v6_flag,
+                'qat_support': False,
+            }
+        )
+        config_files = {
+            'files': {
+                "haproxy.cfg": haproxy_conf,
+            }
+        }
+        daemon_spec.final_config = config_files
+        daemon_spec.deps = self.get_dependencies(self.mgr, rgw_spec, 'haproxy', daemon_spec.host)
+        return daemon_spec
+
     def get_keyring(self, rgw_id: str) -> str:
+        """
+        SMB and NFS services embed librgw. If the RGW service capabilities are
+        updated, verify whether the same changes are required for these
+        services as well.
+        """
         keyring = self.get_keyring_with_caps(self.get_auth_entity(rgw_id),
                                              ['mon', 'allow *',
                                               'mgr', 'allow rw',
@@ -1932,7 +2235,8 @@ class CephExporterService(CephService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
 
         deps = [f'secure_monitoring_stack:{mgr.secure_monitoring_stack}']
         deps += mgr.cache.get_daemons_by_types(['mgmt-gateway'])
@@ -2029,16 +2333,23 @@ class CephadmAgent(CephService):
     TYPE = 'agent'
 
     @classmethod
+    def _get_ceph_volume_image(cls, mgr: "CephadmOrchestrator") -> str:
+        return mgr.get_container_image('osd') or ''
+
+    @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         agent = mgr.http_server.agent
+        container_image = cls._get_ceph_volume_image(mgr)
         return sorted(
             [
                 str(mgr.get_mgr_ip()),
                 str(agent.server_port),
                 mgr.cert_mgr.get_root_ca(),
                 str(mgr.get_module_option("device_enhanced_scan")),
+                container_image,
             ]
         )
 
@@ -2068,11 +2379,13 @@ class CephadmAgent(CephService):
             raise OrchestratorError(
                 'Cannot deploy agent daemons until cephadm endpoint has finished generating certs')
 
+        container_image = self._get_ceph_volume_image(self.mgr)
         cfg = {'target_ip': self.mgr.get_mgr_ip(),
                'target_port': agent.server_port,
                'refresh_period': self.mgr.agent_refresh_rate,
                'listener_port': self.mgr.agent_starting_port,
                'host': daemon_spec.host,
+               'container_image': container_image,
                'device_enhanced_scan': str(self.mgr.device_enhanced_scan)}
 
         tls_creds = self.get_certificates(daemon_spec)
@@ -2084,9 +2397,7 @@ class CephadmAgent(CephService):
             'listener.key': tls_creds.key,
         }
 
-        return config, sorted([str(self.mgr.get_mgr_ip()), str(agent.server_port),
-                               self.mgr.cert_mgr.get_root_ca(),
-                               str(self.mgr.get_module_option('device_enhanced_scan'))])
+        return config, self.get_dependencies(self.mgr)
 
 
 def next_action_for_mgmt_stack_service(

@@ -17,7 +17,7 @@ from orchestrator import OrchestratorError, DaemonDescription
 if TYPE_CHECKING:
     from .module import CephadmOrchestrator
 
-LAST_MIGRATION = 9
+LAST_MIGRATION = 13
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,25 @@ class Migrations:
             if self.migrate_8_9():
                 self.set(9)
 
+        if self.mgr.migration_current == 9:
+            if self.migrate_9_10():
+                self.set(10)
+
+        if self.mgr.migration_current == 10:
+            logger.info('Running migration 10 -> 11')
+            if self.migrate_10_11():
+                self.set(11)
+
+        if self.mgr.migration_current == 11:
+            logger.info('Running migration 11 -> 12')
+            if self.migrate_11_12():
+                self.set(12)
+
+        if self.mgr.migration_current == 12:
+            logger.info('Running migration 12 -> 13')
+            if self.migrate_12_13():
+                self.set(13)
+
     def migrate_0_1(self) -> bool:
         """
         Migration 0 -> 1
@@ -161,7 +180,7 @@ class Migrations:
 
         def convert_to_explicit(spec: ServiceSpec) -> None:
             existing_daemons = self.mgr.cache.get_daemons_by_service(spec.service_name())
-            placements, to_add, to_remove = HostAssignment(
+            placements, to_add, to_remove, _ = HostAssignment(
                 spec=spec,
                 hosts=self.mgr.inventory.all_specs(),
                 unreachable_hosts=self.mgr.cache.get_unreachable_hosts(),
@@ -559,6 +578,139 @@ class Migrations:
         if nfs_services:
             self.mgr.set_store('nfs_services_with_old_nodeid', ','.join(nfs_services))
         self.mgr.remove_health_warning('CEPHADM_MIGRATION_FAILURE')
+        return True
+
+    def migrate_9_10(self) -> bool:
+        # For NFS, only services still using old per-daemon userid (nfs.<daemon_id>)
+        # are recorded so they keep that userid after upgrade. Specs that already
+        # use the shared service_name userid are skipped.
+        def nfs_service_uses_old_userid(service_name: str, auth_out: str) -> bool:
+            # Match the exact per-daemon auth entity for each known NFS daemon.
+            # auth ls prints entities as [client.nfs.<daemon_id>].
+            for dd in self.mgr.cache.get_daemons_by_service(service_name):
+                if dd.daemon_id is None:
+                    continue
+                old_entity = f'client.nfs.{dd.daemon_id}'
+                if re.search(rf'\[{re.escape(old_entity)}\]', auth_out):
+                    return True
+            return False
+
+        nfs_services = []
+        service_specs = self.mgr.spec_store.get_specs_by_type('nfs')
+        if not service_specs:
+            return True
+        try:
+            ret, out, err = self.mgr.mon_command({
+                'prefix': 'auth ls',
+            })
+            if ret:
+                raise OrchestratorError(f'auth ls failed: {err}')
+            auth_out = out or ''
+            for service_name, spec in service_specs.items():
+                if nfs_service_uses_old_userid(service_name, auth_out):
+                    nfs_services.append(service_name)
+                    logger.info(
+                        f'NFS service {service_name} needs to maintain old userid after upgrade'
+                    )
+        except Exception as e:
+            logger.exception(f'Got error while detecting NFS old userid: {e}')
+            self.mgr.set_health_warning('CEPHADM_MIGRATION_FAILURE',
+                                        f'Cephadm migration failed: {e}',
+                                        1, [str(e)])
+            return False
+        if nfs_services:
+            self.mgr.set_store('nfs_services_with_old_userid', ','.join(nfs_services))
+        self.mgr.remove_health_warning('CEPHADM_MIGRATION_FAILURE')
+        return True
+
+    def migrate_10_11(self) -> bool:
+        """
+        Migrate NFS cluster QoS type values from integers to strings.
+        Background: QoS type was stored as integers (1, 2, 3) in RADOS objects.
+        Now using descriptive strings ("Per_Export", "Per_Client", "Per_Export_Per_Client").
+        """
+        service_specs = self.mgr.spec_store.get_specs_by_type('nfs')
+        try:
+            from nfs.cluster import update_qos_type_for_cluster
+            for service_name, spec in service_specs.items():
+                assert spec.service_id
+                update_qos_type_for_cluster(self.mgr, spec.service_id)
+            return True
+        except Exception as e:
+            logger.error('Failed to update NFS clusters QoS type from int to str: %s', e)
+            return False
+
+    def migrate_11_12(self) -> bool:
+        """
+        Migration 11 -> 12
+        Update NFS client auth capabilities to include MDS 'allow all' permissions
+        required for KMIP-based encryption (BYOK) support.
+        """
+        from nfs.cluster import update_nfs_client_caps
+
+        logger.info('Running migration 11 -> 12: Updating NFS client permissions for KMIP support')
+
+        service_specs = self.mgr.spec_store.get_specs_by_type('nfs')
+        if not service_specs:
+            logger.info('No NFS services found, migration not needed')
+            return True
+
+        try:
+            for service_name, spec in service_specs.items():
+                assert spec.service_id
+                update_nfs_client_caps(self.mgr, spec.service_id)
+            logger.info(f'Migration 11->12: Updated {len(service_specs)} NFS services')
+            return True
+        except Exception as e:
+            logger.error(f'Migration 11->12 failed: {e}')
+            return False
+
+    def migrate_12_13(self) -> bool:
+        """
+        Migration 12 -> 13
+        Normalize persisted service spec placement host patterns to lowercase.
+        Specs stored by older versions may contain uppercase host_pattern values
+        (e.g. 'MYHOST-[0-2]'). This patches the stored JSON directly rather
+        than going through spec_store.save(), which would set _needs_configuration
+        and emit a spurious 'service was created' event for every affected spec.
+        The in-memory spec is already correct (HostPattern.__init__ lowercases
+        fnmatch patterns on load).
+        """
+        from cephadm.inventory import SPEC_STORE_PREFIX
+        for spec in self.mgr.spec_store.all_specs.values():
+            if not spec.placement.host_pattern or not spec.placement.host_pattern.pattern:
+                continue
+            name = spec.service_name()
+            store_key = SPEC_STORE_PREFIX + name
+            raw = self.mgr.get_store(store_key)
+            if not raw:
+                continue
+            stored_data = json.loads(raw)
+            hp = stored_data.get('spec', {}).get('placement', {}).get('host_pattern')
+            if isinstance(hp, str):
+                stored_pattern = hp
+            elif isinstance(hp, dict):
+                if hp.get('pattern_type') == 'regex':
+                    continue
+                stored_pattern = hp.get('pattern', '')
+            else:
+                continue
+            normalized = stored_pattern.lower()
+            if stored_pattern == normalized:
+                continue
+            if isinstance(hp, str):
+                stored_data['spec']['placement']['host_pattern'] = normalized
+            else:
+                stored_data['spec']['placement']['host_pattern']['pattern'] = normalized
+            logger.info(
+                f'Normalizing host_pattern for {name} '
+                f'to lowercase: \'{stored_pattern}\' -> \'{normalized}\''
+            )
+            # Update only the persisted JSON; the in-memory ServiceSpec is
+            # already normalized by HostPattern.__init__ during spec_store.load().
+            # Using set_store() directly avoids triggering _needs_configuration
+            # and a spurious 'service was created' event via SpecStore.save().
+            self.mgr.set_store(store_key, json.dumps(stored_data, sort_keys=True))
         return True
 
 

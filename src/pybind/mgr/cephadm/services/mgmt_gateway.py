@@ -73,7 +73,8 @@ class MgmtGatewayService(CephadmService):
     @classmethod
     def get_dependencies(cls, mgr: "CephadmOrchestrator",
                          spec: Optional[ServiceSpec] = None,
-                         daemon_type: Optional[str] = None) -> List[str]:
+                         daemon_type: Optional[str] = None,
+                         hostname: Optional[str] = None) -> List[str]:
         # url_prefix for the following services depends on the presence of mgmt-gateway
         deps = [
             f'{d.name()}:{d.ports[0]}' if d.ports else d.name()
@@ -143,11 +144,11 @@ class MgmtGatewayService(CephadmService):
 
         if svc_spec.ssl:
             ip = self.get_mgmt_gw_ip(svc_spec, daemon_spec)
-            tls_pair = self.get_certificates(daemon_spec, [ip])
+            tls_pair = self.get_certificates(daemon_spec, ips=[ip])
             daemon_config["files"]["nginx.crt"] = tls_pair.cert
             daemon_config["files"]["nginx.key"] = tls_pair.key
 
-        return daemon_config, sorted(MgmtGatewayService.get_dependencies(self.mgr))
+        return daemon_config, self.sorted_dependencies(self.mgr, svc_spec, daemon_spec.daemon_type)
 
     def post_remove(self, daemon: DaemonDescription, is_failed_deploy: bool) -> None:
         """
