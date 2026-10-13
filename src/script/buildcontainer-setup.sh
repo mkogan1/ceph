@@ -8,6 +8,38 @@ install_container_deps() {
     prepare
 }
 
+setup_cuobj_repo() {
+    if [ "${WITH_RADOSGW_CUOBJ:-OFF}" != ON ]; then
+        return
+    fi
+
+    local ID VERSION_ID
+    source /etc/os-release
+    local el_major=${VERSION_ID%%.*}
+    case "${ID}:${el_major}" in
+        rocky:9|centos:9|almalinux:9|rhel:9|rocky:10|centos:10|almalinux:10|rhel:10) ;;
+        *)
+            echo "cuObject build images require an EL9 or EL10 distribution" >&2
+            return 1
+            ;;
+    esac
+    local cuda_arch
+    case "$(uname -m)" in
+        x86_64) cuda_arch=x86_64 ;;
+        aarch64) cuda_arch=sbsa ;;
+        *)
+            echo "cuObject build images require x86_64 or aarch64" >&2
+            return 1
+            ;;
+    esac
+
+    # install-deps.sh installs the server library and headers through the
+    # spec's cuobj BuildRequires. The CUDA toolkit/client is not needed.
+    dnf install -y dnf-plugins-core
+    dnf config-manager --add-repo \
+        "https://developer.download.nvidia.com/compute/cuda/repos/rhel${el_major}/${cuda_arch}/cuda-rhel${el_major}.repo"
+}
+
 dnf_clean() {
     if [ "${CLEAN_DNF}" != no ]; then
         dnf clean all
@@ -25,6 +57,8 @@ if [ -z "$DISTRO_KIND" ]; then
     DISTRO_KIND="${ID}:${VERSION_ID}"
 fi
 
+setup_cuobj_repo
+
 # Execute a container setup process, installing the packges needed to build
 # ceph for the given <branch>~<distro_kind> pair. Some distros need extra
 # tools in the container image vs. vm hosts or extra tools needed to build
@@ -36,7 +70,7 @@ case "${CEPH_BASE_BRANCH}~${DISTRO_KIND}" in
         dnf_clean
     ;;
     # EL-ish, 9+
-    *~*centos*|*~fedora*|*~rocky*|*~alma*)
+    *~*centos*|*~fedora*|*~rocky*|*~alma*|*~rhel*)
         dnf install -y /usr/bin/{rpmbuild,wget,curl}
         install_container_deps
         dnf_clean

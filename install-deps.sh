@@ -45,6 +45,9 @@ function munge_ceph_spec_in {
     if $for_make_check; then
         sed -i -e 's/%bcond_with make_check/%bcond_without make_check/g' $OUTFILE
     fi
+    if [ "${WITH_RADOSGW_CUOBJ:-OFF}" = ON ]; then
+        sed -i -e 's/%bcond_with cuobj/%bcond_without cuobj/g' $OUTFILE
+    fi
 }
 
 function munge_debian_control {
@@ -284,11 +287,14 @@ function setup_lab_extras_repo() {
     # NOTE This repo should be temporary while we work to get the
     # needed deps into EPEL, etc.
     local baseurlprefix="https://apt-mirror.sepia.ceph.com/lab-extras"
+    # RHEL's $releasever includes the minor version (for example, 10.2),
+    # but lab-extras is organized by EL major version.
+    local el_major=$1
     local path="/etc/yum.repos.d/ceph-lab-extras.repo"
     $SUDO tee "${path}" <<EOF
 [ceph-lab-extras]
-name=ceph-lab-extras-\$releasever
-baseurl=${baseurlprefix}/\$releasever
+name=ceph-lab-extras-${el_major}
+baseurl=${baseurlprefix}/${el_major}
 enabled=1
 gpgcheck=0
 EOF
@@ -541,11 +547,21 @@ else
                     $SUDO dnf -y install --nogpgcheck https://dl.fedoraproject.org/pub/epel/epel-release-latest-$MAJOR_VERSION.noarch.rpm
                 $SUDO rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-$MAJOR_VERSION
                 $SUDO rm -f /etc/yum.repos.d/dl.fedoraproject.org*
-                if { [ "$ID" = centos ] || [ "$ID" = rocky ]; } && [ "$MAJOR_VERSION" -ge 9 ]; then
+                if { [ "$ID" = centos ] || [ "$ID" = rocky ] || [ "$ID" = almalinux ] || [ "$ID" = rhel ]; } && [ "$MAJOR_VERSION" -ge 9 ]; then
                     dts_ver=13
-                    $SUDO dnf config-manager --set-enabled crb
+                    if [ "$ID" = rhel ]; then
+                        # UBI provides only a subset of the RHEL build deps.
+                        # Use dnf here: subscription-manager cannot enable
+                        # repositories while operating in container mode.
+                        $SUDO dnf config-manager --set-enabled \
+                            "rhel-${MAJOR_VERSION}-for-${ARCH}-baseos-rpms" \
+                            "rhel-${MAJOR_VERSION}-for-${ARCH}-appstream-rpms" \
+                            "codeready-builder-for-rhel-${MAJOR_VERSION}-${ARCH}-rpms"
+                    else
+                        $SUDO dnf config-manager --set-enabled crb
+                    fi
                     if [ "$MAJOR_VERSION" -eq 10 ]; then
-                        setup_lab_extras_repo
+                        setup_lab_extras_repo "$MAJOR_VERSION"
                     fi
                 fi
                 ;;
