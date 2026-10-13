@@ -5901,6 +5901,7 @@ def _add_deploy_parser_args(
         help=(
             'Whether to log deploy config to cephadm.log. Could contain sensitive info '
             'such as cephx keys. Only relevant at debug level logging.'
+        )
     )
 
 

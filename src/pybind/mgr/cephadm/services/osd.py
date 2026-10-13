@@ -321,7 +321,6 @@ class OSDService(CephService):
         else:
             return "Created no osd(s) on host %s; already created?" % host
 
-
     def prepare_drivegroup(self, drive_group: DriveGroupSpec) -> List[Tuple[str, DriveSelection]]:
         # 1) use fn_filter to determine matching_hosts
         matching_hosts = drive_group.placement.filter_matching_hostspecs(
