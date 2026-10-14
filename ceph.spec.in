@@ -886,6 +886,17 @@ Requires:       python%{python3_pkgversion}-jinja2
 ceph-mgr-cephadm is a ceph-mgr module for orchestration functions using
 the integrated cephadm deployment tool management operations.
 
+%package mgr-callhome
+Summary:	Ceph Manager module for monitoring clusters in IBM environments
+BuildArch:	noarch
+%if 0%{?suse_version}
+Group:          System/Filesystems
+%endif
+Requires:       ceph-mgr = %{_epoch_prefix}%{version}-%{release}
+%description mgr-callhome
+ceph-mgr-callhome is a ceph.mgr module which sends data about the Ceph
+ cluster to IBM systems like IBM Call Home or IBM storage Insights.
+
 %package mgr-cli-api
 BuildArch:      noarch
 Summary:        Ceph Manager module providing a CLI REST API
@@ -3214,5 +3225,8 @@ exit 0
 %files -n python%{python3_pkgversion}-ceph-smb-ctl
 %{_bindir}/ceph-smb-ctl
 %endif
+
+%files mgr-callhome
+%{_datadir}/ceph/mgr/call_home_agent
 
 %changelog
