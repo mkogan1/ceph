@@ -55,7 +55,7 @@ Create Cluster
 
 .. prompt:: bash #
 
-   ceph smb cluster create <cluster_id> {user|active-directory} [--domain-realm=<domain_realm>] [--domain-join-user-pass=<domain_join_user_pass>] [--define-user-pass=<define_user_pass>] [--custom-dns=<custom_dns>] [--placement=<placement>] [--clustering=<clustering>] [--password-filter=<password_filter>] [--password-filter-out=<password_filter_out>]
+   ceph smb cluster create <cluster_id> {user|active-directory} [--domain-realm=<domain_realm>] [--domain-join-user-pass=<domain_join_user_pass>] [--define-user-pass=<define_user_pass>] [--custom-dns=<custom_dns>] [--placement=<placement>] [--clustering=<clustering>] [--client-compat={default|macos}] [--password-filter=<password_filter>] [--password-filter-out=<password_filter_out>]
 
 Create a new logical cluster, identified by the cluster ID value. The cluster
 create command must specify the authentication mode the cluster will use. This
@@ -100,6 +100,11 @@ clustering
     enables clustering regardless of the placement count. A value of ``never``
     disables clustering regardless of the placement count. If unspecified,
     ``default`` is assumed.
+client_compat
+    Optional. One of ``default`` or ``macos``. Controls client-specific SMB
+    features and optimizations. The ``default`` mode provides standard SMB
+    behavior with broad compatibility. The ``macos`` mode enables macOS-specific
+    optimized settings for macOS clients. If unspecified, ``default`` is assumed.
 public_addrs
     Optional. A string in the form of <ipaddress/prefixlength>[%<destination address>].
     Supported only when using Samba's clustering. Assign "virtual" IP addresses
@@ -165,6 +170,15 @@ previous example. Set three CTDB public address values and a custom placement:
         --public-address=192.168.76.112/24 \
         --placement="3 label:smb"
 
+Create a cluster for macOS clients with user authentication:
+
+.. prompt:: bash #
+
+    ceph smb cluster create mac_cluster user \
+        --define-user-pass=macuser%Passw0rd1 \
+        --client-compat=macos \
+        --placement="label:smb"
+
 
 Update Cluster QoS
 ++++++++++++++++++
@@ -214,6 +228,53 @@ Disable QoS for all shares in a cluster:
      --write-iops-limit=0 \
      --read-bw-limit=0 \
      --write-bw-limit=0
+
+
+
+Update Cluster Client Compatibility
+++++++++++++++++++++++++++++++++++++
+
+.. prompt:: bash #
+
+   ceph smb cluster update client-compat {default|macos} <cluster_id>
+
+Update the client compatibility mode for an SMB cluster. This setting controls whether client-specific SMB features and optimizations are enabled.
+
+The client compatibility mode determines how the Samba server is configured to optimize for specific client types:
+
+- ``default``: Standard SMB behavior without client-specific optimizations. This is the default mode and provides broad compatibility with all SMB clients.
+- ``macos``: Enable macOS-specific features including the Samba's fruit VFS module for proper handling of macOS metadata and optimized settings for macOS clients.
+
+When ``macos`` mode is enabled, the following features are automatically configured:
+
+- Fruit VFS module for proper handling of macOS-specific file attributes
+- Streams_xattr VFS module for extended attribute support
+
+Options:
+
+client_compat
+    One of ``default`` or ``macos``
+cluster_id
+    A short string uniquely identifying the cluster
+
+Examples
+~~~~~~~~
+
+Enable macOS compatibility mode for a cluster:
+
+.. prompt:: bash #
+
+   ceph smb cluster update client-compat macos mycluster
+
+Revert to default (standard) compatibility mode:
+
+.. prompt:: bash #
+
+   ceph smb cluster update client-compat default mycluster
+
+.. note::
+   The ``macos`` compatibility mode is recommended when the primary clients accessing the SMB shares are macOS systems. Otherwise default mode is recommended.
+
 
 
 Remove Cluster
@@ -319,6 +380,51 @@ Create a read-only share at a custom path in the CephFS volume:
 
     ceph smb share create test1 plans cephfs \
         --path=/qbranch/top/secret/plans --readonly
+
+
+Create RGW Share
+++++++++++++++++
+
+.. prompt:: bash #
+
+   ceph smb share create rgw <cluster_id> <share_id> <bucket> [--share-name=<share_name>] [--user-id=<user_id>] [--readonly]
+
+Create a new SMB share, hosted by the named cluster, that maps to a RADOS
+Gateway (RGW) bucket. This allows S3-compatible object storage to be accessed
+via the SMB protocol.
+
+Options:
+
+cluster_id
+    A short string uniquely identifying the cluster
+share_id
+    A short string uniquely identifying the share
+bucket
+    The name of the RGW bucket to be shared
+share_name
+    Optional. The public name of the share, visible to clients. If not provided
+    the ``share_id`` will be used automatically
+user_id
+    Optional. The RGW user ID that owns the bucket. If not provided, the system
+    will attempt to determine the bucket owner automatically
+readonly
+    Creates a read-only share
+
+Examples
+~~~~~~~~
+
+Create a share for an RGW bucket:
+
+.. prompt:: bash #
+
+    ceph smb share create rgw test1 photos my-photos-bucket
+
+Create a share with a custom name and specific user:
+
+.. prompt:: bash #
+
+    ceph smb share create rgw test1 photos my-photos-bucket \
+        --share-name="Photo Archive" --user-id=s3user
 
 
 .. _qos-parameters:
@@ -879,6 +985,12 @@ custom_smb_global_options
     indicator that the user is aware that using this option can easily break
     things in ways that the Ceph team can not help with. This special key will
     automatically be removed from the list of options passed to Samba.
+client_compat
+    Optional. One of ``default`` or ``macos``. Controls client-specific SMB
+    features and optimizations. The ``default`` mode provides standard SMB
+    behavior with broad compatibility. The ``macos`` mode enables macOS-specific
+    features including Samba's fruit VFS module for proper handling of macOS and
+    optimized settings for macOS clients. If unspecified, ``default`` is assumed.
 
 .. warning::
    Setting the ``clustering`` option allows an administrator to choose exactly
@@ -977,6 +1089,20 @@ The following is an example of a cluster configured for standalone operation:
       hosts:
         - node6.mycluster.sink.test
 
+The following is an example of a cluster optimized for macOS clients:
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.cluster
+    cluster_id: macshare
+    auth_mode: user
+    client_compat: macos
+    user_group_settings:
+      - source_type: resource
+        ref: ug1
+    placement:
+      count: 1
+
 An example cluster resource with intent to remove:
 
 .. code-block:: yaml
@@ -1018,7 +1144,8 @@ max_connections
     connections to a specific share. The default value is 0 and it indicates
     that there is no limit on the number of connections
 cephfs
-    Required object. Fields:
+    Object. Configures CephFS-backed storage for the share. Either a ``cephfs``
+    or ``rgw`` object must be specified, but not both. Fields:
 
     volume
         Required string. Name of the cephfs volume to use
@@ -1088,6 +1215,18 @@ cephfs
         name
             String. A value indicating what FSCrypt key to fetch. The specific
             value of the name depends on the scope being used.
+rgw
+    Object. Configures RADOS Gateway (RGW) backed storage for the share. Either
+    a ``cephfs`` or ``rgw`` object must be specified, but not both. This allows
+    S3-compatible object storage to be accessed via the SMB protocol. Fields:
+
+    bucket
+        Required string. The name of the RGW bucket to be shared.
+    user_id
+        Optional string. The RGW user ID that owns the bucket. If not provided,
+        the system will automatically determine the bucket owner and fetch the
+        necessary credentials.
+
 restrict_access
     Optional boolean, defaulting to false. If true the share will only permit
     access by users explicitly listed in ``login_control``.
@@ -1135,7 +1274,32 @@ custom_smb_share_options
     things in ways that the Ceph team can not help with. This special key will
     automatically be removed from the list of options passed to Samba.
 
-The following is an example of a share with QoS settings including burst
+The following is an example of an RGW-backed share with minimal configuration
+(credentials auto-fetched):
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.share
+    cluster_id: tango
+    share_id: s3share
+    name: "S3 Storage"
+    rgw:
+      bucket: my-bucket
+
+Another example of an RGW-backed share with explicit user_id:
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.share
+    cluster_id: tango
+    share_id: s3share
+    name: "S3 Storage"
+    rgw:
+      bucket: my-bucket
+      user_id: s3user
+
+
+The following is an example of a CephFS share with QoS settings including burst
 multipliers and human-readable bandwidth limits:
 
 .. code-block:: yaml
@@ -1285,6 +1449,43 @@ Example:
         groups: []
 
 
+RGW Credential Resource
+------------------------
+
+An RGW credential resource stores RADOS Gateway (RGW) access credentials that can be used by RGW-backed shares to authenticate with the object storage system.
+
+A RGW credential resource supports the following fields:
+
+resource_type
+    A literal string ``ceph.smb.rgw.credential``
+rgw_credential_id
+    A short string identifying the RGW credential resource.
+intent
+    One of ``present`` or ``removed``. If not provided, ``present`` is assumed.
+    If ``removed`` all following fields are optional
+user_id
+    Required string. The RGW user ID that owns the credentials
+access_key
+    Required string. The RGW access key for authentication
+secret_key
+    Required string. The RGW secret key for authentication
+linked_to_cluster:
+    Optional. A string containing a cluster ID. If set, the resource may only
+    be used with the linked cluster and will automatically be removed when the
+    linked cluster is removed.
+
+
+Example:
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.rgw.credential
+    rgw_credential_id: s3user 
+    user_id: s3user
+    access_key: AKIAIOSFODNN7EXAMPLE
+    secret_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+
 TLS Credential Resource
 ------------------------
 
@@ -1362,14 +1563,122 @@ fsid
 mon_host
     String. The ``mon_host`` string (as sourced from a ceph.conf file)
 cephfs_user
-    Object. Fields:
+    Optional object. Required if the cluster will host CephFS-backed shares.
+    Fields:
 
     name
-        String. A ceph user name indicating the cephx user that will
+        String. A Ceph user name indicating the CephX user that will
         access the CephFS volume(s) on the external cluster
     key
-        String. The Base64 encoded key value corresponding to the cephx
+        String. The Base64 encoded key value corresponding to the CephX
         user name provided
+rgw_user
+    Optional object. Required if the cluster will host RGW-backed shares.
+    Fields:
+
+    name
+        String. A Ceph user name indicating the CephX user that will
+        access the RGW bucket(s) on the external cluster
+    key
+        String. The Base64 encoded key value corresponding to the CephX
+        user name provided
+
+.. note::
+   At least one of ``cephfs_user`` or ``rgw_user`` must be configured.
+   Configure only the user(s) needed for your share types:
+
+   - CephFS-only clusters: Configure only ``cephfs_user``
+   - RGW-only clusters: Configure only ``rgw_user``
+   - Mixed clusters: Configure both ``cephfs_user`` and ``rgw_user``
+
+Examples
+~~~~~~~~
+
+External cluster with CephFS support only:
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.ext.cluster
+    external_ceph_cluster_id: external-cephfs
+    cluster:
+      fsid: "12345678-1234-1234-1234-123456789abc"
+      mon_host: "10.0.1.10:6789,10.0.1.11:6789"
+      cephfs_user:
+        name: "client.external-cephfs"
+        key: "AQC1234567890abcdefghijklmnopqrstuvwxyz=="
+
+External cluster with RGW support only:
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.ext.cluster
+    external_ceph_cluster_id: external-rgw
+    cluster:
+      fsid: "12345678-1234-1234-1234-123456789abc"
+      mon_host: "10.0.1.10:6789,10.0.1.11:6789"
+      rgw_user:
+        name: "client.external-rgw"
+        key: "AQD9876543210zyxwvutsrqponmlkjihgfedcba=="
+
+External cluster with both CephFS and RGW support:
+
+.. code-block:: yaml
+
+    resource_type: ceph.smb.ext.cluster
+    external_ceph_cluster_id: external-mixed
+    cluster:
+      fsid: "12345678-1234-1234-1234-123456789abc"
+      mon_host: "10.0.1.10:6789,10.0.1.11:6789"
+      cephfs_user:
+        name: "client.external-cephfs"
+        key: "AQC1234567890abcdefghijklmnopqrstuvwxyz=="
+      rgw_user:
+        name: "client.external-rgw"
+        key: "AQD9876543210zyxwvutsrqponmlkjihgfedcba=="
+
+
+.. important::
+   **RGW Shares on External Clusters Require Manual Credentials**
+
+   When creating RGW shares on external clusters, you **must** manually define
+   RGW credentials using the ``ceph.smb.rgw.credential`` resource. Unlike local
+   clusters where credentials can be auto-fetched, external clusters cannot
+   automatically retrieve S3 access keys.
+
+   Example configuration with manual RGW credentials:
+
+   .. code-block:: yaml
+
+       resources:
+         # Define the external cluster with rgw_user
+         - resource_type: ceph.smb.ext.cluster
+           external_ceph_cluster_id: external-rgw
+           cluster:
+             fsid: "12345678-1234-1234-1234-123456789abc"
+             mon_host: "10.0.1.10:6789,10.0.1.11:6789"
+             rgw_user:
+               name: "client.external-rgw"
+               key: "AQD9876543210zyxwvutsrqponmlkjihgfedcba=="
+
+         # Define RGW credentials manually (REQUIRED for external clusters)
+         - resource_type: ceph.smb.rgw.credential
+           rgw_credential_id: my-s3-creds
+           user_id: s3-user
+           access_key_id: AKIAIOSFODNN7EXAMPLE
+           secret_access_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+         # RGW share referencing the manual credentials
+         - resource_type: ceph.smb.share
+           cluster_id: my-cluster
+           share_id: s3-share
+           name: "S3 Share"
+           rgw:
+             bucket: my-bucket
+             credential_ref: my-s3-creds
+
+   The ``rgw_user`` in the external cluster definition provides the CephX
+   credentials for accessing the RGW service, while the ``ceph.smb.rgw.credential``
+   resource provides the S3 access key and secret key for bucket operations.
 
 
 A Declarative Configuration Example

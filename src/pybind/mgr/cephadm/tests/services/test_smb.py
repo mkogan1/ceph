@@ -45,6 +45,7 @@ class TestSMB:
                 'cluster_id': 'foxtrot',
                 'features': [],
                 'config_uri': 'rados://.smb/foxtrot/config.json',
+                'extra_config_uris': ['rados:mon-config-key:smb/config/foxtrot/config.smb.rgw'],
                 'config': '',
                 'keyring': '[client.smb.config.tango.briskly]\nkey = None\n',
                 'config_auth_entity': 'client.smb.config.tango.briskly',
@@ -115,6 +116,7 @@ class TestSMB:
                 'cluster_id': 'foxtrot',
                 'features': ['domain'],
                 'config_uri': 'rados://.smb/foxtrot/config2.json',
+                'extra_config_uris': ['rados:mon-config-key:smb/config/foxtrot/config.smb.rgw'],
                 'join_sources': [
                     'rados://.smb/foxtrot/join1.json',
                     'rados:mon-config-key:smb/config/foxtrot/join2.json',
@@ -179,5 +181,6 @@ def test_smb_get_dependencies(cephadm_module):
     deps = SMBService.get_dependencies(cephadm_module, spec, spec.service_type)
     assert deps == [
         'smb+meta:ceph_cluster_config.exo=sha256:859b001f76df4d184b858b9c3e323ca8ff85a311414d0405f4484d17aa481ef3',
-        'smb+field:features=domain'
+        'smb+field:features=domain',
+        'smb+field:rgw_creds_uri=rados:mon-config-key:smb/config/foxtrot/config.smb.rgw',
     ]

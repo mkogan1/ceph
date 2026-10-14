@@ -208,6 +208,20 @@ class SMBService(CephService):
             ca_cert=ssl_params.ssl_ca_cert or '',
         )
 
+    @classmethod
+    def _lookup_rgw_creds_uri(
+        cls, mgr: 'CephadmOrchestrator', cluster_id: str
+    ) -> Optional[str]:
+        from smb.external import rgw_config_key as _smb_rgw_config_key
+        from smb.mon_store import MonKeyConfigStore
+        _rgw_entry = MonKeyConfigStore(mgr)[_smb_rgw_config_key(cluster_id)]
+        if _rgw_entry.exists():
+            return _rgw_entry.uri
+        return None
+
+    def _rgw_creds_uri(self, cluster_id: str) -> Optional[str]:
+        return self._lookup_rgw_creds_uri(self.mgr, cluster_id)
+
     def generate_config(
         self, daemon_spec: CephadmDaemonDeploySpec
     ) -> Tuple[Dict[str, Any], List[str]]:
@@ -222,6 +236,14 @@ class SMBService(CephService):
         config_blobs['cluster_id'] = smb_spec.cluster_id
         config_blobs['features'] = smb_spec.features
         config_blobs['config_uri'] = smb_spec.config_uri
+        # For RGW clusters, append the private-store config as an extra URI
+        # loaded after the public config.  sambacc's config:merge is a general
+        # merge mechanism; here the mgr populates it with only the RGW
+        # credential fields, keeping the public config the primary source of
+        # truth.
+        rgw_creds_uri = self._rgw_creds_uri(smb_spec.cluster_id)
+        if rgw_creds_uri:
+            config_blobs['extra_config_uris'] = [rgw_creds_uri]
         _add_cfg(config_blobs, 'join_sources', smb_spec.join_sources)
         _add_cfg(config_blobs, 'user_sources', smb_spec.user_sources)
         _add_cfg(config_blobs, 'custom_dns', smb_spec.custom_dns)
@@ -230,6 +252,7 @@ class SMBService(CephService):
         cluster_public_addrs = smb_spec.strict_cluster_ip_specs()
         _add_cfg(config_blobs, 'cluster_public_addrs', cluster_public_addrs)
         ceph_users = smb_spec.include_ceph_users or []
+
         config_blobs.update(
             self._ceph_config_and_keyring_for(
                 smb_spec, daemon_spec.daemon_id, ceph_users
@@ -528,6 +551,8 @@ class SMBService(CephService):
             out.append(Dep.META(f'ceph_cluster_config.{ccc.alias}', value))
         # Add features as a dependency
         out.append(Dep.FIELD('features', ','.join(sorted(smb_spec.features or []))))
+        rgw_creds_uri = cls._lookup_rgw_creds_uri(mgr, smb_spec.cluster_id) or ''
+        out.append(Dep.FIELD('rgw_creds_uri', rgw_creds_uri))
         return out
 
     def choose_next_action(
@@ -543,7 +568,15 @@ class SMBService(CephService):
             scheduled_action, daemon_type, spec, curr_deps, last_deps)
         if step.action is utils.Action.RECONFIG:
             sym_diff = set(curr_deps).symmetric_difference(last_deps)
-            if any(d.startswith(Dep.FIELD('features', '')) for d in sym_diff):
+            needs_redeploy_prefixes = (
+                Dep.FIELD('features', ''),
+                Dep.FIELD('rgw_creds_uri', ''),
+            )
+            if any(
+                d.startswith(p)
+                for d in sym_diff
+                for p in needs_redeploy_prefixes
+            ):
                 return replace(step, action=utils.Action.REDEPLOY)
         return step
 
@@ -583,20 +616,23 @@ def _to_conf(ext_cluster: SMBExternalCephCluster) -> str:
 
 
 def _to_keyring(ext_cluster: SMBExternalCephCluster) -> str:
-    return '\n'.join(
-        [
-            f'[{ext_cluster.user}]',
-            f'key = {ext_cluster.key}',
-            '',
-        ]
-    )
+    entries = []
+    if ext_cluster.user and ext_cluster.key:
+        entries += [f'[{ext_cluster.user}]', f'key = {ext_cluster.key}', '']
+    if ext_cluster.rgw_user and ext_cluster.rgw_key:
+        entries += [f'[{ext_cluster.rgw_user}]', f'key = {ext_cluster.rgw_key}', '']
+    return '\n'.join(entries)
 
 
 def _hash_ceph_cluster_config(spec: SMBExternalCephCluster) -> str:
-    _fields = ['alias', 'fsid', 'mon_host', 'user', 'key']
+    _fields = ['alias', 'fsid', 'mon_host', 'user', 'key', 'rgw_user', 'rgw_key']
     fdg = hashlib.sha256()
     for field_name in _fields:
-        fdg.update(getattr(spec, field_name, '').encode())
+        value = getattr(spec, field_name, '')
+        # Handle None values explicitly
+        if value is None:
+            value = ''
+        fdg.update(value.encode())
     return f'sha256:{fdg.hexdigest()}'
 
 
