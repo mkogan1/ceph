@@ -29,10 +29,11 @@ using librbd::util::create_rados_callback;
 
 template <typename I>
 CreateNonPrimaryRequest<I>::CreateNonPrimaryRequest(
-    I* image_ctx, bool demoted, const std::string &primary_mirror_uuid,
+    I* image_ctx, bool demoted, const std::string group_snap_id,
+    const std::string &primary_mirror_uuid,
     uint64_t primary_snap_id, const SnapSeqs& snap_seqs,
     const ImageState &image_state, uint64_t *snap_id, Context *on_finish)
-  : m_image_ctx(image_ctx), m_demoted(demoted),
+  : m_image_ctx(image_ctx), m_demoted(demoted), m_group_snap_id(group_snap_id),
     m_primary_mirror_uuid(primary_mirror_uuid),
     m_primary_snap_id(primary_snap_id), m_snap_seqs(snap_seqs),
     m_image_state(image_state), m_snap_id(snap_id), m_on_finish(on_finish) {
@@ -120,10 +121,18 @@ void CreateNonPrimaryRequest<I>::handle_get_mirror_image(int r) {
     return;
   }
 
-  uuid_d uuid_gen;
-  uuid_gen.generate_random();
-  m_snap_name = ".mirror.non_primary." + mirror_image.global_image_id + "." +
-    uuid_gen.to_string();
+  std::stringstream ss;
+  ss << ".mirror.non_primary." << mirror_image.global_image_id << ".";
+  if (!m_group_snap_id.empty()) {
+    ss << m_image_ctx->group_spec.pool_id << "_"
+       << m_image_ctx->group_spec.group_id << "_"
+       << m_group_snap_id;
+  } else {
+    uuid_d uuid_gen;
+    uuid_gen.generate_random();
+    ss << uuid_gen.to_string();
+  }
+  m_snap_name = ss.str();
 
   get_mirror_peers();
 }
@@ -189,6 +198,10 @@ void CreateNonPrimaryRequest<I>::create_snapshot() {
   if (m_demoted) {
     ns.mirror_peer_uuids = m_mirror_peer_uuids;
   }
+  if (!m_group_snap_id.empty()) {
+    ns.group_spec = m_image_ctx->group_spec;
+    ns.group_snap_id = m_group_snap_id;
+  }
   ns.snap_seqs = m_snap_seqs;
   ns.complete = is_orphan();
   ldout(cct, 15) << "ns=" << ns << dendl;
@@ -207,6 +220,39 @@ void CreateNonPrimaryRequest<I>::handle_create_snapshot(int r) {
   if (r < 0) {
     lderr(cct) << "failed to create mirror snapshot: " << cpp_strerror(r)
                << dendl;
+    finish(r);
+    return;
+  }
+
+  if (m_snap_id != nullptr && is_orphan()) {
+    // image refresh is required to retrieve orphan snapshot id
+    // in case of group promote --force as the snapshot
+    // is created via remote RPC
+    refresh_image_for_snap_id();
+    return;
+  }
+
+  write_image_state();
+}
+
+template <typename I>
+void CreateNonPrimaryRequest<I>::refresh_image_for_snap_id() {
+  CephContext *cct = m_image_ctx->cct;
+  ldout(cct, 15) << dendl;
+
+  auto ctx = create_context_callback<
+    CreateNonPrimaryRequest<I>,
+    &CreateNonPrimaryRequest<I>::handle_refresh_image_for_snap_id>(this);
+  m_image_ctx->state->refresh(ctx);
+}
+
+template <typename I>
+void CreateNonPrimaryRequest<I>::handle_refresh_image_for_snap_id(int r) {
+  CephContext *cct = m_image_ctx->cct;
+  ldout(cct, 15) << "r=" << r << dendl;
+
+  if (r < 0) {
+    lderr(cct) << "failed to refresh image: " << cpp_strerror(r) << dendl;
     finish(r);
     return;
   }

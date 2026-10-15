@@ -3,6 +3,7 @@
 
 #include "Replayer.h"
 #include "common/Clock.h" // for ceph_clock_now()
+#include "common/Cond.h"
 #include "common/debug.h"
 #include "common/errno.h"
 #include "common/perf_counters.h"
@@ -494,8 +495,6 @@ void Replayer<I>::scan_local_mirror_snapshots(
   m_remote_snap_id_end = CEPH_NOSNAP;
   m_remote_mirror_snap_ns = {};
 
-  std::set<uint64_t> prune_snap_ids;
-
   auto local_image_ctx = m_state_builder->local_image_ctx;
   std::shared_lock image_locker{local_image_ctx->image_lock};
   for (auto snap_info_it = local_image_ctx->snap_info.begin();
@@ -518,13 +517,14 @@ void Replayer<I>::scan_local_mirror_snapshots(
         m_local_snap_id_start = local_snap_id;
         ceph_assert(m_local_snap_id_end == CEPH_NOSNAP);
         const auto& peer_uuids = mirror_ns->mirror_peer_uuids;
-        if (peer_uuids.empty() ||
-            (mirror_ns->state == cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED &&
-             peer_uuids.size() == 1 &&
-             peer_uuids.count(m_local_mirror_peer_uuid) == 1)) {
+        if ((peer_uuids.empty() ||
+             (mirror_ns->state == cls::rbd::MIRROR_SNAPSHOT_STATE_NON_PRIMARY_DEMOTED &&
+              peer_uuids.size() == 1 &&
+              peer_uuids.count(m_local_mirror_peer_uuid) == 1)) &&
+            !mirror_ns->group_spec.is_valid()) {
           // no other peer will attempt to sync to this snapshot so store as
           // a candidate for removal
-          prune_snap_ids.insert(local_snap_id);
+          m_prune_snap_ids.insert(local_snap_id);
         }
       } else if (mirror_ns->last_copied_object_number == 0 &&
                  m_local_snap_id_start > 0) {
@@ -535,9 +535,11 @@ void Replayer<I>::scan_local_mirror_snapshots(
         // the first non-primary snapshot since we know its snapshot is
         // well-formed because otherwise the mirror-image-state would have
         // forced an image deletion.
-        prune_snap_ids.clear();
-        prune_snap_ids.insert(local_snap_id);
-        break;
+        if (!mirror_ns->group_spec.is_valid()) {
+          m_prune_snap_ids.clear();
+          m_prune_snap_ids.insert(local_snap_id);
+          break;
+        }
       } else {
         // start snap will be last complete mirror snapshot or initial
         // image revision
@@ -556,7 +558,7 @@ void Replayer<I>::scan_local_mirror_snapshots(
           // Additionally, in this case, a demoted primary snapshot that is linked
           // to only a single remote (current primary) peer is safe to prune,
           // because no other peer depends on it waiting for sync.
-          prune_snap_ids.insert(local_snap_id);
+          m_prune_snap_ids.insert(local_snap_id);
         }
         m_local_snap_id_start = local_snap_id;
         ceph_assert(m_local_snap_id_end == CEPH_NOSNAP);
@@ -577,14 +579,20 @@ void Replayer<I>::scan_local_mirror_snapshots(
 
   if (m_local_snap_id_start > 0) {
     // remove candidate that is required for delta snapshot sync
-    prune_snap_ids.erase(m_local_snap_id_start);
+    m_prune_snap_ids.erase(m_local_snap_id_start);
   }
-  if (!prune_snap_ids.empty()) {
+  if (!m_prune_snap_ids_by_gr.empty()) {
+    m_prune_snap_ids.insert(m_prune_snap_ids_by_gr.begin(),
+                            m_prune_snap_ids_by_gr.end());
+    m_prune_snap_ids_by_gr.clear();
+  }
+  if (!m_prune_snap_ids.empty()) {
     locker->unlock();
 
-    auto prune_snap_id = *prune_snap_ids.begin();
+    uint64_t prune_snap_id;
+    prune_snap_id = *m_prune_snap_ids.begin();
     dout(5) << "pruning unused mirror snapshot " << prune_snap_id << dendl;
-    prune_mirror_snapshot(prune_snap_id);
+    prune_mirror_snapshot(nullptr, prune_snap_id);
     return;
   }
 
@@ -670,7 +678,8 @@ void Replayer<I>::scan_remote_mirror_snapshots(
         ceph_assert(m_local_mirror_snap_ns.primary_mirror_uuid ==
                       m_state_builder->remote_mirror_uuid);
 
-        if (m_remote_snap_id_end == CEPH_NOSNAP) {
+        if (m_remote_snap_id_end == CEPH_NOSNAP &&
+            !mirror_ns->group_spec.is_valid()) {
           // haven't found the end snap so treat this as a candidate for unlink
           unlink_snap_ids.insert(remote_snap_id);
         }
@@ -771,7 +780,24 @@ void Replayer<I>::scan_remote_mirror_snapshots(
                    << dendl;
           get_local_image_state();
         } else {
-          copy_snapshots();
+          // Standalone image mirroring
+          if (!m_remote_mirror_snap_ns.group_spec.is_valid()) {
+            copy_snapshots();
+            return;
+          }
+          // Image is part of group enabled for mirroring
+          auto limit = get_remote_snap_id_end_limit();
+          if (limit != CEPH_NOSNAP && limit >= m_remote_snap_id_end) {
+            copy_snapshots();
+            return;
+          }
+          dout(10) << "idling waiting for change in snapshot limits" << dendl;
+          {
+            std::unique_lock locker{m_lock};
+            ceph_assert(m_state == STATE_REPLAYING);
+            m_state = STATE_IDLE;
+            notify_status_updated();
+          }
         }
         return;
       } else {
@@ -802,7 +828,8 @@ void Replayer<I>::scan_remote_mirror_snapshots(
          << "local_snap_ns=" << m_local_mirror_snap_ns << dendl;
     handle_replay_complete(locker, -EEXIST, "split-brain");
     return;
-  } else if (remote_demoted) {
+  } else if (remote_demoted &&
+             !m_remote_mirror_snap_ns.group_spec.is_valid()) {
     dout(10) << "remote image demoted" << dendl;
     handle_replay_complete(locker, -EREMOTEIO, "remote image demoted");
     return;
@@ -817,7 +844,8 @@ void Replayer<I>::scan_remote_mirror_snapshots(
 }
 
 template <typename I>
-void Replayer<I>::prune_mirror_snapshot(uint64_t snap_id) {
+void Replayer<I>::prune_mirror_snapshot(
+    Context* on_finish, uint64_t snap_id) {
   dout(10) << "snap_id=" << snap_id << dendl;
 
   auto local_image_ctx = m_state_builder->local_image_ctx;
@@ -825,6 +853,7 @@ void Replayer<I>::prune_mirror_snapshot(uint64_t snap_id) {
   cls::rbd::SnapshotNamespace snap_namespace;
   std::string snap_name;
 
+  m_prune_snap_ids.erase(snap_id);
   {
     std::shared_lock image_locker{local_image_ctx->image_lock};
     auto snap_info = local_image_ctx->get_snap_info(snap_id);
@@ -832,9 +861,6 @@ void Replayer<I>::prune_mirror_snapshot(uint64_t snap_id) {
       snap_valid = true;
       snap_namespace = snap_info->snap_namespace;
       snap_name = snap_info->name;
-
-      ceph_assert(std::holds_alternative<cls::rbd::MirrorSnapshotNamespace>(
-        snap_namespace));
     }
   }
 
@@ -845,6 +871,9 @@ void Replayer<I>::prune_mirror_snapshot(uint64_t snap_id) {
 
   auto ctx = create_context_callback<
     Replayer<I>, &Replayer<I>::handle_prune_mirror_snapshot>(this);
+  if (on_finish) {
+    ctx = on_finish;
+  }
   local_image_ctx->operations->snap_remove(snap_namespace, snap_name, ctx);
 }
 
@@ -960,6 +989,7 @@ void Replayer<I>::handle_get_local_image_state(int r) {
   request_sync();
 }
 
+
 template <typename I>
 void Replayer<I>::create_non_primary_snapshot() {
   auto local_image_ctx = m_state_builder->local_image_ctx;
@@ -1036,6 +1066,7 @@ void Replayer<I>::create_non_primary_snapshot() {
     Replayer<I>, &Replayer<I>::handle_create_non_primary_snapshot>(this);
   auto req = librbd::mirror::snapshot::CreateNonPrimaryRequest<I>::create(
     local_image_ctx, m_remote_mirror_snap_ns.is_demoted(),
+    m_remote_mirror_snap_ns.group_snap_id,
     m_state_builder->remote_mirror_uuid, m_remote_snap_id_end,
     m_local_mirror_snap_ns.snap_seqs, m_image_state, &m_local_snap_id_end, ctx);
   req->send();
@@ -1330,7 +1361,28 @@ void Replayer<I>::handle_notify_image_update(int r) {
     derr << "failed to notify local image update: " << cpp_strerror(r) << dendl;
   }
 
-  unlink_peer(m_remote_snap_id_start);
+  bool unlink = true;
+  auto remote_image_ctx = m_state_builder->remote_image_ctx;
+  for (auto snap_info_it = remote_image_ctx->snap_info.rbegin();
+       snap_info_it != remote_image_ctx->snap_info.rend(); ++snap_info_it) {
+    if (snap_info_it->first == m_remote_snap_id_start) {
+      const auto& snap_ns = snap_info_it->second.snap_namespace;
+      auto mirror_ns = std::get_if<
+        cls::rbd::MirrorSnapshotNamespace>(&snap_ns);
+      if (mirror_ns == nullptr || !mirror_ns->complete) {
+        continue;
+      } else if (mirror_ns->group_spec.is_valid()) {
+        unlink = false;
+      }
+      break;
+    }
+  }
+
+  if (unlink) {
+    unlink_peer(m_remote_snap_id_start);
+  } else{
+    finish_sync();
+  }
 }
 
 template <typename I>

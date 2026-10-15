@@ -1,0 +1,155 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:nil -*-
+// vim: ts=8 sw=2 sts=2 expandtab
+
+#ifndef CEPH_LIBRBD_MIRROR_SNAPSHOT_GROUP_PREPARE_IMAGES_REQUEST_H
+#define CEPH_LIBRBD_MIRROR_SNAPSHOT_GROUP_PREPARE_IMAGES_REQUEST_H
+
+#include "include/buffer.h"
+#include "include/rados/librados.hpp"
+#include "librbd/ImageWatcher.h"
+#include "cls/rbd/cls_rbd_types.h"
+#include "librbd/internal.h"
+#include "librbd/mirror/snapshot/Types.h"
+#include "librbd/mirror/Types.h"
+
+#include <string>
+#include <set>
+
+struct Context;
+
+namespace librbd {
+
+struct ImageCtx;
+
+namespace mirror {
+namespace snapshot {
+
+template <typename ImageCtxT = librbd::ImageCtx>
+class GroupPrepareImagesRequest {
+public:
+  enum Operation {
+    OP_ENABLE          = 0,
+    OP_DISABLE         = 1,
+    OP_PROMOTE         = 2,
+    OP_DEMOTE          = 3,
+    OP_ADD_IMAGE       = 4,
+    OP_CREATE_PRIMARY  = 5,
+  };
+  static GroupPrepareImagesRequest *create(
+      librados::IoCtx& group_ioctx, const std::string& group_id,
+      std::vector<librbd::ImageCtx *>& image_ctxs,
+      std::vector<cls::rbd::GroupImageStatus>& images,
+      std::vector<cls::rbd::MirrorImage>* mirror_images,
+      std::set<std::string>* mirror_peer_uuids,
+      const std::string& image_id_to_add,
+      Operation operation, bool force, Context *on_finish) {
+    return new GroupPrepareImagesRequest(
+      group_ioctx, group_id, image_ctxs, images, mirror_images,
+      mirror_peer_uuids, image_id_to_add, operation, force, on_finish);
+  }
+
+  GroupPrepareImagesRequest(
+    librados::IoCtx& group_ioctx, const std::string& group_id,
+    std::vector<librbd::ImageCtx *>& image_ctxs,
+    std::vector<cls::rbd::GroupImageStatus>& images,
+    std::vector<cls::rbd::MirrorImage>* mirror_images,
+    std::set<std::string>* mirror_peer_uuids,
+    const std::string& image_id_to_add,
+    Operation operation, bool force, Context *on_finish);
+
+  void send();
+
+private:
+  /**
+   *@verbatim
+   *
+   *   <start>-------------->-------------\
+   *       |                              |
+   *       v                              |
+   *   GET_MIRROR_PEER_LIST            (disable)
+   *       |                              |
+   *       v                              |
+   *   LIST_GROUP_IMAGES <----------------/
+   *       |            \
+   *       |             \-----(enable/add_image, r=0)----->CHECK_MIRROR_IMAGES_DISABLED
+   *       |          ________________________________________/
+   *       |         |
+   *       v         V
+   *   OPEN_GROUP_IMAGES ------------------(enable/add_image, r=0)---------->|
+   *       |            \                                                    |
+   *       |             \-------(disable)-------\                           |
+   *       |                                     |                           |
+   *       |                                     v                           |
+   *       |                              CHECK_IMAGES_MIRROR_MODE           |
+   *       |          ___________________________/                           |
+   *       |         |                                                       |
+   *       v         v                                                       |
+   *   GET_IMAGES_MIRROR_INFO ------------(create, r=0)--------------------->|
+   *       |         \                                                       |
+   *       |          \------(disable)--->CHECK_IMAGES_CHILD_MIRRORING       |
+   *       |           __________________________/                           |
+   *       |          |                                                      |
+   *       v          v                                                      |
+   *   UPDATE_IMAGES_READ_ONLY_MASK                                          |
+   *       |                                                                 |
+   *       v                                                                 v
+   *   <finish>-----------------------<--------------------------------------
+   *
+   * @endverbatim
+   */
+
+  librados::IoCtx& m_group_ioctx;
+  std::string m_group_id;
+  std::vector<ImageCtx *>& m_image_ctxs;
+  std::vector<cls::rbd::GroupImageStatus>& m_images;
+  std::vector<cls::rbd::MirrorImage>* m_mirror_images;
+  std::set<std::string>* m_mirror_peer_uuids;
+  const std::string m_image_id_to_add;
+  Operation m_operation;
+  bool m_force;
+  Context *m_on_finish;
+
+  CephContext *m_cct;
+
+  librados::IoCtx m_default_ns_ioctx;
+  bufferlist m_outbl;
+  std::vector<bufferlist> m_out_bls;
+  std::vector<mirror::PromotionState> m_images_promotion_states;
+  std::vector<std::string> m_images_primary_mirror_uuids;
+  cls::rbd::GroupImageSpec m_start_after;
+  std::vector<std::shared_ptr<bufferlist>> m_child_outbls;
+
+  void get_mirror_peer_list();
+  void handle_get_mirror_peer_list(int r);
+
+  void list_group_images();
+  void handle_list_group_images(int r);
+
+  void check_mirror_images_disabled();
+  void handle_check_mirror_images_disabled(int r);
+
+  void open_group_images();
+  void handle_open_group_images(int r);
+
+  void check_images_mirror_mode();
+  void handle_check_images_mirror_mode(int r);
+
+  void get_images_mirror_info();
+  void handle_get_images_mirror_info(int r);
+
+  void check_images_child_mirroring();
+  void handle_check_images_child_mirroring(int r);
+
+  void update_images_read_only_mask();
+  void handle_update_images_read_only_mask(int r);
+
+  void finish(int r);
+};
+
+} // namespace snapshot
+} // namespace mirror
+} // namespace librbd
+
+extern template class librbd::mirror::snapshot::GroupPrepareImagesRequest<librbd::ImageCtx>;
+
+#endif // CEPH_LIBRBD_MIRROR_SNAPSHOT_GROUP_PREPARE_IMAGES_REQUEST_H

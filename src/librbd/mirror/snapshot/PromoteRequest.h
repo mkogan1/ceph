@@ -79,7 +79,7 @@ private:
    */
 
   ImageCtxT *m_image_ctx;
-  std::string m_global_image_id;
+  const std::string m_global_image_id;
   Context *m_on_finish;
 
   uint64_t m_rollback_snap_id = CEPH_NOSNAP;

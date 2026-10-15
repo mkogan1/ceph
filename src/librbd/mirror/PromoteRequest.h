@@ -51,7 +51,7 @@ private:
    */
 
   ImageCtxT &m_image_ctx;
-  bool m_force;
+  const bool m_force;
   Context *m_on_finish;
 
   cls::rbd::MirrorImage m_mirror_image;

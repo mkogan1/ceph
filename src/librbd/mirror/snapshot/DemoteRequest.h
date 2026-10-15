@@ -54,7 +54,7 @@ private:
    */
 
   ImageCtxT *m_image_ctx;
-  std::string m_global_image_id;
+  const std::string m_global_image_id;
   Context *m_on_finish;
 
   void enable_non_primary_feature();

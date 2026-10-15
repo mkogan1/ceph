@@ -34,8 +34,8 @@ CreatePrimaryRequest<I>::CreatePrimaryRequest(
     uint64_t *snap_id, Context *on_finish)
   : m_image_ctx(image_ctx), m_global_image_id(global_image_id),
     m_clean_since_snap_id(clean_since_snap_id),
-    m_snap_create_flags(snap_create_flags), m_flags(flags), m_snap_id(snap_id),
-    m_on_finish(on_finish) {
+    m_snap_create_flags(snap_create_flags), m_flags(flags),
+    m_snap_id(snap_id), m_on_finish(on_finish) {
   m_default_ns_ctx.dup(m_image_ctx->md_ctx);
   m_default_ns_ctx.set_namespace("");
 }
@@ -50,10 +50,12 @@ void CreatePrimaryRequest<I>::send() {
     return;
   }
 
+  std::stringstream ss;
+  ss << ".mirror.primary." << m_global_image_id << ".";
   uuid_d uuid_gen;
   uuid_gen.generate_random();
-  m_snap_name = ".mirror.primary." + m_global_image_id + "." +
-    uuid_gen.to_string();
+  ss << uuid_gen.to_string();
+  m_snap_name = ss.str();
 
   get_mirror_peers();
 }
@@ -199,6 +201,10 @@ void CreatePrimaryRequest<I>::unlink_peer() {
         if (info->mirror_peer_uuids.empty() ||
             (info->mirror_peer_uuids.count(peer) != 0 &&
              info->is_primary() && !info->complete)) {
+          if (info->group_spec.is_valid()) {
+            // snap is part of a group snap
+            continue;
+          }
           peer_uuid = peer;
           snap_id = snap_info_pair.first;
           goto do_unlink;
@@ -223,6 +229,10 @@ void CreatePrimaryRequest<I>::unlink_peer() {
         }
         if (info->mirror_peer_uuids.count(peer) == 0) {
           // snapshot is not linked with this peer
+          continue;
+        }
+        if (info->group_spec.is_valid()) {
+          // snap is part of a group snap
           continue;
         }
         count++;

@@ -85,11 +85,11 @@ private:
                 Context *on_finish);
 
   librados::IoCtx &m_io_ctx;
-  std::string m_image_id;
+  const std::string m_image_id;
   ImageCtxT* m_image_ctx;
-  cls::rbd::MirrorImageMode m_mode;
-  std::string m_non_primary_global_image_id;
-  bool m_image_clean;
+  const cls::rbd::MirrorImageMode m_mode;
+  const std::string m_non_primary_global_image_id;
+  const bool m_image_clean;
   asio::ContextWQ *m_op_work_queue;
   Context *m_on_finish;
 
@@ -101,7 +101,6 @@ private:
   bool m_close_image = false;
 
   bool m_is_primary = false;
-  uint64_t m_snap_id = CEPH_NOSNAP;
 
   void get_mirror_image();
   void handle_get_mirror_image(int r);

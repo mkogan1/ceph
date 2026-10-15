@@ -244,6 +244,8 @@ bool is_not_user_snap_namespace(librbd::Image* image,
 
 std::string image_id(librbd::Image& image);
 
+std::string group_snap_state(
+    librbd::group_snap_state_t state);
 std::string mirror_image_mode(
     librbd::mirror_image_mode_t mirror_image_mode);
 std::string mirror_image_state(
@@ -255,9 +257,19 @@ std::string mirror_image_site_status_state(
 std::string mirror_image_global_status_state(
     const librbd::mirror_image_global_status_t& status);
 
+std::string mirror_group_state(
+    librbd::mirror_group_state_t mirror_group_state);
+std::string mirror_group_status_state(
+    librbd::mirror_group_status_state_t state);
+std::string mirror_group_site_status_state(
+    const librbd::mirror_group_site_status_t& status);
+
 int get_local_mirror_image_status(
     const librbd::mirror_image_global_status_t& status,
     librbd::mirror_image_site_status_t* local_status);
+int get_local_mirror_group_status(
+    const librbd::mirror_group_global_status_t& status,
+    librbd::mirror_group_site_status_t* local_status);
 
 std::string timestr(time_t t);
 
@@ -273,6 +285,9 @@ void get_mirror_peer_mirror_uuids_to_names(
 void populate_unknown_mirror_image_site_statuses(
     const std::vector<librbd::mirror_peer_site_t>& mirror_peers,
     librbd::mirror_image_global_status_t* global_status);
+void populate_unknown_mirror_group_site_statuses(
+    const std::vector<librbd::mirror_peer_site_t>& mirror_peers,
+    librbd::mirror_group_global_status_t* status);
 
 int mgr_command(librados::Rados& rados, const std::string& cmd,
                 const std::map<std::string, std::string> &args,
