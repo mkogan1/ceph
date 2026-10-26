@@ -82,31 +82,9 @@ Use `-d rocky9` for Rocky Linux 9:
 cuObject support is experimental and disabled by default. See the
 [S3 RDMA documentation](doc/radosgw/s3rdma.rst) for its status and limitations.
 `--with-cuobj` enables the spec's `--with cuobj` conditional, which sets
-`WITH_RADOSGW_CUOBJ=ON`. It also enables NVIDIA's
-matching RHEL 9 or RHEL 10 repository inside the build image and installs
-`libcuobjserver-devel >= 2.0.0` and its server runtime dependency. The CUDA
-toolkit, GPUDirect Storage and cuObject client packages are not needed for
-this server build. Packages installed on the host are not automatically
-available inside the container.
-
-The container setup delegates NVIDIA repository configuration to
-`install-deps.sh` with `WITH_RADOSGW_CUOBJ=ON`. To install the same build
-dependencies directly on a supported host, run:
-```
-env WITH_RADOSGW_CUOBJ=ON ./install-deps.sh
-```
-Without this opt-in, `install-deps.sh` does not add NVIDIA's repository or
-request the cuObject server packages.
-
-Automatic repository setup supports Rocky Linux, CentOS Stream, AlmaLinux and
-RHEL 9/10 images on x86_64 and aarch64. It reads the version from the container's
-`/etc/os-release`, independently of the host distribution.
-
-Fedora is not supported for these cuObject builds: NVIDIA's Fedora 44
-repository provides CUDA and cuObject client packages but lacks
-`libcuobjserver-devel`, the server SDK required by RGW. Enabling
-`WITH_RADOSGW_CUOBJ=ON` or `--with-cuobj` fails with an error when dependency
-setup runs on Fedora, before adding any NVIDIA repository.
+`WITH_RADOSGW_CUOBJ=ON`. The NVIDIA cuObject SDK is not needed to build:
+the cuObject server library is loaded at runtime if it is installed on the
+RGW host, and S3 RDMA requests fail with HTTP 500 when it is not.
 
 The same Rocky container commands can be run on AlmaLinux or RHEL hosts.
 To select an AlmaLinux container instead, use the matching EL major version
@@ -128,7 +106,7 @@ The RHEL setup enables the full BaseOS, AppStream and CodeReady Builder
 repositories and installs EPEL. EL10 also uses Ceph's lab-extras repository.
 The full RHEL repositories must be available through the host subscription;
 the public UBI repositories alone do not contain all Ceph build dependencies.
-NVIDIA's repository provides the additional cuObject packages. See Red Hat's
+See Red Hat's
 [container repository documentation](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/building_running_and_managing_containers/assembly_adding-software-to-a-ubi-container_building-running-and-managing-containers).
 There are no separate `alma9`/`rhel9` distro selectors in this script.
 
@@ -136,8 +114,7 @@ The explicit `source-rpm` step regenerates the SRPM with the updated spec;
 `-e rpm` alone may reuse an existing SRPM. Once the SRPM contains these changes,
 `./src/script/build-with-container.py -d rocky10 --with-cuobj -e rpm` is enough.
 For direct `rpmbuild` use, enable the same feature with `rpmbuild --rebuild
---with cuobj ceph-<version>.src.rpm` after configuring the NVIDIA repository and
-installing the build dependencies.
+--with cuobj ceph-<version>.src.rpm` after installing the build dependencies.
 
 cuObject build images have a `.cuobj` suffix in their automatically generated
 tags, and the image cache check also compares the cuObject setting when using

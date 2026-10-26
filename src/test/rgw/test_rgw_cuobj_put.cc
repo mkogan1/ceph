@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include <cuobjserver.h>
 #include <gtest/gtest.h>
 
 #include "common/Formatter.h"
@@ -270,6 +269,14 @@ TEST_F(CuObjPut, CompleteReadCommitsThePayloadBeforeSuccess)
   EXPECT_EQ(client.headers.at("x-amz-rdma-bytes-transferred"), "4");
   EXPECT_EQ(rdma.events, std::vector<std::string>(
       {"rdma_complete", "storage_complete", "http_status"}));
+}
+
+TEST_F(CuObjPut, TokenWithoutCuObjectFailsWith500)
+{
+  RGWCuObjServer::shutdown(); // library absent or init failed
+  EXPECT_EQ(op->get_params(null_yield), -ERR_INTERNAL_ERROR);
+  EXPECT_EQ(rdma.acquisitions, 0);
+  EXPECT_EQ(rdma.reads, 0);
 }
 
 TEST_F(CuObjPut, InvalidDescriptorSizeReturnsInvalidArgument)

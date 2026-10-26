@@ -4767,6 +4767,20 @@ options:
   - rgw
   flags:
   - startup
+- name: rgw_cuobj_library
+  type: str
+  level: advanced
+  desc: Name or path of the cuObject server shared library loaded at runtime
+  fmt_desc: |
+    Name or path passed to ``dlopen()`` to load the cuObject server library
+    when :confval:`rgw_cuobj_enabled` is set. The library is not needed to
+    build or start RGW; when it cannot be loaded, S3 requests that carry an
+    RDMA token fail with HTTP 500. See :ref:`radosgw-s3rdma`.
+  default: libcuobjserver.so.2
+  services:
+  - rgw
+  flags:
+  - startup
 - name: rgw_cuobj_rdma_ip
   type: str
   level: advanced
