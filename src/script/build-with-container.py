@@ -541,8 +541,8 @@ class Context:
         variant = self.variant()
         if variant is not ImageVariant.DEFAULT:
             suffix = f".{variant}{suffix}"
-        if self.cli.with_cuobj:
-            suffix = f".cuobj{suffix}"
+        if self.cli.with_cuobj_runtime:
+            suffix = f".cuobj-runtime{suffix}"
         return f"{branch}.{self.cli.distro}{suffix}"
 
     def base_branch(self):
@@ -735,7 +735,7 @@ def build_container(ctx):
         ctx.image_name,
         f"--label=io.ceph.build-with-container.src={_hash_sources()}",
         f"--label=io.ceph.build-with-container.image-variant={ctx.variant()}",
-        f"--label=io.ceph.build-with-container.cuobj={int(ctx.cli.with_cuobj)}",
+        f"--label=io.ceph.build-with-container.cuobj-runtime={int(ctx.cli.with_cuobj_runtime)}",
         f"--build-arg=CEPH_BASE_BRANCH={ctx.base_branch()}",
     ]
     if ctx.cli.distro:
@@ -759,8 +759,8 @@ def build_container(ctx):
         cmd.append(f"--build-arg=WITH_CRIMSON={with_crimson}")
     if ctx.cli.build_args:
         cmd.extend([f"--build-arg={v}" for v in ctx.cli.build_args])
-    if ctx.cli.with_cuobj:
-        cmd.append("--build-arg=WITH_RADOSGW_CUOBJ=ON")
+    if ctx.cli.with_cuobj_runtime:
+        cmd.append("--build-arg=INSTALL_CUOBJ_RUNTIME=ON")
     cmd += ["-f", ctx.cli.containerfile, ctx.cli.containerdir]
     with ctx.user_command():
         _run(cmd, check=True, ctx=ctx)
@@ -789,10 +789,10 @@ def _check_cached_image(ctx):
         labels = ctr_info["Config"]["Labels"]
     saved_hash = labels.get("io.ceph.build-with-container.src", "")
     curr_hash = _hash_sources()
-    cuobj_ok = labels.get("io.ceph.build-with-container.cuobj", "0") == str(
-        int(ctx.cli.with_cuobj)
+    runtime_ok = labels.get("io.ceph.build-with-container.cuobj-runtime", "0") == str(
+        int(ctx.cli.with_cuobj_runtime)
     )
-    if saved_hash == curr_hash and cuobj_ok:
+    if saved_hash == curr_hash and runtime_ok:
         log.info("Container passes source check")
         return True, True
     log.info("Container sources or cuObject setting do not match: %s", curr_hash)
@@ -837,13 +837,13 @@ def bc_configure(ctx):
     """
     ctx.build.wants(Steps.CONTAINER, ctx)
     ctx.build.wants(Steps.NPM_CACHE, ctx)
-    cuobj_arg = " -DWITH_RADOSGW_CUOBJ=ON" if ctx.cli.with_cuobj else ""
     cmd = _container_cmd(
         ctx,
         [
             "bash",
             "-c",
-            f"cd {ctx.cli.homedir} && source ./src/script/run-make.sh && has_build_dir || configure ${{CONFIGURE_ARGS}}{cuobj_arg}",
+            f"cd {ctx.cli.homedir} && source ./src/script/run-make.sh && "
+            "if ! has_build_dir; then configure ${CONFIGURE_ARGS}; fi",
         ],
     )
     with ctx.user_command():
@@ -1038,8 +1038,6 @@ def bc_build_rpm(ctx):
         '--rebuild',
         f'-D_topdir {topdir}',
     ] + list(ctx.cli.rpmbuild_arg or [])
-    if ctx.cli.with_cuobj:
-        rpmbuild_args.append('--with=cuobj')
     rpmbuild_args.append(str(srpm_path))
     rpmbuild_cmd = ' '.join(shlex.quote(cmd) for cmd in rpmbuild_args)
     cmd = _container_cmd(
@@ -1185,12 +1183,12 @@ def parse_cli(build_step_names):
         help="Use this environment file when building",
     )
     g_basic.add_argument(
-        "--with-cuobj",
+        "--with-cuobj-runtime",
         action="store_true",
         help=(
-            "Enable experimental RGW cuObject support and install its server"
-            " dependencies in the build image (EL9/EL10, x86_64/aarch64)."
-            " Disabled by default."
+            "Install the pinned NVIDIA cuObject server runtime in the build image"
+            " (EL9/EL10, x86_64/aarch64). RGW always uses the ABI shim;"
+            " its build options are unchanged."
         ),
     )
 

@@ -304,13 +304,13 @@ if(WITH_RADOSGW_D4N)
 endif()
 
 if(WITH_RADOSGW_CUOBJ)
-  list(APPEND librgw_common_srcs rgw_cuobj.cc)
+  list(APPEND librgw_common_srcs rgw_cuobj.cc rgw_cuobj_dl.cc)
 endif()
 
 add_library(rgw_common STATIC ${librgw_common_srcs})
 
 if(WITH_RADOSGW_CUOBJ)
-  target_link_libraries(rgw_common PRIVATE ${CUOBJSERVER_LIBRARY})
+  target_link_libraries(rgw_common PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 include(CheckCXXCompilerFlag)

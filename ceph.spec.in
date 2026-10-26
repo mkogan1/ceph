@@ -22,8 +22,9 @@
 #################################################################################
 %bcond_with make_check
 %bcond_with cmake_verbose_logging
-# Experimental cuObject S3 RDMA support (disabled by default).
-%bcond_with cuobj
+# Experimental cuObject S3 RDMA support (enabled by default). The
+# ABI shim loads libcuobjserver at runtime without an SDK build dependency.
+%bcond_without cuobj
 %bcond_without ceph_test_package
 %ifarch s390
 %bcond_with tcmalloc
@@ -299,9 +300,6 @@ BuildRequires:	fmt-devel >= 6.2.1
 BuildRequires:	pkgconfig(libudev)
 BuildRequires:	libnl3-devel
 BuildRequires:	liboath-devel
-%if %{with cuobj}
-BuildRequires:  libcuobjserver-devel >= 2.0.0
-%endif
 BuildRequires:	libtool
 BuildRequires:	libxml2-devel
 BuildRequires:	make
