@@ -546,6 +546,9 @@ namespace rgw {
 
     main.init_lua();
     main.start_lua_background();
+#ifdef WITH_RADOSGW_LANCEDB
+    main.init_s3vector();
+#endif
 #ifdef WITH_RADOSGW_RADOS
     main.init_dedup();
 #endif

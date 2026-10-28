@@ -2017,6 +2017,12 @@ void get_stale_instances(rgw::sal::Driver* driver, const std::string& bucket_nam
       continue;
     }
     binfo = bucket->get_info();
+    // vector buckets are never resharded, and have no S3 entrypoint to compare
+    // against, so they would look stale. they are listed with the S3 instances
+    if (binfo.is_vector()) {
+      ldpp_dout(dpp, 10) << "skipping vector bucket instance: " << bucket_instance << dendl;
+      continue;
+    }
     if (binfo.reshard_status == cls_rgw_reshard_status::DONE)
       stale_instances.emplace_back(std::move(binfo));
     else {
@@ -2871,6 +2877,17 @@ class RGWArchiveBucketMetadataHandler : public RGWBucketMetadataHandler {
   }
 };
 
+class RGWVectorBucketMetadataHandler : public RGWBucketMetadataHandler {
+ public:
+  using RGWBucketMetadataHandler::RGWBucketMetadataHandler;
+
+  string get_type() override { return "vectorbucket"; }
+
+  // the vector data is not synced between the zones, and neither are the vector
+  // buckets holding it. each zone has its own vector buckets
+  bool is_synced() const override { return false; }
+};
+
 class RGWBucketInstanceMetadataHandler : public RGWMetadataHandler {
   rgw::sal::Driver* driver;
   RGWSI_Zone* svc_zone{nullptr};
@@ -2878,6 +2895,7 @@ class RGWBucketInstanceMetadataHandler : public RGWMetadataHandler {
   RGWSI_BucketIndex* svc_bi{nullptr};
   RGWDataChangesLog *svc_datalog{nullptr};
 
+protected:
   int put_prepare(const DoutPrefixProvider* dpp, optional_yield y,
                   const std::string& entry, RGWBucketCompleteInfo& bci,
                   const std::optional<RGWBucketCompleteInfo>& old_bci,
@@ -2952,6 +2970,15 @@ int RGWBucketInstanceMetadataHandler::put(std::string& entry, RGWMetadataObject*
                                           optional_yield y, const DoutPrefixProvider *dpp,
                                           RGWMDLogSyncType sync_type, bool from_remote_zone)
 {
+  auto newobj = static_cast<RGWBucketInstanceMetadataObject*>(obj);
+  RGWBucketCompleteInfo& bci = newobj->get_bci();
+
+  // Full metadata sync lists both bucket types, but vector instances are local
+  // to each zone. Skip them before reading or modifying any local state.
+  if (from_remote_zone && bci.info.is_vector()) {
+    return STATUS_NO_APPLY;
+  }
+
   // read existing bucket instance
   std::optional old = RGWBucketCompleteInfo{};
   int ret = svc_bucket->read_bucket_instance_info(entry, &old->info, nullptr,
@@ -2962,8 +2989,10 @@ int RGWBucketInstanceMetadataHandler::put(std::string& entry, RGWMetadataObject*
     return ret;
   }
 
-  auto newobj = static_cast<RGWBucketInstanceMetadataObject*>(obj);
-  RGWBucketCompleteInfo& bci = newobj->get_bci();
+  // A put must not change the type of an existing instance.
+  if (old && old->info.is_vector() != bci.info.is_vector()) {
+    return -EINVAL;
+  }
 
   // initializate/update the bucket instance info
   ret = put_prepare(dpp, y, entry, bci, old, objv_tracker, from_remote_zone);
@@ -3040,19 +3069,24 @@ int RGWBucketInstanceMetadataHandler::put_prepare(
     string bucket_instance;
     parse_bucket(entry, &tenant_name, &bucket_name, &bucket_instance);
 
-    RGWZonePlacementInfo rule_info;
     bci.info.bucket.name = bucket_name;
     bci.info.bucket.bucket_id = bucket_instance;
     bci.info.bucket.tenant = tenant_name;
-    // if the sync module never writes data, don't require the zone to specify all placement targets
-    if (svc_zone->sync_module_supports_writes()) {
-      int ret = svc_zone->select_bucket_location_by_rule(dpp, bci.info.placement_rule, &rule_info, y);
-      if (ret < 0) {
-        ldpp_dout(dpp, 0) << "ERROR: select_bucket_placement() returned " << ret << dendl;
-        return ret;
+
+    // Indexless vector instances store their data outside the vector bucket.
+    // Native vector instances need the same local placement setup as S3.
+    if (!bci.info.is_vector() || !bci.info.is_indexless()) {
+      RGWZonePlacementInfo rule_info;
+      // if the sync module never writes data, don't require the zone to specify all placement targets
+      if (svc_zone->sync_module_supports_writes()) {
+        int ret = svc_zone->select_bucket_location_by_rule(dpp, bci.info.placement_rule, &rule_info, y);
+        if (ret < 0) {
+          ldpp_dout(dpp, 0) << "ERROR: select_bucket_placement() returned " << ret << dendl;
+          return ret;
+        }
       }
+      bci.info.layout.current_index.layout.type = rule_info.index_type;
     }
-    bci.info.layout.current_index.layout.type = rule_info.index_type;
   } else {
     /* existing bucket, keep its placement */
     bci.info.bucket.explicit_placement = old_bci->info.bucket.explicit_placement;
@@ -3062,7 +3096,7 @@ int RGWBucketInstanceMetadataHandler::put_prepare(
     //bucket instance cleanup in multisite setup
     if (!bci.info.layout.logs.empty()) {
       const auto& log = bci.info.layout.logs.back();
-      if (bci.info.bucket_deleted() && log.layout.type != rgw::BucketLogType::Deleted) {
+      if (!bci.info.is_vector() && bci.info.bucket_deleted() && log.layout.type != rgw::BucketLogType::Deleted) {
         const auto index_log = bci.info.layout.logs.back();
         const int shards_num = rgw::num_shards(index_log.layout.in_index);
         bci.info.layout.logs.push_back({log.gen+1, {rgw::BucketLogType::Deleted}});
@@ -3087,14 +3121,15 @@ int RGWBucketInstanceMetadataHandler::put_prepare(
   }
 
   //always keep bucket versioning enabled on archive zone
-  if (driver->get_zone()->get_tier_type() == "archive") {
+  if (!bci.info.is_vector() &&
+      driver->get_zone()->get_tier_type() == "archive") {
     bci.info.flags = (bci.info.flags & ~BUCKET_VERSIONS_SUSPENDED) | BUCKET_VERSIONED;
   }
 
   /* record the read version (if any), store the new version */
   bci.info.objv_tracker.read_version = objv_tracker.read_version;
   bci.info.objv_tracker.write_version = objv_tracker.write_version;
-  
+
   return 0;
 }
 
@@ -3107,6 +3142,13 @@ int RGWBucketInstanceMetadataHandler::put_post(
   int ret = svc_bi->init_index(dpp, y, bci.info, bci.info.layout.current_index);
   if (ret < 0) {
     return ret;
+  }
+
+  // Native vector instances need an index, but not S3 lifecycle or topics.
+  // init_index() is a no-op for indexless instances.
+  if (bci.info.is_vector()) {
+    objv_tracker = bci.info.objv_tracker;
+    return STATUS_APPLIED;
   }
 
   /* update lc list on changes to lifecyle policy */
@@ -3174,6 +3216,13 @@ int RGWBucketInstanceMetadataHandler::remove(std::string& entry, RGWObjVersionTr
     return ret;
   }
 
+  // vector instances are local to the zone and are never trimmed by sync, so
+  // the removal of the metadata is the only way to drop one
+  if (bci.info.is_vector()) {
+    return svc_bucket->remove_bucket_instance_info(entry, bci.info,
+                                                   &bci.info.objv_tracker, y, dpp);
+  }
+
   // skip bucket instance removal. each zone will handle it independently during trimming
 
   std::ignore = update_bucket_topic_mappings(dpp, &bci, /*current_bci=*/nullptr,
@@ -3235,6 +3284,7 @@ class RGWArchiveBucketInstanceMetadataHandler : public RGWBucketInstanceMetadata
     return 0;
   }
 };
+
 #endif
 
 RGWBucketCtl::RGWBucketCtl(RGWSI_Zone *zone_svc,
@@ -3242,8 +3292,10 @@ RGWBucketCtl::RGWBucketCtl(RGWSI_Zone *zone_svc,
                            RGWSI_Bucket_Sync *bucket_sync_svc,
                            RGWSI_BucketIndex *bi_svc,
                            RGWSI_User* user_svc,
-                           RGWDataChangesLog *datalog_svc)
-  : cct(zone_svc->ctx())
+                           RGWDataChangesLog *datalog_svc,
+                           BucketsObjGetter obj_getter_func,
+                           UserBucketsObjGetter user_obj_getter_func)
+  : cct(zone_svc->ctx()), get_buckets_obj(obj_getter_func), get_user_buckets_obj(user_obj_getter_func)
 {
   svc.zone = zone_svc;
   svc.bucket = bucket_svc;
@@ -3523,17 +3575,17 @@ int RGWBucketCtl::set_bucket_instance_attrs(RGWBucketInfo& bucket_info,
                                                                .set_orig_info(&bucket_info));
 }
 
-static rgw_raw_obj get_owner_buckets_obj(RGWSI_User* svc_user,
+rgw_raw_obj RGWBucketCtl::get_owner_buckets_obj(RGWSI_User* svc_user,
                                          RGWSI_Zone* svc_zone,
                                          const rgw_owner& owner)
 {
   return std::visit(fu2::overload(
       [&] (const rgw_user& uid) {
-        return svc_user->get_buckets_obj(uid);
+        return (svc_user->*get_user_buckets_obj)(uid);
       },
       [&] (const rgw_account_id& account_id) {
         const RGWZoneParams& zone = svc_zone->get_zone_params();
-        return rgwrados::account::get_buckets_obj(zone, account_id);
+        return get_buckets_obj(zone, account_id);
       }), owner);
 }
 #endif
@@ -3682,11 +3734,11 @@ int RGWBucketCtl::sync_owner_stats(const DoutPrefixProvider *dpp,
   // flush stats to the user/account owner object
   const rgw_raw_obj& obj = std::visit(fu2::overload(
       [&] (const rgw_user& user) {
-        return svc.user->get_buckets_obj(user);
+        return (svc.user->*get_user_buckets_obj)(user);
       },
       [&] (const rgw_account_id& id) {
         const RGWZoneParams& zone = svc.zone->get_zone_params();
-        return rgwrados::account::get_buckets_obj(zone, id);
+        return get_buckets_obj(zone, id);
       }), owner);
   return rgwrados::buckets::write_stats(dpp, y, rados, obj, *pent);
 }
@@ -3777,6 +3829,16 @@ auto create_archive_bucket_instance_metadata_handler(rgw::sal::Driver* driver,
                                                                    svc_bucket, svc_bi,
                                                                    svc_datalog);
 }
+
+auto create_vector_bucket_metadata_handler(librados::Rados& rados,
+                                    RGWSI_Bucket* svc_bucket,
+                                    RGWBucketCtl* ctl_bucket)
+    -> std::unique_ptr<RGWMetadataHandler>
+{
+  return std::make_unique<RGWVectorBucketMetadataHandler>(
+      rados, svc_bucket, ctl_bucket);
+}
+
 #endif
 
 list<RGWBucketEntryPoint> RGWBucketEntryPoint::generate_test_instances()

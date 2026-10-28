@@ -219,6 +219,24 @@ enum action_t {
   organizationsListTargetsForPolicy,
   organizationsAll,
 
+  s3vectorsCreateIndex,
+  s3vectorsCreateVectorBucket,
+  s3vectorsDeleteIndex,
+  s3vectorsDeleteVectorBucket,
+  s3vectorsDeleteVectorBucketPolicy,
+  s3vectorsDeleteVectors,
+  s3vectorsGetIndex,
+  s3vectorsGetVectorBucket,
+  s3vectorsGetVectorBucketPolicy,
+  s3vectorsGetVectors,
+  s3vectorsListIndexes,
+  s3vectorsListVectorBuckets,
+  s3vectorsListVectors,
+  s3vectorsPutVectorBucketPolicy,
+  s3vectorsPutVectors,
+  s3vectorsQueryVectors,
+  s3vectorsAll,
+
   allCount
 };
 
@@ -248,6 +266,7 @@ static const Action_t iamAllValue = set_cont_bits<allCount>(s3objectlambdaAll+1,
 static const Action_t stsAllValue = set_cont_bits<allCount>(iamAll+1,stsAll);
 static const Action_t snsAllValue = set_cont_bits<allCount>(stsAll+1, snsAll);
 static const Action_t organizationsAllValue = set_cont_bits<allCount>(snsAll+1,organizationsAll);
+static const Action_t s3vectorsAllValue = set_cont_bits<allCount>(organizationsAll+1, s3vectorsAll);
 static const Action_t allValue = set_cont_bits<allCount>(0,allCount);
 
 namespace {
@@ -271,6 +290,13 @@ inline int op_to_perm(std::uint64_t op) {
   case s3ListBucketVersions:
   case s3ListMultipartUploadParts:
   case s3GetObjectVersionForReplication:
+  case s3vectorsGetVectors:
+  case s3vectorsGetVectorBucket:
+  case s3vectorsGetIndex:
+  case s3vectorsListVectors:
+  case s3vectorsListVectorBuckets:
+  case s3vectorsListIndexes:
+  case s3vectorsQueryVectors:
     return RGW_PERM_READ;
 
   case s3AbortMultipartUpload:
@@ -290,6 +316,12 @@ inline int op_to_perm(std::uint64_t op) {
   case s3ReplicateDelete:
   case s3ReplicateObject:
   case s3ReplicateTags:
+  case s3vectorsCreateIndex:
+  case s3vectorsCreateVectorBucket:
+  case s3vectorsDeleteIndex:
+  case s3vectorsDeleteVectorBucket:
+  case s3vectorsDeleteVectors:
+  case s3vectorsPutVectors:
     return RGW_PERM_WRITE;
 
   case s3GetAccelerateConfiguration:
@@ -312,6 +344,7 @@ inline int op_to_perm(std::uint64_t op) {
   case s3GetBucketObjectLockConfiguration:
   case s3GetBucketPublicAccessBlock:
   case s3GetBucketOwnershipControls:
+  case s3vectorsGetVectorBucketPolicy:
     return RGW_PERM_READ_ACP;
 
   case s3DeleteBucketPolicy:
@@ -336,9 +369,12 @@ inline int op_to_perm(std::uint64_t op) {
   case s3PutBucketObjectLockConfiguration:
   case s3PutBucketPublicAccessBlock:
   case s3PutBucketOwnershipControls:
+  case s3vectorsDeleteVectorBucketPolicy:
+  case s3vectorsPutVectorBucketPolicy:
     return RGW_PERM_WRITE_ACP;
 
   case s3All:
+  case s3vectorsAll:
     return RGW_PERM_FULL_CONTROL;
   }
   return RGW_PERM_INVALID;
