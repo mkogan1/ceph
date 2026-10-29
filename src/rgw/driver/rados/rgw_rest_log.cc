@@ -565,7 +565,7 @@ void RGWOp_BILog_Info::execute(optional_yield y) {
   }
   
   std::optional<std::map<std::string, RGWStorageStats>> sc_stats{
-    std::map<std::string, RGWStorageClassStats>{}
+    std::map<std::string, RGWStorageStats>{}
   };
   const auto& last_log = logs.back();
 
