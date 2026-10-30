@@ -10,21 +10,17 @@
  *
  *   2. The composite-key construction (rgw_sc_quota_key).
  *
- *   3. rgw_check_storage_class_quota() against a deterministic in-test
- *      stats provider, covering:
- *        - no enforcement_mode set => check returns 0 (legacy preservation)
- *        - HYBRID + under limit    => returns 0
- *        - HYBRID + over size      => returns -EDQUOT
- *        - HYBRID + over count     => returns -EDQUOT
- *        - HYBRID + missing stats  => returns 0 (fail-open)
- *        - STORAGE_CLASS mode      => global quota fields ignored
- *        - Different sc_key        => no false positive
+ *   3. The pure per-SC enforcement helpers (sc_enforcement_active,
+ *      combine_sc_quota, sc_quota_would_exceed). The enforcement path
+ *      itself (RGWQuotaHandlerImpl::check_sc_quota) needs a bucket index
+ *      and is covered by the vstart / s3-tests runs.
  *
  * All cases are pure unit tests: no RADOS, no driver, no asio.
  */
 
 #include <gtest/gtest.h>
 #include <cerrno>
+#include <limits>
 
 #include "common/ceph_context.h"
 #include "common/dout.h"
@@ -50,38 +46,13 @@ struct TestDpp : public DoutPrefixProvider {
 } // namespace
 
 
-static rgw_bucket make_bucket(const std::string& name = "test-bucket",
-                              const std::string& tenant = "") {
-  rgw_bucket b;
-  b.name = name;
-  b.tenant = tenant;
-  return b;
-}
-
 static rgw_placement_rule make_placement(const std::string& name,
                                          const std::string& sc) {
   return rgw_placement_rule(name, sc);
 }
 
 namespace {
-class FakeStatsProvider : public ScUsageStatsProvider {
- public:
-  std::map<std::string, ScUsageStats> stats;
-  std::optional<ScUsageStats> lookup(const rgw_bucket& /*b*/,
-                                     const std::string& sc_key) const override {
-    auto it = stats.find(sc_key);
-    if (it == stats.end()) return std::nullopt;
-    return it->second;
-  }
-};
-
 // RAII installer for the global provider slot so tests don't leak state.
-struct ScopedProvider {
-  explicit ScopedProvider(ScUsageStatsProvider* p) {
-    set_sc_stats_provider(p);
-  }
-  ~ScopedProvider() { set_sc_stats_provider(nullptr); }
-};
 } // namespace
 
 TEST(RGWQuotaInfoV4, RoundtripEmptyScMap) {
@@ -174,158 +145,125 @@ TEST(RGWScQuotaKey, FromRule) {
 }
 
 
-TEST(RGWScQuotaChecker, LegacyModeReturnsZero) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  ScopedProvider sp(&prov);
 
-  RGWQuota q;
-  q.bucket_quota.enabled = true;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::LEGACY;
-  // Even with an entry present, LEGACY mode must NOT consult it.
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ 1, 1, true };
+// ---------------------------------------------------------------------------
+// Per-SC enforcement helpers (rgw_sc_quota_checker.h)
+// ---------------------------------------------------------------------------
 
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      1ULL << 30, 100, null_yield);
-  EXPECT_EQ(r, 0);
+static RGWStorageClassQuota make_sc_quota(int64_t max_size, int64_t max_objects,
+                                          bool enabled = true) {
+  RGWStorageClassQuota q;
+  q.max_size = max_size;
+  q.max_objects = max_objects;
+  q.enabled = enabled;
+  return q;
 }
 
-TEST(RGWScQuotaChecker, NoSCConfiguredFallsThrough) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enabled = true;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  // storage_class_quotas is empty -> sc_enforcement_active() returns false.
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      1ULL << 40, 1'000'000, null_yield);
-  EXPECT_EQ(r, 0);
+TEST(RGWScQuotaEnforcement, LegacyAndGlobalOnlyModesInactive) {
+  RGWQuotaInfo q;
+  q.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] = make_sc_quota(1, 1);
+  q.enforcement_mode = RGWQuotaEnforcementMode::LEGACY;
+  EXPECT_FALSE(sc_enforcement_active(q));
+  q.enforcement_mode = RGWQuotaEnforcementMode::GLOBAL_ONLY;
+  EXPECT_FALSE(sc_enforcement_active(q));
 }
 
-TEST(RGWScQuotaChecker, UnderLimitAllows) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{ 50, 5 };
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ /*max_size=*/100, /*max_objects=*/10, /*enabled=*/true };
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      /*new_size=*/40, /*new_objects=*/3, null_yield);
-  EXPECT_EQ(r, 0);
+TEST(RGWScQuotaEnforcement, ScModesActiveOnlyWithEntries) {
+  for (auto mode : {RGWQuotaEnforcementMode::STORAGE_CLASS,
+                    RGWQuotaEnforcementMode::HYBRID}) {
+    RGWQuotaInfo q;
+    q.enforcement_mode = mode;
+    EXPECT_FALSE(sc_enforcement_active(q));
+    q.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] = make_sc_quota(100, 10);
+    EXPECT_TRUE(sc_enforcement_active(q));
+  }
 }
 
-TEST(RGWScQuotaChecker, OverSizeReturnsEDQUOT) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{ 90, 5 };
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ 100, -1, true };
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      /*new_size=*/15, /*new_objects=*/1, null_yield);
-  EXPECT_EQ(r, -EDQUOT);
+TEST(RGWScQuotaEnforcement, DifferentScKeyNotMatched) {
+  RGWQuotaInfo q;
+  q.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] = make_sc_quota(100, 10);
+  EXPECT_NE(q.get_sc_quota(rgw_sc_quota_key("p", "SSD")), nullptr);
+  EXPECT_EQ(q.get_sc_quota(rgw_sc_quota_key("p", "HDD")), nullptr);
+  EXPECT_EQ(q.get_sc_quota(rgw_sc_quota_key("other", "SSD")), nullptr);
 }
 
-TEST(RGWScQuotaChecker, OverObjectCountReturnsEDQUOT) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{ 10, 9 };
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ -1, /*max_objects=*/10, true };
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      /*new_size=*/1, /*new_objects=*/2, null_yield);
-  EXPECT_EQ(r, -EDQUOT);
+TEST(RGWScQuotaEnforcement, WouldExceedBoundaries) {
+  EXPECT_FALSE(sc_quota_would_exceed(100, 60, 40));   // exactly at the limit
+  EXPECT_TRUE (sc_quota_would_exceed(100, 60, 41));
+  EXPECT_TRUE (sc_quota_would_exceed(100, 100, 1));
+  EXPECT_FALSE(sc_quota_would_exceed(100, 0, 0));
+  EXPECT_FALSE(sc_quota_would_exceed(-1, 1ULL << 40, 1ULL << 40));  // unlimited
 }
 
-TEST(RGWScQuotaChecker, MissingStatsFailsOpen) {
-  TestDpp dpp;
-  FakeStatsProvider prov;  // empty
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ 1, 1, true };
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      1'000'000, 1, null_yield);
-  EXPECT_EQ(r, 0);  // fail-open even though we are way over limit
+TEST(RGWScQuotaEnforcement, WouldExceedOverflow) {
+  EXPECT_TRUE(sc_quota_would_exceed(std::numeric_limits<int64_t>::max(),
+                                    std::numeric_limits<uint64_t>::max() - 1, 10));
 }
 
-TEST(RGWScQuotaChecker, NoProviderFailsOpen) {
-  TestDpp dpp;
-  // No ScopedProvider -> get_sc_stats_provider() returns nullptr.
+TEST(RGWScQuotaEnforcement, CombineNoneOrDisabled) {
+  auto e = combine_sc_quota(nullptr, nullptr);
+  EXPECT_FALSE(e.have_size_limit);
+  EXPECT_FALSE(e.have_object_limit);
 
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ 1, 1, true };
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      1'000'000, 1, null_yield);
-  EXPECT_EQ(r, 0);
+  auto disabled = make_sc_quota(10, 10, false);
+  e = combine_sc_quota(&disabled, &disabled);
+  EXPECT_FALSE(e.have_size_limit);
+  EXPECT_FALSE(e.have_object_limit);
 }
 
-TEST(RGWScQuotaChecker, DifferentScKeyNoFalsePositive) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "GLACIER")] = ScUsageStats{ 9999999, 9999 };
-  ScopedProvider sp(&prov);
+TEST(RGWScQuotaEnforcement, CombineSingleSide) {
+  auto bq = make_sc_quota(100, -1);
+  auto e = combine_sc_quota(&bq, nullptr);
+  EXPECT_TRUE(e.have_size_limit);
+  EXPECT_EQ(e.max_size, 100);
+  EXPECT_FALSE(e.have_object_limit);
 
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ 1, 1, true };
-  // Writing to GLACIER but only SSD has a quota -> no SC quota applies.
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "GLACIER"),
-      1, 1, null_yield);
-  EXPECT_EQ(r, 0);
+  auto uq = make_sc_quota(-1, 5);
+  e = combine_sc_quota(nullptr, &uq);
+  EXPECT_FALSE(e.have_size_limit);
+  EXPECT_TRUE(e.have_object_limit);
+  EXPECT_EQ(e.max_objects, 5);
 }
 
-TEST(RGWScQuotaChecker, BucketAndUserCombineTighter) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{ 80, 5 };
-  ScopedProvider sp(&prov);
+TEST(RGWScQuotaEnforcement, CombineTighterWins) {
+  auto bq = make_sc_quota(100, 3);
+  auto uq = make_sc_quota(50, 10);
+  auto e = combine_sc_quota(&bq, &uq);
+  EXPECT_EQ(e.max_size, 50);
+  EXPECT_EQ(e.max_objects, 3);
+}
 
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ /*max_size=*/200, /*max_objects=*/-1, true };
-  q.user_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.user_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-    RGWStorageClassQuota{ /*max_size=*/100, /*max_objects=*/-1, true };
+TEST(RGWScQuotaEnforcement, CombineIgnoresDisabledSide) {
+  auto bq = make_sc_quota(100, 3);
+  auto uq = make_sc_quota(1, 1, false);
+  auto e = combine_sc_quota(&bq, &uq);
+  EXPECT_EQ(e.max_size, 100);
+  EXPECT_EQ(e.max_objects, 3);
+}
 
-  // 80 + 25 = 105 > 100 (user limit) but < 200 (bucket limit) -> reject.
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      25, 1, null_yield);
-  EXPECT_EQ(r, -EDQUOT);
+TEST(RGWScQuotaInfoEncoding, RoundTripWithScQuota) {
+  RGWQuotaInfo in;
+  in.enabled = true;
+  in.max_size = 1024;
+  in.max_objects = 7;
+  in.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
+  in.storage_class_quotas[rgw_sc_quota_key("p", "COLD")] = make_sc_quota(5242880, 3);
+
+  ceph::buffer::list bl;
+  encode(in, bl);
+  RGWQuotaInfo out;
+  auto it = bl.cbegin();
+  decode(out, it);
+
+  EXPECT_EQ(out.enabled, in.enabled);
+  EXPECT_EQ(out.max_size, in.max_size);
+  EXPECT_EQ(out.max_objects, in.max_objects);
+  EXPECT_EQ(out.enforcement_mode, in.enforcement_mode);
+  const auto* sc = out.get_sc_quota(rgw_sc_quota_key("p", "COLD"));
+  ASSERT_NE(sc, nullptr);
+  EXPECT_EQ(sc->max_size, 5242880);
+  EXPECT_EQ(sc->max_objects, 3);
+  EXPECT_TRUE(sc->enabled);
 }
 
 int main(int argc, char** argv)
@@ -339,64 +277,6 @@ int main(int argc, char** argv)
 
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
-}
-
-TEST(RGWScQuotaChecker, StorageClassOnlyModeIgnoresGlobalQuota) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{50, 5};
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  // Global quota would fail (max_size=10, current=50+10=60 > 10)
-  q.bucket_quota.max_size    = 10;
-  q.bucket_quota.max_objects = 10;
-  q.bucket_quota.enabled     = true;
-  // But mode is STORAGE_CLASS — global quota is ignored
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::STORAGE_CLASS;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-      RGWStorageClassQuota{200, 100, true};  // generous SC limit
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      10, 1, null_yield);
-  // SC check passes (50+10 < 200), global check not run
-  EXPECT_EQ(r, 0);
-}
-
-TEST(RGWScQuotaChecker, DisabledEntryNotEnforced) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{999, 999};
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-      RGWStorageClassQuota{1, 1, /*enabled=*/false};  // tiny limit but disabled
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      1000, 100, null_yield);
-  EXPECT_EQ(r, 0);  // disabled entry = no enforcement
-}
-
-TEST(RGWScQuotaChecker, ExactLimitBoundaryAllows) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{90, 9};
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::HYBRID;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-      RGWStorageClassQuota{100, 10, true};
-
-  // 90 + 10 == 100 exactly — should PASS (not exceed)
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      10, 1, null_yield);
-  EXPECT_EQ(r, 0);
 }
 
 TEST(RGWQuotaInfoV4, JSONRoundtrip) {
@@ -428,21 +308,4 @@ TEST(RGWQuotaInfoV4, JSONRoundtrip) {
   EXPECT_EQ(ssd->max_size, 512 * 1024);
   EXPECT_EQ(ssd->max_objects, 50);
   EXPECT_TRUE(ssd->enabled);
-}
-
-TEST(RGWScQuotaChecker, GlobalOnlyModeReturnsZero) {
-  TestDpp dpp;
-  FakeStatsProvider prov;
-  prov.stats[rgw_sc_quota_key("p", "SSD")] = ScUsageStats{1, 1};
-  ScopedProvider sp(&prov);
-
-  RGWQuota q;
-  q.bucket_quota.enforcement_mode = RGWQuotaEnforcementMode::GLOBAL_ONLY;
-  q.bucket_quota.storage_class_quotas[rgw_sc_quota_key("p", "SSD")] =
-      RGWStorageClassQuota{1, 1, true};  // tiny limit
-
-  int r = rgw_check_storage_class_quota(
-      &dpp, q, make_bucket(), make_placement("p", "SSD"),
-      1000, 100, null_yield);
-  EXPECT_EQ(r, 0);  // GLOBAL_ONLY = no SC enforcement
 }
