@@ -4770,7 +4770,7 @@ void RGWPutObj::execute(optional_yield y)
 
   if (!chunked_upload) { /* with chunked upload we don't know how big is the upload.
                             we also check sizes at the end anyway */
-    op_ret = s->bucket->check_quota(this, quota, s->content_length, y, &s->dest_placement);
+    op_ret = s->bucket->check_quota(this, quota, s->content_length, y, false, &s->dest_placement);
     if (op_ret < 0) {
       ldpp_dout(this, 20) << "check_quota() returned ret=" << op_ret << dendl;
       return;
@@ -5053,7 +5053,7 @@ void RGWPutObj::execute(optional_yield y)
     return;
   }
 
-  op_ret = s->bucket->check_quota(this, quota, s->obj_size, y,  &s->dest_placement);
+  op_ret = s->bucket->check_quota(this, quota, s->obj_size, y, false, &s->dest_placement);
   if (op_ret < 0) {
     ldpp_dout(this, 20) << "second check_quota() returned op_ret=" << op_ret << dendl;
     return;
@@ -5307,7 +5307,7 @@ void RGWPostObj::execute(optional_yield y)
     hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
     ceph::buffer::list bl, aclbl;
 
-    op_ret = s->bucket->check_quota(this, quota, s->content_length, y, &s->dest_placement);
+    op_ret = s->bucket->check_quota(this, quota, s->content_length, y, false, &s->dest_placement);
     if (op_ret < 0) {
       return;
     }
@@ -5441,7 +5441,7 @@ void RGWPostObj::execute(optional_yield y)
       }
     }
 
-    op_ret = s->bucket->check_quota(this, quota, s->obj_size, y, &s->dest_placement);
+    op_ret = s->bucket->check_quota(this, quota, s->obj_size, y, false, &s->dest_placement);
     if (op_ret < 0) {
       return;
     }
@@ -6589,7 +6589,7 @@ void RGWCopyObj::execute(optional_yield y)
         return;
       }
       // enforce quota against the destination bucket owner
-      op_ret = s->bucket->check_quota(this, quota, s->src_object->get_accounted_size(), y, &s->dest_placement);
+      op_ret = s->bucket->check_quota(this, quota, s->src_object->get_accounted_size(), y, false, &s->dest_placement);
       if (op_ret < 0) {
         return;
       }
@@ -8838,7 +8838,7 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
   }
 
   rgw_placement_rule dest_placement = s->dest_placement;
-  op_ret = bucket->check_quota(this, quota, size, y, &dest_placement);
+  op_ret = bucket->check_quota(this, quota, size, y, false, &dest_placement);
   if (op_ret < 0) {
     return op_ret;
   }
@@ -8914,7 +8914,7 @@ int RGWBulkUploadOp::handle_file(const std::string_view path,
     return op_ret;
   }
 
-  op_ret = bucket->check_quota(this, quota, size, y, &dest_placement);
+  op_ret = bucket->check_quota(this, quota, size, y, false, &dest_placement);
   if (op_ret < 0) {
     ldpp_dout(this, 20) << "quota exceeded for path=" << path << dendl;
     return op_ret;

@@ -934,7 +934,7 @@ class RGWQuotaHandlerImpl : public RGWQuotaHandler {
   int check_sc_quota(const DoutPrefixProvider* dpp,
                     const RGWQuota& quota,
                     const rgw_placement_rule& placement,
-                    const RGWStorageStats& bucket_stats,
+                    const std::optional<std::map<std::string, RGWStorageStats>>& sc_stats,
                     uint64_t new_size,
                     uint64_t new_objects)
   {
@@ -963,13 +963,13 @@ class RGWQuotaHandlerImpl : public RGWQuotaHandler {
     }
 
     ScUsageStats usage{0, 0};
-    if (!bucket_stats.storage_class_stats.has_value()) {
+    if (!sc_stats.has_value()) {
       ldpp_dout(dpp, 10) << "sc-quota: bucket has no per-SC stats "
                         << "(predates #66501); failing open" << dendl;
       return 0;
     }
-    auto it = bucket_stats.storage_class_stats->find(sc_name);
-    if (it != bucket_stats.storage_class_stats->end()) {
+    auto it = sc_stats->find(sc_name);
+    if (it != sc_stats->end()) {
       usage.size        = it->second.size;
       usage.num_objects = it->second.num_objects;
     }
@@ -980,7 +980,7 @@ class RGWQuotaHandlerImpl : public RGWQuotaHandler {
                         << " current=" << usage.size
                         << " +" << new_size
                         << " limit=" << lim.max_size << dendl;
-      return -EDQUOT;
+      return -ERR_QUOTA_EXCEEDED;
     }
     if (lim.have_object_limit &&
         sc_quota_would_exceed(lim.max_objects, usage.num_objects, new_objects)) {
@@ -988,7 +988,7 @@ class RGWQuotaHandlerImpl : public RGWQuotaHandler {
                         << " current=" << usage.num_objects
                         << " +" << new_objects
                         << " limit=" << lim.max_objects << dendl;
-      return -EDQUOT;
+      return -ERR_QUOTA_EXCEEDED;
     }
 
     ldpp_dout(dpp, 25) << "sc-quota: ok sc=" << sc_name
@@ -996,6 +996,23 @@ class RGWQuotaHandlerImpl : public RGWQuotaHandler {
                       << " objs=" << usage.num_objects << "+" << new_objects
                       << dendl;
     return 0;
+  }
+
+  int read_bucket_sc_stats(const DoutPrefixProvider* dpp,
+                           const rgw_bucket& bucket, optional_yield y,
+                           std::optional<std::map<std::string, RGWStorageStats>>& sc_stats)
+  {
+    std::unique_ptr<rgw::sal::Bucket> bkt;
+    int r = driver->load_bucket(dpp, bucket, &bkt, y);
+    if (r < 0) {
+      return r;
+    }
+    std::map<RGWObjCategory, RGWStorageStats> cat_stats;
+    std::string bver, mver;
+    sc_stats.emplace();  // request per-SC stats; read_stats resets to nullopt for legacy buckets
+    const auto& idx = bkt->get_info().layout.current_index;
+    return bkt->read_stats(dpp, y, idx, RGW_NO_SHARD, &bver, &mver,
+                           cat_stats, sc_stats, nullptr);
   }
 
   public:
@@ -1039,10 +1056,17 @@ class RGWQuotaHandlerImpl : public RGWQuotaHandler {
         }
       }
       if (dest_placement && quota.bucket_quota.has_any_sc_quota()) {
-        ret = check_sc_quota(dpp, quota, *dest_placement, bucket_stats,
-                            size, num_objs);
-        if (ret < 0) {
-          return ret;
+        std::optional<std::map<std::string, RGWStorageStats>> sc_stats;
+        int r = read_bucket_sc_stats(&dp, bucket, y, sc_stats);
+        if (r < 0) {
+          ldpp_dout(&dp, 10) << "sc-quota: failed to read per-SC stats ret="
+                             << r << "; failing open" << dendl;
+        } else {
+          ret = check_sc_quota(dpp, quota, *dest_placement, sc_stats,
+                               size, num_objs);
+          if (ret < 0) {
+            return ret;
+          }
         }
       }
     }

@@ -916,7 +916,7 @@ int FilterBucket::check_quota(const DoutPrefixProvider *dpp, RGWQuota& quota,
 			      uint64_t obj_size, optional_yield y,
 			      bool check_size_only, const rgw_placement_rule* dest_placement)
 {
-  return next->check_quota(dpp, quota, obj_size, y, check_size_only);
+  return next->check_quota(dpp, quota, obj_size, y, check_size_only, dest_placement);
 }
 
 int FilterBucket::merge_and_store_attrs(const DoutPrefixProvider* dpp,

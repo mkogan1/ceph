@@ -2965,7 +2965,7 @@ int POSIXBucket::check_quota(const DoutPrefixProvider *dpp, RGWQuota& quota, uin
 {
   return driver->get_quota_handler()->check_quota(dpp, info.owner, get_key(),
                                                   quota, (check_size_only ? 0 : 1),
-                                                  obj_size, y);
+                                                  obj_size, y, dest_placement);
 }
 
 int POSIXBucket::try_refresh_info(const DoutPrefixProvider* dpp, ceph::real_time* pmtime, optional_yield y)

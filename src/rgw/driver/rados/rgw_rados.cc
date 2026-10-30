@@ -12112,9 +12112,9 @@ int RGWRados::check_quota(const DoutPrefixProvider *dpp, const rgw_owner& bucket
 {
   // if we only check size, then num_objs will set to 0
   if(check_size_only)
-    return quota_handler->check_quota(dpp, bucket_owner, bucket, quota, 0, obj_size, y);
+    return quota_handler->check_quota(dpp, bucket_owner, bucket, quota, 0, obj_size, y, dest_placement);
 
-  return quota_handler->check_quota(dpp, bucket_owner, bucket, quota, 1, obj_size, y);
+  return quota_handler->check_quota(dpp, bucket_owner, bucket, quota, 1, obj_size, y, dest_placement);
 }
 
 int RGWRados::get_target_shard_id(const rgw::bucket_index_normal_layout& layout, const string& obj_key,
