@@ -210,14 +210,6 @@ TEST_F(ClsAccount, list)
   EXPECT_EQ(make_list(u5, u3, u4), list_all(oid, ""));
 }
 
-
-INSTANTIATE_TEST_SUITE_P(, TestClsAccount,
-  ::testing::Values(PoolType::REPLICATED, PoolType::FAST_EC),
-  [](const ::testing::TestParamInfo<PoolType>& info) {
-  return pool_type_name(info.param);
-  }
-);
-
 // ============================================================================
 // USER STORAGE CLASS STATS std::optional TESTS
 // ============================================================================

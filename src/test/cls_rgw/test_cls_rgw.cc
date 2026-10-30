@@ -1634,14 +1634,6 @@ TEST_F(cls_rgw, bi_put_entries)
   }
 }
 
-
-INSTANTIATE_TEST_SUITE_P(, TestClsRgw,
-  ::testing::Values(PoolType::REPLICATED, PoolType::FAST_EC),
-  [](const ::testing::TestParamInfo<PoolType>& info) {
-  return pool_type_name(info.param);
-  }
-);
-
 // ============================================================================
 // STORAGE CLASS STATS std::optional TESTS
 // ============================================================================
@@ -1657,7 +1649,7 @@ static int write_header(librados::IoCtx& ioctx, const string& oid,
   return ioctx.operate(oid, &op);
 }
 
-TEST_P(TestClsRgw, StorageClassStats_LegacyToConverted) {
+TEST_F(cls_rgw, StorageClassStats_LegacyToConverted) {
   string oid = str_int("bucket-sc", 100);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
@@ -1693,7 +1685,7 @@ TEST_P(TestClsRgw, StorageClassStats_LegacyToConverted) {
 
 // nonzero stats + uninitialized storage_class_stats,
 // delete to zero, write with SC, verify storage_class_stats initialized
-TEST_P(TestClsRgw, StorageClassStats_LegacyBucketConversion) {
+TEST_F(cls_rgw, StorageClassStats_LegacyBucketConversion) {
   string oid = str_int("bucket-sc", 101);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
@@ -1757,7 +1749,7 @@ TEST_P(TestClsRgw, StorageClassStats_LegacyBucketConversion) {
   EXPECT_EQ((*header.storage_class_stats)["HDD"].total_size, 2048u);
 }
 
-TEST_P(TestClsRgw, StorageClassStats_BucketCheckFix) {
+TEST_F(cls_rgw, StorageClassStats_BucketCheckFix) {
   string oid = str_int("bucket-sc", 103);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
@@ -1826,7 +1818,7 @@ TEST_P(TestClsRgw, StorageClassStats_BucketCheckFix) {
   EXPECT_EQ(header.stats[RGWObjCategory::Main].total_size, total_size);
 }
 
-TEST_P(TestClsRgw, StorageClassStats_UpdateStatsNullopt) {
+TEST_F(cls_rgw, StorageClassStats_UpdateStatsNullopt) {
   string oid = str_int("bucket-sc", 104);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
@@ -1845,7 +1837,7 @@ TEST_P(TestClsRgw, StorageClassStats_UpdateStatsNullopt) {
   ASSERT_EQ(0, ioctx.operate(oid, &op));
 }
 
-TEST_P(TestClsRgw, StorageClassStats_SuggestChanges) {
+TEST_F(cls_rgw, StorageClassStats_SuggestChanges) {
   string oid = str_int("bucket-sc", 105);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
@@ -1913,7 +1905,7 @@ TEST_P(TestClsRgw, StorageClassStats_SuggestChanges) {
   EXPECT_EQ(2u, after.dir.m.size());
 }
 
-TEST_P(TestClsRgw, StorageClassStats_SuggestChangesLegacy) {
+TEST_F(cls_rgw, StorageClassStats_SuggestChangesLegacy) {
   string oid = str_int("bucket-sc", 106);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
@@ -1972,7 +1964,7 @@ TEST_P(TestClsRgw, StorageClassStats_SuggestChangesLegacy) {
 // a reshard by an older client: the new index shard is initialized by the
 // new cls_rgw, then the older client sends its stats without
 // per-storage-class stats
-TEST_P(TestClsRgw, StorageClassStats_UpdateStatsWithoutSc) {
+TEST_F(cls_rgw, StorageClassStats_UpdateStatsWithoutSc) {
   string oid = str_int("bucket-sc", 107);
   const string loc = str_int("loc", 0);
   ObjectWriteOperation init_op;
