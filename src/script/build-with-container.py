@@ -257,8 +257,6 @@ def _container_cmd(
         cmd.append("--rm")
     if "podman" in ctx.container_engine:
         cmd.append("--pids-limit=-1")
-    if ctx.cli.no_selinux_label:
-        cmd.append("--security-opt=label=disable")
     if ctx.map_user:
         cmd.append("--user=0")
     if ctx.cli.env_file:
@@ -274,8 +272,7 @@ def _container_cmd(
             f"--volume={cwd}:{ctx.cli.homedir}:O,upperdir={overlay.upper},workdir={overlay.work}"
         )
     else:
-        label = "" if ctx.cli.no_selinux_label else ":Z"
-        cmd.append(f"--volume={cwd}:{ctx.cli.homedir}{label}")
+        cmd.append(f"--volume={cwd}:{ctx.cli.homedir}:Z")
     cmd.append(f"-eHOMEDIR={ctx.cli.homedir}")
     if ctx.cli.build_dir:
         cmd.append(f"-eBUILD_DIR={ctx.cli.build_dir}")
@@ -291,9 +288,8 @@ def _container_cmd(
     cmd.extend(ctx.cli.extra or [])
     if ctx.npm_cache_dir:
         # use :z so that other builds can use the cache
-        label = "" if ctx.cli.no_selinux_label else ":z"
         cmd.extend([
-            f'--volume={ctx.npm_cache_dir}:/npmcache{label}',
+            f'--volume={ctx.npm_cache_dir}:/npmcache:z',
             '--env=NPM_CACHEDIR=/npmcache'
         ])
     cmd.append(ctx.image_name)
@@ -541,8 +537,6 @@ class Context:
         variant = self.variant()
         if variant is not ImageVariant.DEFAULT:
             suffix = f".{variant}{suffix}"
-        if self.cli.with_cuobj_runtime:
-            suffix = f".cuobj-runtime{suffix}"
         return f"{branch}.{self.cli.distro}{suffix}"
 
     def base_branch(self):
@@ -735,7 +729,6 @@ def build_container(ctx):
         ctx.image_name,
         f"--label=io.ceph.build-with-container.src={_hash_sources()}",
         f"--label=io.ceph.build-with-container.image-variant={ctx.variant()}",
-        f"--label=io.ceph.build-with-container.cuobj-runtime={int(ctx.cli.with_cuobj_runtime)}",
         f"--build-arg=CEPH_BASE_BRANCH={ctx.base_branch()}",
     ]
     if ctx.cli.distro:
@@ -759,8 +752,6 @@ def build_container(ctx):
         cmd.append(f"--build-arg=WITH_CRIMSON={with_crimson}")
     if ctx.cli.build_args:
         cmd.extend([f"--build-arg={v}" for v in ctx.cli.build_args])
-    if ctx.cli.with_cuobj_runtime:
-        cmd.append("--build-arg=INSTALL_CUOBJ_RUNTIME=ON")
     cmd += ["-f", ctx.cli.containerfile, ctx.cli.containerdir]
     with ctx.user_command():
         _run(cmd, check=True, ctx=ctx)
@@ -789,13 +780,10 @@ def _check_cached_image(ctx):
         labels = ctr_info["Config"]["Labels"]
     saved_hash = labels.get("io.ceph.build-with-container.src", "")
     curr_hash = _hash_sources()
-    runtime_ok = labels.get("io.ceph.build-with-container.cuobj-runtime", "0") == str(
-        int(ctx.cli.with_cuobj_runtime)
-    )
-    if saved_hash == curr_hash and runtime_ok:
+    if saved_hash == curr_hash:
         log.info("Container passes source check")
         return True, True
-    log.info("Container sources or cuObject setting do not match: %s", curr_hash)
+    log.info("Container sources do not match: %s", curr_hash)
     return True, False
 
 
@@ -832,8 +820,8 @@ def get_container(ctx):
 def bc_configure(ctx):
     """Configure the build.
 
-    Use --env-file or --extra=-eCONFIGURE_ARGS to pass CONFIGURE_ARGS into
-    the container for custom CMake arguments. RPM builds use the spec instead.
+    Use the environment variable CONFIGURE_ARGS to pass custom arguments
+    for cmake configuration if needed.
     """
     ctx.build.wants(Steps.CONTAINER, ctx)
     ctx.build.wants(Steps.NPM_CACHE, ctx)
@@ -842,8 +830,7 @@ def bc_configure(ctx):
         [
             "bash",
             "-c",
-            f"cd {ctx.cli.homedir} && source ./src/script/run-make.sh && "
-            "if ! has_build_dir; then configure ${CONFIGURE_ARGS}; fi",
+            f"cd {ctx.cli.homedir} && source ./src/script/run-make.sh && has_build_dir || configure ${{CONFIGURE_ARGS}}",
         ],
     )
     with ctx.user_command():
@@ -1037,8 +1024,7 @@ def bc_build_rpm(ctx):
         'rpmbuild',
         '--rebuild',
         f'-D_topdir {topdir}',
-    ] + list(ctx.cli.rpmbuild_arg or [])
-    rpmbuild_args.append(str(srpm_path))
+    ] + list(ctx.cli.rpmbuild_arg or []) + [str(srpm_path)]
     rpmbuild_cmd = ' '.join(shlex.quote(cmd) for cmd in rpmbuild_args)
     cmd = _container_cmd(
         ctx,
@@ -1182,15 +1168,6 @@ def parse_cli(build_step_names):
         type=pathlib.Path,
         help="Use this environment file when building",
     )
-    g_basic.add_argument(
-        "--with-cuobj-runtime",
-        action="store_true",
-        help=(
-            "Install the pinned NVIDIA cuObject server runtime in the build image"
-            " (EL9/EL10, x86_64/aarch64). RGW always uses the ABI shim;"
-            " its build options are unchanged."
-        ),
-    )
 
     g_debug = parser.add_argument_group(
         title="Debugging options",
@@ -1301,15 +1278,6 @@ def parse_cli(build_step_names):
         "--keep-container",
         action="store_true",
         help="Skip removing container after executing command",
-    )
-    g_container.add_argument(
-        "--no-selinux-label",
-        action="store_true",
-        help=(
-            "Disable SELinux separation for runtime build containers and skip"
-            " relabeling their source and npm cache mounts. Use when files in"
-            " the source tree cannot be relabeled."
-        ),
     )
     g_container.add_argument(
         "--overlay-dir",

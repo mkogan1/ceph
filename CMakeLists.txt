@@ -580,12 +580,6 @@ option(WITH_RADOSGW_SELECT_PARQUET "Support for s3 select on parquet objects" ON
 option(WITH_RADOSGW_ARROW_FLIGHT "Build arrow flight when not using system-provided arrow" OFF)
 option(WITH_RADOSGW_BACKTRACE_LOGGING "Enable backtraces in rgw logs" OFF)
 option(WITH_RADOSGW_LANCEDB "Enable lancedb support in RADOS Gateway" ON)
-# See doc/radosgw/s3rdma.rst for build and runtime requirements.
-# The ABI shim loads libcuobjserver with dlopen() without needing the SDK.
-option(WITH_RADOSGW_CUOBJ "cuObject RDMA support for RADOS Gateway (experimental)" ON)
-if(WITH_RADOSGW AND WITH_RADOSGW_CUOBJ)
-  message(STATUS "cuObject RDMA support for RADOS Gateway is enabled (experimental)")
-endif()
 
 option(WITH_SYSTEM_ARROW "Use system-provided arrow" OFF)
 option(WITH_SYSTEM_UTF8PROC "Use system-provided utf8proc" OFF)

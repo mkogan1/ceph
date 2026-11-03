@@ -93,9 +93,7 @@
 #include "driver/d4n/rgw_sal_d4n.h"
 #endif
 
-#ifdef WITH_RADOSGW_CUOBJ
 #include "rgw_cuobj.h"
-#endif
 
 #ifdef WITH_LTTNG
 #define TRACEPOINT_DEFINE
@@ -4985,7 +4983,6 @@ void RGWPutObj::execute(optional_yield y)
     }
   } /* !append */
 
-#ifdef WITH_RADOSGW_CUOBJ
   std::string rdma_descr;
   bool rdma_put = false;
   auto* cuobj_srv = RGWCuObjServer::get_instance();
@@ -5064,10 +5061,7 @@ void RGWPutObj::execute(optional_yield y)
     s->obj_size = ofs;
     s->rdma_bytes_transferred = ofs;
     s->object->set_obj_size(ofs);
-  }
-  else
-#endif
-  {
+  } else {
     tracepoint(rgw_op, before_data_transfer, s->req_id.c_str());
     do {
       bufferlist data;

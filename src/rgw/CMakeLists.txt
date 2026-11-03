@@ -58,6 +58,8 @@ set(librgw_common_srcs
   rgw_compression.cc
   rgw_cors.cc
   rgw_cors_s3.cc
+  rgw_cuobj.cc
+  rgw_cuobj_dl.cc
   rgw_env.cc
   rgw_es_query.cc
   rgw_formats.cc
@@ -303,15 +305,7 @@ if(WITH_RADOSGW_D4N)
         driver/d4n/rgw_sal_d4n.cc)
 endif()
 
-if(WITH_RADOSGW_CUOBJ)
-  list(APPEND librgw_common_srcs rgw_cuobj.cc rgw_cuobj_dl.cc)
-endif()
-
 add_library(rgw_common STATIC ${librgw_common_srcs})
-
-if(WITH_RADOSGW_CUOBJ)
-  target_link_libraries(rgw_common PRIVATE ${CMAKE_DL_LIBS})
-endif()
 
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-Wimplicit-const-int-float-conversion"
@@ -329,6 +323,7 @@ endif()
 
 target_link_libraries(rgw_common
   PRIVATE
+    ${CMAKE_DL_LIBS}
     legacy-option-headers
     global
     cls_rgw_client
