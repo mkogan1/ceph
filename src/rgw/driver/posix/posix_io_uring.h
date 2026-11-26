@@ -52,8 +52,16 @@ unsigned posix_sync_clamp_iodepth(const DoutPrefixProvider* dpp, unsigned qd,
                                   const char* iodepth_opt);
 
 /* Init this thread's ring from rgw_{posix,nsfs}_io_uring_* knobs.
+ * Beast strands do not pin a worker: after yield the coroutine may
+ * resume on a different thread, so this must be called on the current
+ * thread before every io_uring_get_sqe / io_uring_submit.
  * Returns true if the ring is ready. */
 bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp, bool nsfs);
+
+/* The same, for the driver latched by the last posix_try_use_uring() or
+ * posix_uring_ensure_ring(dpp, nsfs):  for callers that do not know
+ * which driver they serve.  False if none has run yet. */
+bool posix_uring_ensure_ring(const DoutPrefixProvider* dpp);
 
 /* No personality:  the SQE carries the submitting task's own
  * credentials, which is what every caller did before impersonation

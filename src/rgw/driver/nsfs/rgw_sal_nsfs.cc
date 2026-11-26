@@ -3610,7 +3610,12 @@ int File::write(int64_t ofs, bufferlist& bl, const DoutPrefixProvider* dpp,
 
   if (direct_io) {
     /* Never fcntl-off O_DIRECT on a shared fd; pad or RMW instead. */
-    return posix_direct_write(fd, ofs, bl, dpp);
+    ret = posix_direct_write(fd, ofs, bl, dpp);
+    if (ret < 0) {
+      ldpp_dout_fmt(dpp, 1, "URING: ERROR: File::write posix_direct_write "
+			    "failed: {} ({})", cpp_strerror(-ret), ret);
+    }
+    return ret;
   }
 
   char* curp = bl.c_str();
@@ -15874,7 +15879,7 @@ int NSFSObject::NSFSReadOp::iterate(const DoutPrefixProvider* dpp, int64_t ofs,
       nsfs::IdentityPersonality who(identity);
       UringReadWindow win(dpp, y, fd, qd, chunk, dio, /*nsfs=*/true,
 			  identity.active() ? &who : nullptr);
-      return win.iterate(cur_ofs, left,
+      int r = win.iterate(cur_ofs, left,
           [dpp, cb, source = source](bufferlist& bl, int len) {
             int ret = cb->handle_data(bl, 0, len);
             if (ret < 0) {
@@ -15883,6 +15888,11 @@ int NSFSObject::NSFSReadOp::iterate(const DoutPrefixProvider* dpp, int64_t ofs,
             }
             return ret;
           });
+      if (r < 0) {
+        ldpp_dout_fmt(dpp, 1, "URING: ERROR: NSFSReadOp::iterate failed: "
+			      "{} ({})", cpp_strerror(-r), r);
+      }
+      return r;
     }
   }
 
@@ -18416,7 +18426,12 @@ int NSFSMultipartWriter::process(bufferlist&& data, uint64_t offset)
           identity.active() ? &uring_identity : nullptr);
       df->set_sync_on_close(true);
     }
-    return uring_write->process(std::move(data), offset);
+    int r = uring_write->process(std::move(data), offset);
+    if (r < 0) {
+      ldpp_dout_fmt(dpp, 1, "URING: ERROR: NSFSMultipartWriter::process "
+			    "failed: {} ({})", cpp_strerror(-r), r);
+    }
+    return r;
   }
   unsigned iodepth = posix_sync_clamp_iodepth(
       dpp, dpp->get_cct()->_conf.get_val<uint64_t>("rgw_nsfs_put_iodepth"),
@@ -18450,11 +18465,16 @@ int NSFSMultipartWriter::complete(
   int ret = 0;
   if (uring_write) {
     ret = uring_write->drain();
+    if (ret < 0) {
+      ldpp_dout_fmt(dpp, 1, "URING: ERROR: NSFSMultipartWriter::complete "
+			    "drain failed: {} ({})", cpp_strerror(-ret), ret);
+      return ret;
+    }
   } else {
     ret = pending_write.drain();
-  }
-  if (ret < 0) {
-    return ret;
+    if (ret < 0) {
+      return ret;
+    }
   }
   /* The comparison the shared-file layout will gate on:  they agree
    * when nothing between the op layer and here changed the byte count,
@@ -18724,7 +18744,12 @@ int NSFSAtomicWriter::process(bufferlist&& data, uint64_t offset)
         obj->get_fsent()->set_sync_on_close(true);
       }
     }
-    return uring_write->process(std::move(data), offset);
+    int r = uring_write->process(std::move(data), offset);
+    if (r < 0) {
+      ldpp_dout_fmt(dpp, 1, "URING: ERROR: NSFSAtomicWriter::process "
+			    "failed: {} ({})", cpp_strerror(-r), r);
+    }
+    return r;
   }
   unsigned iodepth = posix_sync_clamp_iodepth(
       dpp, dpp->get_cct()->_conf.get_val<uint64_t>("rgw_nsfs_put_iodepth"),
@@ -18757,11 +18782,16 @@ int NSFSAtomicWriter::complete(size_t accounted_size, const std::string& etag,
   int ret = 0;
   if (uring_write) {
     ret = uring_write->drain();
+    if (ret < 0) {
+      ldpp_dout_fmt(dpp, 1, "URING: ERROR: NSFSAtomicWriter::complete "
+			    "drain failed: {} ({})", cpp_strerror(-ret), ret);
+      return ret;
+    }
   } else {
     ret = pending_write.drain();
-  }
-  if (ret < 0) {
-    return ret;
+    if (ret < 0) {
+      return ret;
+    }
   }
 
   uint64_t orig_size = 0;
